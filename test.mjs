@@ -22,6 +22,14 @@ test('the local project owns its exact interface, pickup prompt and prepared act
     ['clips', 'sloptop-mode', 'slop-engine', 'usb'],
   );
   assert.match(html, /Copy agent pickup prompt/);
+  assert.match(html, /Navigate groups/);
+  assert.match(html, /New group/);
+  assert.match(html, /Add shortcut/);
+  assert.match(html, /Move here/);
+  assert.match(html, /Copy here/);
+  assert.match(html, /explorer-list/);
+  assert.match(script, /papers:project:as-you-go-pick-target/);
+  assert.match(script, /papers:project:as-you-go-save/);
   assert.match(script, /Backpack interfaces, behavior, and implementation belong outside Papers/);
   assert.match(script, /My request:\r?\n\[Describe what you want to experience\.\]/);
 

@@ -2,10 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
-    />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>As you Go</title>
     <link rel="stylesheet" href="styles.css" />
@@ -17,40 +14,48 @@
         <div>
           <div class="context-row">
             <p class="eyebrow">Local Backpack</p>
-            <button class="pickup-copy" id="copy-prompt" type="button">
-              <span aria-hidden="true">⧉</span>
-              <span class="copy-label">Copy agent pickup prompt</span>
-            </button>
+            <button class="pickup-copy" id="copy-prompt" type="button"><span aria-hidden="true">⧉</span><span class="copy-label">Copy agent pickup prompt</span></button>
           </div>
           <h1>As you Go</h1>
-          <p class="intro">Your prepared actions on this machine.</p>
+          <p class="intro">Your prepared shortcuts on this machine.</p>
         </div>
         <button class="back" id="back" type="button">Back to Papers</button>
       </header>
 
       <p class="status" id="status" role="status" aria-live="polite"></p>
 
-      <section class="actions" aria-label="Prepared actions">
-        <button class="action" data-action="clips" type="button">
-          <span class="mark" aria-hidden="true">↗</span>
-          <span class="label">CLIPS</span>
-          <span class="kind">Local action</span>
-        </button>
-        <button class="action" data-action="sloptop-mode" type="button">
-          <span class="mark" aria-hidden="true">↗</span>
-          <span class="label">SLOPTOP MODE</span>
-          <span class="kind">Local action</span>
-        </button>
-        <button class="action" data-action="slop-engine" type="button">
-          <span class="mark" aria-hidden="true">↗</span>
-          <span class="label">slop_engine</span>
-          <span class="kind">Local action</span>
-        </button>
-        <button class="action" data-action="usb" type="button">
-          <span class="mark" aria-hidden="true">↗</span>
-          <span class="label">usb</span>
-          <span class="kind">Local action</span>
-        </button>
+      <section class="explorer" aria-label="As you Go file explorer">
+        <div class="explorer-toolbar">
+          <label class="location-picker">Location
+            <select id="location-select" aria-label="Navigate groups"></select>
+          </label>
+          <button class="toolbar-button" id="new-group" type="button">New group</button>
+          <button class="toolbar-button primary" id="new-shortcut" type="button">Add shortcut</button>
+        </div>
+        <nav class="breadcrumbs" id="breadcrumbs" aria-label="Current group path"></nav>
+        <div class="selection-toolbar" id="selection-toolbar" hidden>
+          <span id="selection-count"></span>
+          <select id="destination-select" aria-label="Destination group"></select>
+          <button class="toolbar-button" id="move-selected" type="button">Move here</button>
+          <button class="toolbar-button" id="copy-selected" type="button">Copy here</button>
+          <button class="toolbar-button danger" id="delete-selected" type="button">Delete</button>
+          <button class="toolbar-button" id="clear-selected" type="button">Clear</button>
+        </div>
+        <div class="explorer-list" id="explorer-list"></div>
+        <div class="empty" id="empty" hidden>This group is empty.</div>
+      </section>
+
+      <section class="editor" id="editor" hidden aria-label="Shortcut or group editor">
+        <h2 id="editor-title"></h2>
+        <label>Name<input id="name-input" maxlength="120" autocomplete="off" /></label>
+        <label id="description-label">Description<textarea id="description-input" maxlength="500" rows="2"></textarea></label>
+        <div id="target-fields">
+          <label>Target<input id="target-input" readonly /></label>
+          <div class="editor-actions"><button class="toolbar-button" id="pick-file" type="button">Choose file / app</button><button class="toolbar-button" id="pick-folder" type="button">Choose folder</button></div>
+          <label>Icon image <input id="icon-input" type="file" accept="image/*" /></label>
+          <img id="icon-preview" class="icon-preview" alt="Selected shortcut icon" hidden />
+        </div>
+        <div class="editor-actions"><button class="toolbar-button" id="cancel-editor" type="button">Cancel</button><button class="toolbar-button primary" id="save-editor" type="button">Save</button></div>
       </section>
     </main>
   </body>
