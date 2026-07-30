@@ -4,7 +4,11 @@ import {
   binnedItems,
   copySelection,
   createGroup,
+  createDroppedShortcuts,
   createShortcut,
+  createWebLink,
+  isWebLink,
+  itemsIntersectingMarquee,
   itemsIn,
   moveSelection,
   normalizeState,
@@ -13,8 +17,12 @@ import {
   reorderSelection,
   restoreSelection,
   setIconSize,
+  updateGroup,
   updateShortcut,
-} from './model.js';
+  updateWebLink,
+  updateWorkspaceView,
+  webLinkIcon,
+} from './workspace-model-20260730b.js';
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
 
@@ -34,9 +42,10 @@ const elements = {
   status: document.querySelector('#status'),
   grid: document.querySelector('#icon-grid'),
   explorer: document.querySelector('#explorer'),
+  marquee: document.querySelector('#selection-marquee'),
   empty: document.querySelector('#empty'),
   breadcrumbs: document.querySelector('#breadcrumbs'),
-  location: document.querySelector('#location-select'),
+  deleteAllBin: document.querySelector('#delete-all-bin'),
   selectionStatus: document.querySelector('#selection-status'),
   menu: document.querySelector('#context-menu'),
   binButton: document.querySelector('#bin-button'),
@@ -44,6 +53,7 @@ const elements = {
   binCount: document.querySelector('#bin-count'),
   editorLayer: document.querySelector('#editor-layer'),
   editor: document.querySelector('#editor'),
+  saveButton: document.querySelector('#save-editor'),
   editorTitle: document.querySelector('#editor-title'),
   editorError: document.querySelector('#editor-error'),
   name: document.querySelector('#name-input'),
@@ -51,9 +61,11 @@ const elements = {
   descriptionLabel: document.querySelector('#description-label'),
   target: document.querySelector('#target-input'),
   targetFields: document.querySelector('#target-fields'),
+  targetActions: document.querySelector('#target-actions'),
   iconInput: document.querySelector('#icon-input'),
   iconPreview: document.querySelector('#icon-preview'),
   iconFallback: document.querySelector('#icon-fallback'),
+  iconDefaultButton: document.querySelector('#use-target-icon'),
   confirmLayer: document.querySelector('#confirm-layer'),
   confirmCopy: document.querySelector('#confirm-copy'),
 };
@@ -71,6 +83,9 @@ let editorIcon = null;
 let editorTargetIcon = null;
 let binMode = false;
 let dragIds = [];
+let marqueeDrag = null;
+let suppressBlankClick = false;
+let pendingPermanentIds = [];
 let zoomTimer = null;
 let saveQueue = Promise.resolve();
 
@@ -106,16 +121,50 @@ function item(itemId) {
   return group(itemId) ?? shortcut(itemId);
 }
 
-function allGroups() {
-  const result = [{ id: ROOT_ID, name: 'As you Go', depth: 0 }];
-  const visit = (parentId, depth) => {
-    for (const candidate of itemsIn(state, parentId).filter((entry) => entry.kind === 'group')) {
-      result.push({ id: candidate.id, name: candidate.name, depth });
-      visit(candidate.id, depth + 1);
-    }
-  };
-  visit(ROOT_ID, 1);
-  return result;
+function isAvailableItem(itemId) {
+  const candidate = item(itemId);
+  if (!candidate || candidate.bin) return false;
+  let parent = group(candidate.parentId);
+  while (parent) {
+    if (parent.bin) return false;
+    parent = group(parent.parentId);
+  }
+  return true;
+}
+
+function captureWorkspaceView() {
+  state = updateWorkspaceView(state, {
+    currentGroupId: currentId,
+    expandedGroupIds: [...expanded],
+    selectedItemIds: [...selected],
+    binMode,
+  });
+}
+
+function restoreWorkspaceView() {
+  const requestedCurrent = state.view.currentGroupId;
+  currentId =
+    requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
+      ? requestedCurrent
+      : ROOT_ID;
+  expanded = new Set(
+    state.view.expandedGroupIds.filter((groupId) =>
+      Boolean(group(groupId)) && isAvailableItem(groupId)),
+  );
+  binMode = state.view.binMode;
+  const binnedIds = new Set(binnedItems(state).map((candidate) => candidate.id));
+  selected = new Set(
+    state.view.selectedItemIds.filter((itemId) =>
+      binMode ? binnedIds.has(itemId) : isAvailableItem(itemId)),
+  );
+  selectionAnchor = [...selected].at(-1) ?? null;
+  captureWorkspaceView();
+}
+
+function saveWorkspaceView() {
+  captureWorkspaceView();
+  void persist(state).catch((error) =>
+    setStatus(error instanceof Error ? error.message : String(error)));
 }
 
 function pathTo(groupId) {
@@ -130,10 +179,16 @@ function pathTo(groupId) {
 
 function iconMarkup(candidate) {
   if (candidate.kind === 'group') {
+    if (candidate.icon) {
+      return `<img src="${escapeHtml(candidate.icon)}" alt="" />`;
+    }
     return '<span class="folder-art" aria-hidden="true"><span></span></span>';
   }
   if (candidate.icon) {
     return `<img src="${escapeHtml(candidate.icon)}" alt="" />`;
+  }
+  if (isWebLink(candidate)) {
+    return `<img data-web-icon="${escapeHtml(webLinkIcon(candidate))}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
   }
   return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
 }
@@ -195,19 +250,9 @@ function renderBinItems() {
   `).join('');
 }
 
-function optionMarkup() {
-  return allGroups().map((candidate) => `
-    <option value="${candidate.id}" ${candidate.id === currentId ? 'selected' : ''}>
-      ${'— '.repeat(candidate.depth)}${escapeHtml(candidate.name)}
-    </option>
-  `).join('');
-}
-
 function render() {
   const iconSize = state.view.iconSize;
   document.documentElement.style.setProperty('--icon-size', `${iconSize}px`);
-  elements.location.innerHTML = optionMarkup();
-  elements.location.hidden = binMode;
   elements.breadcrumbs.innerHTML = binMode
     ? '<span class="bin-crumb">Bin</span>'
     : pathTo(currentId).map((candidate, index, path) =>
@@ -229,8 +274,10 @@ function render() {
   elements.binCount.textContent = String(binCount);
   elements.binButton.setAttribute('aria-pressed', String(binMode));
   elements.binLabel.textContent = binMode ? 'Close Bin' : 'Bin';
+  elements.deleteAllBin.hidden = !binMode || binCount === 0;
 
   hydrateIcons();
+  hydrateWebIcons();
 }
 
 function syncSelection() {
@@ -267,6 +314,20 @@ async function hydrateIcons() {
   }));
 }
 
+function hydrateWebIcons() {
+  document.querySelectorAll('[data-web-icon]').forEach((image) => {
+    image.addEventListener('load', () => {
+      image.hidden = false;
+      image.nextElementSibling?.setAttribute('hidden', '');
+    }, { once: true });
+    image.addEventListener('error', () => {
+      image.hidden = true;
+      image.nextElementSibling?.removeAttribute('hidden');
+    }, { once: true });
+    image.src = image.dataset.webIcon;
+  });
+}
+
 async function persist(nextState = state) {
   const snapshot = JSON.stringify(nextState);
   const operation = saveQueue
@@ -276,14 +337,15 @@ async function persist(nextState = state) {
   await operation;
 }
 
-async function commit(nextState, success = '') {
+async function commit(nextState) {
   state = normalizeState(nextState);
   selected.clear();
+  captureWorkspaceView();
   closeMenu();
   render();
   try {
     await persist(state);
-    setStatus(success);
+    setStatus('');
     return true;
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
@@ -314,6 +376,56 @@ function selectItem(itemId, event) {
     selectionAnchor = itemId;
   }
   syncSelection();
+  saveWorkspaceView();
+}
+
+function marqueeBounds(startX, startY, endX, endY) {
+  return {
+    left: Math.min(startX, endX),
+    top: Math.min(startY, endY),
+    right: Math.max(startX, endX),
+    bottom: Math.max(startY, endY),
+  };
+}
+
+function showMarquee(bounds) {
+  const explorerBounds = elements.explorer.getBoundingClientRect();
+  elements.marquee.hidden = false;
+  elements.marquee.style.left = `${bounds.left - explorerBounds.left}px`;
+  elements.marquee.style.top = `${bounds.top - explorerBounds.top}px`;
+  elements.marquee.style.width = `${bounds.right - bounds.left}px`;
+  elements.marquee.style.height = `${bounds.bottom - bounds.top}px`;
+}
+
+function updateMarqueeSelection(bounds) {
+  const tiles = [...elements.grid.querySelectorAll('.icon-item')]
+    .map((tile) => {
+      const rectangle = tile.getBoundingClientRect();
+      return {
+        id: tile.dataset.id,
+        left: rectangle.left,
+        top: rectangle.top,
+        right: rectangle.right,
+        bottom: rectangle.bottom,
+      };
+    })
+    .filter((tile) => tile.right > tile.left && tile.bottom > tile.top);
+  selected = new Set([
+    ...marqueeDrag.baseSelection,
+    ...itemsIntersectingMarquee(tiles, bounds),
+  ]);
+  syncSelection();
+}
+
+function finishMarquee(event) {
+  if (!marqueeDrag || event.pointerId !== marqueeDrag.pointerId) return;
+  if (elements.grid.hasPointerCapture(event.pointerId)) {
+    elements.grid.releasePointerCapture(event.pointerId);
+  }
+  suppressBlankClick = marqueeDrag.moved;
+  if (marqueeDrag.moved) saveWorkspaceView();
+  marqueeDrag = null;
+  elements.marquee.hidden = true;
 }
 
 function closeMenu() {
@@ -331,6 +443,7 @@ function openMenu(x, y, kind = 'selection', parentId = currentId) {
     content = [
       menuButton('new-folder', 'New folder'),
       menuButton('new-shortcut', 'Add shortcut'),
+      menuButton('new-web-link', 'Add web link'),
       clipboard ? '<hr />' : '',
       clipboard ? menuButton('paste', clipboard.mode === 'cut' ? 'Paste moved items' : 'Paste copied items') : '',
     ].join('');
@@ -345,8 +458,8 @@ function openMenu(x, y, kind = 'selection', parentId = currentId) {
     const only = chosen.length === 1 ? chosen[0] : null;
     content = [
       only ? menuButton('open', only.target ? 'Open' : 'Open folder') : '',
-      only?.target ? menuButton('edit', 'Edit shortcut') : '',
-      only && !only.target ? menuButton('rename', 'Rename folder') : '',
+      only?.target ? menuButton('edit', isWebLink(only) ? 'Edit web link' : 'Edit shortcut') : '',
+      only && !only.target ? menuButton('rename', 'Edit folder') : '',
       only ? '<hr />' : '',
       menuButton('copy', chosen.length > 1 ? 'Copy items' : 'Copy'),
       menuButton('cut', chosen.length > 1 ? 'Cut items' : 'Cut'),
@@ -376,12 +489,18 @@ async function activate(itemId) {
     expanded.clear();
     closeMenu();
     render();
+    saveWorkspaceView();
     return;
   }
   if (shortcut(itemId)) {
     closeMenu();
     try {
-      await request('papers:project:as-you-go-launch', { actionId: itemId });
+      const chosen = shortcut(itemId);
+      if (isWebLink(chosen)) {
+        await request('papers:project:open-web-link', { url: chosen.target });
+      } else {
+        await request('papers:project:as-you-go-launch', { actionId: itemId });
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -391,7 +510,7 @@ async function activate(itemId) {
 async function copyOrCut(mode) {
   if (selected.size === 0) return;
   clipboard = { mode, ids: [...selected] };
-  setStatus(`${selected.size} item${selected.size === 1 ? '' : 's'} ${mode === 'cut' ? 'cut' : 'copied'}.`);
+  setStatus('');
   closeMenu();
 }
 
@@ -416,10 +535,69 @@ function showIconPreview(source) {
   else elements.iconPreview.removeAttribute('src');
 }
 
+function readAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('That image could not be read.'));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function canvasBlob(canvas, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', quality));
+}
+
+async function compressIconFile(file) {
+  const maximumDimension = 512;
+  const targetBytes = 500_000;
+  const bitmap = await createImageBitmap(file);
+  try {
+    if (
+      file.size <= targetBytes
+      && bitmap.width <= maximumDimension
+      && bitmap.height <= maximumDimension
+    ) {
+      return readAsDataUrl(file);
+    }
+
+    const initialScale = Math.min(
+      1,
+      maximumDimension / Math.max(bitmap.width, bitmap.height),
+    );
+    let width = Math.max(1, Math.round(bitmap.width * initialScale));
+    let height = Math.max(1, Math.round(bitmap.height * initialScale));
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Image compression is unavailable.');
+
+    for (let sizeAttempt = 0; sizeAttempt < 5; sizeAttempt += 1) {
+      canvas.width = width;
+      canvas.height = height;
+      context.clearRect(0, 0, width, height);
+      context.drawImage(bitmap, 0, 0, width, height);
+      for (const quality of [0.9, 0.78, 0.65, 0.5]) {
+        const compressed = await canvasBlob(canvas, quality);
+        if (compressed && compressed.size <= targetBytes) {
+          return readAsDataUrl(compressed);
+        }
+      }
+      width = Math.max(32, Math.round(width * 0.75));
+      height = Math.max(32, Math.round(height * 0.75));
+    }
+    throw new Error('That image could not be compressed enough for an icon.');
+  } finally {
+    bitmap.close();
+  }
+}
+
 async function resolveEditorTargetIcon() {
   if (editorIcon) return showIconPreview(editorIcon);
   if (editorTargetIcon) return showIconPreview(editorTargetIcon);
-  if (editorMode?.item?.id) {
+  if (editorMode?.kind === 'web') {
+    return showIconPreview(webLinkIcon({ target: elements.target.value.trim() }));
+  }
+  if (editorMode?.kind === 'shortcut' && editorMode.item?.id) {
     try {
       editorTargetIcon = await request('papers:project:as-you-go-shortcut-icon', {
         actionId: editorMode.item.id,
@@ -435,15 +613,28 @@ function showEditor(kind, existing = null, parentId = currentId) {
   closeMenu();
   editorMode = { kind, item: existing, parentId };
   editorIcon = existing?.icon ?? null;
-  editorTargetIcon = existing && !existing.icon ? iconCache.get(existing.id) ?? null : null;
+  editorTargetIcon =
+    kind === 'web' && existing && !existing.icon
+      ? webLinkIcon(existing)
+      : kind === 'shortcut' && existing && !existing.icon
+      ? iconCache.get(existing.id) ?? null
+      : null;
   elements.editorTitle.textContent = kind === 'group'
-    ? existing ? 'Rename folder' : 'New folder'
-    : existing ? 'Edit shortcut' : 'Add shortcut';
+    ? existing ? 'Edit folder' : 'New folder'
+    : kind === 'web'
+      ? existing ? 'Edit web link' : 'Add web link'
+      : existing ? 'Edit shortcut' : 'Add shortcut';
   elements.name.value = existing?.name ?? '';
   elements.description.value = existing?.description ?? '';
   elements.target.value = existing?.target ?? '';
   elements.descriptionLabel.hidden = kind === 'group';
   elements.targetFields.hidden = kind === 'group';
+  elements.target.readOnly = kind !== 'web';
+  elements.target.placeholder = kind === 'web' ? 'https://example.com' : '';
+  elements.targetActions.hidden = kind === 'web';
+  elements.iconFallback.textContent = kind === 'group' ? '▰' : '↗';
+  elements.iconDefaultButton.textContent =
+    kind === 'group' ? 'Use folder icon' : kind === 'web' ? 'Use website icon' : 'Use target icon';
   elements.iconInput.value = '';
   elements.editorError.textContent = '';
   elements.editorLayer.hidden = false;
@@ -477,14 +668,16 @@ async function chooseTarget(kind) {
 }
 
 async function saveEditor() {
-  if (!editorMode) return;
+  if (!editorMode || elements.saveButton.disabled) return;
+  elements.saveButton.disabled = true;
+  elements.saveButton.textContent = 'Saving…';
   const name = elements.name.value.trim();
   try {
     let next;
     if (editorMode.kind === 'group') {
       next = editorMode.item
-        ? renameItem(state, editorMode.item.id, name)
-        : createGroup(state, name, editorMode.parentId);
+        ? updateGroup(state, editorMode.item.id, { name, icon: editorIcon })
+        : createGroup(state, name, editorMode.parentId, editorIcon);
     } else {
       const changes = {
         name,
@@ -492,9 +685,13 @@ async function saveEditor() {
         target: elements.target.value.trim(),
         icon: editorIcon,
       };
-      next = editorMode.item
-        ? updateShortcut(state, editorMode.item.id, changes)
-        : createShortcut(state, { ...changes, parentId: editorMode.parentId });
+      next = editorMode.kind === 'web'
+        ? editorMode.item
+          ? updateWebLink(state, editorMode.item.id, changes)
+          : createWebLink(state, { ...changes, parentId: editorMode.parentId })
+        : editorMode.item
+          ? updateShortcut(state, editorMode.item.id, changes)
+          : createShortcut(state, { ...changes, parentId: editorMode.parentId });
     }
     const editedShortcutId = editorMode.kind === 'shortcut' ? editorMode.item?.id : null;
     const refreshTargetIcon = Boolean(
@@ -510,6 +707,9 @@ async function saveEditor() {
     }
   } catch (error) {
     elements.editorError.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    elements.saveButton.disabled = false;
+    elements.saveButton.textContent = 'Save';
   }
 }
 
@@ -518,11 +718,14 @@ async function moveToBin() {
   await commit(binSelection(state, [...selected]), 'Moved to Bin.');
 }
 
-function askPermanentDelete() {
-  if (selected.size === 0) return;
-  elements.confirmCopy.textContent = selected.size === 1
-    ? `Delete “${item([...selected][0])?.name ?? 'this item'}” permanently? This cannot be undone.`
-    : `Delete these ${selected.size} items permanently? This cannot be undone.`;
+function askPermanentDelete(ids = [...selected], deletingAll = false) {
+  if (ids.length === 0) return;
+  pendingPermanentIds = [...ids];
+  elements.confirmCopy.textContent = deletingAll
+    ? `Delete all ${ids.length} items permanently? This cannot be undone.`
+    : ids.length === 1
+      ? `Delete “${item(ids[0])?.name ?? 'this item'}” permanently? This cannot be undone.`
+      : `Delete these ${ids.length} items permanently? This cannot be undone.`;
   elements.confirmLayer.hidden = false;
 }
 
@@ -530,9 +733,13 @@ async function runMenuAction(action) {
   const onlyId = selected.size === 1 ? [...selected][0] : null;
   if (action === 'new-folder') return showEditor('group', null, elements.menu.dataset.parent);
   if (action === 'new-shortcut') return showEditor('shortcut', null, elements.menu.dataset.parent);
+  if (action === 'new-web-link') return showEditor('web', null, elements.menu.dataset.parent);
   if (action === 'paste') return pasteInto(elements.menu.dataset.parent);
   if (action === 'open' && onlyId) return activate(onlyId);
-  if (action === 'edit' && onlyId) return showEditor('shortcut', shortcut(onlyId));
+  if (action === 'edit' && onlyId) {
+    const chosen = shortcut(onlyId);
+    return showEditor(isWebLink(chosen) ? 'web' : 'shortcut', chosen);
+  }
   if (action === 'rename' && onlyId) return showEditor('group', group(onlyId));
   if (action === 'copy') return copyOrCut('copy');
   if (action === 'cut') return copyOrCut('cut');
@@ -550,6 +757,7 @@ elements.grid.addEventListener('click', (event) => {
     else expanded.add(folderId);
     closeMenu();
     render();
+    saveWorkspaceView();
     return;
   }
   const tile = event.target.closest('.icon-item');
@@ -559,12 +767,60 @@ elements.grid.addEventListener('click', (event) => {
   }
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
   if (blank) {
+    if (suppressBlankClick) {
+      suppressBlankClick = false;
+      return;
+    }
     selected.clear();
     selectionAnchor = null;
     syncSelection();
     closeMenu();
+    saveWorkspaceView();
   }
 });
+
+elements.grid.addEventListener('pointerdown', (event) => {
+  if (
+    event.button !== 0
+    || event.target.closest('.icon-item')
+    || !event.target.closest('[data-blank-parent], [data-icon-grid]')
+  ) return;
+
+  closeMenu();
+  marqueeDrag = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    baseSelection: event.ctrlKey ? new Set(selected) : new Set(),
+    moved: false,
+  };
+  if (!event.ctrlKey) {
+    selected.clear();
+    selectionAnchor = null;
+    syncSelection();
+  }
+  elements.grid.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+
+elements.grid.addEventListener('pointermove', (event) => {
+  if (!marqueeDrag || event.pointerId !== marqueeDrag.pointerId) return;
+  const bounds = marqueeBounds(
+    marqueeDrag.startX,
+    marqueeDrag.startY,
+    event.clientX,
+    event.clientY,
+  );
+  if (!marqueeDrag.moved && bounds.right - bounds.left < 3 && bounds.bottom - bounds.top < 3) {
+    return;
+  }
+  marqueeDrag.moved = true;
+  showMarquee(bounds);
+  updateMarqueeSelection(bounds);
+});
+
+elements.grid.addEventListener('pointerup', finishMarquee);
+elements.grid.addEventListener('pointercancel', finishMarquee);
 
 elements.grid.addEventListener('dblclick', (event) => {
   const tile = event.target.closest('.icon-item');
@@ -580,6 +836,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
       selected = new Set([tile.dataset.id]);
       selectionAnchor = tile.dataset.id;
       syncSelection();
+      saveWorkspaceView();
     }
     openMenu(event.clientX, event.clientY);
     return;
@@ -623,6 +880,7 @@ document.addEventListener('keydown', (event) => {
     selected.clear();
     closeMenu();
     syncSelection();
+    saveWorkspaceView();
     return;
   }
   if (event.ctrlKey && event.key.toLowerCase() === 'c') {
@@ -664,6 +922,7 @@ elements.grid.addEventListener('dragstart', (event) => {
     selected = new Set([tile.dataset.id]);
     selectionAnchor = tile.dataset.id;
     syncSelection();
+    saveWorkspaceView();
   }
   dragIds = [...selected];
   event.dataTransfer.effectAllowed = 'copyMove';
@@ -676,6 +935,12 @@ elements.grid.addEventListener('dragover', (event) => {
   document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
     node.classList.remove('drop-inside', 'drop-before'));
   const tile = event.target.closest('.icon-item');
+  if (event.dataTransfer.types.includes('Files')) {
+    elements.grid.classList.toggle('drop-blank', tile?.dataset.kind !== 'group');
+    if (tile?.dataset.kind === 'group') tile.classList.add('drop-inside');
+    event.dataTransfer.dropEffect = 'link';
+    return;
+  }
   if (!tile) return elements.grid.classList.add('drop-blank');
   elements.grid.classList.remove('drop-blank');
   const rect = tile.getBoundingClientRect();
@@ -693,7 +958,35 @@ elements.grid.addEventListener('dragleave', (event) => {
 });
 
 elements.grid.addEventListener('drop', async (event) => {
-  if (binMode || dragIds.length === 0) return;
+  if (binMode) return;
+  const droppedFiles = [...event.dataTransfer.files];
+  if (droppedFiles.length > 0) {
+    event.preventDefault();
+    const tile = event.target.closest('.icon-item');
+    const blank = event.target.closest('[data-blank-parent]');
+    const destination = tile?.dataset.kind === 'group'
+      ? tile.dataset.id
+      : blank?.dataset.blankParent ?? tile?.dataset.parent ?? currentId;
+    try {
+      const targets = await request('papers:project:resolve-dropped-targets', {
+        files: droppedFiles,
+      });
+      const next = createDroppedShortcuts(state, targets, destination);
+      if (next.shortcuts.length === state.shortcuts.length) {
+        setStatus('Those shortcuts already exist here.');
+        return;
+      }
+      await commit(next);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      elements.grid.classList.remove('drop-blank');
+      document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
+        node.classList.remove('drop-inside', 'drop-before'));
+    }
+    return;
+  }
+  if (dragIds.length === 0) return;
   event.preventDefault();
   const tile = event.target.closest('.icon-item');
   const copy = event.ctrlKey;
@@ -734,13 +1027,6 @@ elements.grid.addEventListener('drop', async (event) => {
   }
 });
 
-elements.location.addEventListener('change', (event) => {
-  currentId = event.target.value;
-  selected.clear();
-  expanded.clear();
-  render();
-});
-
 elements.breadcrumbs.addEventListener('click', (event) => {
   const crumb = event.target.closest('[data-breadcrumb]');
   if (!crumb) return;
@@ -748,6 +1034,7 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   selected.clear();
   expanded.clear();
   render();
+  saveWorkspaceView();
 });
 
 elements.binButton.addEventListener('click', () => {
@@ -755,44 +1042,62 @@ elements.binButton.addEventListener('click', () => {
   selected.clear();
   closeMenu();
   render();
+  saveWorkspaceView();
+});
+elements.deleteAllBin.addEventListener('click', () => {
+  askPermanentDelete(binnedItems(state).map((candidate) => candidate.id), true);
 });
 
 elements.editor.addEventListener('submit', (event) => {
   event.preventDefault();
-  saveEditor();
+  void saveEditor();
 });
+const saveButton = elements.saveButton;
+saveButton.addEventListener('click', () => void saveEditor());
 document.querySelector('#cancel-editor').addEventListener('click', hideEditor);
 document.querySelector('#pick-file').addEventListener('click', () => chooseTarget('file'));
 document.querySelector('#pick-folder').addEventListener('click', () => chooseTarget('folder'));
-document.querySelector('#use-target-icon').addEventListener('click', () => {
+elements.iconDefaultButton.addEventListener('click', () => {
   editorIcon = null;
+  if (editorMode?.kind === 'group') editorTargetIcon = null;
+  if (editorMode?.kind === 'web') {
+    editorTargetIcon = webLinkIcon({ target: elements.target.value.trim() });
+  }
   resolveEditorTargetIcon();
 });
-elements.iconInput.addEventListener('change', () => {
+elements.target.addEventListener('input', () => {
+  if (editorMode?.kind !== 'web' || editorIcon) return;
+  editorTargetIcon = webLinkIcon({ target: elements.target.value.trim() });
+  showIconPreview(editorTargetIcon);
+});
+elements.iconInput.addEventListener('change', async () => {
   const file = elements.iconInput.files[0];
   if (!file) return;
   if (!file.type.startsWith('image/')) {
     elements.editorError.textContent = 'Choose an image file.';
     return;
   }
-  if (file.size > 750_000) {
-    elements.editorError.textContent = 'That icon image is too large. Choose one under 750 KB.';
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = () => {
-    editorIcon = String(reader.result);
+  elements.saveButton.disabled = true;
+  elements.editorError.textContent = 'Preparing icon…';
+  try {
+    editorIcon = await compressIconFile(file);
     elements.editorError.textContent = '';
     showIconPreview(editorIcon);
-  };
-  reader.readAsDataURL(file);
+  } catch (error) {
+    elements.editorError.textContent =
+      error instanceof Error ? error.message : String(error);
+  } finally {
+    elements.saveButton.disabled = false;
+  }
 });
 
 document.querySelector('#cancel-confirm').addEventListener('click', () => {
+  pendingPermanentIds = [];
   elements.confirmLayer.hidden = true;
 });
 document.querySelector('#confirm-delete').addEventListener('click', async () => {
-  const next = permanentlyDelete(state, [...selected]);
+  const next = permanentlyDelete(state, pendingPermanentIds);
+  pendingPermanentIds = [];
   elements.confirmLayer.hidden = true;
   await commit(next, 'Deleted permanently.');
 });
@@ -822,13 +1127,20 @@ window.addEventListener('message', (event) => {
     task.resolve({ target: event.data.target, icon: event.data.icon });
     return;
   }
-  task.resolve(event.data.state ?? event.data.icon ?? event.data.target ?? undefined);
+  task.resolve(
+    event.data.state
+    ?? event.data.icon
+    ?? event.data.target
+    ?? event.data.targets
+    ?? undefined,
+  );
 });
 
 (async () => {
   try {
     const loaded = await request('papers:project:as-you-go-load');
     state = normalizeState(typeof loaded === 'string' ? JSON.parse(loaded) : loaded);
+    restoreWorkspaceView();
     render();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));

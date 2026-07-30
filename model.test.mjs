@@ -10,13 +10,37 @@ import {
   binSelection,
   permanentlyDelete,
   emptyState,
+  itemsIntersectingMarquee,
   moveSelection,
   normalizeState,
   renameItem,
   reorderSelection,
   restoreSelection,
+  updateGroup,
   updateShortcut,
+  updateWorkspaceView,
+  createWebLink,
+  isWebLink,
+  webLinkIcon,
+  createDroppedShortcuts,
 } from './model.mjs';
+
+test('a drag marquee selects every visible item rectangle it crosses', () => {
+  const tiles = [
+    { id: 'one', left: 20, top: 20, right: 100, bottom: 100 },
+    { id: 'two', left: 120, top: 20, right: 200, bottom: 100 },
+    { id: 'three', left: 220, top: 20, right: 300, bottom: 100 },
+  ];
+
+  assert.deepEqual(
+    itemsIntersectingMarquee(tiles, { left: 90, top: 10, right: 210, bottom: 110 }),
+    ['one', 'two'],
+  );
+  assert.deepEqual(
+    itemsIntersectingMarquee(tiles, { left: 210, top: 110, right: 90, bottom: 10 }),
+    ['one', 'two'],
+  );
+});
 
 test('groups and shortcuts form a nested explorer tree', () => {
   let state = createGroup(emptyState(), 'Projects');
@@ -79,6 +103,20 @@ test('rename applies to either a group or shortcut', () => {
   assert.equal(state.groups[0].name, 'New');
 });
 
+test('folders can use a custom image or return to the default folder icon', () => {
+  let state = createGroup(
+    emptyState(),
+    'Pictures',
+    ROOT_ID,
+    'data:image/png;base64,folder',
+  );
+  const folder = state.groups[0];
+  assert.equal(folder.icon, 'data:image/png;base64,folder');
+
+  state = updateGroup(state, folder.id, { name: 'Pictures', icon: null });
+  assert.equal(state.groups[0].icon, null);
+});
+
 test('editing a shortcut preserves its identity and folder while replacing every editable field', () => {
   let state = createGroup(emptyState(), 'Apps');
   const apps = state.groups[0];
@@ -119,6 +157,67 @@ test('legacy state receives stable manual order and a default icon size without 
   assert.deepEqual(state.shortcuts.map((item) => item.order), [1, 2]);
   assert.equal(state.groups[0].order, 0);
   assert.equal(state.view.iconSize, 96);
+  assert.equal(state.groups[0].icon, null);
+});
+
+test('the local project preserves its explorer working position', () => {
+  let state = createGroup(emptyState(), 'Open');
+  state = createShortcut(state, {
+    name: 'Picked',
+    target: 'C:\\picked.exe',
+    parentId: state.groups[0].id,
+  });
+
+  state = updateWorkspaceView(state, {
+    currentGroupId: state.groups[0].id,
+    expandedGroupIds: [state.groups[0].id],
+    selectedItemIds: [state.shortcuts[0].id],
+    binMode: false,
+  });
+  const restored = normalizeState(JSON.parse(JSON.stringify(state)));
+
+  assert.deepEqual(restored.view, {
+    iconSize: 96,
+    currentGroupId: state.groups[0].id,
+    expandedGroupIds: [state.groups[0].id],
+    selectedItemIds: [state.shortcuts[0].id],
+    binMode: false,
+  });
+});
+
+test('web links are http(s) shortcuts owned by the local project', () => {
+  const linked = createWebLink(emptyState(), {
+    name: 'Papers',
+    target: 'https://github.com/Futahua/Papers-3',
+  });
+  assert.equal(linked.shortcuts.length, 1);
+  assert.equal(isWebLink(linked.shortcuts[0]), true);
+  assert.equal(
+    webLinkIcon(linked.shortcuts[0]),
+    'https://github.com/favicon.ico',
+  );
+  assert.throws(
+    () => createWebLink(emptyState(), { name: 'Unsafe', target: 'javascript:alert(1)' }),
+    /http or https/i,
+  );
+});
+
+test('Explorer drops create quick shortcuts in the exact destination without duplicates', () => {
+  const grouped = createGroup(emptyState(), 'Dropped here');
+  const destination = grouped.groups[0].id;
+  const dropped = createDroppedShortcuts(grouped, [
+    { name: 'notes.txt', target: 'D:\\Work\\notes.txt' },
+    { name: 'Pictures', target: 'D:\\Pictures' },
+    { name: 'notes.txt', target: 'D:\\Work\\notes.txt' },
+  ], destination);
+
+  assert.deepEqual(
+    dropped.shortcuts.map(({ name, target, parentId }) => ({ name, target, parentId })),
+    [
+      { name: 'notes.txt', target: 'D:\\Work\\notes.txt', parentId: destination },
+      { name: 'Pictures', target: 'D:\\Pictures', parentId: destination },
+    ],
+  );
 });
 
 test('manual reordering persists for multiple selected siblings', () => {

@@ -1,1 +1,1 @@
-export * from './public/model.js';
+export * from './public/workspace-model-20260730b.js';

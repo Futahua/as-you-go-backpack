@@ -5,13 +5,22 @@ export const MAX_ICON_SIZE = 176;
 
 const id = (kind) => `${kind}-${globalThis.crypto.randomUUID()}`;
 const hasNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+const stringIds = (value) => Array.isArray(value)
+  ? [...new Set(value.filter((candidate) => typeof candidate === 'string'))]
+  : [];
 
 export function emptyState() {
   return {
     schemaVersion: 1,
     groups: [],
     shortcuts: [],
-    view: { iconSize: DEFAULT_ICON_SIZE },
+    view: {
+      iconSize: DEFAULT_ICON_SIZE,
+      currentGroupId: ROOT_ID,
+      expandedGroupIds: [],
+      selectedItemIds: [],
+      binMode: false,
+    },
   };
 }
 
@@ -69,13 +78,22 @@ export function binnedItems(state) {
 export function normalizeState(raw) {
   const state = {
     schemaVersion: 1,
-    groups: Array.isArray(raw?.groups) ? raw.groups.map((candidate) => ({ ...candidate })) : [],
+    groups: Array.isArray(raw?.groups)
+      ? raw.groups.map((candidate) => ({ ...candidate, icon: candidate.icon ?? null }))
+      : [],
     shortcuts: Array.isArray(raw?.shortcuts) ? raw.shortcuts.map((candidate) => ({ ...candidate })) : [],
     view: {
       iconSize: Math.min(
         MAX_ICON_SIZE,
         Math.max(MIN_ICON_SIZE, hasNumber(raw?.view?.iconSize) ? raw.view.iconSize : DEFAULT_ICON_SIZE),
       ),
+      currentGroupId:
+        typeof raw?.view?.currentGroupId === 'string'
+          ? raw.view.currentGroupId
+          : ROOT_ID,
+      expandedGroupIds: stringIds(raw?.view?.expandedGroupIds),
+      selectedItemIds: stringIds(raw?.view?.selectedItemIds),
+      binMode: raw?.view?.binMode === true,
     },
   };
 
@@ -135,7 +153,7 @@ function nextOrder(state, parentId) {
   return itemsIn(state, parentId).length;
 }
 
-export function createGroup(state, name, parentId = ROOT_ID) {
+export function createGroup(state, name, parentId = ROOT_ID, icon = null) {
   const trimmed = String(name).trim();
   if (!trimmed) throw new Error('Group name must not be empty.');
   assertParent(state, parentId);
@@ -146,6 +164,7 @@ export function createGroup(state, name, parentId = ROOT_ID) {
       parentId,
       order: nextOrder(state, parentId),
       name: trimmed,
+      icon,
     }],
   };
 }
@@ -171,6 +190,72 @@ export function createShortcut(state, shortcut) {
   };
 }
 
+export function createDroppedShortcuts(state, droppedTargets, parentId = ROOT_ID) {
+  assertParent(state, parentId);
+  const existingTargets = new Set(
+    state.shortcuts
+      .filter((candidate) => candidate.parentId === parentId && !candidate.bin)
+      .map((candidate) => candidate.target.toLocaleLowerCase()),
+  );
+  let next = state;
+  for (const dropped of droppedTargets) {
+    const target = String(dropped?.target ?? '').trim();
+    const key = target.toLocaleLowerCase();
+    if (!target || existingTargets.has(key)) continue;
+    next = createShortcut(next, {
+      name: String(dropped?.name ?? '').trim() || target,
+      target,
+      parentId,
+      description: '',
+      icon: null,
+    });
+    existingTargets.add(key);
+  }
+  return next;
+}
+
+function normalizeWebTarget(target) {
+  let parsed;
+  try {
+    parsed = new URL(String(target ?? '').trim());
+  } catch {
+    throw new Error('Web address must be a valid http or https URL.');
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Web address must use http or https.');
+  }
+  return parsed.toString();
+}
+
+export function isWebLink(candidate) {
+  if (!candidate || typeof candidate.target !== 'string') return false;
+  try {
+    const parsed = new URL(candidate.target);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+export function webLinkIcon(candidate) {
+  if (!isWebLink(candidate)) return null;
+  return new URL('/favicon.ico', candidate.target).toString();
+}
+
+export function createWebLink(state, webLink) {
+  return createShortcut(state, {
+    ...webLink,
+    target: normalizeWebTarget(webLink.target),
+  });
+}
+
+export function updateWebLink(state, shortcutId, changes) {
+  return updateShortcut(state, shortcutId, {
+    ...changes,
+    target: normalizeWebTarget(changes.target),
+  });
+}
+
 export function updateShortcut(state, shortcutId, changes) {
   const name = String(changes.name ?? '').trim();
   const target = String(changes.target ?? '').trim();
@@ -190,6 +275,23 @@ export function updateShortcut(state, shortcutId, changes) {
   });
   if (!found) throw new Error('Shortcut was not found.');
   return { ...state, shortcuts };
+}
+
+export function updateGroup(state, groupId, changes) {
+  const name = String(changes.name ?? '').trim();
+  if (!name) throw new Error('Group name must not be empty.');
+  let found = false;
+  const groups = state.groups.map((candidate) => {
+    if (candidate.id !== groupId) return candidate;
+    found = true;
+    return {
+      ...candidate,
+      name,
+      icon: changes.icon ?? null,
+    };
+  });
+  if (!found) throw new Error('Group was not found.');
+  return { ...state, groups };
 }
 
 export function moveSelection(state, ids, destinationId = ROOT_ID) {
@@ -398,4 +500,35 @@ export function setIconSize(state, size) {
       iconSize: Math.min(MAX_ICON_SIZE, Math.max(MIN_ICON_SIZE, Math.round(size))),
     },
   };
+}
+
+export function updateWorkspaceView(state, changes) {
+  return {
+    ...state,
+    view: {
+      ...state.view,
+      currentGroupId:
+        typeof changes.currentGroupId === 'string'
+          ? changes.currentGroupId
+          : ROOT_ID,
+      expandedGroupIds: stringIds(changes.expandedGroupIds),
+      selectedItemIds: stringIds(changes.selectedItemIds),
+      binMode: changes.binMode === true,
+    },
+  };
+}
+
+export function itemsIntersectingMarquee(items, rectangle) {
+  const left = Math.min(rectangle.left, rectangle.right);
+  const right = Math.max(rectangle.left, rectangle.right);
+  const top = Math.min(rectangle.top, rectangle.bottom);
+  const bottom = Math.max(rectangle.top, rectangle.bottom);
+
+  return items
+    .filter((candidate) =>
+      candidate.right >= left
+      && candidate.left <= right
+      && candidate.bottom >= top
+      && candidate.top <= bottom)
+    .map((candidate) => candidate.id);
 }
