@@ -220,7 +220,7 @@ function render() {
   elements.empty.hidden = visible.length !== 0;
   elements.empty.textContent = binMode
     ? 'The Bin is empty.'
-    : 'This folder is empty. Left-click here to add something.';
+    : 'This folder is empty. Right-click here to add something.';
 
   syncSelection();
 
@@ -555,21 +555,47 @@ elements.grid.addEventListener('click', (event) => {
   const tile = event.target.closest('.icon-item');
   if (tile) {
     selectItem(tile.dataset.id, event);
-    openMenu(event.clientX, event.clientY);
     return;
   }
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
-  if (blank && !binMode) {
+  if (blank) {
     selected.clear();
     selectionAnchor = null;
     syncSelection();
-    openMenu(event.clientX, event.clientY, 'blank', blank.dataset.blankParent ?? currentId);
+    closeMenu();
   }
 });
 
 elements.grid.addEventListener('dblclick', (event) => {
   const tile = event.target.closest('.icon-item');
   if (tile) activate(tile.dataset.id);
+});
+
+elements.grid.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const tile = event.target.closest('.icon-item');
+  if (tile) {
+    if (!selected.has(tile.dataset.id)) {
+      selected = new Set([tile.dataset.id]);
+      selectionAnchor = tile.dataset.id;
+      syncSelection();
+    }
+    openMenu(event.clientX, event.clientY);
+    return;
+  }
+  if (binMode) return closeMenu();
+  const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
+  if (!blank) return;
+  selected.clear();
+  selectionAnchor = null;
+  syncSelection();
+  openMenu(
+    event.clientX,
+    event.clientY,
+    'blank',
+    blank.dataset.blankParent ?? currentId,
+  );
 });
 
 elements.menu.addEventListener('click', (event) => {

@@ -38,6 +38,7 @@ test('the local project owns its exact interface, pickup prompt and prepared act
   assert.match(script, /ctrlKey.*deltaY|deltaY.*ctrlKey/s);
   assert.match(script, /keydown/);
   assert.match(script, /dblclick/);
+  assert.match(script, /contextmenu/);
   assert.match(script, /dragstart/);
   assert.match(script, /closest\(['"]\[data-blank-parent\]['"]\)/);
   assert.match(script, /iconCache\.delete/);

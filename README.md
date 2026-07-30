@@ -23,12 +23,12 @@ Papers supplies only the demonstrated host seam:
 
 The As you Go workspace behaves like a file explorer:
 
-- single-click selects and opens a contextual menu;
+- single left-click selects; right-click opens a contextual menu;
 - double-click opens folders or launches shortcuts;
 - folder chevrons expand nested contents without leaving the current location;
 - Shift/Ctrl selection, Ctrl+C/X/V, Delete-to-Bin and drag move/Ctrl-drag copy work as
   their Windows equivalents;
-- blank-space click offers creation and paste actions;
+- blank-space right-click offers creation and paste actions;
 - Ctrl+mouse-wheel changes the persistent icon size;
 - the Bin supports restore and separately confirmed permanent deletion.
 
