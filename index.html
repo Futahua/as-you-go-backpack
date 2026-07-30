@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>As you Go</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <main class="workspace">
+      <header class="head">
+        <div>
+          <div class="context-row">
+            <p class="eyebrow">Local Backpack</p>
+            <button class="pickup-copy" id="copy-prompt" type="button">
+              <span aria-hidden="true">⧉</span>
+              <span class="copy-label">Copy agent pickup prompt</span>
+            </button>
+          </div>
+          <h1>As you Go</h1>
+          <p class="intro">Your prepared actions on this machine.</p>
+        </div>
+        <button class="back" id="back" type="button">Back to Papers</button>
+      </header>
+
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+
+      <section class="actions" aria-label="Prepared actions">
+        <button class="action" data-action="clips" type="button">
+          <span class="mark" aria-hidden="true">↗</span>
+          <span class="label">CLIPS</span>
+          <span class="kind">Local action</span>
+        </button>
+        <button class="action" data-action="sloptop-mode" type="button">
+          <span class="mark" aria-hidden="true">↗</span>
+          <span class="label">SLOPTOP MODE</span>
+          <span class="kind">Local action</span>
+        </button>
+        <button class="action" data-action="slop-engine" type="button">
+          <span class="mark" aria-hidden="true">↗</span>
+          <span class="label">slop_engine</span>
+          <span class="kind">Local action</span>
+        </button>
+        <button class="action" data-action="usb" type="button">
+          <span class="mark" aria-hidden="true">↗</span>
+          <span class="label">usb</span>
+          <span class="kind">Local action</span>
+        </button>
+      </section>
+    </main>
+  </body>
+</html>
