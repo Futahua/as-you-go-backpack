@@ -6,56 +6,87 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>As you Go</title>
     <link rel="stylesheet" href="styles.css" />
-    <script defer src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </head>
   <body>
     <main class="workspace">
-      <header class="head">
-        <div>
-          <div class="context-row">
-            <p class="eyebrow">Local Backpack</p>
-            <button class="pickup-copy" id="copy-prompt" type="button"><span aria-hidden="true">⧉</span><span class="copy-label">Copy agent pickup prompt</span></button>
-          </div>
+      <header class="compact-head">
+        <div class="identity">
+          <span>Local Backpack</span>
           <h1>As you Go</h1>
-          <p class="intro">Your prepared shortcuts on this machine.</p>
         </div>
-        <button class="back" id="back" type="button">Back to Papers</button>
+        <div class="head-actions">
+          <button class="quiet-button pickup-copy" id="copy-prompt" type="button"><span aria-hidden="true">⧉</span><span class="copy-label">Copy agent pickup prompt</span></button>
+          <button class="quiet-button bin-button" id="bin-button" data-bin-view type="button" aria-pressed="false">
+            <span aria-hidden="true">♲</span>
+            <span id="bin-label">Bin</span>
+            <span class="bin-count" id="bin-count" hidden></span>
+          </button>
+        </div>
       </header>
+
+      <section class="navigation" aria-label="Folder navigation">
+        <nav class="breadcrumbs" id="breadcrumbs" aria-label="Current group path"></nav>
+        <label class="location-picker">
+          <span class="sr-only">Jump to folder</span>
+          <select id="location-select" aria-label="Navigate groups"></select>
+        </label>
+      </section>
 
       <p class="status" id="status" role="status" aria-live="polite"></p>
 
-      <section class="explorer" aria-label="As you Go file explorer">
-        <div class="explorer-toolbar">
-          <label class="location-picker">Location
-            <select id="location-select" aria-label="Navigate groups"></select>
-          </label>
-          <button class="toolbar-button" id="new-group" type="button">New group</button>
-          <button class="toolbar-button primary" id="new-shortcut" type="button">Add shortcut</button>
-        </div>
-        <nav class="breadcrumbs" id="breadcrumbs" aria-label="Current group path"></nav>
-        <div class="selection-toolbar" id="selection-toolbar" hidden>
-          <span id="selection-count"></span>
-          <select id="destination-select" aria-label="Destination group"></select>
-          <button class="toolbar-button" id="move-selected" type="button">Move here</button>
-          <button class="toolbar-button" id="copy-selected" type="button">Copy here</button>
-          <button class="toolbar-button danger" id="delete-selected" type="button">Delete</button>
-          <button class="toolbar-button" id="clear-selected" type="button">Clear</button>
-        </div>
-        <div class="explorer-list" id="explorer-list"></div>
-        <div class="empty" id="empty" hidden>This group is empty.</div>
+      <section class="explorer" id="explorer" aria-label="As you Go explorer">
+        <div
+          class="icon-grid"
+          id="icon-grid"
+          data-icon-grid
+          tabindex="0"
+          aria-label="Items in this folder"
+        ></div>
+        <div class="empty" id="empty" hidden></div>
       </section>
 
-      <section class="editor" id="editor" hidden aria-label="Shortcut or group editor">
-        <h2 id="editor-title"></h2>
-        <label>Name<input id="name-input" maxlength="120" autocomplete="off" /></label>
-        <label id="description-label">Description<textarea id="description-input" maxlength="500" rows="2"></textarea></label>
-        <div id="target-fields">
-          <label>Target<input id="target-input" readonly /></label>
-          <div class="editor-actions"><button class="toolbar-button" id="pick-file" type="button">Choose file / app</button><button class="toolbar-button" id="pick-folder" type="button">Choose folder</button></div>
-          <label>Icon image <input id="icon-input" type="file" accept="image/*" /></label>
-          <img id="icon-preview" class="icon-preview" alt="Selected shortcut icon" hidden />
+      <footer class="selection-status" id="selection-status" hidden></footer>
+
+      <div class="context-menu" id="context-menu" data-context-menu role="menu" hidden></div>
+
+      <section class="editor-layer" id="editor-layer" hidden>
+        <form class="editor" id="editor" aria-label="Shortcut or folder editor">
+          <h2 id="editor-title"></h2>
+          <label>Name<input id="name-input" maxlength="120" autocomplete="off" /></label>
+          <label id="description-label">Description <span>(optional)</span><textarea id="description-input" maxlength="500" rows="2"></textarea></label>
+          <div id="target-fields">
+            <label>Target<input id="target-input" readonly /></label>
+            <div class="editor-actions">
+              <button class="paper-button" id="pick-file" type="button">Choose file / app</button>
+              <button class="paper-button" id="pick-folder" type="button">Choose folder</button>
+            </div>
+            <fieldset class="icon-choice">
+              <legend>Icon</legend>
+              <div class="icon-preview-shell"><img id="icon-preview" class="icon-preview" alt="" hidden /><span id="icon-fallback" aria-hidden="true">↗</span></div>
+              <div class="editor-actions">
+                <button class="paper-button" id="use-target-icon" type="button">Use target icon</button>
+                <label class="paper-button file-button">Choose image<input id="icon-input" type="file" accept="image/*" /></label>
+              </div>
+            </fieldset>
+          </div>
+          <p class="editor-error" id="editor-error" role="alert"></p>
+          <div class="editor-actions editor-submit">
+            <button class="paper-button" id="cancel-editor" type="button">Cancel</button>
+            <button class="paper-button primary" id="save-editor" type="submit">Save</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="confirm-layer" id="confirm-layer" hidden>
+        <div class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+          <h2 id="confirm-title">Delete permanently?</h2>
+          <p id="confirm-copy">This cannot be undone.</p>
+          <div class="editor-actions">
+            <button class="paper-button" id="cancel-confirm" type="button">Cancel</button>
+            <button class="paper-button danger" id="confirm-delete" type="button">Delete permanently</button>
+          </div>
         </div>
-        <div class="editor-actions"><button class="toolbar-button" id="cancel-editor" type="button">Cancel</button><button class="toolbar-button primary" id="save-editor" type="button">Save</button></div>
       </section>
     </main>
   </body>

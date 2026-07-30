@@ -8,8 +8,9 @@ build or release Papers.
 
 Only static interface files under `public/` are displayable. `project.json`, `actions.json`
 and `state.json` remain private project control records. The explorer state belongs to this
-project; Papers only provides the narrow persistence, target-picker and launch seam needed
-for this explicitly requested local workflow.
+project; Papers only provides the narrow persistence, target-picker, Windows-icon and launch
+seams needed for this explicitly requested local workflow. `state.json` is local creator
+data and is intentionally ignored by Git.
 
 Papers supplies only the demonstrated host seam:
 
@@ -20,10 +21,19 @@ Papers supplies only the demonstrated host seam:
 - choose and launch a local shortcut target through the host seam;
 - return to Papers.
 
-The As you Go workspace behaves like a file explorer: groups can nest, the current group
-opens in the main pane, a dropdown/tree jumps directly to any group, and selected shortcuts
-or groups can be moved or copied into another group. Shortcut descriptions and icon images
-are project-owned presentation data; the external target itself is never copied or changed.
+The As you Go workspace behaves like a file explorer:
+
+- single-click selects and opens a contextual menu;
+- double-click opens folders or launches shortcuts;
+- folder chevrons expand nested contents without leaving the current location;
+- Shift/Ctrl selection, Ctrl+C/X/V, Delete-to-Bin and drag move/Ctrl-drag copy work as
+  their Windows equivalents;
+- blank-space click offers creation and paste actions;
+- Ctrl+mouse-wheel changes the persistent icon size;
+- the Bin supports restore and separately confirmed permanent deletion.
+
+Shortcut descriptions are optional. Icons use the target's Windows icon by default or a
+project-owned image chosen by the creator. External targets are never copied or changed.
 
 The local binding from the protected Backpack ID to this folder is stored in
 `Papers/Data/PapersData/backpack-projects.json`. Do not modify the protected Backpack
