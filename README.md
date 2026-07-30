@@ -6,6 +6,10 @@ Its interface, prompt and prepared actions are owned here, outside the Papers ap
 binary and the Papers source repository. Ordinary changes to this project must not bump,
 build or release Papers.
 
+Only static interface files under `public/` are displayable. `project.json` and
+`actions.json` remain private main-process control records, so their absolute paths never
+cross into the displayed project.
+
 Papers supplies only the demonstrated host seam:
 
 - display this static project inside the Backpack;
