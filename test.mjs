@@ -72,18 +72,14 @@ assert.match(script, /Backpack interfaces, behavior, and implementation belong o
 assert.match(script, /My request:\r?\n\[Describe what you want to experience\.\]/);
 assert.match(html, /id="graph-view-button"/);
 assert.match(html, /id="graph-label"/);
+assert.match(html, /data-view="explorer"/);
 assert.match(script, /renderGraph/);
 assert.match(script, /layout === 'graph'/);
 assert.match(script, /state\.view\.layout/);
-assert.match(script, /forceSimulation/);
-assert.match(script, /forceLink/);
-assert.match(script, /forceManyBody/);
-assert.match(script, /forceCollide/);
-assert.match(script, /zoom\(/);
-assert.match(script, /scaleExtent/);
 assert.match(script, /graph-model-20260730b\.js/);
 assert.match(script, /vendor\/d3-force\.js/);
 assert.match(script, /vendor\/d3-zoom\.js/);
+assert.match(script, /vendor\/d3-selection\.js/);
 assert.match(script, /ResizeObserver/);
 assert.match(script, /fitGraph/);
 assert.match(script, /translate3d/);
@@ -95,6 +91,14 @@ assert.match(script, /graph-node-shell/);
 assert.match(script, /graph-viewport/);
 assert.match(script, /graph-camera/);
 assert.match(script, /dataset\.view/);
+assert.match(script, /select\(viewport\)/);
+assert.match(script, /\.call\(zoomBehavior\)/);
+assert.match(script, /viewportSelection\.transition\(\)/);
+assert.match(script, /buildCandidate/);
+assert.match(script, /siblings\.findIndex/);
+assert.match(script, /exitTimer/);
+assert.match(script, /edges\.get\(/);
+assert.match(script, /node\.exitTimer/);
 
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);

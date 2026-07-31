@@ -1,18 +1,37 @@
-import { itemsIn, ROOT_ID } from './workspace-model-20260730b.js';
+import { itemsIn, binnedItems, ROOT_ID } from './workspace-model-20260730b.js';
 
 export function visibleGraphItems(state, parentId, expandedSet, binMode = false) {
-  return collectVisible(state, parentId, expandedSet, binMode, 0);
+  if (binMode) {
+    return binnedItems(state).map((candidate, index) => ({
+      id: candidate.id,
+      parentId: 'bin',
+      kind: candidate.kind,
+      depth: 0,
+      siblingIndex: index,
+      siblingCount: binnedItems(state).length,
+    }));
+  }
+  return collectVisible(state, parentId, expandedSet, 0);
 }
 
-function collectVisible(state, parentId, expanded, binMode, depth) {
+function collectVisible(state, parentId, expanded, depth) {
   const seen = new Set();
   const items = [];
+  const siblingCounts = new Map();
   function walk(folderId, d) {
-    for (const child of itemsIn(state, folderId)) {
+    const children = itemsIn(state, folderId);
+    for (const child of children) {
       if (seen.has(child.id)) continue;
       seen.add(child.id);
-      items.push({ id: child.id, parentId: child.parentId, kind: child.kind, depth: d });
-      const isOpen = !binMode && child.kind === 'group' && expanded.has(child.id);
+      items.push({
+        id: child.id,
+        parentId: child.parentId,
+        kind: child.kind,
+        depth: d,
+        siblingIndex: children.indexOf(child),
+        siblingCount: children.length,
+      });
+      const isOpen = child.kind === 'group' && expanded.has(child.id);
       if (isOpen) walk(child.id, d + 1);
     }
   }
@@ -23,21 +42,21 @@ function collectVisible(state, parentId, expanded, binMode, depth) {
 export function graphEdges(items) {
   const ids = new Set(items.map((i) => i.id));
   return items
-    .filter((i) => i.parentId !== ROOT_ID && ids.has(i.parentId))
-    .map((i) => ({ source: i.parentId, target: i.id }));
+    .filter((i) => i.parentId !== ROOT_ID && i.parentId !== 'bin' && ids.has(i.parentId))
+    .map((i) => ({ id: `${i.parentId}->${i.id}`, source: i.parentId, target: i.id }));
 }
 
 const RADIUS = 28;
 const SPACING = (2 * Math.PI) / 40;
 
-export function seedPosition(itemId, parent, index, count) {
-  const parentX = parent?.x ?? 0;
-  const parentY = parent?.y ?? 0;
+export function seedPosition(itemId, parent, index, count, originX = 0, originY = 0) {
   if (!parent) {
-    const a = (index * SPACING * 1.4) % (2 * Math.PI);
+    const total = Math.max(count, 1);
+    const angle = (2 * Math.PI * index) / total;
+    const ringRadius = RADIUS * 2.4 * Math.max(1, total / 4);
     return {
-      x: Math.cos(a) * RADIUS * 2.4 + parentX,
-      y: Math.sin(a) * RADIUS * 2.4 + parentY,
+      x: Math.cos(angle) * ringRadius + originX,
+      y: Math.sin(angle) * ringRadius + originY,
     };
   }
   const golden = 2.39996;

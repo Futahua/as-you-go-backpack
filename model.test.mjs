@@ -342,3 +342,40 @@ test('root seed positions are finite and distinct', () => {
   assert.ok(allFinite(seeds));
   assert.ok(allUniquePositions(seeds));
 });
+
+test('graph visibility assigns unique sibling indices', () => {
+  let state = createGroup(emptyState(), 'Parent');
+  const parent = state.groups[0];
+  state = createShortcut(state, { name: 'A', target: 'C:\\a.exe', parentId: parent.id });
+  state = createShortcut(state, { name: 'B', target: 'C:\\b.exe', parentId: parent.id });
+  state = createShortcut(state, { name: 'C', target: 'C:\\c.exe', parentId: parent.id });
+
+  const items = visibleGraphItems(state, ROOT_ID, new Set([parent.id]), false);
+  const children = items.filter((i) => i.parentId === parent.id);
+  assert.deepEqual(children.map((i) => i.siblingIndex), [0, 1, 2]);
+  assert.equal(children[0].siblingCount, 3);
+});
+
+test('graph edges include stable keys', () => {
+  let state = createGroup(emptyState(), 'Parent');
+  const parent = state.groups[0];
+  state = createShortcut(state, { name: 'Child', target: 'C:\\child.exe', parentId: parent.id });
+  const items = visibleGraphItems(state, ROOT_ID, new Set([parent.id]), false);
+  const edges = graphEdges(items);
+  assert.equal(edges.length, 1);
+  assert.equal(edges[0].id, `${parent.id}->${state.shortcuts[0].id}`);
+});
+
+test('Bin graph mode shows binned items as flat roots with no edges', () => {
+  let state = createGroup(emptyState(), 'Folder');
+  const folder = state.groups[0];
+  state = createShortcut(state, { name: 'Inside', target: 'C:\\inside.exe', parentId: folder.id });
+  state = createShortcut(state, { name: 'Outside', target: 'C:\\outside.exe' });
+  const binned = binSelection(state, [folder.id], '2026-07-30T00:00:00.000Z');
+
+  const binItems = visibleGraphItems(binned, ROOT_ID, new Set(), true);
+  assert.ok(binItems.every((i) => i.depth === 0));
+  assert.ok(binItems.every((i) => i.parentId === 'bin'));
+  const binEdges = graphEdges(binItems);
+  assert.equal(binEdges.length, 0);
+});

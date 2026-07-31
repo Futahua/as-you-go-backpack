@@ -33,6 +33,7 @@ import {
   forceY,
 } from './vendor/d3-force.js';
 import { zoom, zoomIdentity } from './vendor/d3-zoom.js';
+import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, seedPosition } from './graph-model-20260730b.js';
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
@@ -270,8 +271,10 @@ const graph = createGraphController();
 
 function createGraphController() {
   const nodes = new Map();
+  const edges = new Map();
   let simulation = null;
   let zoomBehavior = null;
+  let viewportSelection = null;
   let viewport = null;
   let camera = null;
   let edgeLayer = null;
@@ -281,16 +284,14 @@ function createGraphController() {
   let rafId = 0;
   let pendingFrame = false;
   let initialized = false;
+  let fitPending = false;
   let attached = false;
-  const exitTimers = [];
+  let updatePending = false;
+  let pendingInitialFit = false;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
   function createGraphView() {
     if (attached) return;
-    elements.grid.innerHTML = '';
-    elements.grid.classList.add('graph-view');
-    elements.grid.dataset.view = 'graph';
-
     viewport = document.createElement('div');
     viewport.className = 'graph-viewport';
     viewport.id = 'graph-viewport';
@@ -311,47 +312,72 @@ function createGraphController() {
     camera.append(svg, nodeLayer);
     viewport.append(camera);
     elements.grid.append(viewport);
-    attached = true;
 
-    zoomBehavior = zoom()
-      .scaleExtent([0.35, 3])
-      .filter((event) => {
-        if (event.type === 'mousedown' && event.button === 0) return false;
-        if (event.type === 'dblclick') return false;
-        if (event.type === 'wheel' && event.ctrlKey) return false;
-        return true;
-      })
-      .on('zoom', ({ transform }) => {
-        camera.style.transform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`;
-      });
-    zoomBehavior(viewport);
+    try {
+      zoomBehavior = zoom()
+        .scaleExtent([0.35, 3])
+        .filter((event) => {
+          if (event.type === 'mousedown' && event.button === 0) return false;
+          if (event.type === 'dblclick') return false;
+          if (event.type === 'wheel' && event.ctrlKey) return false;
+          return true;
+        })
+        .on('zoom', ({ transform }) => {
+          if (camera) {
+            camera.style.transform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`;
+          }
+        });
+      viewportSelection = select(viewport);
+      viewportSelection.call(zoomBehavior);
+    } catch (error) {
+      viewport.remove();
+      viewport = null;
+      camera = null;
+      edgeLayer = null;
+      nodeLayer = null;
+      svg = null;
+      throw error;
+    }
 
     resizeObserver = new ResizeObserver(() => {
-      const w = viewport.clientWidth;
-      const h = viewport.clientHeight;
-      if (w > 0 && h > 0 && simulation) {
-        simulation.force('cx').x(w / 2);
-        simulation.force('cy').y(h / 2);
+      const w = viewport?.clientWidth ?? 0;
+      const h = viewport?.clientHeight ?? 0;
+      if (w >= 2 && h >= 2) {
+        if (simulation) {
+          simulation.force('cx').x(w / 2);
+          simulation.force('cy').y(h / 2);
+        }
+        if (updatePending || fitPending) {
+          updatePending = false;
+          updateGraphView(pendingInitialFit);
+        }
       }
     });
     resizeObserver.observe(viewport);
+    attached = true;
   }
 
   function destroyGraphView() {
     if (simulation) { simulation.stop(); simulation = null; }
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; pendingFrame = false; }
-    while (exitTimers.length) clearTimeout(exitTimers.pop());
+    nodes.forEach((node) => {
+      if (node.exitTimer) { clearTimeout(node.exitTimer); node.exitTimer = null; }
+    });
     if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
     nodes.clear();
+    edges.clear();
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
     nodeLayer = null;
     svg = null;
+    viewportSelection = null;
+    zoomBehavior = null;
     attached = false;
     initialized = false;
-    elements.grid.classList.remove('graph-view');
-    elements.grid.dataset.view = 'explorer';
+    fitPending = false;
+    updatePending = false;
+    pendingInitialFit = false;
   }
 
   function scheduleRender() {
@@ -370,19 +396,11 @@ function createGraphController() {
       node.shell.style.transform =
         `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
     });
-    const paths = edgeLayer ? edgeLayer.querySelectorAll('path') : [];
-    let i = 0;
-    nodes.forEach((node) => {
-      if (node.exiting) return;
-      for (const childId of node.childIds) {
-        const child = nodes.get(childId);
-        if (!child || child.exiting) continue;
-        const path = paths[i];
-        if (path) {
-          path.setAttribute('d', edgePath(node.x, node.y, child.x, child.y));
-          i += 1;
-        }
-      }
+    edges.forEach((edge) => {
+      const source = nodes.get(edge.sourceId);
+      const target = nodes.get(edge.targetId);
+      if (!source || !target || !edge.path) return;
+      edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
     });
   }
 
@@ -391,31 +409,57 @@ function createGraphController() {
     return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
   }
 
+  function buildCandidate(vi) {
+    const stored = item(vi.id);
+    if (!stored) return null;
+    return { ...stored, kind: vi.kind };
+  }
+
   function syncNodes(visibleItems) {
     const incoming = new Set(visibleItems.map((vi) => vi.id));
     for (const id of [...nodes.keys()]) {
       if (!incoming.has(id)) removeNode(id);
     }
+    const byParent = new Map();
+    for (const vi of visibleItems) {
+      const key = vi.parentId ?? ROOT_ID;
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(vi);
+    }
     for (const vi of visibleItems) {
       let node = nodes.get(vi.id);
       if (node) {
-        node.exiting = false;
+        if (node.exitTimer) {
+          clearTimeout(node.exitTimer);
+          node.exitTimer = null;
+          node.exiting = false;
+          if (node.shell) {
+            node.shell.classList.remove('exiting');
+            node.shell.style.opacity = '';
+            node.shell.style.scale = '';
+          }
+        }
+        node.candidate = buildCandidate(vi);
         node.childIds = childIdsFor(vi);
-        node.parentNode = parentOf(node);
+        node.parentNode = parentOfNode(vi);
+        node.depth = vi.depth;
+        refreshNodeContent(node);
         continue;
       }
-      const candidate = item(vi.id);
+      const candidate = buildCandidate(vi);
       if (!candidate) continue;
       const parent = candidate.parentId && candidate.parentId !== ROOT_ID && candidate.parentId !== 'bin'
         ? nodes.get(candidate.parentId)
         : null;
-      const index = parent
-        ? parent.childIds.length
-        : visibleItems.filter((v) => v.depth === 0).indexOf(vi);
-      const seed = seedPosition(vi.id, parent, Math.max(0, index), visibleItems.length);
+      const siblings = byParent.get(candidate.parentId ?? ROOT_ID) ?? [];
+      const index = Math.max(0, siblings.findIndex((s) => s.id === vi.id));
+      const originX = viewport ? viewport.clientWidth / 2 : 400;
+      const originY = viewport ? viewport.clientHeight / 2 : 300;
+      const seed = seedPosition(vi.id, parent, index, siblings.length, originX, originY);
       node = {
         id: vi.id,
         candidate,
+        depth: vi.depth,
         x: seed.x,
         y: seed.y,
         vx: 0,
@@ -426,16 +470,16 @@ function createGraphController() {
         parentNode: parent ?? null,
         shell: null,
         exiting: false,
+        exitTimer: null,
       };
       nodes.set(vi.id, node);
       createNodeShell(node);
     }
   }
 
-  function parentOf(node) {
-    const candidate = node.candidate;
-    if (!candidate || candidate.parentId === ROOT_ID || candidate.parentId === 'bin') return null;
-    return nodes.get(candidate.parentId) ?? null;
+  function parentOfNode(vi) {
+    if (!vi.parentId || vi.parentId === ROOT_ID || vi.parentId === 'bin') return null;
+    return nodes.get(vi.parentId) ?? null;
   }
 
   function childIdsFor(vi) {
@@ -443,8 +487,33 @@ function createGraphController() {
     return itemsIn(state, vi.id).map((c) => c.id);
   }
 
+  function refreshNodeContent(node) {
+    if (!node.shell) return;
+    const candidate = node.candidate;
+    if (!candidate) return;
+    const iconItem = node.shell.querySelector('.icon-item');
+    if (!iconItem) return;
+    const canExpand = candidate.kind === 'group' && !binMode;
+    const isExpanded = canExpand && expanded.has(candidate.id);
+    const isSelected = selected.has(candidate.id);
+    const draggable = binMode ? 'false' : 'true';
+    iconItem.dataset.kind = candidate.kind;
+    iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
+    iconItem.setAttribute('draggable', draggable);
+    iconItem.setAttribute('aria-selected', String(isSelected));
+    iconItem.classList.toggle('selected', isSelected);
+    iconItem.innerHTML =
+      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+      + `<div class="item-icon">${iconMarkup(candidate)}</div>`
+      + `<strong>${escapeHtml(candidate.name)}</strong>`
+      + `${descriptionMarkup(candidate)}`;
+    node.width = node.shell.offsetWidth || (state.view.iconSize + 42);
+    node.height = node.shell.offsetHeight || (state.view.iconSize + 64);
+  }
+
   function createNodeShell(node) {
     const candidate = node.candidate;
+    if (!candidate) return;
     const isSelected = selected.has(candidate.id);
     const canExpand = candidate.kind === 'group' && !binMode;
     const isExpanded = canExpand && expanded.has(candidate.id);
@@ -483,8 +552,10 @@ function createGraphController() {
       shell.style.opacity = '0';
       shell.style.scale = '0.7';
       requestAnimationFrame(() => {
-        shell.style.opacity = '1';
-        shell.style.scale = '1';
+        if (node.shell) {
+          shell.style.opacity = '1';
+          shell.style.scale = '1';
+        }
       });
     }
   }
@@ -501,33 +572,51 @@ function createGraphController() {
     const parent = node.parentNode;
     const targetX = parent ? parent.x : node.x;
     const targetY = parent ? parent.y : node.y;
-    node.shell.classList.add('exiting');
-    node.shell.style.transform = `translate3d(${targetX}px, ${targetY}px, 0) translate(-50%, -50%)`;
-    node.shell.style.opacity = '0';
-    node.shell.style.scale = '0.5';
-    const timer = setTimeout(() => {
+    if (node.shell) {
+      node.shell.classList.add('exiting');
+      node.shell.style.transform = `translate3d(${targetX}px, ${targetY}px, 0) translate(-50%, -50%)`;
+      node.shell.style.opacity = '0';
+      node.shell.style.scale = '0.5';
+    }
+    node.exitTimer = setTimeout(() => {
       node.shell?.remove();
       nodes.delete(id);
-      const idx = exitTimers.indexOf(timer);
-      if (idx >= 0) exitTimers.splice(idx, 1);
+      node.exitTimer = null;
     }, 200);
-    exitTimers.push(timer);
   }
 
-  function buildEdges() {
+  function syncEdges() {
     if (!edgeLayer) return;
-    edgeLayer.innerHTML = '';
+    const wanted = new Map();
     nodes.forEach((node) => {
       if (node.exiting) return;
       for (const childId of node.childIds) {
         const child = nodes.get(childId);
         if (!child || child.exiting) continue;
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('class', 'graph-edge');
-        path.setAttribute('d', edgePath(node.x, node.y, child.x, child.y));
-        edgeLayer.append(path);
+        const key = `${node.id}->${childId}`;
+        wanted.set(key, { sourceId: node.id, targetId: childId });
       }
     });
+    for (const [key, edge] of edges) {
+      if (!wanted.has(key)) {
+        edge.path?.remove();
+        edges.delete(key);
+      }
+    }
+    for (const [key, info] of wanted) {
+      let edge = edges.get(key);
+      const source = nodes.get(info.sourceId);
+      const target = nodes.get(info.targetId);
+      if (!source || !target) continue;
+      if (!edge) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-edge');
+        path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+        edgeLayer.append(path);
+        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
+        edges.set(key, edge);
+      }
+    }
   }
 
   function ensureSimulation() {
@@ -550,13 +639,8 @@ function createGraphController() {
     const nodeArray = [...nodes.values()].filter((n) => !n.exiting);
     simulation.nodes(nodeArray);
     const edgeArray = [];
-    nodes.forEach((node) => {
-      if (node.exiting) return;
-      for (const childId of node.childIds) {
-        const child = nodes.get(childId);
-        if (!child || child.exiting) continue;
-        edgeArray.push({ source: node.id, target: child.id });
-      }
+    edges.forEach((edge) => {
+      edgeArray.push({ source: edge.sourceId, target: edge.targetId });
     });
     simulation.force('link').links(edgeArray);
     simulation.force('collide').radius((n) => Math.max(n.width, n.height) / 2 + 20);
@@ -572,10 +656,15 @@ function createGraphController() {
   }
 
   function fitGraph(padding = 90, animate = true) {
-    if (!camera || !viewport || nodes.size === 0) return;
+    if (!camera || !viewport || !viewportSelection || nodes.size === 0) return false;
+    const w = viewport.clientWidth;
+    const h = viewport.clientHeight;
+    if (w < 2 || h < 2) return false;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let activeCount = 0;
     nodes.forEach((n) => {
       if (n.exiting) return;
+      activeCount += 1;
       const halfW = (n.width || 100) / 2;
       const halfH = (n.height || 120) / 2;
       minX = Math.min(minX, n.x - halfW);
@@ -583,9 +672,7 @@ function createGraphController() {
       maxX = Math.max(maxX, n.x + halfW);
       maxY = Math.max(maxY, n.y + halfH);
     });
-    if (!Number.isFinite(minX)) return;
-    const w = viewport.clientWidth || 800;
-    const h = viewport.clientHeight || 600;
+    if (!Number.isFinite(minX) || activeCount === 0) return false;
     const scale = Math.min(
       (w - padding * 2) / Math.max(1, maxX - minX),
       (h - padding * 2) / Math.max(1, maxY - minY),
@@ -596,32 +683,41 @@ function createGraphController() {
     const cy = (minY + maxY) / 2;
     const tx = w / 2 - cx * k;
     const ty = h / 2 - cy * k;
+    const transform = zoomIdentity.translate(tx, ty).scale(k);
     if (animate && !reducedMotion?.matches) {
-      zoomBehavior.transition(viewport).duration(550).call(
-        zoomBehavior.transform,
-        zoomIdentity.translate(tx, ty).scale(k),
-      );
+      viewportSelection.transition().duration(550).call(zoomBehavior.transform, transform);
     } else {
-      zoomBehavior.transform(viewport, zoomIdentity.translate(tx, ty).scale(k));
+      zoomBehavior.transform(viewportSelection, transform);
     }
+    return true;
   }
 
   function updateGraphView(initialFit = false) {
     const w = viewport?.clientWidth ?? 0;
     const h = viewport?.clientHeight ?? 0;
-    if (w === 0 || h === 0) return;
+    if (w < 2 || h < 2) {
+      updatePending = true;
+      pendingInitialFit = initialFit;
+      return;
+    }
+    updatePending = false;
     const visible = visibleGraphItems(state, currentId, expanded, binMode);
     if (visible.length === 0) {
       nodes.forEach((_, id) => removeNode(id));
       return;
     }
     syncNodes(visible);
-    buildEdges();
+    syncEdges();
     syncSimulation();
     reheat(initialFit ? 0.7 : 0.35);
     if (initialFit && !initialized) {
-      initialized = true;
-      setTimeout(() => fitGraph(), 500);
+      fitPending = true;
+      setTimeout(() => {
+        if (fitPending && fitGraph()) {
+          fitPending = false;
+          initialized = true;
+        }
+      }, 500);
     }
   }
 
@@ -645,6 +741,8 @@ function createGraphController() {
     fitGraph,
     get hasNodes() { return nodes.size > 0; },
     get isAttached() { return attached; },
+    get nodeCount() { return [...nodes.values()].filter((n) => !n.exiting).length; },
+    get edgeCount() { return edges.size; },
   };
 }
 
@@ -666,10 +764,12 @@ function render() {
 
   const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
   elements.grid.dataset.blankParent = binMode ? 'bin' : currentId;
+  elements.grid.dataset.view = layout;
   if (layout === 'graph') {
     renderGraph(!graph.isAttached);
   } else {
     if (graph.isAttached) graph.destroyGraphView();
+    elements.grid.classList.remove('graph-view');
     elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
   }
   elements.empty.hidden = visible.length !== 0;
