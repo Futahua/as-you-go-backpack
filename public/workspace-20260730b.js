@@ -22,6 +22,10 @@ import {
   updateWebLink,
   updateWorkspaceView,
   webLinkIcon,
+  graphContextId,
+  getGraphPosition,
+  setGraphPositions,
+  removeGraphPositions,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -32,7 +36,7 @@ import {
   forceX,
   forceY,
 } from './vendor/d3-force.js';
-import { zoom, zoomIdentity } from './vendor/d3-zoom.js';
+import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, seedPosition } from './graph-model-20260730b.js';
 
@@ -90,7 +94,8 @@ let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
 let currentId = ROOT_ID;
 let selected = new Set();
 let selectionAnchor = null;
-let expanded = new Set();
+let explorerExpanded = new Set();
+let graphExpanded = new Set();
 let clipboard = null;
 let editorMode = null;
 let editorIcon = null;
@@ -100,9 +105,11 @@ let layout = 'explorer';
 let dragIds = [];
 let marqueeDrag = null;
 let suppressBlankClick = false;
+let suppressGraphClick = false;
 let pendingPermanentIds = [];
 let zoomTimer = null;
 let saveQueue = Promise.resolve();
+let graphDrag = null;
 
 function request(type, detail = {}) {
   const requestId = crypto.randomUUID();
@@ -150,7 +157,8 @@ function isAvailableItem(itemId) {
 function captureWorkspaceView() {
   state = updateWorkspaceView(state, {
     currentGroupId: currentId,
-    expandedGroupIds: [...expanded],
+    expandedGroupIds: [...explorerExpanded],
+    graphExpandedGroupIds: [...graphExpanded],
     selectedItemIds: [...selected],
     binMode,
     layout,
@@ -163,9 +171,13 @@ function restoreWorkspaceView() {
     requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
       ? requestedCurrent
       : ROOT_ID;
-  expanded = new Set(
+  explorerExpanded = new Set(
     state.view.expandedGroupIds.filter((groupId) =>
       Boolean(group(groupId)) && isAvailableItem(groupId)),
+  );
+  graphExpanded = new Set(
+    (state.view.graphExpandedGroupIds ?? []).filter((groupId) =>
+      Boolean(group(groupId))),
   );
   binMode = state.view.binMode;
   layout = state.view.layout === 'graph' ? 'graph' : 'explorer';
@@ -220,7 +232,7 @@ function renderItems(parentId, depth = 0) {
   return itemsIn(state, parentId).map((candidate) => {
     const isSelected = selected.has(candidate.id);
     const canExpand = candidate.kind === 'group';
-    const isExpanded = canExpand && expanded.has(candidate.id);
+    const isExpanded = canExpand && explorerExpanded.has(candidate.id);
     const tile = `
       <div
         class="icon-item ${isSelected ? 'selected' : ''}"
@@ -426,6 +438,7 @@ function createGraphController() {
       if (!byParent.has(key)) byParent.set(key, []);
       byParent.get(key).push(vi);
     }
+    const ctxId = graphContextId(currentId, binMode);
     for (const vi of visibleItems) {
       let node = nodes.get(vi.id);
       if (node) {
@@ -455,13 +468,16 @@ function createGraphController() {
       const index = Math.max(0, siblings.findIndex((s) => s.id === vi.id));
       const originX = viewport ? viewport.clientWidth / 2 : 400;
       const originY = viewport ? viewport.clientHeight / 2 : 300;
+      const saved = getGraphPosition(state, ctxId, vi.id);
       const seed = seedPosition(vi.id, parent, index, siblings.length, originX, originY);
       node = {
         id: vi.id,
         candidate,
         depth: vi.depth,
-        x: seed.x,
-        y: seed.y,
+        x: saved ? saved.x : seed.x,
+        y: saved ? saved.y : seed.y,
+        fx: saved ? saved.x : null,
+        fy: saved ? saved.y : null,
         vx: 0,
         vy: 0,
         width: 0,
@@ -471,6 +487,7 @@ function createGraphController() {
         shell: null,
         exiting: false,
         exitTimer: null,
+        positioned: Boolean(saved),
       };
       nodes.set(vi.id, node);
       createNodeShell(node);
@@ -483,7 +500,7 @@ function createGraphController() {
   }
 
   function childIdsFor(vi) {
-    if (binMode || vi.kind !== 'group' || !expanded.has(vi.id)) return [];
+    if (binMode || vi.kind !== 'group' || !graphExpanded.has(vi.id)) return [];
     return itemsIn(state, vi.id).map((c) => c.id);
   }
 
@@ -494,19 +511,32 @@ function createGraphController() {
     const iconItem = node.shell.querySelector('.icon-item');
     if (!iconItem) return;
     const canExpand = candidate.kind === 'group' && !binMode;
-    const isExpanded = canExpand && expanded.has(candidate.id);
+    const isExpanded = canExpand && graphExpanded.has(candidate.id);
     const isSelected = selected.has(candidate.id);
-    const draggable = binMode ? 'false' : 'true';
     iconItem.dataset.kind = candidate.kind;
     iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
-    iconItem.setAttribute('draggable', draggable);
+    iconItem.setAttribute('draggable', 'false');
     iconItem.setAttribute('aria-selected', String(isSelected));
     iconItem.classList.toggle('selected', isSelected);
-    iconItem.innerHTML =
-      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
-      + `<div class="item-icon">${iconMarkup(candidate)}</div>`
-      + `<strong>${escapeHtml(candidate.name)}</strong>`
-      + `${descriptionMarkup(candidate)}`;
+    const signature = JSON.stringify([
+      candidate.kind,
+      candidate.name,
+      candidate.description ?? '',
+      candidate.target ?? '',
+      candidate.icon ?? null,
+      isExpanded,
+      binMode,
+      state.view.iconSize,
+    ]);
+    if (node.contentSignature !== signature) {
+      node.contentSignature = signature;
+      iconItem.innerHTML =
+        `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+        + `<div class="item-icon">${iconMarkup(candidate)}</div>`
+        + `<strong>${escapeHtml(candidate.name)}</strong>`
+        + `${descriptionMarkup(candidate)}`;
+      hydrateNodeIcons(node.shell);
+    }
     node.width = node.shell.offsetWidth || (state.view.iconSize + 42);
     node.height = node.shell.offsetHeight || (state.view.iconSize + 64);
   }
@@ -516,8 +546,7 @@ function createGraphController() {
     if (!candidate) return;
     const isSelected = selected.has(candidate.id);
     const canExpand = candidate.kind === 'group' && !binMode;
-    const isExpanded = canExpand && expanded.has(candidate.id);
-    const draggable = binMode ? 'false' : 'true';
+    const isExpanded = canExpand && graphExpanded.has(candidate.id);
 
     const shell = document.createElement('div');
     shell.className = 'graph-node-shell';
@@ -529,7 +558,7 @@ function createGraphController() {
     iconItem.dataset.id = candidate.id;
     iconItem.dataset.kind = candidate.kind;
     iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
-    iconItem.setAttribute('draggable', draggable);
+    iconItem.setAttribute('draggable', 'false');
     iconItem.setAttribute('role', 'option');
     iconItem.setAttribute('aria-selected', String(isSelected));
     iconItem.setAttribute('tabindex', '-1');
@@ -542,6 +571,17 @@ function createGraphController() {
     shell.append(iconItem);
     nodeLayer.append(shell);
     node.shell = shell;
+
+    node.contentSignature = JSON.stringify([
+      candidate.kind,
+      candidate.name,
+      candidate.description ?? '',
+      candidate.target ?? '',
+      candidate.icon ?? null,
+      isExpanded,
+      binMode,
+      state.view.iconSize,
+    ]);
 
     node.width = shell.offsetWidth || (state.view.iconSize + 42);
     node.height = shell.offsetHeight || (state.view.iconSize + 64);
@@ -701,7 +741,7 @@ function createGraphController() {
       return;
     }
     updatePending = false;
-    const visible = visibleGraphItems(state, currentId, expanded, binMode);
+    const visible = visibleGraphItems(state, currentId, graphExpanded, binMode);
     if (visible.length === 0) {
       nodes.forEach((_, id) => removeNode(id));
       return;
@@ -739,10 +779,20 @@ function createGraphController() {
     refreshSelection,
     reheat,
     fitGraph,
+    _getNode: (id) => nodes.get(id) ?? null,
+    _setSimulationDecay() {
+      if (simulation) {
+        simulation.alphaTarget(0);
+        if (simulation.alpha() < simulation.alphaMin()) {
+          simulation.alpha(0.05).restart();
+        }
+      }
+    },
     get hasNodes() { return nodes.size > 0; },
     get isAttached() { return attached; },
     get nodeCount() { return [...nodes.values()].filter((n) => !n.exiting).length; },
     get edgeCount() { return edges.size; },
+    get _needsFullRebuild() { return false; },
   };
 }
 
@@ -765,11 +815,36 @@ function render() {
   const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
   elements.grid.dataset.blankParent = binMode ? 'bin' : currentId;
   elements.grid.dataset.view = layout;
+
   if (layout === 'graph') {
-    renderGraph(!graph.isAttached);
+    if (!graph.isAttached) {
+      elements.grid.innerHTML = '';
+      console.assert(
+        elements.grid.querySelectorAll('.graph-viewport').length === 0
+      );
+      console.assert(
+        elements.grid.querySelectorAll('.expanded-branch').length === 0
+      );
+      console.assert(
+        elements.grid.querySelectorAll('.nested-icon-grid').length === 0
+      );
+      renderGraph(true);
+    } else {
+      graph.updateGraphView(false);
+    }
+    console.assert(
+      elements.grid.querySelectorAll('.graph-viewport').length === 1
+    );
+    console.assert(
+      [...elements.grid.querySelectorAll('.icon-item')]
+        .every(item => item.closest('.graph-node-shell'))
+    );
   } else {
     if (graph.isAttached) graph.destroyGraphView();
-    elements.grid.classList.remove('graph-view');
+    elements.grid.innerHTML = '';
+    console.assert(
+      elements.grid.querySelectorAll('.graph-viewport').length === 0
+    );
     elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
   }
   elements.empty.hidden = visible.length !== 0;
@@ -828,6 +903,29 @@ async function hydrateIcons() {
     image.hidden = false;
     image.nextElementSibling?.setAttribute('hidden', '');
   }));
+}
+
+function hydrateNodeIcons(shell) {
+  if (!shell) return;
+  const images = [...shell.querySelectorAll('[data-default-icon]')];
+  images.forEach(async (image) => {
+    const shortcutId = image.dataset.defaultIcon;
+    if (!iconCache.has(shortcutId)) {
+      try {
+        iconCache.set(
+          shortcutId,
+          await request('papers:project:as-you-go-shortcut-icon', { actionId: shortcutId }),
+        );
+      } catch {
+        iconCache.set(shortcutId, null);
+      }
+    }
+    const resolved = iconCache.get(shortcutId);
+    if (!resolved || !image.isConnected) return;
+    image.src = resolved;
+    image.hidden = false;
+    image.nextElementSibling?.setAttribute('hidden', '');
+  });
 }
 
 function hydrateWebIcons() {
@@ -980,6 +1078,10 @@ function openMenu(x, y, kind = 'selection', parentId = currentId) {
       menuButton('copy', chosen.length > 1 ? 'Copy items' : 'Copy'),
       menuButton('cut', chosen.length > 1 ? 'Cut items' : 'Cut'),
       menuButton('bin', chosen.length > 1 ? 'Move items to Bin' : 'Move to Bin', true),
+      layout === 'graph' ? '<hr />' : '',
+      layout === 'graph'
+        ? menuButton('reset-graph-position', chosen.length > 1 ? 'Reset graph positions' : 'Reset graph position')
+        : '',
     ].join('');
   }
   elements.menu.innerHTML = content;
@@ -1002,7 +1104,6 @@ async function activate(itemId) {
     currentId = folder.id;
     binMode = false;
     selected.clear();
-    expanded.clear();
     if (layout === 'graph') graph.destroyGraphView();
     closeMenu();
     render();
@@ -1263,6 +1364,24 @@ async function runMenuAction(action) {
   if (action === 'bin') return moveToBin();
   if (action === 'restore') return commit(restoreSelection(state, [...selected]), 'Restored.');
   if (action === 'delete-forever') return askPermanentDelete();
+  if (action === 'reset-graph-position') {
+    const ctxId = graphContextId(currentId, binMode);
+    state = removeGraphPositions(state, ctxId, [...selected]);
+    for (const id of selected) {
+      const node = graph._getNode(id);
+      if (node) {
+        node.fx = null;
+        node.fy = null;
+        node.positioned = false;
+        node.vx = 0;
+        node.vy = 0;
+      }
+    }
+    graph.reheat(0.3);
+    closeMenu();
+    saveWorkspaceView();
+    return;
+  }
 }
 
 elements.grid.addEventListener('click', (event) => {
@@ -1270,8 +1389,9 @@ elements.grid.addEventListener('click', (event) => {
   const expandButton = event.target.closest('[data-expand]');
   if (expandButton) {
     const folderId = expandButton.dataset.expand;
-    if (expanded.has(folderId)) expanded.delete(folderId);
-    else expanded.add(folderId);
+    const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
+    if (targetSet.has(folderId)) targetSet.delete(folderId);
+    else targetSet.add(folderId);
     closeMenu();
     render();
     saveWorkspaceView();
@@ -1279,6 +1399,10 @@ elements.grid.addEventListener('click', (event) => {
   }
   const tile = event.target.closest('.icon-item');
   if (tile) {
+    if (suppressGraphClick) {
+      suppressGraphClick = false;
+      return;
+    }
     selectItem(tile.dataset.id, event);
     return;
   }
@@ -1286,6 +1410,10 @@ elements.grid.addEventListener('click', (event) => {
   if (blank) {
     if (suppressBlankClick) {
       suppressBlankClick = false;
+      return;
+    }
+    if (suppressGraphClick) {
+      suppressGraphClick = false;
       return;
     }
     selected.clear();
@@ -1297,9 +1425,39 @@ elements.grid.addEventListener('click', (event) => {
 });
 
 elements.grid.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+
+  if (layout === 'graph' && !event.target.closest('[data-expand]') && !event.target.closest('button')) {
+    const tile = event.target.closest('.icon-item');
+    const shell = tile?.closest('.graph-node-shell');
+    if (shell && event.pointerType !== 'touch') {
+      const itemId = tile.dataset.id;
+      if (!selected.has(itemId)) {
+        selected = new Set([itemId]);
+        selectionAnchor = itemId;
+        syncSelection();
+        saveWorkspaceView();
+      }
+      graphDrag = {
+        pointerId: event.pointerId,
+        itemIds: [...selected],
+        primaryNodeId: itemId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startWorldX: null,
+        startWorldY: null,
+        initialPositions: new Map(),
+        moved: false,
+        thresholdPassed: false,
+      };
+      closeMenu();
+      event.preventDefault();
+      return;
+    }
+  }
+
   if (
-    event.button !== 0
-    || event.target.closest('.icon-item')
+    event.target.closest('.icon-item')
     || !event.target.closest('[data-blank-parent], [data-icon-grid]')
   ) return;
 
@@ -1321,6 +1479,63 @@ elements.grid.addEventListener('pointerdown', (event) => {
 });
 
 elements.grid.addEventListener('pointermove', (event) => {
+  if (graphDrag && event.pointerId === graphDrag.pointerId) {
+    if (!graphDrag.thresholdPassed) {
+      const dx = event.clientX - graphDrag.startClientX;
+      const dy = event.clientY - graphDrag.startClientY;
+      if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+      graphDrag.thresholdPassed = true;
+      graphDrag.moved = true;
+      elements.grid.setPointerCapture(event.pointerId);
+      const viewport = elements.grid.querySelector('.graph-viewport');
+      let transform = { x: 0, y: 0, k: 1 };
+      if (viewport) {
+        try { transform = zoomTransform(viewport); } catch { /* use identity */ }
+      }
+      const rect = viewport?.getBoundingClientRect();
+
+      const localX = rect ? graphDrag.startClientX - rect.left : graphDrag.startClientX;
+      const localY = rect ? graphDrag.startClientY - rect.top : graphDrag.startClientY;
+      graphDrag.startWorldX = (localX - transform.x) / transform.k;
+      graphDrag.startWorldY = (localY - transform.y) / transform.k;
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        if (node) {
+          graphDrag.initialPositions.set(id, {
+            x: node.x, y: node.y, fx: node.fx, fy: node.fy,
+          });
+          if (node.shell) node.shell.classList.add('graph-dragging');
+        }
+      }
+    }
+    if (!graphDrag.moved) return;
+    const viewport = elements.grid.querySelector('.graph-viewport');
+    let transform = { x: 0, y: 0, k: 1 };
+    if (viewport) {
+      try { transform = zoomTransform(viewport); } catch { /* use identity */ }
+    }
+    const rect = viewport?.getBoundingClientRect();
+    const localX = rect ? event.clientX - rect.left : event.clientX;
+    const localY = rect ? event.clientY - rect.top : event.clientY;
+    const worldX = (localX - transform.x) / transform.k;
+    const worldY = (localY - transform.y) / transform.k;
+    const deltaX = worldX - graphDrag.startWorldX;
+    const deltaY = worldY - graphDrag.startWorldY;
+    for (const id of graphDrag.itemIds) {
+      const node = graph._getNode(id);
+      if (!node) continue;
+      const initial = graphDrag.initialPositions.get(id);
+      if (!initial) continue;
+      node.fx = initial.x + deltaX;
+      node.fy = initial.y + deltaY;
+      node.x = node.fx;
+      node.y = node.fy;
+      node.positioned = true;
+    }
+    graph.reheat(0.12);
+    return;
+  }
+
   if (!marqueeDrag || event.pointerId !== marqueeDrag.pointerId) return;
   const bounds = marqueeBounds(
     marqueeDrag.startX,
@@ -1336,12 +1551,95 @@ elements.grid.addEventListener('pointermove', (event) => {
   updateMarqueeSelection(bounds);
 });
 
-elements.grid.addEventListener('pointerup', finishMarquee);
-elements.grid.addEventListener('pointercancel', finishMarquee);
+elements.grid.addEventListener('pointerup', (event) => {
+  if (graphDrag && event.pointerId === graphDrag.pointerId) {
+    if (elements.grid.hasPointerCapture(event.pointerId)) {
+      elements.grid.releasePointerCapture(event.pointerId);
+    }
+    if (graphDrag.moved) {
+      suppressGraphClick = true;
+      document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging'));
+      document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+      const shells = [...elements.grid.querySelectorAll('.graph-node-shell')];
+      shells.forEach((s) => s.style.pointerEvents = '');
+      const viewport = elements.grid.querySelector('.graph-viewport');
+      let transform = { x: 0, y: 0, k: 1 };
+      if (viewport) {
+        try { transform = zoomTransform(viewport); } catch { /* use identity */ }
+      }
+      let hitFolderId = null;
+      shells.forEach((s) => {
+        if (!graphDrag.itemIds.includes(s.dataset.graphNodeId)) {
+          s.style.pointerEvents = 'none';
+        }
+      });
+      const elAtPoint = document.elementFromPoint(event.clientX, event.clientY);
+      const hitShell = elAtPoint?.closest('.graph-node-shell');
+      shells.forEach((s) => s.style.pointerEvents = '');
+      if (hitShell && !graphDrag.itemIds.includes(hitShell.dataset.graphNodeId)) {
+        const hitItem = hitShell.querySelector('.icon-item');
+        if (hitItem?.dataset.kind === 'group') {
+          hitFolderId = hitItem.dataset.id;
+        }
+      }
+
+      const graphDragCopy = { ...graphDrag, itemIds: [...graphDrag.itemIds] };
+      graphDrag = null;
+
+      if (hitFolderId) {
+        try {
+          const next = moveSelection(state, graphDragCopy.itemIds, hitFolderId);
+          const ctxId = graphContextId(currentId, binMode);
+          state = removeGraphPositions(next, ctxId, graphDragCopy.itemIds);
+          commit(state, 'Moved.');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error));
+        }
+      } else {
+        const ctxId = graphContextId(currentId, binMode);
+        const updates = {};
+        for (const id of graphDragCopy.itemIds) {
+          const node = graph._getNode(id);
+          if (node) {
+            updates[id] = { x: node.x, y: node.y };
+          }
+        }
+        state = setGraphPositions(state, ctxId, updates);
+        graphDrag = null;
+        graph._setSimulationDecay();
+        saveWorkspaceView();
+      }
+      return;
+    }
+    graphDrag = null;
+    return;
+  }
+
+  if (marqueeDrag) {
+    finishMarquee(event);
+  }
+});
 
 elements.grid.addEventListener('dblclick', (event) => {
+  if (suppressGraphClick) {
+    suppressGraphClick = false;
+    return;
+  }
   const tile = event.target.closest('.icon-item');
   if (tile) activate(tile.dataset.id);
+});
+
+elements.grid.addEventListener('pointercancel', (event) => {
+  if (graphDrag && event.pointerId === graphDrag.pointerId) {
+    if (elements.grid.hasPointerCapture(event.pointerId)) {
+      elements.grid.releasePointerCapture(event.pointerId);
+    }
+    document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging'));
+    document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+    graphDrag = null;
+    return;
+  }
+  finishMarquee(event);
 });
 
 elements.grid.addEventListener('contextmenu', (event) => {
@@ -1433,6 +1731,7 @@ elements.explorer.addEventListener('wheel', (event) => {
 }, { passive: false });
 
 elements.grid.addEventListener('dragstart', (event) => {
+  if (layout === 'graph') return;
   const tile = event.target.closest('.icon-item');
   if (!tile || binMode) return event.preventDefault();
   if (!selected.has(tile.dataset.id)) {
@@ -1449,6 +1748,24 @@ elements.grid.addEventListener('dragstart', (event) => {
 elements.grid.addEventListener('dragover', (event) => {
   if (binMode) return;
   event.preventDefault();
+
+  if (layout === 'graph') {
+    document.querySelectorAll('.drop-inside, .drop-before, .graph-drop-target').forEach((node) =>
+      node.classList.remove('drop-inside', 'drop-before', 'graph-drop-target'));
+    if (event.dataTransfer.types.includes('Files')) {
+      const tile = event.target.closest('.icon-item');
+      const shell = tile?.closest('.graph-node-shell');
+      if (tile?.dataset.kind === 'group' && shell) {
+        shell.classList.add('graph-drop-target');
+        tile.classList.add('drop-inside');
+      }
+      event.dataTransfer.dropEffect = 'link';
+      return;
+    }
+    event.dataTransfer.dropEffect = 'none';
+    return;
+  }
+
   document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
     node.classList.remove('drop-inside', 'drop-before'));
   const tile = event.target.closest('.icon-item');
@@ -1469,14 +1786,43 @@ elements.grid.addEventListener('dragover', (event) => {
 elements.grid.addEventListener('dragleave', (event) => {
   if (!elements.grid.contains(event.relatedTarget)) {
     elements.grid.classList.remove('drop-blank');
-    document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
-      node.classList.remove('drop-inside', 'drop-before'));
+    document.querySelectorAll('.drop-inside, .drop-before, .graph-drop-target').forEach((node) =>
+      node.classList.remove('drop-inside', 'drop-before', 'graph-drop-target'));
   }
 });
 
 elements.grid.addEventListener('drop', async (event) => {
   if (binMode) return;
   const droppedFiles = [...event.dataTransfer.files];
+
+  if (layout === 'graph') {
+    if (droppedFiles.length > 0) {
+      event.preventDefault();
+      const tile = event.target.closest('.icon-item');
+      const shell = tile?.closest('.graph-node-shell');
+      const blank = event.target.closest('[data-blank-parent]');
+      const destination = tile?.dataset.kind === 'group'
+        ? tile.dataset.id
+        : blank?.dataset.blankParent ?? currentId;
+      try {
+        const targets = await request('papers:project:resolve-dropped-targets', {
+          files: droppedFiles,
+        });
+        const next = createDroppedShortcuts(state, targets, destination);
+        if (next.shortcuts.length === state.shortcuts.length) {
+          setStatus('Those shortcuts already exist here.');
+          return;
+        }
+        await commit(next);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error));
+      } finally {
+        document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+      }
+    }
+    return;
+  }
+
   if (droppedFiles.length > 0) {
     event.preventDefault();
     const tile = event.target.closest('.icon-item');
@@ -1549,7 +1895,6 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   if (!crumb) return;
   currentId = crumb.dataset.breadcrumb;
   selected.clear();
-  expanded.clear();
   if (layout === 'graph') graph.destroyGraphView();
   render();
   saveWorkspaceView();

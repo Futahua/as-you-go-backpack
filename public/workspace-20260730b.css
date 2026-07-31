@@ -279,10 +279,8 @@ button { color: inherit; }
 }
 
 .graph-viewport {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  min-height: calc(100vh - 102px);
+  position: absolute;
+  inset: 0;
   overflow: hidden;
 }
 .graph-camera {
@@ -320,6 +318,19 @@ button { color: inherit; }
 .graph-node-shell.exiting {
   pointer-events: none;
   transition: transform 200ms ease, opacity 200ms ease, scale 200ms ease;
+}
+.graph-node-shell.graph-dragging {
+  z-index: 3;
+  opacity: 0.88;
+}
+.graph-node-shell.graph-dragging .icon-item {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  outline: 2px solid rgba(76, 114, 90, 0.65);
+}
+.graph-node-shell.graph-drop-target .icon-item {
+  border-color: #4c725a;
+  background: #d7e7d9;
+  box-shadow: 0 0 0 3px rgba(76, 114, 90, 0.16);
 }
 .graph-edge {
   fill: none;

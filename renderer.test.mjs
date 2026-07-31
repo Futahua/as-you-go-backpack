@@ -9,6 +9,11 @@ import {
   emptyState,
   normalizeState,
   updateWorkspaceView,
+  setGraphPositions,
+  removeGraphPositions,
+  getGraphPosition,
+  graphContextId,
+  moveSelection,
 } from './model.mjs';
 
 import {
@@ -152,4 +157,104 @@ test('repeated visibility cycling is stable and complete', () => {
     const expanded = visibleGraphItems(state, ROOT_ID, new Set([letters.id]), false);
     assert.equal(expanded.filter((n) => n.parentId === letters.id).length, 7);
   }
+});
+
+test('independent expansion states do not leak between views', () => {
+  const state = makeFixtureState();
+  const letters = state.groups[1];
+
+  const explorerExpanded = new Set([letters.id]);
+  const graphExpanded = new Set();
+
+  const explorerItems = visibleGraphItems(state, ROOT_ID, explorerExpanded, false);
+  assert.ok(explorerItems.some((i) => i.id === state.shortcuts[0].id));
+
+  let items = visibleGraphItems(state, ROOT_ID, graphExpanded, false);
+  assert.ok(!items.some((i) => i.parentId === letters.id));
+  assert.equal(items.length, 4);
+});
+
+test('graph positions persist through state serialization round-trip', () => {
+  let state = setGraphPositions(makeFixtureState(), ROOT_ID, {
+    shortcut1: { x: 100, y: 200 },
+    shortcut2: { x: 300, y: 400 },
+  });
+
+  const serialized = JSON.parse(JSON.stringify(state));
+  const restored = normalizeState(serialized);
+
+  assert.deepEqual(getGraphPosition(restored, ROOT_ID, 'shortcut1'), { x: 100, y: 200 });
+  assert.deepEqual(getGraphPosition(restored, ROOT_ID, 'shortcut2'), { x: 300, y: 400 });
+});
+
+test('graph positions are independent across different contexts', () => {
+  let state = makeFixtureState();
+  const letters = state.groups[1];
+
+  state = setGraphPositions(state, ROOT_ID, {
+    item1: { x: 10, y: 20 },
+  });
+  state = setGraphPositions(state, letters.id, {
+    item1: { x: 50, y: 60 },
+  });
+
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+  assert.deepEqual(getGraphPosition(state, letters.id, 'item1'), { x: 50, y: 60 });
+
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 99, y: 88 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 99, y: 88 });
+  assert.deepEqual(getGraphPosition(state, letters.id, 'item1'), { x: 50, y: 60 });
+});
+
+test('removing graph positions only affects the target context', () => {
+  let state = setGraphPositions(makeFixtureState(), ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+  });
+  state = setGraphPositions(state, 'bin', {
+    item1: { x: 100, y: 200 },
+  });
+
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item2'), { x: 30, y: 40 });
+  assert.deepEqual(getGraphPosition(state, 'bin', 'item1'), { x: 100, y: 200 });
+});
+
+test('moving selection between folders clears source context positions', () => {
+  let state = makeFixtureState();
+  const letters = state.groups[1];
+  const things = state.groups[3];
+
+  state = setGraphPositions(state, ROOT_ID, {
+    [letters.id]: { x: 100, y: 200 },
+  });
+
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, letters.id), { x: 100, y: 200 });
+
+  state = moveSelection(state, [letters.id], things.id);
+
+  assert.equal(state.groups[1].parentId, things.id);
+});
+
+test('layout and expansion are independently persisted across view changes', () => {
+  let state = updateWorkspaceView(makeFixtureState(), {
+    expandedGroupIds: ['group-a'],
+    graphExpandedGroupIds: ['group-b'],
+    layout: 'graph',
+    binMode: true,
+  });
+
+  state = updateWorkspaceView(state, { layout: 'explorer', binMode: false });
+  assert.deepEqual(state.view.expandedGroupIds, ['group-a']);
+  assert.deepEqual(state.view.graphExpandedGroupIds, ['group-b']);
+  assert.equal(state.view.layout, 'explorer');
+  assert.equal(state.view.binMode, false);
+});
+
+test('graph context ID properly distinguishes bin from normal contexts', () => {
+  assert.equal(graphContextId(ROOT_ID, false), ROOT_ID);
+  assert.equal(graphContextId(ROOT_ID, true), 'bin');
+  assert.equal(graphContextId('some-group-id', false), 'some-group-id');
+  assert.equal(graphContextId('some-group-id', true), 'bin');
 });

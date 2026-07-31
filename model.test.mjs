@@ -23,6 +23,11 @@ import {
   isWebLink,
   webLinkIcon,
   createDroppedShortcuts,
+  graphContextId,
+  getGraphPosition,
+  setGraphPositions,
+  removeGraphPositions,
+  normalizeGraphPositions,
 } from './model.mjs';
 
 import {
@@ -188,9 +193,11 @@ test('the local project preserves its explorer working position', () => {
     iconSize: 96,
     currentGroupId: state.groups[0].id,
     expandedGroupIds: [state.groups[0].id],
+    graphExpandedGroupIds: [],
     selectedItemIds: [state.shortcuts[0].id],
     binMode: false,
     layout: 'explorer',
+    graphPositions: {},
   });
 });
 
@@ -378,4 +385,141 @@ test('Bin graph mode shows binned items as flat roots with no edges', () => {
   assert.ok(binItems.every((i) => i.parentId === 'bin'));
   const binEdges = graphEdges(binItems);
   assert.equal(binEdges.length, 0);
+});
+
+test('emptyState contains independent expansion fields and graphPositions', () => {
+  const state = emptyState();
+  assert.deepEqual(state.view.expandedGroupIds, []);
+  assert.deepEqual(state.view.graphExpandedGroupIds, []);
+  assert.deepEqual(state.view.graphPositions, {});
+});
+
+test('legacy state without new fields preserves existing data and defaults new fields', () => {
+  const legacy = { schemaVersion: 1, groups: [], shortcuts: [] };
+  const state = normalizeState(legacy);
+  assert.deepEqual(state.view.expandedGroupIds, []);
+  assert.deepEqual(state.view.graphExpandedGroupIds, []);
+  assert.deepEqual(state.view.graphPositions, {});
+  assert.equal(state.view.layout, 'explorer');
+});
+
+test('independent Explorer and Graph expansion do not interfere', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, []);
+
+  state = updateWorkspaceView(state, { graphExpandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [letters.id]);
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [] });
+  assert.deepEqual(state.view.expandedGroupIds, []);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [letters.id]);
+});
+
+test('partial update preserves omitted view fields', () => {
+  let state = updateWorkspaceView(emptyState(), {
+    expandedGroupIds: ['g1'],
+    graphExpandedGroupIds: ['g2'],
+    layout: 'graph',
+  });
+
+  state = updateWorkspaceView(state, { layout: 'explorer' });
+  assert.deepEqual(state.view.expandedGroupIds, ['g1']);
+  assert.deepEqual(state.view.graphExpandedGroupIds, ['g2']);
+  assert.equal(state.view.layout, 'explorer');
+
+  state = updateWorkspaceView(state, { selectedItemIds: ['s1'] });
+  assert.deepEqual(state.view.graphExpandedGroupIds, ['g2']);
+  assert.deepEqual(state.view.expandedGroupIds, ['g1']);
+
+  state = updateWorkspaceView(state, { binMode: true });
+  assert.equal(state.view.currentGroupId, ROOT_ID);
+  assert.equal(state.view.binMode, true);
+});
+
+test('position normalization accepts valid entries and discards invalid ones', () => {
+  const raw = {
+    root: {
+      item1: { x: 100, y: 200 },
+      item2: { x: 50.5, y: -30.2 },
+      badNan: { x: NaN, y: 100 },
+      badInf: { x: 100, y: Infinity },
+      badMissingX: { y: 100 },
+      badMissingY: { x: 100 },
+      badString: { x: '100', y: '200' },
+    },
+    badContext: 42,
+    emptyContext: {},
+  };
+  const result = normalizeGraphPositions(raw);
+  assert.deepEqual(result.root.item1, { x: 100, y: 200 });
+  assert.deepEqual(result.root.item2, { x: 50.5, y: -30.2 });
+  assert.equal(result.root.badNan, undefined);
+  assert.equal(result.root.badInf, undefined);
+  assert.equal(result.root.badMissingX, undefined);
+  assert.equal(result.root.badMissingY, undefined);
+  assert.equal(result.root.badString, undefined);
+  assert.equal(result.badContext, undefined);
+  assert.equal(result.emptyContext, undefined);
+});
+
+test('independent graph position contexts are isolated', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = setGraphPositions(state, 'bin', { item1: { x: 30, y: 40 } });
+
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+  assert.deepEqual(getGraphPosition(state, 'bin', 'item1'), { x: 30, y: 40 });
+
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 100, y: 200 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 100, y: 200 });
+  assert.deepEqual(getGraphPosition(state, 'bin', 'item1'), { x: 30, y: 40 });
+});
+
+test('removeGraphPositions removes only selected entries in current context', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+    item3: { x: 50, y: 60 },
+  });
+  state = setGraphPositions(state, 'bin', { item1: { x: 70, y: 80 } });
+
+  state = removeGraphPositions(state, ROOT_ID, ['item2']);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item2'), null);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item3'), { x: 50, y: 60 });
+  assert.deepEqual(getGraphPosition(state, 'bin', 'item1'), { x: 70, y: 80 });
+});
+
+test('removeGraphPositions cleans up empty context', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.deepEqual(state.view.graphPositions, {});
+});
+
+test('graphContextId returns bin for bin mode and currentGroupId otherwise', () => {
+  assert.equal(graphContextId(ROOT_ID, false), ROOT_ID);
+  assert.equal(graphContextId('group-1', false), 'group-1');
+  assert.equal(graphContextId(ROOT_ID, true), 'bin');
+});
+
+test('updateWorkspaceView preserves graphPositions when not supplied', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = updateWorkspaceView(state, { layout: 'graph' });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+});
+
+test('normalizeGraphPositions returns empty when given null/undefined/non-object', () => {
+  assert.deepEqual(normalizeGraphPositions(null), {});
+  assert.deepEqual(normalizeGraphPositions(undefined), {});
+  assert.deepEqual(normalizeGraphPositions(42), {});
+  assert.deepEqual(normalizeGraphPositions('string'), {});
+  assert.deepEqual(normalizeGraphPositions([]), {});
 });
