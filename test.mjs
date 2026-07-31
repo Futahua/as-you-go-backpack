@@ -68,8 +68,13 @@ test('the local project owns its exact interface, pickup prompt and prepared act
   assert.match(script, /Delete all \$\{ids\.length\} items permanently/);
   assert.match(html, /Use target icon/);
   assert.doesNotMatch(script, /description \|\| ['"]Shortcut['"]/);
-  assert.match(script, /Backpack interfaces, behavior, and implementation belong outside Papers/);
-  assert.match(script, /My request:\r?\n\[Describe what you want to experience\.\]/);
+assert.match(script, /Backpack interfaces, behavior, and implementation belong outside Papers/);
+assert.match(script, /My request:\r?\n\[Describe what you want to experience\.\]/);
+assert.match(html, /id="graph-view-button"/);
+assert.match(html, /id="graph-label"/);
+assert.match(script, /renderGraph/);
+assert.match(script, /layout === 'graph'/);
+assert.match(script, /state\.view\.layout/);
 
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);

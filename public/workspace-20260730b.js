@@ -48,9 +48,11 @@ const elements = {
   deleteAllBin: document.querySelector('#delete-all-bin'),
   selectionStatus: document.querySelector('#selection-status'),
   menu: document.querySelector('#context-menu'),
-  binButton: document.querySelector('#bin-button'),
+binButton: document.querySelector('#bin-button'),
   binLabel: document.querySelector('#bin-label'),
   binCount: document.querySelector('#bin-count'),
+  graphButton: document.querySelector('#graph-view-button'),
+  graphLabel: document.querySelector('#graph-label'),
   editorLayer: document.querySelector('#editor-layer'),
   editor: document.querySelector('#editor'),
   saveButton: document.querySelector('#save-editor'),
@@ -82,6 +84,7 @@ let editorMode = null;
 let editorIcon = null;
 let editorTargetIcon = null;
 let binMode = false;
+let layout = 'explorer';
 let dragIds = [];
 let marqueeDrag = null;
 let suppressBlankClick = false;
@@ -138,6 +141,7 @@ function captureWorkspaceView() {
     expandedGroupIds: [...expanded],
     selectedItemIds: [...selected],
     binMode,
+    layout,
   });
 }
 
@@ -152,6 +156,7 @@ function restoreWorkspaceView() {
       Boolean(group(groupId)) && isAvailableItem(groupId)),
   );
   binMode = state.view.binMode;
+  layout = state.view.layout === 'graph' ? 'graph' : 'explorer';
   const binnedIds = new Set(binnedItems(state).map((candidate) => candidate.id));
   selected = new Set(
     state.view.selectedItemIds.filter((itemId) =>
@@ -250,6 +255,105 @@ function renderBinItems() {
   `).join('');
 }
 
+function renderGraph() {
+  const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
+  elements.grid.classList.add('graph-view');
+  if (visible.length === 0) {
+    elements.grid.innerHTML = '';
+    return;
+  }
+
+  const iconSize = state.view.iconSize;
+  const nodeWidth = iconSize + 42;
+  const rowHeight = iconSize + 64;
+  const columnWidth = nodeWidth + 110;
+  const padding = 28;
+  let nextLeaf = 0;
+  let maxDepth = 0;
+  const placed = new Map();
+
+  function place(itemId, depth) {
+    const candidate = item(itemId);
+    if (!candidate) return;
+    if (depth > maxDepth) maxDepth = depth;
+    const isExpanded =
+      !binMode
+      && candidate.kind === 'group'
+      && expanded.has(candidate.id);
+    const childItems = isExpanded ? itemsIn(state, candidate.id) : [];
+    if (childItems.length === 0) {
+      placed.set(candidate.id, {
+        candidate, depth, y: nextLeaf, expanded: false, childCount: 0,
+      });
+      nextLeaf += 1;
+      return;
+    }
+    const firstIndex = nextLeaf;
+    for (const child of childItems) place(child.id, depth + 1);
+    const lastIndex = nextLeaf - 1;
+    placed.set(candidate.id, {
+      candidate,
+      depth,
+      y: (firstIndex + lastIndex) / 2,
+      expanded: true,
+      childCount: childItems.length,
+    });
+  }
+
+  for (const top of visible) place(top.id, 0);
+
+  const totalRows = Math.max(1, nextLeaf);
+  const contentWidth = padding * 2 + (maxDepth + 1) * columnWidth;
+  const contentHeight = padding * 2 + totalRows * rowHeight;
+
+  const xFor = (depth) => padding + depth * columnWidth;
+  const yFor = (row) => padding + row * rowHeight + rowHeight / 2;
+
+  let edges = '';
+  for (const node of placed.values()) {
+    if (!node.expanded) continue;
+    const px = xFor(node.depth) + nodeWidth;
+    const py = yFor(node.y);
+    for (const child of itemsIn(state, node.candidate.id)) {
+      const childNode = placed.get(child.id);
+      if (!childNode) continue;
+      const cx = xFor(childNode.depth);
+      const cy = yFor(childNode.y);
+      const dx = Math.max(24, (cx - px) / 2);
+      edges += `<path class="graph-edge" d="M ${px} ${py} C ${px + dx} ${py}, ${cx - dx} ${cy}, ${cx} ${cy}" />`;
+    }
+  }
+
+  const nodes = [...placed.values()].map((node) => {
+    const candidate = node.candidate;
+    const isSelected = selected.has(candidate.id);
+    const canExpand = candidate.kind === 'group' && !binMode;
+    const isExpanded = canExpand && expanded.has(candidate.id);
+    const left = xFor(node.depth);
+    const top = yFor(node.y) - rowHeight / 2;
+    const draggable = binMode ? 'false' : 'true';
+    return `
+      <div
+        class="icon-item ${isSelected ? 'selected' : ''}"
+        data-id="${candidate.id}"
+        data-kind="${candidate.kind}"
+        data-parent="${binMode ? 'bin' : (candidate.parentId ?? currentId)}"
+        draggable="${draggable}"
+        role="option"
+        aria-selected="${isSelected}"
+        tabindex="-1"
+        style="left:${left}px;top:${top}px;width:${nodeWidth}px;"
+      >
+        ${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}
+        <div class="item-icon">${iconMarkup(candidate)}</div>
+        <strong>${escapeHtml(candidate.name)}</strong>
+        ${descriptionMarkup(candidate)}
+      </div>`;
+  }).join('');
+
+  elements.grid.innerHTML = `<svg class="graph-edges" width="${contentWidth}" height="${contentHeight}" aria-hidden="true">${edges}</svg>${nodes}`;
+}
+
 function render() {
   const iconSize = state.view.iconSize;
   document.documentElement.style.setProperty('--icon-size', `${iconSize}px`);
@@ -260,8 +364,13 @@ function render() {
       ).join('');
 
   const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
-  elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
   elements.grid.dataset.blankParent = binMode ? 'bin' : currentId;
+  if (layout === 'graph') {
+    renderGraph();
+  } else {
+    elements.grid.classList.remove('graph-view');
+    elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
+  }
   elements.empty.hidden = visible.length !== 0;
   elements.empty.textContent = binMode
     ? 'The Bin is empty.'
@@ -274,6 +383,8 @@ function render() {
   elements.binCount.textContent = String(binCount);
   elements.binButton.setAttribute('aria-pressed', String(binMode));
   elements.binLabel.textContent = binMode ? 'Close Bin' : 'Bin';
+  elements.graphButton.setAttribute('aria-pressed', String(layout === 'graph'));
+  elements.graphLabel.textContent = layout === 'graph' ? 'Explorer' : 'Graph';
   elements.deleteAllBin.hidden = !binMode || binCount === 0;
 
   hydrateIcons();
@@ -1039,6 +1150,13 @@ elements.breadcrumbs.addEventListener('click', (event) => {
 
 elements.binButton.addEventListener('click', () => {
   binMode = !binMode;
+  selected.clear();
+  closeMenu();
+  render();
+  saveWorkspaceView();
+});
+elements.graphButton.addEventListener('click', () => {
+  layout = layout === 'graph' ? 'explorer' : 'graph';
   selected.clear();
   closeMenu();
   render();

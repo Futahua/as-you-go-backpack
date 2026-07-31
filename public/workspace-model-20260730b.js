@@ -20,6 +20,7 @@ export function emptyState() {
       expandedGroupIds: [],
       selectedItemIds: [],
       binMode: false,
+      layout: 'explorer',
     },
   };
 }
@@ -94,6 +95,7 @@ export function normalizeState(raw) {
       expandedGroupIds: stringIds(raw?.view?.expandedGroupIds),
       selectedItemIds: stringIds(raw?.view?.selectedItemIds),
       binMode: raw?.view?.binMode === true,
+      layout: raw?.view?.layout === 'graph' ? 'graph' : 'explorer',
     },
   };
 
@@ -503,10 +505,15 @@ export function setIconSize(state, size) {
 }
 
 export function updateWorkspaceView(state, changes) {
+  const layout =
+    changes.layout === 'graph' || changes.layout === 'explorer'
+      ? changes.layout
+      : (state.view?.layout === 'graph' ? 'graph' : 'explorer');
   return {
     ...state,
     view: {
       ...state.view,
+      layout,
       currentGroupId:
         typeof changes.currentGroupId === 'string'
           ? changes.currentGroupId

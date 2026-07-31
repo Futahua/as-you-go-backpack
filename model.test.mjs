@@ -182,7 +182,29 @@ test('the local project preserves its explorer working position', () => {
     expandedGroupIds: [state.groups[0].id],
     selectedItemIds: [state.shortcuts[0].id],
     binMode: false,
+    layout: 'explorer',
   });
+});
+
+test('the explorer view mode defaults to explorer and persists as graph', () => {
+  assert.equal(emptyState().view.layout, 'explorer');
+
+  const graphed = updateWorkspaceView(emptyState(), { layout: 'graph' });
+  assert.equal(graphed.view.layout, 'graph');
+  const restored = normalizeState(JSON.parse(JSON.stringify(graphed)));
+  assert.equal(restored.view.layout, 'graph');
+
+  const explored = updateWorkspaceView(graphed, { layout: 'explorer' });
+  assert.equal(explored.view.layout, 'explorer');
+
+  const legacy = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
+  assert.equal(legacy.view.layout, 'explorer');
+
+  const unknown = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [], view: { layout: 'unknown' } });
+  assert.equal(unknown.view.layout, 'explorer');
+
+  const preserved = updateWorkspaceView(graphed, { currentGroupId: ROOT_ID });
+  assert.equal(preserved.view.layout, 'graph');
 });
 
 test('web links are http(s) shortcuts owned by the local project', () => {
