@@ -21,7 +21,6 @@ import {
   updateShortcut,
   updateWebLink,
   updateWorkspaceView,
-  webLinkIcon,
   graphContextId,
   getGraphPosition,
   setGraphPositions,
@@ -107,7 +106,6 @@ let dragIds = [];
 let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
-let suppressCtrlClickOpen = null;
 let pendingPermanentIds = [];
 let zoomTimer = null;
 let saveQueue = Promise.resolve();
@@ -1248,9 +1246,7 @@ function showEditor(kind, existing = null, parentId = currentId) {
   editorMode = { kind, item: existing, parentId };
   editorIcon = existing?.icon ?? null;
   editorTargetIcon =
-    kind === 'web' && existing && !existing.icon
-      ? webLinkIcon(existing)
-      : kind === 'shortcut' && existing && !existing.icon
+    kind === 'shortcut' && existing && !existing.icon
       ? iconCache.get(existing.id) ?? null
       : null;
   elements.editorTitle.textContent = kind === 'group'
@@ -1417,26 +1413,6 @@ elements.grid.addEventListener('click', (event) => {
   if (tile) {
     if (suppressGraphClick) {
       suppressGraphClick = false;
-      return;
-    }
-    if (
-      event.ctrlKey
-      && tile.dataset.kind === 'group'
-      && !event.target.closest('[data-expand]')
-    ) {
-      const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
-      const id = tile.dataset.id;
-      if (targetSet.has(id)) targetSet.delete(id);
-      else targetSet.add(id);
-      if (!selected.has(id)) {
-        selected = new Set([id]);
-        selectionAnchor = id;
-        syncSelection();
-      }
-      suppressCtrlClickOpen = id;
-      closeMenu();
-      render();
-      saveWorkspaceView();
       return;
     }
     selectItem(tile.dataset.id, event);
@@ -1694,11 +1670,6 @@ elements.grid.addEventListener('dblclick', (event) => {
   }
   const tile = event.target.closest('.icon-item');
   if (!tile) return;
-  if (suppressCtrlClickOpen === tile.dataset.id) {
-    suppressCtrlClickOpen = null;
-    return;
-  }
-  suppressCtrlClickOpen = null;
   activate(tile.dataset.id);
 });
 
@@ -1735,6 +1706,22 @@ elements.grid.addEventListener('contextmenu', (event) => {
   event.stopPropagation();
   const tile = event.target.closest('.icon-item');
   if (tile) {
+    if (event.ctrlKey && tile.dataset.kind === 'group') {
+      const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
+      const id = tile.dataset.id;
+      const folderIds = selected.has(id)
+        ? [...selected].filter((selectedId) => group(selectedId))
+        : [id];
+      const shouldExpand = !targetSet.has(id);
+      for (const folderId of folderIds) {
+        if (shouldExpand) targetSet.add(folderId);
+        else targetSet.delete(folderId);
+      }
+      closeMenu();
+      render();
+      saveWorkspaceView();
+      return;
+    }
     if (!selected.has(tile.dataset.id)) {
       selected = new Set([tile.dataset.id]);
       selectionAnchor = tile.dataset.id;
@@ -2083,6 +2070,10 @@ window.addEventListener('message', (event) => {
   }
   if ('target' in event.data && 'icon' in event.data) {
     task.resolve({ target: event.data.target, icon: event.data.icon });
+    return;
+  }
+  if ('finalOrigin' in event.data) {
+    task.resolve({ icon: event.data.icon, mime: event.data.mime, finalOrigin: event.data.finalOrigin });
     return;
   }
   task.resolve(
