@@ -737,3 +737,55 @@ test('expansion sets remain independent after multiple Ctrl+click toggles', () =
   assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
   assert.deepEqual(state.view.graphExpandedGroupIds, [letters.id, things.id]);
 });
+
+test('drag starts without Shift, Shift pressed before release: node is pinned', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 100, y: 200 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 100, y: 200 });
+});
+
+test('drag starts with Shift, Shift released before release: node is unpinned via removeGraphPositions', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+});
+
+test('pointerup Shift state determines final outcome regardless of prior toggles during drag', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+  });
+
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 99, y: 88 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 99, y: 88 });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item2'), { x: 30, y: 40 });
+
+  state = removeGraphPositions(state, ROOT_ID, ['item2']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item2'), null);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 99, y: 88 });
+});
+
+test('folder drop overrides final Shift state on pointerup', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+  state = createGroup(state, 'Things');
+  const things = state.groups[1];
+  state = createShortcut(state, { name: 'CLIPS', target: 'C:\\clips.exe', parentId: letters.id });
+  const clips = state.shortcuts[0];
+
+  state = setGraphPositions(state, ROOT_ID, { [clips.id]: { x: 100, y: 200 } });
+
+  const moved = moveSelection(state, [clips.id], things.id);
+  state = removeGraphPositions(moved, ROOT_ID, [clips.id]);
+
+  assert.equal(state.shortcuts[0].parentId, things.id);
+  assert.equal(getGraphPosition(state, ROOT_ID, clips.id), null);
+});
+
+test('removeGraphPositions on all entries cleans up context object', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, { item1: { x: 10, y: 20 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.deepEqual(state.view.graphPositions, {});
+});

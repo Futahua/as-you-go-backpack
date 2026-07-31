@@ -111,6 +111,49 @@ let pendingPermanentIds = [];
 let zoomTimer = null;
 let saveQueue = Promise.resolve();
 let graphDrag = null;
+let graphShiftKeydown = null;
+let graphShiftKeyup = null;
+
+function installGraphShiftListeners() {
+  if (graphShiftKeydown) return;
+  graphShiftKeydown = (event) => {
+    if (event.key === 'Shift' && graphDrag) {
+      graphDrag.pinOnRelease = true;
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        if (node?.shell) {
+          node.shell.classList.remove('will-release');
+          node.shell.classList.add('will-pin');
+        }
+      }
+    }
+  };
+  graphShiftKeyup = (event) => {
+    if (event.key === 'Shift' && graphDrag) {
+      graphDrag.pinOnRelease = false;
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        if (node?.shell) {
+          node.shell.classList.remove('will-pin');
+          node.shell.classList.add('will-release');
+        }
+      }
+    }
+  };
+  window.addEventListener('keydown', graphShiftKeydown, { capture: true });
+  window.addEventListener('keyup', graphShiftKeyup, { capture: true });
+}
+
+function removeGraphShiftListeners() {
+  if (graphShiftKeydown) {
+    window.removeEventListener('keydown', graphShiftKeydown, { capture: true });
+    graphShiftKeydown = null;
+  }
+  if (graphShiftKeyup) {
+    window.removeEventListener('keyup', graphShiftKeyup, { capture: true });
+    graphShiftKeyup = null;
+  }
+}
 
 function request(type, detail = {}) {
   const requestId = crypto.randomUUID();
@@ -371,6 +414,10 @@ function createGraphController() {
   }
 
   function destroyGraphView() {
+    if (graphDrag) {
+      graphDrag = null;
+      removeGraphShiftListeners();
+    }
     if (simulation) { simulation.stop(); simulation = null; }
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; pendingFrame = false; }
     nodes.forEach((node) => {
@@ -1502,6 +1549,22 @@ elements.grid.addEventListener('pointerdown', (event) => {
 
 elements.grid.addEventListener('pointermove', (event) => {
   if (graphDrag && event.pointerId === graphDrag.pointerId) {
+    const shiftHeld = event.shiftKey === true;
+    if (shiftHeld !== graphDrag.pinOnRelease) {
+      graphDrag.pinOnRelease = shiftHeld;
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        if (node?.shell) {
+          if (shiftHeld) {
+            node.shell.classList.remove('will-release');
+            node.shell.classList.add('will-pin');
+          } else {
+            node.shell.classList.remove('will-pin');
+            node.shell.classList.add('will-release');
+          }
+        }
+      }
+    }
     if (!graphDrag.thresholdPassed) {
       const dx = event.clientX - graphDrag.startClientX;
       const dy = event.clientY - graphDrag.startClientY;
@@ -1509,6 +1572,7 @@ elements.grid.addEventListener('pointermove', (event) => {
       graphDrag.thresholdPassed = true;
       graphDrag.moved = true;
       elements.grid.setPointerCapture(event.pointerId);
+      installGraphShiftListeners();
       const viewport = elements.grid.querySelector('.graph-viewport');
       let transform = { x: 0, y: 0, k: 1 };
       if (viewport) {
@@ -1582,6 +1646,8 @@ elements.grid.addEventListener('pointerup', (event) => {
       elements.grid.releasePointerCapture(event.pointerId);
     }
     if (graphDrag.moved) {
+      graphDrag.pinOnRelease = event.shiftKey === true;
+      removeGraphShiftListeners();
       suppressGraphClick = true;
       document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
       document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
@@ -1643,6 +1709,7 @@ elements.grid.addEventListener('pointerup', (event) => {
       }
       return;
     }
+    removeGraphShiftListeners();
     graphDrag = null;
     return;
   }
@@ -1672,6 +1739,7 @@ elements.grid.addEventListener('pointercancel', (event) => {
     if (elements.grid.hasPointerCapture(event.pointerId)) {
       elements.grid.releasePointerCapture(event.pointerId);
     }
+    removeGraphShiftListeners();
     if (graphDrag.moved) {
       for (const id of graphDrag.itemIds) {
         const node = graph._getNode(id);
@@ -1687,6 +1755,7 @@ elements.grid.addEventListener('pointercancel', (event) => {
     }
     document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
     document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+    removeGraphShiftListeners();
     graphDrag = null;
     return;
   }
