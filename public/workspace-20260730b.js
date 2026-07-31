@@ -39,6 +39,7 @@ import {
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, seedPosition } from './graph-model-20260730b.js';
+import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
 
@@ -261,7 +262,7 @@ function iconMarkup(candidate) {
     return `<img src="${escapeHtml(candidate.icon)}" alt="" />`;
   }
   if (isWebLink(candidate)) {
-    return `<img data-web-icon="${escapeHtml(webLinkIcon(candidate))}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
+    return `<img data-web-icon="${escapeHtml(candidate.target)}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
   }
   return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
 }
@@ -912,7 +913,6 @@ function render() {
   elements.deleteAllBin.hidden = !binMode || binCount === 0;
 
   hydrateIcons();
-  hydrateWebIcons();
 }
 
 function syncSelection() {
@@ -932,62 +932,22 @@ function syncSelection() {
 }
 
 async function hydrateIcons() {
-  const images = [...document.querySelectorAll('[data-default-icon]')];
-  await Promise.all(images.map(async (image) => {
-    const shortcutId = image.dataset.defaultIcon;
-    if (!iconCache.has(shortcutId)) {
-      try {
-        iconCache.set(
-          shortcutId,
-          await request('papers:project:as-you-go-shortcut-icon', { actionId: shortcutId }),
-        );
-      } catch {
-        iconCache.set(shortcutId, null);
-      }
-    }
-    const resolved = iconCache.get(shortcutId);
-    if (!resolved || !image.isConnected) return;
-    image.src = resolved;
-    image.hidden = false;
-    image.nextElementSibling?.setAttribute('hidden', '');
-  }));
+  await hydrateIconsScoped(
+    document,
+    iconCache,
+    (detail) => request('papers:project:as-you-go-shortcut-icon', detail),
+    (url) => request('papers:project:resolve-web-link-icon', { url }),
+  );
 }
 
 function hydrateNodeIcons(shell) {
   if (!shell) return;
-  const images = [...shell.querySelectorAll('[data-default-icon]')];
-  images.forEach(async (image) => {
-    const shortcutId = image.dataset.defaultIcon;
-    if (!iconCache.has(shortcutId)) {
-      try {
-        iconCache.set(
-          shortcutId,
-          await request('papers:project:as-you-go-shortcut-icon', { actionId: shortcutId }),
-        );
-      } catch {
-        iconCache.set(shortcutId, null);
-      }
-    }
-    const resolved = iconCache.get(shortcutId);
-    if (!resolved || !image.isConnected) return;
-    image.src = resolved;
-    image.hidden = false;
-    image.nextElementSibling?.setAttribute('hidden', '');
-  });
-}
-
-function hydrateWebIcons() {
-  document.querySelectorAll('[data-web-icon]').forEach((image) => {
-    image.addEventListener('load', () => {
-      image.hidden = false;
-      image.nextElementSibling?.setAttribute('hidden', '');
-    }, { once: true });
-    image.addEventListener('error', () => {
-      image.hidden = true;
-      image.nextElementSibling?.removeAttribute('hidden');
-    }, { once: true });
-    image.src = image.dataset.webIcon;
-  });
+  hydrateIconsScoped(
+    shell,
+    iconCache,
+    (detail) => request('papers:project:as-you-go-shortcut-icon', detail),
+    (url) => request('papers:project:resolve-web-link-icon', { url }),
+  );
 }
 
 async function persist(nextState = state) {
@@ -1195,10 +1155,14 @@ async function pasteInto(parentId) {
 }
 
 function showIconPreview(source) {
-  elements.iconPreview.hidden = !source;
-  elements.iconFallback.hidden = Boolean(source);
-  if (source) elements.iconPreview.src = source;
-  else elements.iconPreview.removeAttribute('src');
+  if (!source) {
+    elements.iconPreview.hidden = true;
+    elements.iconFallback.removeAttribute('hidden');
+    return;
+  }
+  elements.iconPreview.hidden = false;
+  elements.iconPreview.src = source;
+  elements.iconFallback.setAttribute('hidden', '');
 }
 
 function readAsDataUrl(blob) {
@@ -1261,7 +1225,11 @@ async function resolveEditorTargetIcon() {
   if (editorIcon) return showIconPreview(editorIcon);
   if (editorTargetIcon) return showIconPreview(editorTargetIcon);
   if (editorMode?.kind === 'web') {
-    return showIconPreview(webLinkIcon({ target: elements.target.value.trim() }));
+    const target = elements.target.value.trim();
+    if (target) {
+      return hydrateWebPreview(elements.iconPreview, elements.iconFallback, target);
+    }
+    return showIconPreview(null);
   }
   if (editorMode?.kind === 'shortcut' && editorMode.item?.id) {
     try {
@@ -2051,14 +2019,14 @@ elements.iconDefaultButton.addEventListener('click', () => {
   editorIcon = null;
   if (editorMode?.kind === 'group') editorTargetIcon = null;
   if (editorMode?.kind === 'web') {
-    editorTargetIcon = webLinkIcon({ target: elements.target.value.trim() });
+    resolveEditorTargetIcon();
+    return;
   }
   resolveEditorTargetIcon();
 });
 elements.target.addEventListener('input', () => {
   if (editorMode?.kind !== 'web' || editorIcon) return;
-  editorTargetIcon = webLinkIcon({ target: elements.target.value.trim() });
-  showIconPreview(editorTargetIcon);
+  hydrateWebPreview(elements.iconPreview, elements.iconFallback, elements.target.value.trim());
 });
 elements.iconInput.addEventListener('change', async () => {
   const file = elements.iconInput.files[0];

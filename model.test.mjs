@@ -231,12 +231,20 @@ test('web links are http(s) shortcuts owned by the local project', () => {
   assert.equal(isWebLink(linked.shortcuts[0]), true);
   assert.equal(
     webLinkIcon(linked.shortcuts[0]),
-    'https://github.com/favicon.ico',
+    'https://github.com/Futahua/Papers-3',
   );
   assert.throws(
     () => createWebLink(emptyState(), { name: 'Unsafe', target: 'javascript:alert(1)' }),
     /http or https/i,
   );
+});
+
+test('bare domain defaults to https', () => {
+  const linked = createWebLink(emptyState(), {
+    name: 'Example',
+    target: 'example.com',
+  });
+  assert.equal(linked.shortcuts[0].target, 'https://example.com/');
 });
 
 test('Explorer drops create quick shortcuts in the exact destination without duplicates', () => {

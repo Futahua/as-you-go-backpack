@@ -240,9 +240,12 @@ export function createDroppedShortcuts(state, droppedTargets, parentId = ROOT_ID
 }
 
 function normalizeWebTarget(target) {
+  let raw = String(target ?? '').trim();
+  if (!raw) throw new Error('Web address must not be empty.');
+  if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw;
   let parsed;
   try {
-    parsed = new URL(String(target ?? '').trim());
+    parsed = new URL(raw);
   } catch {
     throw new Error('Web address must be a valid http or https URL.');
   }
@@ -264,7 +267,7 @@ export function isWebLink(candidate) {
 
 export function webLinkIcon(candidate) {
   if (!isWebLink(candidate)) return null;
-  return new URL('/favicon.ico', candidate.target).toString();
+  return candidate.target;
 }
 
 export function createWebLink(state, webLink) {
