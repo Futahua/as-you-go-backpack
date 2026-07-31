@@ -2,6 +2,7 @@ import {
   ROOT_ID,
   binSelection,
   binnedItems,
+  itemsInBinnedGroup,
   copySelection,
   createGroup,
   createDroppedShortcuts,
@@ -41,7 +42,7 @@ import {
 } from './vendor/d3-force.js';
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
-import { visibleGraphItems, graphEdges, seedPosition } from './graph-model-20260730b.js';
+import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition } from './graph-model-20260730b.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
@@ -66,6 +67,7 @@ const elements = {
   empty: document.querySelector('#empty'),
   breadcrumbs: document.querySelector('#breadcrumbs'),
   deleteAllBin: document.querySelector('#delete-all-bin'),
+  restoreAllBin: document.querySelector('#restore-all-bin'),
   selectionStatus: document.querySelector('#selection-status'),
   menu: document.querySelector('#context-menu'),
 binButton: document.querySelector('#bin-button'),
@@ -87,14 +89,18 @@ binButton: document.querySelector('#bin-button'),
   iconFallback: document.querySelector('#icon-fallback'),
   iconDefaultButton: document.querySelector('#use-target-icon'),
   confirmLayer: document.querySelector('#confirm-layer'),
+  confirmTitle: document.querySelector('#confirm-title'),
   confirmCopy: document.querySelector('#confirm-copy'),
+  confirmDelete: document.querySelector('#confirm-delete'),
+  confirmRestore: document.querySelector('#confirm-restore'),
   linkEditLayer: document.querySelector('#link-edit-layer'),
 };
 
 const pending = new Map();
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
-let undoState = null;
+let undoStack = [];
+let redoStack = [];
 let currentId = ROOT_ID;
 let selected = new Set();
 let selectionAnchor = null;
@@ -104,10 +110,12 @@ let editorMode = null;
 let editorIcon = null;
 let editorTargetIcon = null;
 let binMode = false;
+let binCurrentId = 'bin';
 let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
 let pendingPermanentIds = [];
+let pendingRestoreIds = [];
 let zoomTimer = null;
 let saveQueue = Promise.resolve();
 let graphDrag = null;
@@ -185,6 +193,17 @@ function shortcut(shortcutId) {
 
 function item(itemId) {
   return group(itemId) ?? shortcut(itemId);
+}
+
+/** Resolves a shortcut by either its shared record id or one of its
+ * placement ids — bin-mode graph tiles are keyed by placement id (each
+ * binned placement is its own independent tile), so looking a bin
+ * shortcut tile up by shortcut() alone (which only matches the record id)
+ * always misses. */
+function shortcutByRecordOrPlacementId(candidateId) {
+  return shortcut(candidateId)
+    ?? state.shortcuts.find((record) => record.placements.some((placement) => placement.id === candidateId))
+    ?? null;
 }
 
 /** Any one active (non-bin) placement id belonging to the given shortcut
@@ -294,7 +313,26 @@ function pathTo(groupId) {
   return [{ id: ROOT_ID, name: 'As you Go' }, ...result];
 }
 
+/** Breadcrumb path while drilled into a folder inside the Bin — walks up
+ * from groupId through its real (original) ancestor chain, stopping at
+ * the first folder that isn't itself binned (its own placement in the
+ * Bin's top-level list), so the trail reads "Bin › outerBinnedFolder ›
+ * ... › groupId" without ever crossing into the real explorer tree. */
+function pathToBin(groupId) {
+  const result = [];
+  let cursor = group(groupId);
+  while (cursor) {
+    result.unshift({ id: cursor.id, name: cursor.name });
+    if (cursor.bin) break;
+    cursor = group(cursor.parentId);
+  }
+  return [{ id: 'bin', name: 'Bin' }, ...result];
+}
+
 function iconMarkup(candidate) {
+  if (candidate.kind === 'bin-origin') {
+    return '<span class="folder-art" aria-hidden="true"><span></span></span>';
+  }
   if (candidate.kind === 'group') {
     if (candidate.icon) {
       return `<img src="${escapeHtml(candidate.icon)}" alt="" />`;
@@ -327,6 +365,7 @@ const graph = createGraphController();
 function createGraphController() {
   const nodes = new Map();
   const edges = new Map();
+  const originEdges = new Map();
   let simulation = null;
   let zoomBehavior = null;
   let viewportSelection = null;
@@ -425,6 +464,7 @@ function createGraphController() {
     if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
     nodes.clear();
     edges.clear();
+    originEdges.clear();
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
@@ -461,6 +501,12 @@ function createGraphController() {
       if (!source || !target || !edge.path) return;
       edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
     });
+    originEdges.forEach((edge) => {
+      const source = nodes.get(edge.sourceId);
+      const target = nodes.get(edge.targetId);
+      if (!source || !target || !edge.path) return;
+      edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+    });
   }
 
   function edgePath(x1, y1, x2, y2) {
@@ -469,10 +515,32 @@ function createGraphController() {
   }
 
   function buildCandidate(vi) {
-    const stored = item(vi.id);
+    if (vi.kind === 'bin-origin') {
+      // A ghost node standing in for a folder that isn't itself visible in
+      // the current Bin walk — just a "this is where it came from" label,
+      // not a real interactive item. The folder may since have been
+      // deleted or renamed to nothing findable; fall back to a generic
+      // label rather than dropping the edge entirely.
+      const origin = group(vi.groupId);
+      return {
+        id: vi.id,
+        kind: 'bin-origin',
+        name: origin?.name ?? 'Elsewhere',
+        parentId: null,
+        parentIds: [],
+        linked: false,
+      };
+    }
+    const stored = vi.kind === 'shortcut' ? shortcutByRecordOrPlacementId(vi.id) : group(vi.id);
     if (!stored) return null;
     return {
       ...stored,
+      // The graph node's identity is always vi.id (a placement id for a
+      // bin-mode shortcut tile, the shared record id everywhere else) —
+      // never stored.id, which for a resolved-by-placement bin tile would
+      // be the shared shortcut record id and corrupt every DOM/selection
+      // lookup keyed off candidate.id (dataset.id, dataset.graphNodeId).
+      id: vi.id,
       kind: vi.kind,
       parentId: vi.parentId,
       // Every folder this shortcut is currently placed in, per the visible
@@ -560,14 +628,17 @@ function createGraphController() {
     if (!candidate) return;
     const iconItem = node.shell.querySelector('.icon-item');
     if (!iconItem) return;
-    const canExpand = candidate.kind === 'group' && !binMode;
+    const isGhost = candidate.kind === 'bin-origin';
+    const canExpand = candidate.kind === 'group';
     const isExpanded = canExpand && graphExpanded.has(candidate.id);
-    const isSelected = selected.has(candidate.id);
+    const isSelected = !isGhost && selected.has(candidate.id);
     iconItem.dataset.kind = candidate.kind;
-    iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
+    iconItem.dataset.parent = candidate.parentId ?? (binMode ? 'bin' : currentId);
     iconItem.setAttribute('draggable', 'false');
     iconItem.setAttribute('aria-selected', String(isSelected));
     iconItem.classList.toggle('selected', isSelected);
+    iconItem.classList.toggle('bin-origin-ghost', isGhost);
+    node.shell.classList.toggle('bin-origin-ghost', isGhost);
     const signature = JSON.stringify([
       candidate.kind,
       candidate.name,
@@ -596,22 +667,23 @@ function createGraphController() {
   function createNodeShell(node) {
     const candidate = node.candidate;
     if (!candidate) return;
-    const isSelected = selected.has(candidate.id);
-    const canExpand = candidate.kind === 'group' && !binMode;
+    const isGhost = candidate.kind === 'bin-origin';
+    const isSelected = !isGhost && selected.has(candidate.id);
+    const canExpand = candidate.kind === 'group';
     const isExpanded = canExpand && graphExpanded.has(candidate.id);
 
     const shell = document.createElement('div');
-    shell.className = 'graph-node-shell';
+    shell.className = `graph-node-shell${isGhost ? ' bin-origin-ghost' : ''}`;
     shell.dataset.graphNodeId = candidate.id;
     shell.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
 
     const iconItem = document.createElement('div');
-    iconItem.className = `icon-item${isSelected ? ' selected' : ''}`;
+    iconItem.className = `icon-item${isSelected ? ' selected' : ''}${isGhost ? ' bin-origin-ghost' : ''}`;
     iconItem.dataset.id = candidate.id;
     iconItem.dataset.kind = candidate.kind;
-    iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
+    iconItem.dataset.parent = candidate.parentId ?? (binMode ? 'bin' : currentId);
     iconItem.setAttribute('draggable', 'false');
-    iconItem.setAttribute('role', 'option');
+    iconItem.setAttribute('role', isGhost ? 'presentation' : 'option');
     iconItem.setAttribute('aria-selected', String(isSelected));
     iconItem.setAttribute('tabindex', '-1');
     iconItem.innerHTML =
@@ -710,6 +782,41 @@ function createGraphController() {
     }
   }
 
+  /** Draws the "where did this come from" edges for binned tiles (see
+   * binOriginEdges) — kept in a separate map/CSS class from the normal
+   * graph-edge set above, since these connect to a possibly-ghost node
+   * and are always styled distinctly (red) rather than the default gray. */
+  function syncOriginEdges(edgeList) {
+    if (!edgeLayer) return;
+    const wanted = new Map();
+    for (const edge of edgeList) {
+      const source = nodes.get(edge.source);
+      const target = nodes.get(edge.target);
+      if (!source || !target || source.exiting || target.exiting) continue;
+      wanted.set(edge.id, { sourceId: edge.source, targetId: edge.target });
+    }
+    for (const [key, edge] of originEdges) {
+      if (!wanted.has(key)) {
+        edge.path?.remove();
+        originEdges.delete(key);
+      }
+    }
+    for (const [key, info] of wanted) {
+      let edge = originEdges.get(key);
+      const source = nodes.get(info.sourceId);
+      const target = nodes.get(info.targetId);
+      if (!source || !target) continue;
+      if (!edge) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-edge bin-origin-edge');
+        path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+        edgeLayer.append(path);
+        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
+        originEdges.set(key, edge);
+      }
+    }
+  }
+
   function ensureSimulation() {
     if (simulation) return;
     const w = viewport?.clientWidth || 800;
@@ -731,6 +838,9 @@ function createGraphController() {
     simulation.nodes(nodeArray);
     const edgeArray = [];
     edges.forEach((edge) => {
+      edgeArray.push({ source: edge.sourceId, target: edge.targetId });
+    });
+    originEdges.forEach((edge) => {
       edgeArray.push({ source: edge.sourceId, target: edge.targetId });
     });
     simulation.force('link').links(edgeArray);
@@ -792,13 +902,27 @@ function createGraphController() {
       return;
     }
     updatePending = false;
-    const visible = visibleGraphItems(state, currentId, graphExpanded, binMode);
+    const visible = visibleGraphItems(state, currentId, graphExpanded, binMode, binCurrentId);
     if (visible.length === 0) {
       nodes.forEach((_, id) => removeNode(id));
+      syncEdges([]);
+      syncOriginEdges([]);
       return;
     }
-    syncNodes(visible);
+    const originEdges = binMode ? binOriginEdges(visible) : [];
+    const ghostIds = new Set(originEdges.filter((e) => e.ghost).map((e) => e.ghostGroupId));
+    const ghostItems = [...ghostIds].map((groupId, index) => ({
+      id: `bin-origin:${groupId}`,
+      parentId: null,
+      kind: 'bin-origin',
+      groupId,
+      depth: 0,
+      siblingIndex: index,
+      siblingCount: ghostIds.size,
+    }));
+    syncNodes([...visible, ...ghostItems]);
     syncEdges(visible);
+    syncOriginEdges(originEdges);
     syncSimulation();
     reheat(initialFit ? 0.7 : 0.35);
     if (initialFit && !initialized) {
@@ -855,16 +979,27 @@ function renderGraph(initialFit = false) {
 }
 
 function render() {
+  if (binMode && binCurrentId !== 'bin' && !group(binCurrentId)?.bin) {
+    // The folder we'd drilled into was restored or deleted out from under
+    // us (e.g. via the top-level Bin list or "Delete all") — fall back to
+    // the top of the Bin rather than rendering a dangling, nonexistent
+    // breadcrumb segment.
+    binCurrentId = 'bin';
+  }
   const iconSize = state.view.iconSize;
   document.documentElement.style.setProperty('--icon-size', `${iconSize}px`);
   elements.breadcrumbs.innerHTML = binMode
-    ? '<span class="bin-crumb">Bin</span>'
+    ? pathToBin(binCurrentId === 'bin' ? null : binCurrentId).map((candidate, index, path) =>
+        `<button type="button" data-bin-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
+      ).join('')
     : pathTo(currentId).map((candidate, index, path) =>
         `<button type="button" data-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
       ).join('');
 
-  const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
-  elements.grid.dataset.blankParent = binMode ? 'bin' : currentId;
+  const visible = binMode
+    ? (binCurrentId === 'bin' ? binnedItems(state) : itemsInBinnedGroup(state, binCurrentId))
+    : itemsIn(state, currentId);
+  elements.grid.dataset.blankParent = binMode ? binCurrentId : currentId;
   elements.grid.dataset.view = 'graph';
   elements.grid.classList.toggle('bin-canvas', binMode);
 
@@ -876,7 +1011,7 @@ function render() {
   }
   elements.empty.hidden = visible.length !== 0;
   elements.empty.textContent = binMode
-    ? 'The Bin is empty.'
+    ? (binCurrentId === 'bin' ? 'The Bin is empty.' : 'Nothing left here.')
     : 'This folder is empty. Right-click here to add something.';
 
   syncSelection();
@@ -886,7 +1021,14 @@ function render() {
   elements.binCount.textContent = String(binCount);
   elements.binButton.setAttribute('aria-pressed', String(binMode));
   elements.binLabel.textContent = binMode ? 'Close Bin' : 'Bin';
+  elements.binButton.title = binMode ? 'Close Bin' : 'Bin';
+  const hasSelection = binMode && selected.size > 0;
   elements.deleteAllBin.hidden = !binMode || binCount === 0;
+  elements.restoreAllBin.hidden = !binMode || binCount === 0;
+  elements.deleteAllBin.classList.toggle('selective', hasSelection);
+  elements.restoreAllBin.classList.toggle('selective', hasSelection);
+  elements.deleteAllBin.title = hasSelection ? 'Delete selection permanently' : 'Delete all';
+  elements.restoreAllBin.title = hasSelection ? 'Restore selection' : 'Restore all';
 
   hydrateIcons();
 }
@@ -936,7 +1078,14 @@ async function persist(nextState = state) {
 }
 
 async function commit(nextState, options = {}) {
-  if (!options.isUndo) undoState = state;
+  if (options.isUndo) {
+    redoStack.push(state);
+  } else if (options.isRedo) {
+    undoStack.push(state);
+  } else {
+    undoStack.push(state);
+    redoStack.length = 0;
+  }
   state = normalizeState(nextState);
   selected.clear();
   captureWorkspaceView();
@@ -953,11 +1102,17 @@ async function commit(nextState, options = {}) {
 }
 
 async function undo() {
-  if (!undoState) return;
-  const previous = undoState;
-  undoState = null;
+  if (undoStack.length === 0) return;
+  const previous = undoStack.pop();
   closeMenu();
   await commit(previous, { isUndo: true });
+}
+
+async function redo() {
+  if (redoStack.length === 0) return;
+  const next = redoStack.pop();
+  closeMenu();
+  await commit(next, { isRedo: true });
 }
 
 function visibleItemIds() {
@@ -1089,16 +1244,27 @@ function currentSelectionParent() {
   return first?.parentId ?? currentId;
 }
 
-function selectedPasteDestination() {
-  const folder = [...selected].map((itemId) => group(itemId)).find(Boolean);
-  return folder ? folder.id : currentId;
+function selectedPasteDestinations() {
+  const folders = [...selected].map((itemId) => group(itemId)).filter(Boolean);
+  return folders.length > 0 ? folders.map((folder) => folder.id) : [currentId];
 }
 
 async function activate(itemId) {
   const folder = group(itemId);
   if (folder) {
+    if (binMode) {
+      // Drilling into a binned folder stays inside the Bin — it must never
+      // jump to the real explorer, since the folder (and everything under
+      // it) is still hidden there and would just show up empty.
+      binCurrentId = folder.id;
+      selected.clear();
+      graph.destroyGraphView();
+      closeMenu();
+      render();
+      saveWorkspaceView();
+      return;
+    }
     currentId = folder.id;
-    binMode = false;
     selected.clear();
     graph.destroyGraphView();
     closeMenu();
@@ -1197,12 +1363,16 @@ async function copyOrCut(mode) {
   closeMenu();
 }
 
-async function pasteInto(parentId) {
-  if (!clipboard || parentId === 'bin') return;
+async function pasteInto(parentIds) {
+  const destinations = Array.isArray(parentIds) ? parentIds : [parentIds];
+  if (!clipboard || destinations.length === 0 || destinations.includes('bin')) return;
   try {
     const wasCut = clipboard.mode === 'cut';
     let next = state;
     if (wasCut) {
+      // A cut item can only move to one place, so multi-folder selection is
+      // ignored here — only the first destination applies.
+      const parentId = destinations[0];
       const groupIds = clipboard.ids.filter((selectedId) => group(selectedId));
       const wholeShortcutIds = clipboard.ids.filter((selectedId) => clipboard.collapseWhole.has(selectedId));
       const singlePlacementIds = clipboard.ids
@@ -1221,7 +1391,11 @@ async function pasteInto(parentId) {
           ? selectedId
           : clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
         .filter(Boolean);
-      next = copySelection(next, ids, parentId);
+      // Copying always links; pasting into multiple selected folders at once
+      // links a new placement into each one.
+      for (const parentId of destinations) {
+        next = copySelection(next, ids, parentId);
+      }
     }
     if (wasCut) clipboard = null;
     await commit(next, wasCut ? 'Moved.' : 'Copied.');
@@ -1454,25 +1628,53 @@ async function commitEditorSave(forkFirst) {
   }
 }
 
+/** Resolves a set of graph item ids (groups or shared shortcut identities)
+ * to the exact Bin-context ids binSelection() needs — a linked shortcut
+ * with more than one visible edge bins every one of its placements (the
+ * whole shared thing), while one with a single visible edge only bins the
+ * placement this view represents. Shared by the Bin button/keyboard path
+ * and drag-onto-the-bin-pill. */
+function resolveBinTargets(itemIds) {
+  return itemIds.flatMap((itemId) => {
+    if (group(itemId)) return [itemId];
+    return visibleParentCountFor(itemId) > 1
+      ? allActivePlacementIds(itemId)
+      : [visiblePlacementIdFor(itemId)].filter(Boolean);
+  });
+}
+
 async function moveToBin() {
   if (selected.size === 0) return;
-  const ids = [...selected].flatMap((selectedId) => {
-    if (group(selectedId)) return [selectedId];
-    return visibleParentCountFor(selectedId) > 1
-      ? allActivePlacementIds(selectedId)
-      : [visiblePlacementIdFor(selectedId)].filter(Boolean);
-  });
-  await commit(binSelection(state, ids), 'Moved to Bin.');
+  await commit(binSelection(state, resolveBinTargets([...selected])), 'Moved to Bin.');
 }
 
 function askPermanentDelete(ids = [...selected], deletingAll = false) {
   if (ids.length === 0) return;
   pendingPermanentIds = [...ids];
+  pendingRestoreIds = [];
+  elements.confirmTitle.textContent = 'Delete permanently?';
   elements.confirmCopy.textContent = deletingAll
     ? `Delete all ${ids.length} items permanently? This cannot be undone.`
     : ids.length === 1
       ? `Delete “${binItemName(ids[0]) ?? 'this item'}” permanently? This cannot be undone.`
       : `Delete these ${ids.length} items permanently? This cannot be undone.`;
+  elements.confirmDelete.hidden = false;
+  elements.confirmRestore.hidden = true;
+  elements.confirmLayer.hidden = false;
+}
+
+function askRestoreConfirm(ids, restoringAll = false) {
+  if (ids.length === 0) return;
+  pendingRestoreIds = [...ids];
+  pendingPermanentIds = [];
+  elements.confirmTitle.textContent = 'Restore?';
+  elements.confirmCopy.textContent = restoringAll
+    ? `Restore all ${ids.length} items?`
+    : ids.length === 1
+      ? `Restore “${binItemName(ids[0]) ?? 'this item'}”?`
+      : `Restore these ${ids.length} items?`;
+  elements.confirmDelete.hidden = true;
+  elements.confirmRestore.hidden = false;
   elements.confirmLayer.hidden = false;
 }
 
@@ -1491,7 +1693,7 @@ async function runMenuAction(action) {
   if (action === 'copy') return copyOrCut('copy');
   if (action === 'cut') return copyOrCut('cut');
   if (action === 'bin') return moveToBin();
-  if (action === 'restore') return commit(restoreSelection(state, [...selected]), 'Restored.');
+  if (action === 'restore') return askRestoreConfirm([...selected]);
   if (action === 'delete-forever') return askPermanentDelete();
   if (action === 'reset-graph-position') {
     const ctxId = graphContextId(currentId, binMode);
@@ -1532,6 +1734,7 @@ elements.grid.addEventListener('click', (event) => {
       suppressGraphClick = false;
       return;
     }
+    if (tile.classList.contains('bin-origin-ghost')) return;
     selectItem(tile.dataset.id, event);
     return;
   }
@@ -1559,7 +1762,7 @@ elements.grid.addEventListener('pointerdown', (event) => {
   if (!event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
     const tile = event.target.closest('.icon-item');
     const shell = tile?.closest('.graph-node-shell');
-    if (shell && event.pointerType !== 'touch') {
+    if (shell && event.pointerType !== 'touch' && !tile.classList.contains('bin-origin-ghost')) {
       const itemId = tile.dataset.id;
       if (!selected.has(itemId)) {
         selected = new Set([itemId]);
@@ -1690,6 +1893,11 @@ elements.grid.addEventListener('pointermove', (event) => {
       node.positioned = true;
     }
     graph.reheat(0.12);
+
+    if (!binMode && elements.binButton) {
+      const overBin = elements.binButton.contains(document.elementFromPoint(event.clientX, event.clientY));
+      elements.binButton.classList.toggle('graph-bin-drop-target', overBin);
+    }
     return;
   }
 
@@ -1719,28 +1927,44 @@ elements.grid.addEventListener('pointerup', (event) => {
       suppressGraphClick = true;
       document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
       document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+      elements.binButton?.classList.remove('graph-bin-drop-target');
+      const hitBin = !binMode && elements.binButton?.contains(document.elementFromPoint(event.clientX, event.clientY));
       const shells = [...elements.grid.querySelectorAll('.graph-node-shell')];
       shells.forEach((s) => s.style.pointerEvents = '');
       let hitFolderId = null;
-      shells.forEach((s) => {
-        if (!graphDrag.itemIds.includes(s.dataset.graphNodeId)) {
-          s.style.pointerEvents = 'none';
-        }
-      });
-      const elAtPoint = document.elementFromPoint(event.clientX, event.clientY);
-      const hitShell = elAtPoint?.closest('.graph-node-shell');
-      shells.forEach((s) => s.style.pointerEvents = '');
-      if (hitShell && !graphDrag.itemIds.includes(hitShell.dataset.graphNodeId)) {
-        const hitItem = hitShell.querySelector('.icon-item');
-        if (hitItem?.dataset.kind === 'group') {
-          hitFolderId = hitItem.dataset.id;
+      if (!hitBin) {
+        shells.forEach((s) => {
+          if (!graphDrag.itemIds.includes(s.dataset.graphNodeId)) {
+            s.style.pointerEvents = 'none';
+          }
+        });
+        const elAtPoint = document.elementFromPoint(event.clientX, event.clientY);
+        const hitShell = elAtPoint?.closest('.graph-node-shell');
+        shells.forEach((s) => s.style.pointerEvents = '');
+        if (hitShell && !graphDrag.itemIds.includes(hitShell.dataset.graphNodeId)) {
+          const hitItem = hitShell.querySelector('.icon-item');
+          if (hitItem?.dataset.kind === 'group') {
+            hitFolderId = hitItem.dataset.id;
+          }
         }
       }
 
       const graphDragCopy = { ...graphDrag, itemIds: [...graphDrag.itemIds], placementIds: graphDrag.placementIds };
       graphDrag = null;
 
-      if (hitFolderId) {
+      if (hitBin) {
+        try {
+          const ctxId = graphContextId(currentId, binMode);
+          const next = removeGraphPositions(
+            binSelection(state, resolveBinTargets(graphDragCopy.itemIds)),
+            ctxId,
+            graphDragCopy.itemIds,
+          );
+          commit(next, 'Moved to Bin.');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error));
+        }
+      } else if (hitFolderId) {
         try {
           const groupIds = graphDragCopy.itemIds.filter((draggedId) => group(draggedId));
           const wholeShortcutIds = graphDragCopy.itemIds.filter((draggedId) =>
@@ -1831,6 +2055,7 @@ elements.grid.addEventListener('pointercancel', (event) => {
     }
     document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
     document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+    elements.binButton?.classList.remove('graph-bin-drop-target');
     removeGraphShiftListeners();
     graphDrag = null;
     return;
@@ -1842,6 +2067,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
   event.preventDefault();
   event.stopPropagation();
   const tile = event.target.closest('.icon-item');
+  if (tile && tile.classList.contains('bin-origin-ghost')) return;
   if (tile) {
     if (event.shiftKey && tile.dataset.kind === 'group') {
       const targetSet = graphExpanded;
@@ -1868,9 +2094,12 @@ elements.grid.addEventListener('contextmenu', (event) => {
     openMenu(event.clientX, event.clientY);
     return;
   }
-  if (binMode) return closeMenu();
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
   if (!blank) return;
+  if (binMode) {
+    if (selected.size > 0) openMenu(event.clientX, event.clientY);
+    return;
+  }
   if (selected.size > 0) {
     openMenu(event.clientX, event.clientY);
     return;
@@ -1911,6 +2140,14 @@ document.addEventListener('keydown', (event) => {
     saveWorkspaceView();
     return;
   }
+  if (event.ctrlKey && event.key.toLowerCase() === 'a') {
+    event.preventDefault();
+    selected = new Set(visibleItemIds());
+    selectionAnchor = null;
+    syncSelection();
+    saveWorkspaceView();
+    return;
+  }
   if (event.ctrlKey && event.key.toLowerCase() === 'c') {
     event.preventDefault();
     copyOrCut('copy');
@@ -1921,11 +2158,15 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.ctrlKey && event.key.toLowerCase() === 'v') {
     event.preventDefault();
-    pasteInto(selectedPasteDestination());
+    pasteInto(selectedPasteDestinations());
   }
-  if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+  if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     undo();
+  }
+  if (event.ctrlKey && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
+    event.preventDefault();
+    redo();
   }
   if (event.key === 'Delete' && selected.size > 0) {
     event.preventDefault();
@@ -2009,6 +2250,15 @@ elements.grid.addEventListener('drop', async (event) => {
 });
 
 elements.breadcrumbs.addEventListener('click', (event) => {
+  const binCrumb = event.target.closest('[data-bin-breadcrumb]');
+  if (binCrumb) {
+    binCurrentId = binCrumb.dataset.binBreadcrumb;
+    selected.clear();
+    graph.destroyGraphView();
+    render();
+    saveWorkspaceView();
+    return;
+  }
   const crumb = event.target.closest('[data-breadcrumb]');
   if (!crumb) return;
   currentId = crumb.dataset.breadcrumb;
@@ -2019,14 +2269,30 @@ elements.breadcrumbs.addEventListener('click', (event) => {
 });
 
 elements.binButton.addEventListener('click', () => {
+  if (!binMode && selected.size > 0) {
+    moveToBin();
+    return;
+  }
   binMode = !binMode;
+  if (!binMode) binCurrentId = 'bin';
   selected.clear();
   closeMenu();
   render();
   saveWorkspaceView();
 });
 elements.deleteAllBin.addEventListener('click', () => {
+  if (selected.size > 0) {
+    askPermanentDelete([...selected], false);
+    return;
+  }
   askPermanentDelete(binnedItems(state).map((candidate) => candidate.id), true);
+});
+elements.restoreAllBin.addEventListener('click', () => {
+  if (selected.size > 0) {
+    askRestoreConfirm([...selected], false);
+    return;
+  }
+  askRestoreConfirm(binnedItems(state).map((candidate) => candidate.id), true);
 });
 
 elements.editor.addEventListener('submit', (event) => {
@@ -2086,6 +2352,7 @@ document.querySelector('#apply-everywhere-link-edit').addEventListener('click', 
 
 document.querySelector('#cancel-confirm').addEventListener('click', () => {
   pendingPermanentIds = [];
+  pendingRestoreIds = [];
   elements.confirmLayer.hidden = true;
 });
 document.querySelector('#confirm-delete').addEventListener('click', async () => {
@@ -2094,10 +2361,21 @@ document.querySelector('#confirm-delete').addEventListener('click', async () => 
   elements.confirmLayer.hidden = true;
   await commit(next, 'Deleted permanently.');
 });
+document.querySelector('#confirm-restore').addEventListener('click', async () => {
+  const next = restoreSelection(state, pendingRestoreIds);
+  pendingRestoreIds = [];
+  elements.confirmLayer.hidden = true;
+  await commit(next, 'Restored.');
+});
 
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
-    await request('papers:project:copy-text', { text: PICKUP_PROMPT });
+    const selectedTargets = [...selected]
+      .map((selectedId) => shortcutByRecordOrPlacementId(selectedId))
+      .filter(Boolean)
+      .map((candidate) => candidate.target);
+    const text = selectedTargets.length > 0 ? selectedTargets.join('\n') : PICKUP_PROMPT;
+    await request('papers:project:copy-text', { text });
     document.querySelector('.copy-label').textContent = 'Copied';
     setTimeout(() => {
       document.querySelector('.copy-label').textContent = 'Copy agent pickup prompt';
@@ -2171,7 +2449,12 @@ function setupToolbarDragging() {
         offsetY: event.clientY - rect.top,
         moved: false,
       };
-      element.setPointerCapture(event.pointerId);
+      // Pointer capture is deferred until the drag threshold is actually
+      // crossed (below), not taken on every pointerdown — capturing
+      // immediately interferes with a plain click's default activation on
+      // a nested <button> (the breadcrumb's own navigation buttons), which
+      // broke breadcrumb navigation entirely. Matches the same deferred-
+      // capture pattern already used for graph node dragging.
     });
     element.addEventListener('pointermove', (event) => {
       if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
@@ -2181,6 +2464,7 @@ function setupToolbarDragging() {
       if (!drag.moved) {
         drag.moved = true;
         drag.element.classList.add('toolbar-dragging');
+        element.setPointerCapture(event.pointerId);
       }
       const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
       const x = event.clientX - workspaceRect.left - drag.offsetX;

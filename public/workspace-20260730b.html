@@ -12,6 +12,10 @@
     <main class="workspace">
       <section class="navigation" aria-label="Folder navigation">
         <nav class="breadcrumbs toolbar-float" id="breadcrumbs" data-toolbar-key="breadcrumbs" aria-label="Current group path"></nav>
+        <button class="quiet-button icon-button toolbar-float" id="restore-all-bin" data-toolbar-key="restore-all-bin" type="button" title="Restore all" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10a6 6 0 1 0 1.76-4.24M4 10V5m0 5h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="sr-only">Restore all</span>
+        </button>
         <button class="quiet-button icon-button danger-text toolbar-float" id="delete-all-bin" data-toolbar-key="delete-all-bin" type="button" title="Delete all" hidden>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M8 6V4.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V6M6 6v9.5A1.5 1.5 0 0 0 7.5 17h5a1.5 1.5 0 0 0 1.5-1.5V6M8.5 9v5M11.5 9v5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span class="sr-only">Delete all</span>
@@ -93,6 +97,7 @@
           <div class="editor-actions">
             <button class="paper-button" id="cancel-confirm" type="button">Cancel</button>
             <button class="paper-button danger" id="confirm-delete" type="button">Delete permanently</button>
+            <button class="paper-button" id="confirm-restore" type="button" hidden>Restore</button>
           </div>
         </div>
       </section>

@@ -6,6 +6,8 @@ import {
   createGroup,
   createShortcut,
   binSelection,
+  restoreSelection,
+  permanentlyDelete,
   emptyState,
   normalizeState,
   updateWorkspaceView,
@@ -34,6 +36,7 @@ function visiblePlacementIdForNode(state, shortcutId, node) {
 import {
   visibleGraphItems,
   graphEdges,
+  binOriginEdges,
   seedPosition,
   allFinite,
   allUniquePositions,
@@ -130,6 +133,199 @@ test('Bin graph mode shows only binned items as flat roots', () => {
   assert.ok(binItems.every((i) => i.depth === 0));
   assert.ok(binItems.every((i) => i.parentId === 'bin'));
   assert.equal(graphEdges(binItems).length, 0);
+});
+
+test('a bin graph node id is the placement id, so restoring or deleting it actually works', () => {
+  // Regression test: visibleGraphItems()'s bin branch used to dedupe by
+  // shared shortcut identity (like the normal graph does), so a shortcut's
+  // bin tile carried the shortcut's shared record id instead of its
+  // placement id. restoreSelection/permanentlyDelete both match against
+  // placement ids, so passing the tile's id straight through (as the
+  // renderer does) silently matched nothing — restore/delete were no-ops
+  // for every shortcut in the Bin.
+  let state = createGroup(emptyState(), 'A');
+  const [a] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  const placementId = original.placements[0].id;
+
+  state = binSelection(state, [placementId], '2026-07-30T00:00:00.000Z');
+  const binItems = visibleGraphItems(state, ROOT_ID, new Set(), true);
+  const tile = binItems.find((i) => i.kind === 'shortcut');
+  assert.ok(tile);
+  assert.equal(tile.id, placementId, 'the bin tile id must be the placement id, not the shared shortcut id');
+
+  state = restoreSelection(state, [tile.id]);
+  const restored = state.shortcuts.find((candidate) => candidate.id === original.id);
+  const restoredPlacement = restored.placements.find((p) => p.id === placementId);
+  assert.ok(restoredPlacement, 'restore must find the placement by the tile id');
+  assert.equal(restoredPlacement.bin, undefined, 'the placement is no longer binned');
+  assert.equal(restoredPlacement.parentId, a.id, 'restored to its original folder');
+});
+
+test('two placements of the same linked shortcut binned separately show as two distinct, independently restorable bin tiles', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  const [a, b] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  state = copySelection(state, [original.placements[0].id], b.id);
+  const linked = state.shortcuts.find((candidate) => candidate.id === original.id);
+  const [placementA, placementB] = linked.placements;
+
+  state = binSelection(state, [placementA.id, placementB.id], '2026-07-30T00:00:00.000Z');
+  const binItems = visibleGraphItems(state, ROOT_ID, new Set(), true);
+  const shortcutTiles = binItems.filter((i) => i.kind === 'shortcut');
+  assert.equal(shortcutTiles.length, 2, 'both placements appear as separate tiles, not deduped into one');
+  assert.deepEqual(new Set(shortcutTiles.map((t) => t.id)), new Set([placementA.id, placementB.id]));
+
+  state = restoreSelection(state, [placementA.id]);
+  const afterRestore = state.shortcuts.find((candidate) => candidate.id === original.id);
+  assert.equal(afterRestore.placements.find((p) => p.id === placementA.id).bin, undefined, 'placement A restored');
+  assert.ok(afterRestore.placements.find((p) => p.id === placementB.id).bin, 'placement B stays binned');
+});
+
+test('expanding a binned folder in the Bin reveals its still-intact contents beneath it', () => {
+  let state = createGroup(emptyState(), 'Archive');
+  const [archive] = state.groups;
+  state = createShortcut(state, { name: 'Inside', target: 'C:\\inside.exe', parentId: archive.id });
+  const inside = state.shortcuts[0];
+  state = binSelection(state, [archive.id], '2026-07-30T00:00:00.000Z');
+
+  const collapsed = visibleGraphItems(state, ROOT_ID, new Set(), true);
+  assert.equal(collapsed.length, 1, 'only the binned folder itself shows, collapsed');
+  assert.equal(collapsed[0].id, archive.id);
+
+  const expanded = visibleGraphItems(state, ROOT_ID, new Set([archive.id]), true);
+  const child = expanded.find((i) => i.id === inside.placements[0].id);
+  assert.ok(child, 'the shortcut inside the binned folder now shows as its own tile');
+  assert.equal(child.parentId, archive.id, 'nested under the binned folder, not a flat root');
+  assert.equal(child.depth, 1);
+
+  const edges = graphEdges(expanded);
+  assert.equal(edges.length, 1, 'an edge is drawn from the binned folder to its revealed child');
+  assert.equal(edges[0].source, archive.id);
+});
+
+test('restoring one item nested inside a binned folder lands it under the nearest still-active ancestor', () => {
+  // Spec from the creator: chain 1>2>3>4>5 — binning 3 hides 4 and 5 (still
+  // intact, just invisible). Restoring 5 alone must NOT un-bin 3 — it should
+  // reparent 5 directly under 2, the nearest ancestor that's still active.
+  let state = createGroup(emptyState(), '1');
+  state = createGroup(state, '2', state.groups[0].id);
+  state = createGroup(state, '3', state.groups[1].id);
+  state = createGroup(state, '4', state.groups[2].id);
+  const [g1, g2, g3, g4] = state.groups;
+  state = createShortcut(state, { name: '5', target: 'C:\\five.exe', parentId: g4.id });
+  const five = state.shortcuts[0];
+
+  state = binSelection(state, [g3.id], '2026-07-30T00:00:00.000Z');
+  state = restoreSelection(state, [five.placements[0].id]);
+
+  const restoredFive = state.shortcuts[0].placements[0];
+  assert.equal(restoredFive.parentId, g2.id, 'restored directly under 2, skipping the still-binned 3 and 4');
+  assert.ok(!restoredFive.bin, 'no longer hidden');
+
+  const stillBinned = state.groups.find((candidate) => candidate.id === g3.id);
+  assert.ok(stillBinned.bin, '3 itself is still in the Bin');
+  const g4After = state.groups.find((candidate) => candidate.id === g4.id);
+  assert.ok(!g4After.bin, '4 was never itself binned, just hidden under 3');
+  assert.equal(g4After.parentId, g3.id, '4 stays right where it was, still nested under the binned 3');
+});
+
+test('permanently deleting one item nested inside a binned folder removes only that item', () => {
+  let state = createGroup(emptyState(), 'Archive');
+  const [archive] = state.groups;
+  state = createShortcut(state, { name: 'Keep', target: 'C:\\keep.exe', parentId: archive.id });
+  state = createShortcut(state, { name: 'Drop', target: 'C:\\drop.exe', parentId: archive.id });
+  const keep = state.shortcuts.find((s) => s.name === 'Keep');
+  const drop = state.shortcuts.find((s) => s.name === 'Drop');
+  state = binSelection(state, [archive.id], '2026-07-30T00:00:00.000Z');
+
+  state = permanentlyDelete(state, [drop.placements[0].id]);
+
+  assert.ok(!state.shortcuts.some((s) => s.name === 'Drop'), 'Drop is gone');
+  assert.ok(state.shortcuts.some((s) => s.name === 'Keep'), 'Keep is untouched');
+  assert.ok(state.groups.some((g) => g.id === archive.id && g.bin), 'the folder itself is still in the Bin');
+});
+
+test('drilling into a binned folder shows only its direct children, not the whole Bin', () => {
+  let state = createGroup(emptyState(), 'Archive');
+  const [archive] = state.groups;
+  state = createShortcut(state, { name: 'Inside', target: 'C:\\inside.exe', parentId: archive.id });
+  const inside = state.shortcuts[0];
+  state = createShortcut(state, { name: 'Elsewhere', target: 'C:\\elsewhere.exe', parentId: ROOT_ID });
+  const elsewhere = state.shortcuts.find((s) => s.name === 'Elsewhere');
+  state = binSelection(state, [archive.id, elsewhere.placements[0].id], '2026-07-30T00:00:00.000Z');
+
+  const topLevel = visibleGraphItems(state, ROOT_ID, new Set(), true, 'bin');
+  assert.equal(topLevel.length, 2, 'Archive and Elsewhere both show at the top of the Bin');
+
+  const drilledIn = visibleGraphItems(state, ROOT_ID, new Set(), true, archive.id);
+  assert.equal(drilledIn.length, 1, 'only Archive\'s own child shows once drilled in');
+  assert.equal(drilledIn[0].id, inside.placements[0].id);
+  assert.equal(drilledIn[0].depth, 0, 'a drilled-in view treats its own contents as roots');
+});
+
+test('an ordinary (never-linked) binned shortcut gets no origin edge — only linked ones need one', () => {
+  let state = createGroup(emptyState(), 'Archive');
+  const [archive] = state.groups;
+  state = createShortcut(state, { name: 'Solo', target: 'C:\\solo.exe', parentId: archive.id });
+  const solo = state.shortcuts[0];
+  state = binSelection(state, [solo.placements[0].id], '2026-07-30T00:00:00.000Z');
+
+  const binItems = visibleGraphItems(state, ROOT_ID, new Set(), true, 'bin');
+  const edges = binOriginEdges(binItems);
+  assert.equal(edges.length, 0, 'a single-placement shortcut has nothing to distinguish, so no ghost/edge');
+});
+
+test('a binned shortcut linked into several folders at once gets an origin edge back to each folder it came from', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  const [a, b] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  state = copySelection(state, [original.placements[0].id], b.id);
+  const linked = state.shortcuts.find((candidate) => candidate.id === original.id);
+  const [placementA, placementB] = linked.placements;
+  state = binSelection(state, [placementA.id, placementB.id], '2026-07-30T00:00:00.000Z');
+
+  const binItems = visibleGraphItems(state, ROOT_ID, new Set(), true, 'bin');
+  const edges = binOriginEdges(binItems);
+  assert.equal(edges.length, 2, 'one origin edge per binned placement');
+
+  const edgeToA = edges.find((e) => e.target === placementA.id);
+  const edgeToB = edges.find((e) => e.target === placementB.id);
+  assert.ok(edgeToA.ghost, 'folder A is not itself in the Bin, so its edge targets a ghost node');
+  assert.equal(edgeToA.source, `bin-origin:${a.id}`);
+  assert.ok(edgeToB.ghost);
+  assert.equal(edgeToB.source, `bin-origin:${b.id}`);
+});
+
+test('a binned shortcut origin edge targets the real folder tile when that folder is also visible in the Bin', () => {
+  let state = createGroup(emptyState(), 'Archive');
+  state = createGroup(state, 'Other');
+  const [archive, other] = state.groups;
+  state = createShortcut(state, { name: 'Inside', target: 'C:\\inside.exe', parentId: archive.id });
+  const insideOriginal = state.shortcuts[0];
+  // Link it into a second folder so it has more than one placement total —
+  // otherwise there's nothing to distinguish and no origin edge is drawn.
+  state = copySelection(state, [insideOriginal.placements[0].id], other.id);
+  const inside = state.shortcuts.find((candidate) => candidate.id === insideOriginal.id);
+  const placementInArchive = inside.placements.find((p) => p.parentId === archive.id);
+  // Bin the shortcut's own placement first, as its own independent top-level
+  // Bin root — then separately bin its (now-empty-of-active-children)
+  // origin folder too, so both end up as independent top-level Bin roots
+  // at once, rather than the folder implicitly covering the shortcut.
+  state = binSelection(state, [placementInArchive.id], '2026-07-30T00:00:00.000Z');
+  state = binSelection(state, [archive.id], '2026-07-30T00:00:01.000Z');
+
+  const binItems = visibleGraphItems(state, ROOT_ID, new Set(), true, 'bin');
+  const edges = binOriginEdges(binItems);
+  const edgeToInside = edges.find((e) => e.target === placementInArchive.id);
+  assert.ok(edgeToInside);
+  assert.ok(!edgeToInside.ghost, 'Archive is itself visible in the Bin, so no ghost is needed');
+  assert.equal(edgeToInside.source, archive.id);
 });
 
 test('persisted layout=graph loads directly into graph mode', () => {
@@ -374,6 +570,41 @@ test('copying a shortcut into a folder selected by a single click produces a sec
 
   const edgesToShared = graphEdges(itemsBothExpanded).filter((e) => e.target === original.id);
   assert.equal(edgesToShared.length, 2, 'both folders show an edge to the shared shortcut');
+});
+
+test('pasting into multiple selected folders links a placement into every one of them', () => {
+  // Regression test for batch linking: the renderer's pasteInto() loops
+  // copySelection() once per selected destination folder when pasting a
+  // copy (not a cut, which can only ever move to one place). Mirrors that
+  // loop directly against the model layer.
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  state = createGroup(state, 'C');
+  state = createGroup(state, 'D');
+  const [a, b, c, d] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  const placementId = original.placements[0].id;
+
+  // User selects folders B, C, and D (all with a single click, not entered)
+  // then pastes — every selected folder should receive a new placement.
+  for (const destinationId of [b.id, c.id, d.id]) {
+    state = copySelection(state, [placementId], destinationId);
+  }
+
+  const record = state.shortcuts.find((candidate) => candidate.id === original.id);
+  assert.equal(record.placements.filter((p) => !p.bin).length, 4, 'original plus 3 new placements');
+  for (const destination of [a, b, c, d]) {
+    assert.ok(record.placements.some((p) => p.parentId === destination.id), `linked into ${destination.name}`);
+  }
+
+  const itemsAllExpanded = visibleGraphItems(state, ROOT_ID, new Set([a.id, b.id, c.id, d.id]), false);
+  const sharedNodes = itemsAllExpanded.filter((i) => i.id === original.id);
+  assert.equal(sharedNodes.length, 1, 'still one shared node');
+  assert.deepEqual(new Set(sharedNodes[0].parentIds), new Set([a.id, b.id, c.id, d.id]));
+
+  const edgesToShared = graphEdges(itemsAllExpanded).filter((e) => e.target === original.id);
+  assert.equal(edgesToShared.length, 4, 'all four folders show an edge to the shared shortcut');
 });
 
 test('forking from a placement in folder B (not the placement in folder A) forks the correct one', () => {

@@ -86,6 +86,21 @@ function activeItem(state, candidate) {
   return !candidate.bin && !isUnderBinnedGroup(state, candidate);
 }
 
+/** Walks up from parentId past any binned ancestors to find the nearest
+ * still-active folder (or ROOT_ID). Used to restore an item nested inside
+ * a binned folder without un-binning that folder — e.g. binning 3 in the
+ * chain 1>2>3>4>5 and then restoring 5 alone should land it directly under
+ * 2, the nearest ancestor that's still active. */
+function nearestActiveAncestorId(state, parentId) {
+  if (parentId === ROOT_ID || parentId === 'bin') return ROOT_ID;
+  let cursor = group(state, parentId);
+  while (cursor) {
+    if (!cursor.bin && !isUnderBinnedGroupId(state, cursor.parentId)) return cursor.id;
+    cursor = group(state, cursor.parentId);
+  }
+  return ROOT_ID;
+}
+
 function activePlacements(shortcut) {
   return (shortcut.placements ?? []).filter((placement) => !placement.bin);
 }
@@ -158,6 +173,13 @@ export function binnedItems(state) {
         order: placement.order ?? 0,
         bin: placement.bin,
         linked: placementCount(candidate) > 1,
+        // Whether this shortcut had more than one placement in total
+        // (active + binned) — unlike `linked` above (which only counts
+        // currently-active placements, correct for the link badge/fork
+        // prompt elsewhere), this stays true even when every placement
+        // was binned at once, since the Bin still needs to distinguish
+        // those otherwise-identical tiles from each other.
+        wasLinked: (candidate.placements?.length ?? 0) > 1,
         placements: undefined,
       });
     }
@@ -166,6 +188,37 @@ export function binnedItems(state) {
     ...state.groups.filter((candidate) => candidate.bin).map((candidate) => ({ ...candidate, kind: 'group' })),
     ...shortcutPlacements,
   ]);
+}
+
+/** Lists the direct children of a binned folder, for expanding it inside
+ * the Bin view. Nothing here was independently binned — a folder's
+ * children are still fully intact, just hidden from the normal view
+ * because their ancestor is binned (see isUnderBinnedGroup) — so this
+ * intentionally skips the "hidden by binned ancestor" filter itemsIn()
+ * applies, while still excluding anything that has since been
+ * independently binned itself (it already has its own top-level Bin
+ * tile and shouldn't also appear nested here). */
+export function itemsInBinnedGroup(state, groupId) {
+  const childGroups = state.groups
+    .filter((candidate) => candidate.parentId === groupId && !candidate.bin)
+    .map((candidate) => ({ ...candidate, kind: 'group' }));
+  const childPlacements = [];
+  for (const candidate of state.shortcuts) {
+    for (const placement of activePlacements(candidate)) {
+      if (placement.parentId !== groupId) continue;
+      childPlacements.push({
+        ...candidate,
+        kind: 'shortcut',
+        id: placement.id,
+        shortcutId: candidate.id,
+        parentId: placement.parentId,
+        order: placement.order,
+        linked: placementCount(candidate) > 1,
+        placements: undefined,
+      });
+    }
+  }
+  return sorted([...childGroups, ...childPlacements]);
 }
 
 function normalizeGraphPositions(raw) {
@@ -680,28 +733,38 @@ export function binSelection(state, ids, binnedAt = new Date().toISOString()) {
 export function restoreSelection(state, ids) {
   const selected = new Set(ids);
   const restore = (candidate) => {
-    if (!selected.has(candidate.id) || !candidate.bin) return candidate;
-    const originalParent = candidate.bin.parentId;
-    const canRestoreParent = originalParent === ROOT_ID
-      || (group(state, originalParent) && activeItem(state, group(state, originalParent)));
-    return {
-      ...candidate,
-      parentId: canRestoreParent ? originalParent : ROOT_ID,
-      order: candidate.bin.order,
-      bin: undefined,
-    };
+    if (!selected.has(candidate.id)) return candidate;
+    if (candidate.bin) {
+      const originalParent = candidate.bin.parentId;
+      const canRestoreParent = originalParent === ROOT_ID
+        || (group(state, originalParent) && activeItem(state, group(state, originalParent)));
+      return {
+        ...candidate,
+        parentId: canRestoreParent ? originalParent : ROOT_ID,
+        order: candidate.bin.order,
+        bin: undefined,
+      };
+    }
+    // Never itself binned — just nested inside a binned ancestor. Restoring
+    // it alone reparents it to the nearest still-active ancestor, without
+    // touching the binned folder it was pulled out of.
+    if (!isUnderBinnedGroup(state, candidate)) return candidate;
+    return { ...candidate, parentId: nearestActiveAncestorId(state, candidate.parentId) };
   };
   const groups = state.groups.map(restore);
   const shortcuts = mapPlacements(state.shortcuts, ids, (placement) => {
-    if (!placement.bin) return placement;
-    const originalParent = placement.bin.parentId;
-    const canRestoreParent = originalParent === ROOT_ID
-      || (group(state, originalParent) && activeItem(state, group(state, originalParent)));
-    return {
-      id: placement.id,
-      parentId: canRestoreParent ? originalParent : ROOT_ID,
-      order: placement.bin.order,
-    };
+    if (placement.bin) {
+      const originalParent = placement.bin.parentId;
+      const canRestoreParent = originalParent === ROOT_ID
+        || (group(state, originalParent) && activeItem(state, group(state, originalParent)));
+      return {
+        id: placement.id,
+        parentId: canRestoreParent ? originalParent : ROOT_ID,
+        order: placement.bin.order,
+      };
+    }
+    if (!isUnderBinnedGroupId(state, placement.parentId)) return placement;
+    return { ...placement, parentId: nearestActiveAncestorId(state, placement.parentId) };
   });
   return { ...state, groups, shortcuts };
 }
@@ -723,7 +786,9 @@ function descendantGroupIds(state, roots) {
 
 export function permanentlyDelete(state, ids) {
   const selected = ids.map((itemId) => item(state, itemId));
-  if (selected.some((candidate) => !candidate?.bin)) {
+  const isDeletable = (candidate) => Boolean(candidate)
+    && (Boolean(candidate.bin) || isUnderBinnedGroupId(state, candidate.parentId));
+  if (selected.some((candidate) => !isDeletable(candidate))) {
     throw new Error('Only items in the Bin can be permanently deleted.');
   }
   const selectedIds = new Set(ids);

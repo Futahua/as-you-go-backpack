@@ -99,6 +99,16 @@ button { color: inherit; }
 .toolbar-float[data-toolbar-key="copy-prompt"] { top: 12px; right: 148px; }
 .toolbar-float[data-toolbar-key="bin-button"] { top: 12px; right: 28px; }
 .toolbar-float[data-toolbar-key="delete-all-bin"] { top: 12px; right: 88px; }
+.toolbar-float[data-toolbar-key="restore-all-bin"] { top: 12px; right: 208px; }
+#delete-all-bin.selective {
+  background: #f2d7d7;
+  border-color: #a23b3b;
+}
+#restore-all-bin.selective {
+  background: #d7e7d9;
+  border-color: #4c725a;
+  color: #4c725a;
+}
 
 .breadcrumbs {
   display: flex;
@@ -121,7 +131,6 @@ button { color: inherit; }
 }
 .breadcrumbs button:hover { background: #ece9e0; }
 .breadcrumbs span { color: #9b9589; }
-.bin-crumb { padding: 5px 7px; color: #5c554a !important; font-weight: 600; }
 .status {
   position: relative;
   z-index: 5;
@@ -349,11 +358,31 @@ button { color: inherit; }
   background: #d7e7d9;
   box-shadow: 0 0 0 3px rgba(76, 114, 90, 0.16);
 }
+.bin-button.graph-bin-drop-target {
+  border-color: #a23b3b;
+  background: #f2d7d7;
+  box-shadow: 0 0 0 3px rgba(162, 59, 59, 0.22);
+}
 .graph-edge {
   fill: none;
   stroke: #b9b3a6;
   stroke-width: 1.5;
   transition: opacity 180ms ease, stroke 180ms ease;
+}
+.graph-edge.bin-origin-edge {
+  stroke: #b23b3b;
+  stroke-dasharray: 4 3;
+}
+.graph-node-shell.bin-origin-ghost {
+  pointer-events: none;
+}
+.icon-item.bin-origin-ghost {
+  opacity: 0.55;
+  border-style: dashed;
+  cursor: default;
+}
+.icon-item.bin-origin-ghost:hover {
+  background: transparent;
 }
 .empty {
   position: absolute;
