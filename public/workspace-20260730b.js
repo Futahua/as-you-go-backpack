@@ -1706,7 +1706,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
   event.stopPropagation();
   const tile = event.target.closest('.icon-item');
   if (tile) {
-    if (event.ctrlKey && tile.dataset.kind === 'group') {
+    if (event.shiftKey && tile.dataset.kind === 'group') {
       const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
       const id = tile.dataset.id;
       const folderIds = selected.has(id)
