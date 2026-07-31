@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https: http:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>As you Go</title>
+    <link rel="stylesheet" href="workspace-20260730b.css" />
+    <script type="module" src="workspace-20260730b.js"></script>
+  </head>
+  <body>
+    <main class="workspace">
+      <section class="navigation" aria-label="Folder navigation">
+        <nav class="breadcrumbs" id="breadcrumbs" aria-label="Current group path"></nav>
+        <div class="navigation-actions">
+          <button class="quiet-button danger-text" id="delete-all-bin" type="button" hidden>Delete all</button>
+          <button class="quiet-button pickup-copy" id="copy-prompt" type="button"><span aria-hidden="true">⧉</span><span class="copy-label">Copy agent pickup prompt</span></button>
+          <button class="quiet-button bin-button" id="bin-button" data-bin-view type="button" aria-pressed="false">
+            <span aria-hidden="true">♲</span>
+            <span id="bin-label">Bin</span>
+            <span class="bin-count" id="bin-count" hidden></span>
+          </button>
+        </div>
+      </section>
+
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+
+      <section class="explorer" id="explorer" aria-label="As you Go explorer">
+        <div
+          class="icon-grid"
+          id="icon-grid"
+          data-icon-grid
+          tabindex="0"
+          aria-label="Items in this folder"
+        ></div>
+        <div class="empty" id="empty" hidden></div>
+        <div class="selection-marquee" id="selection-marquee" aria-hidden="true" hidden></div>
+      </section>
+
+      <footer class="selection-status" id="selection-status" hidden></footer>
+
+      <div class="context-menu" id="context-menu" data-context-menu role="menu" hidden></div>
+
+      <section class="editor-layer" id="editor-layer" hidden>
+        <form class="editor" id="editor" aria-label="Shortcut or folder editor">
+          <h2 id="editor-title"></h2>
+          <label>Name<input id="name-input" maxlength="120" autocomplete="off" /></label>
+          <label id="description-label">Description <span>(optional)</span><textarea id="description-input" maxlength="500" rows="2"></textarea></label>
+          <div id="target-fields">
+            <label>Target<input id="target-input" readonly /></label>
+            <div class="editor-actions" id="target-actions">
+              <button class="paper-button" id="pick-file" type="button">Choose file / app</button>
+              <button class="paper-button" id="pick-folder" type="button">Choose folder</button>
+            </div>
+          </div>
+          <fieldset class="icon-choice">
+            <legend>Icon</legend>
+            <div class="icon-preview-shell"><img id="icon-preview" class="icon-preview" alt="" hidden /><span id="icon-fallback" aria-hidden="true">↗</span></div>
+            <div class="editor-actions">
+              <button class="paper-button" id="use-target-icon" type="button">Use target icon</button>
+              <label class="paper-button file-button">Choose image<input id="icon-input" type="file" accept="image/*" /></label>
+            </div>
+          </fieldset>
+          <p class="editor-error" id="editor-error" role="alert"></p>
+          <div class="editor-actions editor-submit">
+            <button class="paper-button" id="cancel-editor" type="button">Cancel</button>
+            <button class="paper-button primary" id="save-editor" type="button">Save</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="confirm-layer" id="confirm-layer" hidden>
+        <div class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+          <h2 id="confirm-title">Delete permanently?</h2>
+          <p id="confirm-copy">This cannot be undone.</p>
+          <div class="editor-actions">
+            <button class="paper-button" id="cancel-confirm" type="button">Cancel</button>
+            <button class="paper-button danger" id="confirm-delete" type="button">Delete permanently</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
