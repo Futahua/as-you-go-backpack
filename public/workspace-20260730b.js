@@ -1080,7 +1080,7 @@ function openMenu(x, y, kind = 'selection', parentId = currentId) {
       menuButton('bin', chosen.length > 1 ? 'Move items to Bin' : 'Move to Bin', true),
       layout === 'graph' ? '<hr />' : '',
       layout === 'graph'
-        ? menuButton('reset-graph-position', chosen.length > 1 ? 'Reset graph positions' : 'Reset graph position')
+        ? menuButton('reset-graph-position', chosen.length > 1 ? 'Follow folders automatically' : 'Follow folder automatically')
         : '',
     ].join('');
   }
@@ -1447,6 +1447,7 @@ elements.grid.addEventListener('pointerdown', (event) => {
         startWorldX: null,
         startWorldY: null,
         initialPositions: new Map(),
+        pinOnRelease: event.shiftKey,
         moved: false,
         thresholdPassed: false,
       };
@@ -1498,13 +1499,16 @@ elements.grid.addEventListener('pointermove', (event) => {
       const localY = rect ? graphDrag.startClientY - rect.top : graphDrag.startClientY;
       graphDrag.startWorldX = (localX - transform.x) / transform.k;
       graphDrag.startWorldY = (localY - transform.y) / transform.k;
+      const pinClass = graphDrag.pinOnRelease ? 'will-pin' : 'will-release';
       for (const id of graphDrag.itemIds) {
         const node = graph._getNode(id);
         if (node) {
           graphDrag.initialPositions.set(id, {
             x: node.x, y: node.y, fx: node.fx, fy: node.fy,
           });
-          if (node.shell) node.shell.classList.add('graph-dragging');
+          if (node.shell) {
+            node.shell.classList.add('graph-dragging', pinClass);
+          }
         }
       }
     }
@@ -1558,15 +1562,10 @@ elements.grid.addEventListener('pointerup', (event) => {
     }
     if (graphDrag.moved) {
       suppressGraphClick = true;
-      document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging'));
+      document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
       document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
       const shells = [...elements.grid.querySelectorAll('.graph-node-shell')];
       shells.forEach((s) => s.style.pointerEvents = '');
-      const viewport = elements.grid.querySelector('.graph-viewport');
-      let transform = { x: 0, y: 0, k: 1 };
-      if (viewport) {
-        try { transform = zoomTransform(viewport); } catch { /* use identity */ }
-      }
       let hitFolderId = null;
       shells.forEach((s) => {
         if (!graphDrag.itemIds.includes(s.dataset.graphNodeId)) {
@@ -1595,7 +1594,7 @@ elements.grid.addEventListener('pointerup', (event) => {
         } catch (error) {
           setStatus(error instanceof Error ? error.message : String(error));
         }
-      } else {
+      } else if (graphDragCopy.pinOnRelease) {
         const ctxId = graphContextId(currentId, binMode);
         const updates = {};
         for (const id of graphDragCopy.itemIds) {
@@ -1605,8 +1604,20 @@ elements.grid.addEventListener('pointerup', (event) => {
           }
         }
         state = setGraphPositions(state, ctxId, updates);
-        graphDrag = null;
         graph._setSimulationDecay();
+        saveWorkspaceView();
+      } else {
+        const ctxId = graphContextId(currentId, binMode);
+        state = removeGraphPositions(state, ctxId, graphDragCopy.itemIds);
+        for (const id of graphDragCopy.itemIds) {
+          const node = graph._getNode(id);
+          if (node) {
+            node.fx = null;
+            node.fy = null;
+            node.positioned = false;
+          }
+        }
+        graph.reheat(0.25);
         saveWorkspaceView();
       }
       return;
@@ -1634,7 +1645,20 @@ elements.grid.addEventListener('pointercancel', (event) => {
     if (elements.grid.hasPointerCapture(event.pointerId)) {
       elements.grid.releasePointerCapture(event.pointerId);
     }
-    document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging'));
+    if (graphDrag.moved) {
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        const initial = graphDrag.initialPositions.get(id);
+        if (node && initial) {
+          node.x = initial.x;
+          node.y = initial.y;
+          node.fx = initial.fx;
+          node.fy = initial.fy;
+        }
+      }
+      graph.reheat(0.2);
+    }
+    document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
     document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
     graphDrag = null;
     return;

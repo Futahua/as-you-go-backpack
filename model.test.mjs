@@ -523,3 +523,108 @@ test('normalizeGraphPositions returns empty when given null/undefined/non-object
   assert.deepEqual(normalizeGraphPositions('string'), {});
   assert.deepEqual(normalizeGraphPositions([]), {});
 });
+
+test('setGraphPositions stores coordinates and getGraphPosition retrieves them (simulates shift-drag pin)', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 100, y: 200 } });
+  const pos = getGraphPosition(state, ROOT_ID, 'item1');
+  assert.deepEqual(pos, { x: 100, y: 200 });
+  assert.ok(Number.isFinite(pos.x) && Number.isFinite(pos.y));
+});
+
+test('normal drag of an unpinned item removes saved positions (simulates release-without-shift from unpinned)', () => {
+  let state = emptyState();
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.deepEqual(state.view.graphPositions, {});
+});
+
+test('normal drag of a pinned item removes its saved coordinate and preserves other items', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+  });
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item2'), { x: 30, y: 40 });
+});
+
+test('shift-drag of a pinned item updates its saved coordinate', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 99, y: 88 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 99, y: 88 });
+});
+
+test('multi-selection shift-drag saves coordinates for all dragged items', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+    item3: { x: 50, y: 60 },
+  });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item2'), { x: 30, y: 40 });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item3'), { x: 50, y: 60 });
+});
+
+test('multi-selection normal drag removes coordinates only for dragged items', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+  });
+  state = setGraphPositions(state, ROOT_ID, { item3: { x: 50, y: 60 } });
+  state = removeGraphPositions(state, ROOT_ID, ['item1', 'item2']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item2'), null);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item3'), { x: 50, y: 60 });
+});
+
+test('folder drop always moves items and clears source context coordinates regardless of shift', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+  state = createGroup(state, 'Things');
+  const things = state.groups[1];
+  state = createShortcut(state, { name: 'CLIPS', target: 'C:\\clips.exe', parentId: letters.id });
+  const clips = state.shortcuts[0];
+
+  state = setGraphPositions(state, ROOT_ID, { [clips.id]: { x: 100, y: 200 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, clips.id), { x: 100, y: 200 });
+
+  const moved = moveSelection(state, [clips.id], things.id);
+  state = removeGraphPositions(moved, ROOT_ID, [clips.id]);
+
+  assert.equal(state.shortcuts[0].parentId, things.id);
+  assert.equal(getGraphPosition(state, ROOT_ID, clips.id), null);
+});
+
+test('free-space graph dragging never changes item parentId or order through setGraphPositions', () => {
+  let state = createShortcut(emptyState(), { name: 'A', target: 'C:\\a.exe' });
+  const item = state.shortcuts[0];
+  const originalParentId = item.parentId;
+  const originalOrder = item.order;
+
+  state = setGraphPositions(state, ROOT_ID, { [item.id]: { x: 999, y: 888 } });
+
+  assert.equal(state.shortcuts[0].parentId, originalParentId);
+  assert.equal(state.shortcuts[0].order, originalOrder);
+});
+
+test('removeGraphPositions on a non-existent item is a safe no-op', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = removeGraphPositions(state, ROOT_ID, ['nonexistent']);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+});
+
+test('context separation: same itemId can have positions in different contexts, removing from one does not affect another', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { shared: { x: 10, y: 20 } });
+  state = setGraphPositions(state, 'group-A', { shared: { x: 50, y: 60 } });
+
+  state = removeGraphPositions(state, ROOT_ID, ['shared']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'shared'), null);
+  assert.deepEqual(getGraphPosition(state, 'group-A', 'shared'), { x: 50, y: 60 });
+});

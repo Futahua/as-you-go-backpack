@@ -327,6 +327,15 @@ button { color: inherit; }
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
   outline: 2px solid rgba(76, 114, 90, 0.65);
 }
+.graph-node-shell.will-pin .icon-item {
+  outline-color: rgba(76, 114, 90, 0.9);
+  outline-width: 2.5px;
+}
+.graph-node-shell.will-release .icon-item {
+  outline-color: rgba(120, 120, 120, 0.55);
+  outline-style: dashed;
+  outline-width: 2px;
+}
 .graph-node-shell.graph-drop-target .icon-item {
   border-color: #4c725a;
   background: #d7e7d9;
