@@ -2,6 +2,7 @@ import {
   ROOT_ID,
   binSelection,
   binnedItems,
+  itemsInBinnedGroup,
   copySelection,
   createGroup,
   createDroppedShortcuts,
@@ -14,7 +15,6 @@ import {
   normalizeState,
   permanentlyDelete,
   renameItem,
-  reorderSelection,
   restoreSelection,
   setIconSize,
   updateGroup,
@@ -25,6 +25,11 @@ import {
   getGraphPosition,
   setGraphPositions,
   removeGraphPositions,
+  setToolbarPosition,
+  getToolbarPosition,
+  forkPlacement,
+  collapsePlacements,
+  placementCount,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -37,7 +42,7 @@ import {
 } from './vendor/d3-force.js';
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
-import { visibleGraphItems, graphEdges, seedPosition } from './graph-model-20260730b.js';
+import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition } from './graph-model-20260730b.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
@@ -62,13 +67,12 @@ const elements = {
   empty: document.querySelector('#empty'),
   breadcrumbs: document.querySelector('#breadcrumbs'),
   deleteAllBin: document.querySelector('#delete-all-bin'),
+  restoreAllBin: document.querySelector('#restore-all-bin'),
   selectionStatus: document.querySelector('#selection-status'),
   menu: document.querySelector('#context-menu'),
 binButton: document.querySelector('#bin-button'),
   binLabel: document.querySelector('#bin-label'),
   binCount: document.querySelector('#bin-count'),
-  graphButton: document.querySelector('#graph-view-button'),
-  graphLabel: document.querySelector('#graph-label'),
   editorLayer: document.querySelector('#editor-layer'),
   editor: document.querySelector('#editor'),
   saveButton: document.querySelector('#save-editor'),
@@ -85,29 +89,33 @@ binButton: document.querySelector('#bin-button'),
   iconFallback: document.querySelector('#icon-fallback'),
   iconDefaultButton: document.querySelector('#use-target-icon'),
   confirmLayer: document.querySelector('#confirm-layer'),
+  confirmTitle: document.querySelector('#confirm-title'),
   confirmCopy: document.querySelector('#confirm-copy'),
+  confirmDelete: document.querySelector('#confirm-delete'),
+  confirmRestore: document.querySelector('#confirm-restore'),
+  linkEditLayer: document.querySelector('#link-edit-layer'),
 };
 
 const pending = new Map();
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
-let undoState = null;
+let undoStack = [];
+let redoStack = [];
 let currentId = ROOT_ID;
 let selected = new Set();
 let selectionAnchor = null;
-let explorerExpanded = new Set();
 let graphExpanded = new Set();
 let clipboard = null;
 let editorMode = null;
 let editorIcon = null;
 let editorTargetIcon = null;
 let binMode = false;
-let layout = 'explorer';
-let dragIds = [];
+let binCurrentId = 'bin';
 let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
 let pendingPermanentIds = [];
+let pendingRestoreIds = [];
 let zoomTimer = null;
 let saveQueue = Promise.resolve();
 let graphDrag = null;
@@ -187,6 +195,68 @@ function item(itemId) {
   return group(itemId) ?? shortcut(itemId);
 }
 
+/** Resolves a shortcut by either its shared record id or one of its
+ * placement ids — bin-mode graph tiles are keyed by placement id (each
+ * binned placement is its own independent tile), so looking a bin
+ * shortcut tile up by shortcut() alone (which only matches the record id)
+ * always misses. */
+function shortcutByRecordOrPlacementId(candidateId) {
+  return shortcut(candidateId)
+    ?? state.shortcuts.find((record) => record.placements.some((placement) => placement.id === candidateId))
+    ?? null;
+}
+
+/** Any one active (non-bin) placement id belonging to the given shortcut
+ * identity — enough for the model layer's placement-scoped functions
+ * (copySelection/moveSelection/collapsePlacements) to find the record. */
+function anyActivePlacementId(shortcutId) {
+  const record = shortcut(shortcutId);
+  return record?.placements.find((placement) => !placement.bin)?.id ?? null;
+}
+
+function allActivePlacementIds(shortcutId) {
+  const record = shortcut(shortcutId);
+  return record?.placements.filter((placement) => !placement.bin).map((placement) => placement.id) ?? [];
+}
+
+/** The specific placement the user is currently looking at for this
+ * shortcut — the one matching its visible parent in the currently
+ * rendered graph node, falling back to any active placement if the node
+ * isn't on screen. Must be resolved at gesture-start time (copy/cut,
+ * drag start, bin move, editor open), not at commit time, since
+ * navigation or selection changes between gesture and commit shouldn't
+ * change which placement the action targets. */
+function visiblePlacementIdFor(shortcutId) {
+  const record = shortcut(shortcutId);
+  const visibleParentId = graph._getNode(shortcutId)?.parentIds?.[0];
+
+  return record?.placements.find((placement) =>
+    !placement.bin
+    && (!visibleParentId || placement.parentId === visibleParentId)
+  )?.id ?? anyActivePlacementId(shortcutId);
+}
+
+/** Resolves a Bin-context id — a group id, or one specific placement id —
+ * to its display name. Used for the Bin, where a tile's own id is the
+ * placement, not the shared shortcut identity. */
+function binItemName(binItemId) {
+  const asGroup = group(binItemId);
+  if (asGroup) return asGroup.name;
+  const owner = state.shortcuts.find((candidate) =>
+    candidate.placements.some((placement) => placement.id === binItemId));
+  return owner?.name ?? null;
+}
+
+/** How many distinct folders the given shortcut is currently shown linked
+ * into, in the graph node currently on screen for it — this is what decides
+ * whether cutting it collapses every placement into one, or only moves the
+ * one this view represents (per the creator's rule: 2+ visible edges means
+ * "act on the whole shared thing," exactly 1 means "act on this location"). */
+function visibleParentCountFor(shortcutId) {
+  const node = graph._getNode(shortcutId);
+  return node?.parentIds?.length ?? 1;
+}
+
 function isAvailableItem(itemId) {
   const candidate = item(itemId);
   if (!candidate || candidate.bin) return false;
@@ -201,11 +271,9 @@ function isAvailableItem(itemId) {
 function captureWorkspaceView() {
   state = updateWorkspaceView(state, {
     currentGroupId: currentId,
-    expandedGroupIds: [...explorerExpanded],
     graphExpandedGroupIds: [...graphExpanded],
     selectedItemIds: [...selected],
     binMode,
-    layout,
   });
 }
 
@@ -215,16 +283,11 @@ function restoreWorkspaceView() {
     requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
       ? requestedCurrent
       : ROOT_ID;
-  explorerExpanded = new Set(
-    state.view.expandedGroupIds.filter((groupId) =>
-      Boolean(group(groupId)) && isAvailableItem(groupId)),
-  );
   graphExpanded = new Set(
     (state.view.graphExpandedGroupIds ?? []).filter((groupId) =>
       Boolean(group(groupId))),
   );
   binMode = state.view.binMode;
-  layout = state.view.layout === 'graph' ? 'graph' : 'explorer';
   const binnedIds = new Set(binnedItems(state).map((candidate) => candidate.id));
   selected = new Set(
     state.view.selectedItemIds.filter((itemId) =>
@@ -250,7 +313,26 @@ function pathTo(groupId) {
   return [{ id: ROOT_ID, name: 'As you Go' }, ...result];
 }
 
+/** Breadcrumb path while drilled into a folder inside the Bin — walks up
+ * from groupId through its real (original) ancestor chain, stopping at
+ * the first folder that isn't itself binned (its own placement in the
+ * Bin's top-level list), so the trail reads "Bin › outerBinnedFolder ›
+ * ... › groupId" without ever crossing into the real explorer tree. */
+function pathToBin(groupId) {
+  const result = [];
+  let cursor = group(groupId);
+  while (cursor) {
+    result.unshift({ id: cursor.id, name: cursor.name });
+    if (cursor.bin) break;
+    cursor = group(cursor.parentId);
+  }
+  return [{ id: 'bin', name: 'Bin' }, ...result];
+}
+
 function iconMarkup(candidate) {
+  if (candidate.kind === 'bin-origin') {
+    return '<span class="folder-art" aria-hidden="true"><span></span></span>';
+  }
   if (candidate.kind === 'group') {
     if (candidate.icon) {
       return `<img src="${escapeHtml(candidate.icon)}" alt="" />`;
@@ -266,61 +348,16 @@ function iconMarkup(candidate) {
   return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
 }
 
+function linkMarkup(candidate) {
+  return candidate.linked
+    ? '<span class="link-badge" title="Linked into more than one folder" aria-hidden="true">⛓</span>'
+    : '';
+}
+
 function descriptionMarkup(candidate) {
   return candidate.kind === 'shortcut' && candidate.description
     ? `<small>${escapeHtml(candidate.description)}</small>`
     : '';
-}
-
-function renderItems(parentId, depth = 0) {
-  return itemsIn(state, parentId).map((candidate) => {
-    const isSelected = selected.has(candidate.id);
-    const canExpand = candidate.kind === 'group';
-    const isExpanded = canExpand && explorerExpanded.has(candidate.id);
-    const tile = `
-      <div
-        class="icon-item ${isSelected ? 'selected' : ''}"
-        data-id="${candidate.id}"
-        data-kind="${candidate.kind}"
-        data-parent="${parentId}"
-        draggable="true"
-        role="option"
-        aria-selected="${isSelected}"
-        tabindex="-1"
-      >
-        ${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}
-        <div class="item-icon">${iconMarkup(candidate)}</div>
-        <strong>${escapeHtml(candidate.name)}</strong>
-        ${descriptionMarkup(candidate)}
-      </div>`;
-    if (!isExpanded) return tile;
-    return `${tile}
-      <section class="expanded-branch" data-branch-parent="${candidate.id}" style="--branch-depth:${depth + 1}">
-        <div class="branch-heading">${escapeHtml(candidate.name)}</div>
-        <div class="nested-icon-grid" data-blank-parent="${candidate.id}">
-          ${renderItems(candidate.id, depth + 1)}
-        </div>
-      </section>`;
-  }).join('');
-}
-
-function renderBinItems() {
-  return binnedItems(state).map((candidate) => `
-    <div
-      class="icon-item ${selected.has(candidate.id) ? 'selected' : ''}"
-      data-id="${candidate.id}"
-      data-kind="${candidate.kind}"
-      data-parent="bin"
-      draggable="false"
-      role="option"
-      aria-selected="${selected.has(candidate.id)}"
-      tabindex="-1"
-    >
-      <div class="item-icon">${iconMarkup(candidate)}</div>
-      <strong>${escapeHtml(candidate.name)}</strong>
-      ${descriptionMarkup(candidate)}
-    </div>
-  `).join('');
 }
 
 const graph = createGraphController();
@@ -328,6 +365,7 @@ const graph = createGraphController();
 function createGraphController() {
   const nodes = new Map();
   const edges = new Map();
+  const originEdges = new Map();
   let simulation = null;
   let zoomBehavior = null;
   let viewportSelection = null;
@@ -426,6 +464,7 @@ function createGraphController() {
     if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
     nodes.clear();
     edges.clear();
+    originEdges.clear();
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
@@ -462,6 +501,12 @@ function createGraphController() {
       if (!source || !target || !edge.path) return;
       edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
     });
+    originEdges.forEach((edge) => {
+      const source = nodes.get(edge.sourceId);
+      const target = nodes.get(edge.targetId);
+      if (!source || !target || !edge.path) return;
+      edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+    });
   }
 
   function edgePath(x1, y1, x2, y2) {
@@ -470,9 +515,43 @@ function createGraphController() {
   }
 
   function buildCandidate(vi) {
-    const stored = item(vi.id);
+    if (vi.kind === 'bin-origin') {
+      // A ghost node standing in for a folder that isn't itself visible in
+      // the current Bin walk — just a "this is where it came from" label,
+      // not a real interactive item. The folder may since have been
+      // deleted or renamed to nothing findable; fall back to a generic
+      // label rather than dropping the edge entirely.
+      const origin = group(vi.groupId);
+      return {
+        id: vi.id,
+        kind: 'bin-origin',
+        name: origin?.name ?? 'Elsewhere',
+        parentId: null,
+        parentIds: [],
+        linked: false,
+      };
+    }
+    const stored = vi.kind === 'shortcut' ? shortcutByRecordOrPlacementId(vi.id) : group(vi.id);
     if (!stored) return null;
-    return { ...stored, kind: vi.kind };
+    return {
+      ...stored,
+      // The graph node's identity is always vi.id (a placement id for a
+      // bin-mode shortcut tile, the shared record id everywhere else) —
+      // never stored.id, which for a resolved-by-placement bin tile would
+      // be the shared shortcut record id and corrupt every DOM/selection
+      // lookup keyed off candidate.id (dataset.id, dataset.graphNodeId).
+      id: vi.id,
+      kind: vi.kind,
+      parentId: vi.parentId,
+      // Every folder this shortcut is currently placed in, per the visible
+      // graph (used to decide whether Ctrl+X collapses everything into one
+      // place or moves just the one placement this view represents).
+      parentIds: vi.parentIds ?? [vi.parentId],
+      // Whether the underlying shortcut has more than one active placement
+      // anywhere at all (not just in this view) — drives the link marker
+      // and the apply-everywhere-or-fork prompt on edit.
+      linked: vi.kind === 'shortcut' ? placementCount(stored) > 1 : false,
+    };
   }
 
   function syncNodes(visibleItems) {
@@ -488,6 +567,7 @@ function createGraphController() {
     }
     const ctxId = graphContextId(currentId, binMode);
     for (const vi of visibleItems) {
+      const parentIds = vi.parentIds ?? [vi.parentId];
       let node = nodes.get(vi.id);
       if (node) {
         if (node.exitTimer) {
@@ -501,16 +581,16 @@ function createGraphController() {
           }
         }
         node.candidate = buildCandidate(vi);
-        node.childIds = childIdsFor(vi);
-        node.parentNode = parentOfNode(vi);
+        node.parentIds = parentIds;
         node.depth = vi.depth;
         refreshNodeContent(node);
         continue;
       }
       const candidate = buildCandidate(vi);
       if (!candidate) continue;
-      const parent = candidate.parentId && candidate.parentId !== ROOT_ID && candidate.parentId !== 'bin'
-        ? nodes.get(candidate.parentId)
+      const firstParentId = parentIds[0];
+      const parent = firstParentId && firstParentId !== ROOT_ID && firstParentId !== 'bin'
+        ? nodes.get(firstParentId)
         : null;
       const siblings = byParent.get(candidate.parentId ?? ROOT_ID) ?? [];
       const index = Math.max(0, siblings.findIndex((s) => s.id === vi.id));
@@ -530,7 +610,7 @@ function createGraphController() {
         vy: 0,
         width: 0,
         height: 0,
-        childIds: childIdsFor(vi),
+        parentIds,
         parentNode: parent ?? null,
         shell: null,
         exiting: false,
@@ -542,36 +622,30 @@ function createGraphController() {
     }
   }
 
-  function parentOfNode(vi) {
-    if (!vi.parentId || vi.parentId === ROOT_ID || vi.parentId === 'bin') return null;
-    return nodes.get(vi.parentId) ?? null;
-  }
-
-  function childIdsFor(vi) {
-    if (binMode || vi.kind !== 'group' || !graphExpanded.has(vi.id)) return [];
-    return itemsIn(state, vi.id).map((c) => c.id);
-  }
-
   function refreshNodeContent(node) {
     if (!node.shell) return;
     const candidate = node.candidate;
     if (!candidate) return;
     const iconItem = node.shell.querySelector('.icon-item');
     if (!iconItem) return;
-    const canExpand = candidate.kind === 'group' && !binMode;
+    const isGhost = candidate.kind === 'bin-origin';
+    const canExpand = candidate.kind === 'group';
     const isExpanded = canExpand && graphExpanded.has(candidate.id);
-    const isSelected = selected.has(candidate.id);
+    const isSelected = !isGhost && selected.has(candidate.id);
     iconItem.dataset.kind = candidate.kind;
-    iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
+    iconItem.dataset.parent = candidate.parentId ?? (binMode ? 'bin' : currentId);
     iconItem.setAttribute('draggable', 'false');
     iconItem.setAttribute('aria-selected', String(isSelected));
     iconItem.classList.toggle('selected', isSelected);
+    iconItem.classList.toggle('bin-origin-ghost', isGhost);
+    node.shell.classList.toggle('bin-origin-ghost', isGhost);
     const signature = JSON.stringify([
       candidate.kind,
       candidate.name,
       candidate.description ?? '',
       candidate.target ?? '',
       candidate.icon ?? null,
+      candidate.linked ?? false,
       isExpanded,
       binMode,
       state.view.iconSize,
@@ -580,6 +654,7 @@ function createGraphController() {
       node.contentSignature = signature;
       iconItem.innerHTML =
         `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+        + `${linkMarkup(candidate)}`
         + `<div class="item-icon">${iconMarkup(candidate)}</div>`
         + `<strong>${escapeHtml(candidate.name)}</strong>`
         + `${descriptionMarkup(candidate)}`;
@@ -592,26 +667,28 @@ function createGraphController() {
   function createNodeShell(node) {
     const candidate = node.candidate;
     if (!candidate) return;
-    const isSelected = selected.has(candidate.id);
-    const canExpand = candidate.kind === 'group' && !binMode;
+    const isGhost = candidate.kind === 'bin-origin';
+    const isSelected = !isGhost && selected.has(candidate.id);
+    const canExpand = candidate.kind === 'group';
     const isExpanded = canExpand && graphExpanded.has(candidate.id);
 
     const shell = document.createElement('div');
-    shell.className = 'graph-node-shell';
+    shell.className = `graph-node-shell${isGhost ? ' bin-origin-ghost' : ''}`;
     shell.dataset.graphNodeId = candidate.id;
     shell.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
 
     const iconItem = document.createElement('div');
-    iconItem.className = `icon-item${isSelected ? ' selected' : ''}`;
+    iconItem.className = `icon-item${isSelected ? ' selected' : ''}${isGhost ? ' bin-origin-ghost' : ''}`;
     iconItem.dataset.id = candidate.id;
     iconItem.dataset.kind = candidate.kind;
-    iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
+    iconItem.dataset.parent = candidate.parentId ?? (binMode ? 'bin' : currentId);
     iconItem.setAttribute('draggable', 'false');
-    iconItem.setAttribute('role', 'option');
+    iconItem.setAttribute('role', isGhost ? 'presentation' : 'option');
     iconItem.setAttribute('aria-selected', String(isSelected));
     iconItem.setAttribute('tabindex', '-1');
     iconItem.innerHTML =
       `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+      + `${linkMarkup(candidate)}`
       + `<div class="item-icon">${iconMarkup(candidate)}</div>`
       + `<strong>${escapeHtml(candidate.name)}</strong>`
       + `${descriptionMarkup(candidate)}`;
@@ -626,6 +703,7 @@ function createGraphController() {
       candidate.description ?? '',
       candidate.target ?? '',
       candidate.icon ?? null,
+      candidate.linked ?? false,
       isExpanded,
       binMode,
       state.view.iconSize,
@@ -673,18 +751,15 @@ function createGraphController() {
     }, 200);
   }
 
-  function syncEdges() {
+  function syncEdges(visibleItems) {
     if (!edgeLayer) return;
     const wanted = new Map();
-    nodes.forEach((node) => {
-      if (node.exiting) return;
-      for (const childId of node.childIds) {
-        const child = nodes.get(childId);
-        if (!child || child.exiting) continue;
-        const key = `${node.id}->${childId}`;
-        wanted.set(key, { sourceId: node.id, targetId: childId });
-      }
-    });
+    for (const edge of graphEdges(visibleItems)) {
+      const source = nodes.get(edge.source);
+      const target = nodes.get(edge.target);
+      if (!source || !target || source.exiting || target.exiting) continue;
+      wanted.set(edge.id, { sourceId: edge.source, targetId: edge.target });
+    }
     for (const [key, edge] of edges) {
       if (!wanted.has(key)) {
         edge.path?.remove();
@@ -703,6 +778,41 @@ function createGraphController() {
         edgeLayer.append(path);
         edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
         edges.set(key, edge);
+      }
+    }
+  }
+
+  /** Draws the "where did this come from" edges for binned tiles (see
+   * binOriginEdges) — kept in a separate map/CSS class from the normal
+   * graph-edge set above, since these connect to a possibly-ghost node
+   * and are always styled distinctly (red) rather than the default gray. */
+  function syncOriginEdges(edgeList) {
+    if (!edgeLayer) return;
+    const wanted = new Map();
+    for (const edge of edgeList) {
+      const source = nodes.get(edge.source);
+      const target = nodes.get(edge.target);
+      if (!source || !target || source.exiting || target.exiting) continue;
+      wanted.set(edge.id, { sourceId: edge.source, targetId: edge.target });
+    }
+    for (const [key, edge] of originEdges) {
+      if (!wanted.has(key)) {
+        edge.path?.remove();
+        originEdges.delete(key);
+      }
+    }
+    for (const [key, info] of wanted) {
+      let edge = originEdges.get(key);
+      const source = nodes.get(info.sourceId);
+      const target = nodes.get(info.targetId);
+      if (!source || !target) continue;
+      if (!edge) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-edge bin-origin-edge');
+        path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+        edgeLayer.append(path);
+        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
+        originEdges.set(key, edge);
       }
     }
   }
@@ -728,6 +838,9 @@ function createGraphController() {
     simulation.nodes(nodeArray);
     const edgeArray = [];
     edges.forEach((edge) => {
+      edgeArray.push({ source: edge.sourceId, target: edge.targetId });
+    });
+    originEdges.forEach((edge) => {
       edgeArray.push({ source: edge.sourceId, target: edge.targetId });
     });
     simulation.force('link').links(edgeArray);
@@ -789,13 +902,27 @@ function createGraphController() {
       return;
     }
     updatePending = false;
-    const visible = visibleGraphItems(state, currentId, graphExpanded, binMode);
+    const visible = visibleGraphItems(state, currentId, graphExpanded, binMode, binCurrentId);
     if (visible.length === 0) {
       nodes.forEach((_, id) => removeNode(id));
+      syncEdges([]);
+      syncOriginEdges([]);
       return;
     }
-    syncNodes(visible);
-    syncEdges();
+    const originEdges = binMode ? binOriginEdges(visible) : [];
+    const ghostIds = new Set(originEdges.filter((e) => e.ghost).map((e) => e.ghostGroupId));
+    const ghostItems = [...ghostIds].map((groupId, index) => ({
+      id: `bin-origin:${groupId}`,
+      parentId: null,
+      kind: 'bin-origin',
+      groupId,
+      depth: 0,
+      siblingIndex: index,
+      siblingCount: ghostIds.size,
+    }));
+    syncNodes([...visible, ...ghostItems]);
+    syncEdges(visible);
+    syncOriginEdges(originEdges);
     syncSimulation();
     reheat(initialFit ? 0.7 : 0.35);
     if (initialFit && !initialized) {
@@ -852,52 +979,39 @@ function renderGraph(initialFit = false) {
 }
 
 function render() {
+  if (binMode && binCurrentId !== 'bin' && !group(binCurrentId)?.bin) {
+    // The folder we'd drilled into was restored or deleted out from under
+    // us (e.g. via the top-level Bin list or "Delete all") — fall back to
+    // the top of the Bin rather than rendering a dangling, nonexistent
+    // breadcrumb segment.
+    binCurrentId = 'bin';
+  }
   const iconSize = state.view.iconSize;
   document.documentElement.style.setProperty('--icon-size', `${iconSize}px`);
   elements.breadcrumbs.innerHTML = binMode
-    ? '<span class="bin-crumb">Bin</span>'
+    ? pathToBin(binCurrentId === 'bin' ? null : binCurrentId).map((candidate, index, path) =>
+        `<button type="button" data-bin-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
+      ).join('')
     : pathTo(currentId).map((candidate, index, path) =>
         `<button type="button" data-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
       ).join('');
 
-  const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
-  elements.grid.dataset.blankParent = binMode ? 'bin' : currentId;
-  elements.grid.dataset.view = layout;
+  const visible = binMode
+    ? (binCurrentId === 'bin' ? binnedItems(state) : itemsInBinnedGroup(state, binCurrentId))
+    : itemsIn(state, currentId);
+  elements.grid.dataset.blankParent = binMode ? binCurrentId : currentId;
+  elements.grid.dataset.view = 'graph';
+  elements.grid.classList.toggle('bin-canvas', binMode);
 
-  if (layout === 'graph') {
-    if (!graph.isAttached) {
-      elements.grid.innerHTML = '';
-      console.assert(
-        elements.grid.querySelectorAll('.graph-viewport').length === 0
-      );
-      console.assert(
-        elements.grid.querySelectorAll('.expanded-branch').length === 0
-      );
-      console.assert(
-        elements.grid.querySelectorAll('.nested-icon-grid').length === 0
-      );
-      renderGraph(true);
-    } else {
-      graph.updateGraphView(false);
-    }
-    console.assert(
-      elements.grid.querySelectorAll('.graph-viewport').length === 1
-    );
-    console.assert(
-      [...elements.grid.querySelectorAll('.icon-item')]
-        .every(item => item.closest('.graph-node-shell'))
-    );
-  } else {
-    if (graph.isAttached) graph.destroyGraphView();
+  if (!graph.isAttached) {
     elements.grid.innerHTML = '';
-    console.assert(
-      elements.grid.querySelectorAll('.graph-viewport').length === 0
-    );
-    elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
+    renderGraph(true);
+  } else {
+    graph.updateGraphView(false);
   }
   elements.empty.hidden = visible.length !== 0;
   elements.empty.textContent = binMode
-    ? 'The Bin is empty.'
+    ? (binCurrentId === 'bin' ? 'The Bin is empty.' : 'Nothing left here.')
     : 'This folder is empty. Right-click here to add something.';
 
   syncSelection();
@@ -907,15 +1021,20 @@ function render() {
   elements.binCount.textContent = String(binCount);
   elements.binButton.setAttribute('aria-pressed', String(binMode));
   elements.binLabel.textContent = binMode ? 'Close Bin' : 'Bin';
-  elements.graphButton.setAttribute('aria-pressed', String(layout === 'graph'));
-  elements.graphLabel.textContent = layout === 'graph' ? 'Explorer' : 'Graph';
+  elements.binButton.title = binMode ? 'Close Bin' : 'Bin';
+  const hasSelection = binMode && selected.size > 0;
   elements.deleteAllBin.hidden = !binMode || binCount === 0;
+  elements.restoreAllBin.hidden = !binMode || binCount === 0;
+  elements.deleteAllBin.classList.toggle('selective', hasSelection);
+  elements.restoreAllBin.classList.toggle('selective', hasSelection);
+  elements.deleteAllBin.title = hasSelection ? 'Delete selection permanently' : 'Delete all';
+  elements.restoreAllBin.title = hasSelection ? 'Restore selection' : 'Restore all';
 
   hydrateIcons();
 }
 
 function syncSelection() {
-  if (layout === 'graph' && graph.isAttached) {
+  if (graph.isAttached) {
     graph.refreshSelection();
   } else {
     document.querySelectorAll('.icon-item').forEach((tile) => {
@@ -959,7 +1078,14 @@ async function persist(nextState = state) {
 }
 
 async function commit(nextState, options = {}) {
-  if (!options.isUndo) undoState = state;
+  if (options.isUndo) {
+    redoStack.push(state);
+  } else if (options.isRedo) {
+    undoStack.push(state);
+  } else {
+    undoStack.push(state);
+    redoStack.length = 0;
+  }
   state = normalizeState(nextState);
   selected.clear();
   captureWorkspaceView();
@@ -976,11 +1102,17 @@ async function commit(nextState, options = {}) {
 }
 
 async function undo() {
-  if (!undoState) return;
-  const previous = undoState;
-  undoState = null;
+  if (undoStack.length === 0) return;
+  const previous = undoStack.pop();
   closeMenu();
   await commit(previous, { isUndo: true });
+}
+
+async function redo() {
+  if (redoStack.length === 0) return;
+  const next = redoStack.pop();
+  closeMenu();
+  await commit(next, { isRedo: true });
 }
 
 function visibleItemIds() {
@@ -1094,10 +1226,8 @@ function openMenu(x, y, kind = 'selection', parentId = currentId) {
       menuButton('copy', chosen.length > 1 ? 'Copy items' : 'Copy'),
       menuButton('cut', chosen.length > 1 ? 'Cut items' : 'Cut'),
       menuButton('bin', chosen.length > 1 ? 'Move items to Bin' : 'Move to Bin', true),
-      layout === 'graph' ? '<hr />' : '',
-      layout === 'graph'
-        ? menuButton('reset-graph-position', chosen.length > 1 ? 'Follow folders automatically' : 'Follow folder automatically')
-        : '',
+      '<hr />',
+      menuButton('reset-graph-position', chosen.length > 1 ? 'Follow folders automatically' : 'Follow folder automatically'),
     ].join('');
   }
   elements.menu.innerHTML = content;
@@ -1114,18 +1244,29 @@ function currentSelectionParent() {
   return first?.parentId ?? currentId;
 }
 
-function selectedPasteDestination() {
-  const folder = [...selected].map((itemId) => group(itemId)).find(Boolean);
-  return folder ? folder.id : currentId;
+function selectedPasteDestinations() {
+  const folders = [...selected].map((itemId) => group(itemId)).filter(Boolean);
+  return folders.length > 0 ? folders.map((folder) => folder.id) : [currentId];
 }
 
 async function activate(itemId) {
   const folder = group(itemId);
   if (folder) {
+    if (binMode) {
+      // Drilling into a binned folder stays inside the Bin — it must never
+      // jump to the real explorer, since the folder (and everything under
+      // it) is still hidden there and would just show up empty.
+      binCurrentId = folder.id;
+      selected.clear();
+      graph.destroyGraphView();
+      closeMenu();
+      render();
+      saveWorkspaceView();
+      return;
+    }
     currentId = folder.id;
-    binMode = false;
     selected.clear();
-    if (layout === 'graph') graph.destroyGraphView();
+    graph.destroyGraphView();
     closeMenu();
     render();
     saveWorkspaceView();
@@ -1191,18 +1332,71 @@ async function activateSelection() {
 
 async function copyOrCut(mode) {
   if (selected.size === 0) return;
-  clipboard = { mode, ids: [...selected] };
+
+  // Capture right now, at the moment of Ctrl+C/Ctrl+X, both which specific
+  // placement each selected shortcut represents and (for a cut) whether it
+  // currently shows more than one edge on screen — both decide behavior at
+  // paste time and must not drift if selection or graph visibility changes
+  // before the user pastes.
+  const collapseWhole = new Set();
+  const placementIds = new Map();
+
+  for (const selectedId of selected) {
+    if (group(selectedId)) continue;
+
+    const placementId = visiblePlacementIdFor(selectedId);
+    if (placementId) placementIds.set(selectedId, placementId);
+
+    if (mode === 'cut' && visibleParentCountFor(selectedId) > 1) {
+      collapseWhole.add(selectedId);
+    }
+  }
+
+  clipboard = {
+    mode,
+    ids: [...selected],
+    collapseWhole,
+    placementIds,
+  };
+
   setStatus('');
   closeMenu();
 }
 
-async function pasteInto(parentId) {
-  if (!clipboard || parentId === 'bin') return;
+async function pasteInto(parentIds) {
+  const destinations = Array.isArray(parentIds) ? parentIds : [parentIds];
+  if (!clipboard || destinations.length === 0 || destinations.includes('bin')) return;
   try {
-    const next = clipboard.mode === 'cut'
-      ? moveSelection(state, clipboard.ids, parentId)
-      : copySelection(state, clipboard.ids, parentId);
     const wasCut = clipboard.mode === 'cut';
+    let next = state;
+    if (wasCut) {
+      // A cut item can only move to one place, so multi-folder selection is
+      // ignored here — only the first destination applies.
+      const parentId = destinations[0];
+      const groupIds = clipboard.ids.filter((selectedId) => group(selectedId));
+      const wholeShortcutIds = clipboard.ids.filter((selectedId) => clipboard.collapseWhole.has(selectedId));
+      const singlePlacementIds = clipboard.ids
+        .filter((selectedId) => !group(selectedId) && !clipboard.collapseWhole.has(selectedId))
+        .map((selectedId) => clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
+        .filter(Boolean);
+      if (groupIds.length > 0 || singlePlacementIds.length > 0) {
+        next = moveSelection(next, [...groupIds, ...singlePlacementIds], parentId);
+      }
+      for (const shortcutId of wholeShortcutIds) {
+        next = collapsePlacements(next, shortcutId, parentId);
+      }
+    } else {
+      const ids = clipboard.ids
+        .map((selectedId) => group(selectedId)
+          ? selectedId
+          : clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
+        .filter(Boolean);
+      // Copying always links; pasting into multiple selected folders at once
+      // links a new placement into each one.
+      for (const parentId of destinations) {
+        next = copySelection(next, ids, parentId);
+      }
+    }
     if (wasCut) clipboard = null;
     await commit(next, wasCut ? 'Moved.' : 'Copied.');
   } catch (error) {
@@ -1301,7 +1495,11 @@ async function resolveEditorTargetIcon() {
 
 function showEditor(kind, existing = null, parentId = currentId) {
   closeMenu();
-  editorMode = { kind, item: existing, parentId };
+  const representedPlacementId =
+    (kind === 'shortcut' || kind === 'web') && existing
+      ? visiblePlacementIdFor(existing.id)
+      : null;
+  editorMode = { kind, item: existing, parentId, representedPlacementId };
   editorIcon = existing?.icon ?? null;
   editorTargetIcon =
     kind === 'shortcut' && existing && !existing.icon
@@ -1335,6 +1533,7 @@ function hideEditor() {
   editorIcon = null;
   editorTargetIcon = null;
   elements.editorLayer.hidden = true;
+  elements.linkEditLayer.hidden = true;
 }
 
 async function chooseTarget(kind) {
@@ -1355,17 +1554,45 @@ async function chooseTarget(kind) {
   }
 }
 
+function editedShortcutIsLinked() {
+  if (editorMode?.kind !== 'shortcut' && editorMode?.kind !== 'web') return false;
+  const existingId = editorMode.item?.id;
+  if (!existingId) return false;
+  const record = shortcut(existingId);
+  return record ? placementCount(record) > 1 : false;
+}
+
 async function saveEditor() {
   if (!editorMode || elements.saveButton.disabled) return;
+  if (editedShortcutIsLinked()) {
+    elements.linkEditLayer.hidden = false;
+    return;
+  }
+  await commitEditorSave(false);
+}
+
+async function commitEditorSave(forkFirst) {
   elements.saveButton.disabled = true;
   elements.saveButton.textContent = 'Saving…';
   const name = elements.name.value.trim();
   try {
+    let workingState = state;
+    let editItemId = editorMode.item?.id;
+    if (forkFirst && editItemId) {
+      const representedPlacementId =
+        editorMode.representedPlacementId ?? anyActivePlacementId(editItemId);
+      if (representedPlacementId) {
+        const knownIds = new Set(workingState.shortcuts.map((candidate) => candidate.id));
+        workingState = forkPlacement(workingState, representedPlacementId);
+        const forked = workingState.shortcuts.find((candidate) => !knownIds.has(candidate.id));
+        if (forked) editItemId = forked.id;
+      }
+    }
     let next;
     if (editorMode.kind === 'group') {
       next = editorMode.item
-        ? updateGroup(state, editorMode.item.id, { name, icon: editorIcon })
-        : createGroup(state, name, editorMode.parentId, editorIcon);
+        ? updateGroup(workingState, editorMode.item.id, { name, icon: editorIcon })
+        : createGroup(workingState, name, editorMode.parentId, editorIcon);
     } else {
       const changes = {
         name,
@@ -1375,13 +1602,13 @@ async function saveEditor() {
       };
       next = editorMode.kind === 'web'
         ? editorMode.item
-          ? updateWebLink(state, editorMode.item.id, changes)
-          : createWebLink(state, { ...changes, parentId: editorMode.parentId })
+          ? updateWebLink(workingState, editItemId, changes)
+          : createWebLink(workingState, { ...changes, parentId: editorMode.parentId })
         : editorMode.item
-          ? updateShortcut(state, editorMode.item.id, changes)
-          : createShortcut(state, { ...changes, parentId: editorMode.parentId });
+          ? updateShortcut(workingState, editItemId, changes)
+          : createShortcut(workingState, { ...changes, parentId: editorMode.parentId });
     }
-    const editedShortcutId = editorMode.kind === 'shortcut' ? editorMode.item?.id : null;
+    const editedShortcutId = editorMode.kind === 'group' ? null : editItemId;
     const refreshTargetIcon = Boolean(
       editedShortcutId
       && (!editorIcon || editorMode.item?.target !== elements.target.value.trim()),
@@ -1401,19 +1628,53 @@ async function saveEditor() {
   }
 }
 
+/** Resolves a set of graph item ids (groups or shared shortcut identities)
+ * to the exact Bin-context ids binSelection() needs — a linked shortcut
+ * with more than one visible edge bins every one of its placements (the
+ * whole shared thing), while one with a single visible edge only bins the
+ * placement this view represents. Shared by the Bin button/keyboard path
+ * and drag-onto-the-bin-pill. */
+function resolveBinTargets(itemIds) {
+  return itemIds.flatMap((itemId) => {
+    if (group(itemId)) return [itemId];
+    return visibleParentCountFor(itemId) > 1
+      ? allActivePlacementIds(itemId)
+      : [visiblePlacementIdFor(itemId)].filter(Boolean);
+  });
+}
+
 async function moveToBin() {
   if (selected.size === 0) return;
-  await commit(binSelection(state, [...selected]), 'Moved to Bin.');
+  await commit(binSelection(state, resolveBinTargets([...selected])), 'Moved to Bin.');
 }
 
 function askPermanentDelete(ids = [...selected], deletingAll = false) {
   if (ids.length === 0) return;
   pendingPermanentIds = [...ids];
+  pendingRestoreIds = [];
+  elements.confirmTitle.textContent = 'Delete permanently?';
   elements.confirmCopy.textContent = deletingAll
     ? `Delete all ${ids.length} items permanently? This cannot be undone.`
     : ids.length === 1
-      ? `Delete “${item(ids[0])?.name ?? 'this item'}” permanently? This cannot be undone.`
+      ? `Delete “${binItemName(ids[0]) ?? 'this item'}” permanently? This cannot be undone.`
       : `Delete these ${ids.length} items permanently? This cannot be undone.`;
+  elements.confirmDelete.hidden = false;
+  elements.confirmRestore.hidden = true;
+  elements.confirmLayer.hidden = false;
+}
+
+function askRestoreConfirm(ids, restoringAll = false) {
+  if (ids.length === 0) return;
+  pendingRestoreIds = [...ids];
+  pendingPermanentIds = [];
+  elements.confirmTitle.textContent = 'Restore?';
+  elements.confirmCopy.textContent = restoringAll
+    ? `Restore all ${ids.length} items?`
+    : ids.length === 1
+      ? `Restore “${binItemName(ids[0]) ?? 'this item'}”?`
+      : `Restore these ${ids.length} items?`;
+  elements.confirmDelete.hidden = true;
+  elements.confirmRestore.hidden = false;
   elements.confirmLayer.hidden = false;
 }
 
@@ -1432,7 +1693,7 @@ async function runMenuAction(action) {
   if (action === 'copy') return copyOrCut('copy');
   if (action === 'cut') return copyOrCut('cut');
   if (action === 'bin') return moveToBin();
-  if (action === 'restore') return commit(restoreSelection(state, [...selected]), 'Restored.');
+  if (action === 'restore') return askRestoreConfirm([...selected]);
   if (action === 'delete-forever') return askPermanentDelete();
   if (action === 'reset-graph-position') {
     const ctxId = graphContextId(currentId, binMode);
@@ -1459,7 +1720,7 @@ elements.grid.addEventListener('click', (event) => {
   const expandButton = event.target.closest('[data-expand]');
   if (expandButton) {
     const folderId = expandButton.dataset.expand;
-    const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
+    const targetSet = graphExpanded;
     if (targetSet.has(folderId)) targetSet.delete(folderId);
     else targetSet.add(folderId);
     closeMenu();
@@ -1473,6 +1734,7 @@ elements.grid.addEventListener('click', (event) => {
       suppressGraphClick = false;
       return;
     }
+    if (tile.classList.contains('bin-origin-ghost')) return;
     selectItem(tile.dataset.id, event);
     return;
   }
@@ -1497,10 +1759,10 @@ elements.grid.addEventListener('click', (event) => {
 elements.grid.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return;
 
-  if (layout === 'graph' && !event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
+  if (!event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
     const tile = event.target.closest('.icon-item');
     const shell = tile?.closest('.graph-node-shell');
-    if (shell && event.pointerType !== 'touch') {
+    if (shell && event.pointerType !== 'touch' && !tile.classList.contains('bin-origin-ghost')) {
       const itemId = tile.dataset.id;
       if (!selected.has(itemId)) {
         selected = new Set([itemId]);
@@ -1508,9 +1770,16 @@ elements.grid.addEventListener('pointerdown', (event) => {
         syncSelection();
         saveWorkspaceView();
       }
+      const dragPlacementIds = new Map();
+      for (const id of selected) {
+        if (group(id)) continue;
+        const placementId = visiblePlacementIdFor(id);
+        if (placementId) dragPlacementIds.set(id, placementId);
+      }
       graphDrag = {
         pointerId: event.pointerId,
         itemIds: [...selected],
+        placementIds: dragPlacementIds,
         primaryNodeId: itemId,
         startClientX: event.clientX,
         startClientY: event.clientY,
@@ -1624,6 +1893,11 @@ elements.grid.addEventListener('pointermove', (event) => {
       node.positioned = true;
     }
     graph.reheat(0.12);
+
+    if (!binMode && elements.binButton) {
+      const overBin = elements.binButton.contains(document.elementFromPoint(event.clientX, event.clientY));
+      elements.binButton.classList.toggle('graph-bin-drop-target', overBin);
+    }
     return;
   }
 
@@ -1653,30 +1927,59 @@ elements.grid.addEventListener('pointerup', (event) => {
       suppressGraphClick = true;
       document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
       document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+      elements.binButton?.classList.remove('graph-bin-drop-target');
+      const hitBin = !binMode && elements.binButton?.contains(document.elementFromPoint(event.clientX, event.clientY));
       const shells = [...elements.grid.querySelectorAll('.graph-node-shell')];
       shells.forEach((s) => s.style.pointerEvents = '');
       let hitFolderId = null;
-      shells.forEach((s) => {
-        if (!graphDrag.itemIds.includes(s.dataset.graphNodeId)) {
-          s.style.pointerEvents = 'none';
-        }
-      });
-      const elAtPoint = document.elementFromPoint(event.clientX, event.clientY);
-      const hitShell = elAtPoint?.closest('.graph-node-shell');
-      shells.forEach((s) => s.style.pointerEvents = '');
-      if (hitShell && !graphDrag.itemIds.includes(hitShell.dataset.graphNodeId)) {
-        const hitItem = hitShell.querySelector('.icon-item');
-        if (hitItem?.dataset.kind === 'group') {
-          hitFolderId = hitItem.dataset.id;
+      if (!hitBin) {
+        shells.forEach((s) => {
+          if (!graphDrag.itemIds.includes(s.dataset.graphNodeId)) {
+            s.style.pointerEvents = 'none';
+          }
+        });
+        const elAtPoint = document.elementFromPoint(event.clientX, event.clientY);
+        const hitShell = elAtPoint?.closest('.graph-node-shell');
+        shells.forEach((s) => s.style.pointerEvents = '');
+        if (hitShell && !graphDrag.itemIds.includes(hitShell.dataset.graphNodeId)) {
+          const hitItem = hitShell.querySelector('.icon-item');
+          if (hitItem?.dataset.kind === 'group') {
+            hitFolderId = hitItem.dataset.id;
+          }
         }
       }
 
-      const graphDragCopy = { ...graphDrag, itemIds: [...graphDrag.itemIds] };
+      const graphDragCopy = { ...graphDrag, itemIds: [...graphDrag.itemIds], placementIds: graphDrag.placementIds };
       graphDrag = null;
 
-      if (hitFolderId) {
+      if (hitBin) {
         try {
-          const next = moveSelection(state, graphDragCopy.itemIds, hitFolderId);
+          const ctxId = graphContextId(currentId, binMode);
+          const next = removeGraphPositions(
+            binSelection(state, resolveBinTargets(graphDragCopy.itemIds)),
+            ctxId,
+            graphDragCopy.itemIds,
+          );
+          commit(next, 'Moved to Bin.');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error));
+        }
+      } else if (hitFolderId) {
+        try {
+          const groupIds = graphDragCopy.itemIds.filter((draggedId) => group(draggedId));
+          const wholeShortcutIds = graphDragCopy.itemIds.filter((draggedId) =>
+            !group(draggedId) && visibleParentCountFor(draggedId) > 1);
+          const singlePlacementIds = graphDragCopy.itemIds
+            .filter((draggedId) => !group(draggedId) && visibleParentCountFor(draggedId) <= 1)
+            .map((shortcutId) => graphDragCopy.placementIds.get(shortcutId) ?? anyActivePlacementId(shortcutId))
+            .filter(Boolean);
+          let next = state;
+          if (groupIds.length > 0 || singlePlacementIds.length > 0) {
+            next = moveSelection(next, [...groupIds, ...singlePlacementIds], hitFolderId);
+          }
+          for (const shortcutId of wholeShortcutIds) {
+            next = collapsePlacements(next, shortcutId, hitFolderId);
+          }
           const ctxId = graphContextId(currentId, binMode);
           state = removeGraphPositions(next, ctxId, graphDragCopy.itemIds);
           commit(state, 'Moved.');
@@ -1752,6 +2055,7 @@ elements.grid.addEventListener('pointercancel', (event) => {
     }
     document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
     document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+    elements.binButton?.classList.remove('graph-bin-drop-target');
     removeGraphShiftListeners();
     graphDrag = null;
     return;
@@ -1763,9 +2067,10 @@ elements.grid.addEventListener('contextmenu', (event) => {
   event.preventDefault();
   event.stopPropagation();
   const tile = event.target.closest('.icon-item');
+  if (tile && tile.classList.contains('bin-origin-ghost')) return;
   if (tile) {
     if (event.shiftKey && tile.dataset.kind === 'group') {
-      const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
+      const targetSet = graphExpanded;
       const id = tile.dataset.id;
       const folderIds = selected.has(id)
         ? [...selected].filter((selectedId) => group(selectedId))
@@ -1789,9 +2094,12 @@ elements.grid.addEventListener('contextmenu', (event) => {
     openMenu(event.clientX, event.clientY);
     return;
   }
-  if (binMode) return closeMenu();
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
   if (!blank) return;
+  if (binMode) {
+    if (selected.size > 0) openMenu(event.clientX, event.clientY);
+    return;
+  }
   if (selected.size > 0) {
     openMenu(event.clientX, event.clientY);
     return;
@@ -1816,7 +2124,7 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden) return;
+  if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden || !elements.linkEditLayer.hidden) return;
   if (
     binMode
     && event.ctrlKey
@@ -1832,6 +2140,14 @@ document.addEventListener('keydown', (event) => {
     saveWorkspaceView();
     return;
   }
+  if (event.ctrlKey && event.key.toLowerCase() === 'a') {
+    event.preventDefault();
+    selected = new Set(visibleItemIds());
+    selectionAnchor = null;
+    syncSelection();
+    saveWorkspaceView();
+    return;
+  }
   if (event.ctrlKey && event.key.toLowerCase() === 'c') {
     event.preventDefault();
     copyOrCut('copy');
@@ -1842,11 +2158,15 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.ctrlKey && event.key.toLowerCase() === 'v') {
     event.preventDefault();
-    pasteInto(selectedPasteDestination());
+    pasteInto(selectedPasteDestinations());
   }
-  if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+  if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     undo();
+  }
+  if (event.ctrlKey && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
+    event.preventDefault();
+    redo();
   }
   if (event.key === 'Delete' && selected.size > 0) {
     event.preventDefault();
@@ -1877,192 +2197,102 @@ elements.explorer.addEventListener('wheel', (event) => {
   zoomTimer = setTimeout(() => persist().catch((error) => setStatus(String(error))), 250);
 }, { passive: false });
 
-elements.grid.addEventListener('dragstart', (event) => {
-  if (layout === 'graph') return;
-  const tile = event.target.closest('.icon-item');
-  if (!tile || binMode) return event.preventDefault();
-  if (!selected.has(tile.dataset.id)) {
-    selected = new Set([tile.dataset.id]);
-    selectionAnchor = tile.dataset.id;
-    syncSelection();
-    saveWorkspaceView();
-  }
-  dragIds = [...selected];
-  event.dataTransfer.effectAllowed = 'copyMove';
-  event.dataTransfer.setData('text/plain', dragIds.join(','));
-});
-
 elements.grid.addEventListener('dragover', (event) => {
   if (binMode) return;
   event.preventDefault();
-
-  if (layout === 'graph') {
-    document.querySelectorAll('.drop-inside, .drop-before, .graph-drop-target').forEach((node) =>
-      node.classList.remove('drop-inside', 'drop-before', 'graph-drop-target'));
-    if (event.dataTransfer.types.includes('Files')) {
-      const tile = event.target.closest('.icon-item');
-      const shell = tile?.closest('.graph-node-shell');
-      if (tile?.dataset.kind === 'group' && shell) {
-        shell.classList.add('graph-drop-target');
-        tile.classList.add('drop-inside');
-      }
-      event.dataTransfer.dropEffect = 'link';
-      return;
-    }
-    event.dataTransfer.dropEffect = 'none';
-    return;
-  }
-
-  document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
-    node.classList.remove('drop-inside', 'drop-before'));
-  const tile = event.target.closest('.icon-item');
+  document.querySelectorAll('.drop-inside, .graph-drop-target').forEach((node) =>
+    node.classList.remove('drop-inside', 'graph-drop-target'));
   if (event.dataTransfer.types.includes('Files')) {
-    elements.grid.classList.toggle('drop-blank', tile?.dataset.kind !== 'group');
-    if (tile?.dataset.kind === 'group') tile.classList.add('drop-inside');
+    const tile = event.target.closest('.icon-item');
+    const shell = tile?.closest('.graph-node-shell');
+    if (tile?.dataset.kind === 'group' && shell) {
+      shell.classList.add('graph-drop-target');
+      tile.classList.add('drop-inside');
+    }
     event.dataTransfer.dropEffect = 'link';
     return;
   }
-  if (!tile) return elements.grid.classList.add('drop-blank');
-  elements.grid.classList.remove('drop-blank');
-  const rect = tile.getBoundingClientRect();
-  const nearEdge = event.clientX - rect.left < rect.width * 0.22;
-  tile.classList.add(tile.dataset.kind === 'group' && !nearEdge ? 'drop-inside' : 'drop-before');
-  event.dataTransfer.dropEffect = event.ctrlKey ? 'copy' : 'move';
+  event.dataTransfer.dropEffect = 'none';
 });
 
 elements.grid.addEventListener('dragleave', (event) => {
   if (!elements.grid.contains(event.relatedTarget)) {
-    elements.grid.classList.remove('drop-blank');
-    document.querySelectorAll('.drop-inside, .drop-before, .graph-drop-target').forEach((node) =>
-      node.classList.remove('drop-inside', 'drop-before', 'graph-drop-target'));
+    document.querySelectorAll('.drop-inside, .graph-drop-target').forEach((node) =>
+      node.classList.remove('drop-inside', 'graph-drop-target'));
   }
 });
 
 elements.grid.addEventListener('drop', async (event) => {
   if (binMode) return;
   const droppedFiles = [...event.dataTransfer.files];
-
-  if (layout === 'graph') {
-    if (droppedFiles.length > 0) {
-      event.preventDefault();
-      const tile = event.target.closest('.icon-item');
-      const shell = tile?.closest('.graph-node-shell');
-      const blank = event.target.closest('[data-blank-parent]');
-      const destination = tile?.dataset.kind === 'group'
-        ? tile.dataset.id
-        : blank?.dataset.blankParent ?? currentId;
-      try {
-        const targets = await request('papers:project:resolve-dropped-targets', {
-          files: droppedFiles,
-        });
-        const next = createDroppedShortcuts(state, targets, destination);
-        if (next.shortcuts.length === state.shortcuts.length) {
-          setStatus('Those shortcuts already exist here.');
-          return;
-        }
-        await commit(next);
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : String(error));
-      } finally {
-        document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
-      }
-    }
-    return;
-  }
-
-  if (droppedFiles.length > 0) {
-    event.preventDefault();
-    const tile = event.target.closest('.icon-item');
-    const blank = event.target.closest('[data-blank-parent]');
-    const destination = tile?.dataset.kind === 'group'
-      ? tile.dataset.id
-      : blank?.dataset.blankParent ?? tile?.dataset.parent ?? currentId;
-    try {
-      const targets = await request('papers:project:resolve-dropped-targets', {
-        files: droppedFiles,
-      });
-      const next = createDroppedShortcuts(state, targets, destination);
-      if (next.shortcuts.length === state.shortcuts.length) {
-        setStatus('Those shortcuts already exist here.');
-        return;
-      }
-      await commit(next);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      elements.grid.classList.remove('drop-blank');
-      document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
-        node.classList.remove('drop-inside', 'drop-before'));
-    }
-    return;
-  }
-  if (dragIds.length === 0) return;
+  if (droppedFiles.length === 0) return;
   event.preventDefault();
   const tile = event.target.closest('.icon-item');
-  const copy = event.ctrlKey;
+  const blank = event.target.closest('[data-blank-parent]');
+  const destination = tile?.dataset.kind === 'group'
+    ? tile.dataset.id
+    : blank?.dataset.blankParent ?? currentId;
   try {
-    let next;
-    if (tile?.classList.contains('drop-inside')) {
-      next = copy
-        ? copySelection(state, dragIds, tile.dataset.id)
-        : moveSelection(state, dragIds, tile.dataset.id);
-    } else if (tile) {
-      if (dragIds.includes(tile.dataset.id)) return;
-      if (copy) {
-        next = copySelection(state, dragIds, tile.dataset.parent);
-      } else {
-        const moved = dragIds.every((itemId) => item(itemId)?.parentId === tile.dataset.parent)
-          ? state
-          : moveSelection(state, dragIds, tile.dataset.parent);
-        const reorderIds = dragIds.filter((itemId) => {
-          const candidate = moved.groups.find((entry) => entry.id === itemId)
-            ?? moved.shortcuts.find((entry) => entry.id === itemId);
-          return candidate?.parentId === tile.dataset.parent;
-        });
-        next = reorderSelection(moved, reorderIds, tile.dataset.parent, tile.dataset.id);
-      }
-    } else {
-      const blank = event.target.closest('[data-blank-parent]');
-      const destination = blank?.dataset.blankParent ?? currentId;
-      next = copy
-        ? copySelection(state, dragIds, destination)
-        : moveSelection(state, dragIds, destination);
+    const targets = await request('papers:project:resolve-dropped-targets', {
+      files: droppedFiles,
+    });
+    const next = createDroppedShortcuts(state, targets, destination);
+    if (next.shortcuts.length === state.shortcuts.length) {
+      setStatus('Those shortcuts already exist here.');
+      return;
     }
-    await commit(next, copy ? 'Copied.' : 'Moved.');
+    await commit(next);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   } finally {
-    dragIds = [];
-    elements.grid.classList.remove('drop-blank');
+    document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
   }
 });
 
 elements.breadcrumbs.addEventListener('click', (event) => {
+  const binCrumb = event.target.closest('[data-bin-breadcrumb]');
+  if (binCrumb) {
+    binCurrentId = binCrumb.dataset.binBreadcrumb;
+    selected.clear();
+    graph.destroyGraphView();
+    render();
+    saveWorkspaceView();
+    return;
+  }
   const crumb = event.target.closest('[data-breadcrumb]');
   if (!crumb) return;
   currentId = crumb.dataset.breadcrumb;
   selected.clear();
-  if (layout === 'graph') graph.destroyGraphView();
+  graph.destroyGraphView();
   render();
   saveWorkspaceView();
 });
 
 elements.binButton.addEventListener('click', () => {
+  if (!binMode && selected.size > 0) {
+    moveToBin();
+    return;
+  }
   binMode = !binMode;
-  selected.clear();
-  closeMenu();
-  render();
-  saveWorkspaceView();
-});
-elements.graphButton.addEventListener('click', () => {
-  layout = layout === 'graph' ? 'explorer' : 'graph';
+  if (!binMode) binCurrentId = 'bin';
   selected.clear();
   closeMenu();
   render();
   saveWorkspaceView();
 });
 elements.deleteAllBin.addEventListener('click', () => {
+  if (selected.size > 0) {
+    askPermanentDelete([...selected], false);
+    return;
+  }
   askPermanentDelete(binnedItems(state).map((candidate) => candidate.id), true);
+});
+elements.restoreAllBin.addEventListener('click', () => {
+  if (selected.size > 0) {
+    askRestoreConfirm([...selected], false);
+    return;
+  }
+  askRestoreConfirm(binnedItems(state).map((candidate) => candidate.id), true);
 });
 
 elements.editor.addEventListener('submit', (event) => {
@@ -2108,8 +2338,21 @@ elements.iconInput.addEventListener('change', async () => {
   }
 });
 
+document.querySelector('#cancel-link-edit').addEventListener('click', () => {
+  elements.linkEditLayer.hidden = true;
+});
+document.querySelector('#fork-link-edit').addEventListener('click', async () => {
+  elements.linkEditLayer.hidden = true;
+  await commitEditorSave(true);
+});
+document.querySelector('#apply-everywhere-link-edit').addEventListener('click', async () => {
+  elements.linkEditLayer.hidden = true;
+  await commitEditorSave(false);
+});
+
 document.querySelector('#cancel-confirm').addEventListener('click', () => {
   pendingPermanentIds = [];
+  pendingRestoreIds = [];
   elements.confirmLayer.hidden = true;
 });
 document.querySelector('#confirm-delete').addEventListener('click', async () => {
@@ -2118,10 +2361,21 @@ document.querySelector('#confirm-delete').addEventListener('click', async () => 
   elements.confirmLayer.hidden = true;
   await commit(next, 'Deleted permanently.');
 });
+document.querySelector('#confirm-restore').addEventListener('click', async () => {
+  const next = restoreSelection(state, pendingRestoreIds);
+  pendingRestoreIds = [];
+  elements.confirmLayer.hidden = true;
+  await commit(next, 'Restored.');
+});
 
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
-    await request('papers:project:copy-text', { text: PICKUP_PROMPT });
+    const selectedTargets = [...selected]
+      .map((selectedId) => shortcutByRecordOrPlacementId(selectedId))
+      .filter(Boolean)
+      .map((candidate) => candidate.target);
+    const text = selectedTargets.length > 0 ? selectedTargets.join('\n') : PICKUP_PROMPT;
+    await request('papers:project:copy-text', { text });
     document.querySelector('.copy-label').textContent = 'Copied';
     setTimeout(() => {
       document.querySelector('.copy-label').textContent = 'Copy agent pickup prompt';
@@ -2157,11 +2411,106 @@ window.addEventListener('message', (event) => {
   );
 });
 
+function applyToolbarPosition(element, key) {
+  const saved = getToolbarPosition(state, key);
+  if (!saved) return;
+  element.style.left = `${saved.x}px`;
+  element.style.top = `${saved.y}px`;
+  element.style.right = 'auto';
+}
+
+function restoreToolbarPositions() {
+  document.querySelectorAll('.toolbar-float[data-toolbar-key]').forEach((element) => {
+    applyToolbarPosition(element, element.dataset.toolbarKey);
+  });
+}
+
+function setupToolbarDragging() {
+  let drag = null;
+  let suppressClickFor = null;
+  document.querySelectorAll('.toolbar-float[data-toolbar-key]').forEach((element) => {
+    element.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      // The breadcrumb pill's visible surface is almost entirely its own
+      // navigation buttons, so unlike the other toolbar-float elements it
+      // must allow starting a drag from those buttons too — the 4px move
+      // threshold below (and the click-suppression on release) is what
+      // still lets a plain click navigate normally.
+      const interactiveAncestor = event.target.closest('button, a, input');
+      if (interactiveAncestor && interactiveAncestor !== element && !element.classList.contains('breadcrumbs')) return;
+      const rect = element.getBoundingClientRect();
+      drag = {
+        element,
+        key: element.dataset.toolbarKey,
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+        moved: false,
+      };
+      // Pointer capture is deferred until the drag threshold is actually
+      // crossed (below), not taken on every pointerdown — capturing
+      // immediately interferes with a plain click's default activation on
+      // a nested <button> (the breadcrumb's own navigation buttons), which
+      // broke breadcrumb navigation entirely. Matches the same deferred-
+      // capture pattern already used for graph node dragging.
+    });
+    element.addEventListener('pointermove', (event) => {
+      if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
+      const dx = event.clientX - drag.startClientX;
+      const dy = event.clientY - drag.startClientY;
+      if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      if (!drag.moved) {
+        drag.moved = true;
+        drag.element.classList.add('toolbar-dragging');
+        element.setPointerCapture(event.pointerId);
+      }
+      const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
+      const x = event.clientX - workspaceRect.left - drag.offsetX;
+      const y = event.clientY - workspaceRect.top - drag.offsetY;
+      drag.element.style.left = `${x}px`;
+      drag.element.style.top = `${y}px`;
+      drag.element.style.right = 'auto';
+    });
+    const finishDrag = (event) => {
+      if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
+      if (element.hasPointerCapture(event.pointerId)) {
+        element.releasePointerCapture(event.pointerId);
+      }
+      const { key, moved } = drag;
+      drag.element.classList.remove('toolbar-dragging');
+      drag = null;
+      if (!moved) return;
+      suppressClickFor = element;
+      const rect = element.getBoundingClientRect();
+      const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
+      state = setToolbarPosition(state, key, {
+        x: rect.left - workspaceRect.left,
+        y: rect.top - workspaceRect.top,
+      });
+      void persist(state).catch((error) =>
+        setStatus(error instanceof Error ? error.message : String(error)));
+    };
+    element.addEventListener('pointerup', finishDrag);
+    element.addEventListener('pointercancel', finishDrag);
+    element.addEventListener('click', (event) => {
+      if (suppressClickFor === element) {
+        suppressClickFor = null;
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, { capture: true });
+  });
+}
+
 (async () => {
   try {
     const loaded = await request('papers:project:as-you-go-load');
     state = normalizeState(typeof loaded === 'string' ? JSON.parse(loaded) : loaded);
     restoreWorkspaceView();
+    restoreToolbarPositions();
+    setupToolbarDragging();
     render();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));

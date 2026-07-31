@@ -18,6 +18,8 @@ import {
   restoreSelection,
   updateGroup,
   updateShortcut,
+  forkPlacement,
+  collapsePlacements,
   updateWorkspaceView,
   createWebLink,
   isWebLink,
@@ -37,6 +39,12 @@ import {
   allFinite,
   allUniquePositions,
 } from './public/graph-model-20260730b.js';
+
+/** A freshly created shortcut has exactly one placement; this is that
+ * placement's id, which is what selection/move/copy/bin operate on. */
+function soloPlacementId(shortcut) {
+  return shortcut.placements[0].id;
+}
 
 test('a drag marquee selects every visible item rectangle it crosses', () => {
   const tiles = [
@@ -71,34 +79,138 @@ test('moving a selected folder and its visible children preserves the folder tre
   const [one, two] = state.groups;
   state = createShortcut(state, { name: 'A', target: 'C:\\a.bat', parentId: one.id });
   state = createShortcut(state, { name: 'B', target: 'C:\\b.bat', parentId: one.id });
-  state = moveSelection(state, [one.id, state.shortcuts[0].id, state.shortcuts[1].id], two.id);
+  const [a, b] = state.shortcuts;
+  state = moveSelection(state, [one.id, soloPlacementId(a), soloPlacementId(b)], two.id);
   assert.equal(state.groups.find((item) => item.id === one.id).parentId, two.id);
-  assert.deepEqual(state.shortcuts.map((item) => item.parentId), [one.id, one.id]);
+  assert.deepEqual(
+    state.shortcuts.map((item) => item.placements[0].parentId),
+    [one.id, one.id],
+  );
 });
 
-test('copy preserves the source tree and creates new identities', () => {
+test('copying a folder gives it a new identity but links its shortcuts as new placements of the same record', () => {
   let state = createGroup(emptyState(), 'Source');
   const source = state.groups[0];
   state = createGroup(state, 'Destination');
   const destination = state.groups[1];
   state = createShortcut(state, { name: 'A', target: 'C:\\a.bat', parentId: source.id });
+  const original = state.shortcuts[0];
   const copied = copySelection(state, [source.id], destination.id);
+
   assert.equal(copied.groups.length, 3);
-  assert.equal(copied.shortcuts.length, 2);
   assert.notEqual(copied.groups[2].id, source.id);
   assert.equal(copied.groups[2].parentId, destination.id);
+
+  // The shortcut itself is not duplicated — it's the same record, now with
+  // a second placement inside the copied folder.
+  assert.equal(copied.shortcuts.length, 1);
+  assert.equal(copied.shortcuts[0].id, original.id);
+  assert.equal(copied.shortcuts[0].placements.length, 2);
+  assert.equal(children(copied, copied.groups[2].id).shortcuts[0].name, 'A');
+  assert.equal(children(copied, source.id).shortcuts[0].name, 'A');
 });
 
-test('a selected shortcut can be copied from a nested expanded folder', () => {
+test('a selected shortcut copied from a nested expanded folder links rather than duplicates', () => {
   let state = createGroup(emptyState(), 'Source');
   const source = state.groups[0];
   state = createGroup(state, 'Destination');
   const destination = state.groups[1];
   state = createShortcut(state, { name: 'Nested', target: 'C:\\nested.exe', parentId: source.id });
+  const original = state.shortcuts[0];
 
-  const copied = copySelection(state, [state.shortcuts[0].id], destination.id);
+  const copied = copySelection(state, [soloPlacementId(original)], destination.id);
 
+  assert.equal(copied.shortcuts.length, 1);
+  assert.equal(copied.shortcuts[0].placements.length, 2);
   assert.equal(children(copied, destination.id).shortcuts[0].name, 'Nested');
+  assert.equal(children(copied, source.id).shortcuts[0].name, 'Nested');
+});
+
+test('editing a linked shortcut changes it in every folder it is placed in', () => {
+  let state = createGroup(emptyState(), 'Source');
+  const source = state.groups[0];
+  state = createGroup(state, 'Destination');
+  const destination = state.groups[1];
+  state = createShortcut(state, { name: 'A', target: 'C:\\a.bat', parentId: source.id });
+  const original = state.shortcuts[0];
+  state = copySelection(state, [soloPlacementId(original)], destination.id);
+
+  state = updateShortcut(state, original.id, {
+    name: 'Renamed',
+    target: 'C:\\a.bat',
+    description: '',
+    icon: null,
+  });
+
+  assert.equal(children(state, source.id).shortcuts[0].name, 'Renamed');
+  assert.equal(children(state, destination.id).shortcuts[0].name, 'Renamed');
+});
+
+test('forking a linked placement gives it an independent identity that no longer shares edits', () => {
+  let state = createGroup(emptyState(), 'Source');
+  const source = state.groups[0];
+  state = createGroup(state, 'Destination');
+  const destination = state.groups[1];
+  state = createShortcut(state, { name: 'A', target: 'C:\\a.bat', parentId: source.id });
+  const original = state.shortcuts[0];
+  state = copySelection(state, [soloPlacementId(original)], destination.id);
+  const destinationPlacementId = children(state, destination.id).shortcuts[0].id;
+
+  state = forkPlacement(state, destinationPlacementId);
+  assert.equal(state.shortcuts.length, 2);
+  const forked = state.shortcuts.find((candidate) => candidate.id !== original.id);
+  assert.equal(forked.placements.length, 1);
+  assert.equal(children(state, source.id).shortcuts[0].shortcutId, original.id);
+  assert.equal(children(state, destination.id).shortcuts[0].shortcutId, forked.id);
+
+  state = updateShortcut(state, original.id, {
+    name: 'OnlySource',
+    target: 'C:\\a.bat',
+    description: '',
+    icon: null,
+  });
+  assert.equal(children(state, source.id).shortcuts[0].name, 'OnlySource');
+  assert.equal(children(state, destination.id).shortcuts[0].name, 'A');
+});
+
+test('collapsePlacements moves a linked shortcut entirely into one destination, dropping all other placements', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  state = createGroup(state, 'C');
+  const [a, b, c] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  state = copySelection(state, [original.placements[0].id], b.id);
+  assert.equal(state.shortcuts[0].placements.length, 2);
+
+  state = collapsePlacements(state, original.id, c.id);
+
+  assert.equal(state.shortcuts.length, 1);
+  assert.equal(state.shortcuts[0].placements.length, 1);
+  assert.equal(state.shortcuts[0].placements[0].parentId, c.id);
+  assert.equal(children(state, a.id).shortcuts.length, 0);
+  assert.equal(children(state, b.id).shortcuts.length, 0);
+  assert.equal(children(state, c.id).shortcuts[0].name, 'Shared');
+});
+
+test('collapsePlacements leaves binned placements of the same shortcut untouched', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  const [a, b] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  state = copySelection(state, [original.placements[0].id], b.id);
+  const bPlacementId = state.shortcuts[0].placements.find((p) => p.parentId === b.id).id;
+  state = binSelection(state, [bPlacementId], '2026-07-30T00:00:00.000Z');
+
+  state = createGroup(state, 'C');
+  const c = state.groups[2];
+  state = collapsePlacements(state, original.id, c.id);
+
+  const placements = state.shortcuts[0].placements;
+  assert.equal(placements.length, 2);
+  assert.ok(placements.some((p) => p.bin));
+  assert.ok(placements.some((p) => p.parentId === c.id && !p.bin));
 });
 
 test('a group cannot move into itself or one of its descendants', () => {
@@ -167,7 +279,7 @@ test('legacy state receives stable manual order and a default icon size without 
       { id: 'b', parentId: ROOT_ID, name: 'B', description: '', target: 'C:\\b.exe', icon: null },
     ],
   });
-  assert.deepEqual(state.shortcuts.map((item) => item.order), [1, 2]);
+  assert.deepEqual(state.shortcuts.map((item) => item.placements[0].order), [1, 2]);
   assert.equal(state.groups[0].order, 0);
   assert.equal(state.view.iconSize, 96);
   assert.equal(state.groups[0].icon, null);
@@ -198,6 +310,7 @@ test('the local project preserves its explorer working position', () => {
     binMode: false,
     layout: 'explorer',
     graphPositions: {},
+    toolbarPositions: {},
   });
 });
 
@@ -257,7 +370,7 @@ test('Explorer drops create quick shortcuts in the exact destination without dup
   ], destination);
 
   assert.deepEqual(
-    dropped.shortcuts.map(({ name, target, parentId }) => ({ name, target, parentId })),
+    dropped.shortcuts.map(({ name, target, placements }) => ({ name, target, parentId: placements[0].parentId })),
     [
       { name: 'notes.txt', target: 'D:\\Work\\notes.txt', parentId: destination },
       { name: 'Pictures', target: 'D:\\Pictures', parentId: destination },
@@ -272,7 +385,7 @@ test('manual reordering persists for multiple selected siblings', () => {
   state = createShortcut(state, { name: 'C', target: 'C:\\c.exe' });
   const [a, b, c] = state.shortcuts;
 
-  state = reorderSelection(state, [c.id, b.id], ROOT_ID, a.id);
+  state = reorderSelection(state, [soloPlacementId(c), soloPlacementId(b)], ROOT_ID, soloPlacementId(a));
 
   assert.deepEqual(
     children(state, ROOT_ID).shortcuts.map((item) => item.name),
@@ -597,15 +710,16 @@ test('folder drop always moves items and clears source context coordinates regar
   const things = state.groups[1];
   state = createShortcut(state, { name: 'CLIPS', target: 'C:\\clips.exe', parentId: letters.id });
   const clips = state.shortcuts[0];
+  const clipsPlacementId = soloPlacementId(clips);
 
-  state = setGraphPositions(state, ROOT_ID, { [clips.id]: { x: 100, y: 200 } });
-  assert.deepEqual(getGraphPosition(state, ROOT_ID, clips.id), { x: 100, y: 200 });
+  state = setGraphPositions(state, ROOT_ID, { [clipsPlacementId]: { x: 100, y: 200 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, clipsPlacementId), { x: 100, y: 200 });
 
-  const moved = moveSelection(state, [clips.id], things.id);
-  state = removeGraphPositions(moved, ROOT_ID, [clips.id]);
+  const moved = moveSelection(state, [clipsPlacementId], things.id);
+  state = removeGraphPositions(moved, ROOT_ID, [clipsPlacementId]);
 
-  assert.equal(state.shortcuts[0].parentId, things.id);
-  assert.equal(getGraphPosition(state, ROOT_ID, clips.id), null);
+  assert.equal(state.shortcuts[0].placements[0].parentId, things.id);
+  assert.equal(getGraphPosition(state, ROOT_ID, clipsPlacementId), null);
 });
 
 test('free-space graph dragging never changes item parentId or order through setGraphPositions', () => {
@@ -780,14 +894,15 @@ test('folder drop overrides final Shift state on pointerup', () => {
   const things = state.groups[1];
   state = createShortcut(state, { name: 'CLIPS', target: 'C:\\clips.exe', parentId: letters.id });
   const clips = state.shortcuts[0];
+  const clipsPlacementId = soloPlacementId(clips);
 
-  state = setGraphPositions(state, ROOT_ID, { [clips.id]: { x: 100, y: 200 } });
+  state = setGraphPositions(state, ROOT_ID, { [clipsPlacementId]: { x: 100, y: 200 } });
 
-  const moved = moveSelection(state, [clips.id], things.id);
-  state = removeGraphPositions(moved, ROOT_ID, [clips.id]);
+  const moved = moveSelection(state, [clipsPlacementId], things.id);
+  state = removeGraphPositions(moved, ROOT_ID, [clipsPlacementId]);
 
-  assert.equal(state.shortcuts[0].parentId, things.id);
-  assert.equal(getGraphPosition(state, ROOT_ID, clips.id), null);
+  assert.equal(state.shortcuts[0].placements[0].parentId, things.id);
+  assert.equal(getGraphPosition(state, ROOT_ID, clipsPlacementId), null);
 });
 
 test('removeGraphPositions on all entries cleans up context object', () => {
