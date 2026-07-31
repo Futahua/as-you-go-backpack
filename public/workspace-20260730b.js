@@ -1131,6 +1131,30 @@ async function activate(itemId) {
   }
 }
 
+function directoryOf(target) {
+  const normalized = target.replace(/\\/g, '/');
+  const lastSlash = normalized.lastIndexOf('/');
+  return lastSlash === -1 ? normalized : normalized.slice(0, lastSlash).toLocaleLowerCase();
+}
+
+async function revealSelection() {
+  const targets = [...selected]
+    .map((itemId) => shortcut(itemId))
+    .filter((candidate) => candidate && !isWebLink(candidate));
+  if (targets.length === 0) return;
+  const seenDirectories = new Set();
+  for (const target of targets) {
+    const directory = directoryOf(target.target);
+    if (seenDirectories.has(directory)) continue;
+    seenDirectories.add(directory);
+    try {
+      await request('papers:project:as-you-go-reveal', { actionId: target.id });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+
 async function copyOrCut(mode) {
   if (selected.size === 0) return;
   clipboard = { mode, ids: [...selected] };
@@ -1734,9 +1758,10 @@ elements.grid.addEventListener('contextmenu', (event) => {
   if (binMode) return closeMenu();
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
   if (!blank) return;
-  selected.clear();
-  selectionAnchor = null;
-  syncSelection();
+  if (selected.size > 0) {
+    openMenu(event.clientX, event.clientY);
+    return;
+  }
   openMenu(
     event.clientX,
     event.clientY,
@@ -1789,6 +1814,11 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     if (binMode) askPermanentDelete();
     else moveToBin();
+  }
+  if (event.key === 'Enter' && event.ctrlKey && selected.size > 0 && !binMode) {
+    event.preventDefault();
+    revealSelection();
+    return;
   }
   if (event.key === 'Enter' && selected.size === 1 && !binMode) {
     event.preventDefault();

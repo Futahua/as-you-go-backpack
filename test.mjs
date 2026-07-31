@@ -99,6 +99,11 @@ assert.match(script, /siblings\.findIndex/);
 assert.match(script, /exitTimer/);
 assert.match(script, /edges\.get\(/);
 assert.match(script, /node\.exitTimer/);
+assert.match(script, /papers:project:as-you-go-reveal/);
+assert.match(script, /revealSelection/);
+assert.match(script, /event\.key === 'Enter' && event\.ctrlKey/);
+assert.match(script, /directoryOf/);
+assert.match(script, /seenDirectories/);
 
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);
