@@ -25,6 +25,14 @@ import {
   createDroppedShortcuts,
 } from './model.mjs';
 
+import {
+  visibleGraphItems,
+  graphEdges,
+  seedPosition,
+  allFinite,
+  allUniquePositions,
+} from './public/graph-model-20260730b.js';
+
 test('a drag marquee selects every visible item rectangle it crosses', () => {
   const tiles = [
     { id: 'one', left: 20, top: 20, right: 100, bottom: 100 },
@@ -277,4 +285,60 @@ test('Delete bins items recoverably and permanent deletion is confined to the Bi
   assert.equal(deleted.groups.length, 0);
   assert.deepEqual(deleted.shortcuts.map((item) => item.name), ['Outside']);
   assert.throws(() => permanentlyDelete(restored, [folder.id]), /Bin/);
+});
+
+test('graph visibility includes every root item and only descendants of expanded folders', () => {
+  let state = createGroup(emptyState(), 'News');
+  state = createGroup(state, 'Letters');
+  const letters = state.groups[1];
+  state = createGroup(state, 'Real');
+  state = createShortcut(state, { name: 'CLIPS', target: 'C:\\clips.bat', parentId: letters.id });
+  state = createShortcut(state, { name: 'HiddenChild', target: 'C:\\hidden.exe', parentId: state.groups[2].id });
+
+  const collapsed = visibleGraphItems(state, ROOT_ID, new Set(), false);
+  assert.deepEqual(collapsed.map((i) => i.id), state.groups.map((g) => g.id));
+  assert.deepEqual(collapsed.map((i) => i.depth), [0, 0, 0]);
+
+  const expanded = visibleGraphItems(state, ROOT_ID, new Set([letters.id]), false);
+  const rootIds = state.groups.map((g) => g.id);
+  assert.ok(expanded.some((i) => i.id === rootIds[0]));
+  assert.ok(expanded.some((i) => i.id === rootIds[1]));
+  assert.ok(expanded.some((i) => i.id === rootIds[2]));
+  assert.ok(expanded.some((i) => i.id === state.shortcuts[0].id));
+  assert.ok(!expanded.some((i) => i.id === state.shortcuts[1].id));
+});
+
+test('expanded folders create exactly their parent-child edges; collapsed folders omit hidden descendants', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  state = createShortcut(state, { name: 's1', target: 'C:\\s1.exe', parentId: state.groups[0].id });
+  state = createShortcut(state, { name: 's2', target: 'C:\\s2.exe', parentId: state.groups[1].id });
+
+  const collapsedItems = visibleGraphItems(state, ROOT_ID, new Set(), false);
+  const collapsedEdges = graphEdges(collapsedItems);
+  assert.equal(collapsedEdges.length, 0);
+
+  const openItems = visibleGraphItems(state, ROOT_ID, new Set([state.groups[0].id]), false);
+  const openEdges = graphEdges(openItems);
+  assert.equal(openEdges.length, 1);
+  assert.equal(openEdges[0].source, state.groups[0].id);
+  assert.equal(openEdges[0].target, state.shortcuts[0].id);
+});
+
+test('child seed positions are finite and not all identical across siblings or rebuilds', () => {
+  const ids = ['n1', 'n2', 'n3', 'n4', 'n5'];
+  const parent = { x: 100, y: 50 };
+  const seeds = ids.map((id, i) => seedPosition(id, parent, i, ids.length));
+  assert.ok(allFinite(seeds));
+  assert.ok(allUniquePositions(seeds));
+
+  const rebuilt = ids.map((id, i) => seedPosition(id, parent, i, ids.length));
+  assert.deepEqual(rebuilt, seeds);
+});
+
+test('root seed positions are finite and distinct', () => {
+  const ids = ['a', 'b', 'c', 'd'];
+  const seeds = ids.map((id, i) => seedPosition(id, null, i, ids.length));
+  assert.ok(allFinite(seeds));
+  assert.ok(allUniquePositions(seeds));
 });

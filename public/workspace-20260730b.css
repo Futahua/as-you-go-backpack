@@ -272,25 +272,60 @@ button { color: inherit; }
 .icon-grid.graph-view {
   display: block;
   position: relative;
-  overflow: auto;
+  overflow: hidden;
   grid-template-columns: none;
+  padding: 0;
+  cursor: grab;
 }
-.icon-grid.graph-view .icon-item {
-  position: absolute;
-  min-height: calc(var(--icon-size) + 64px);
-}
-.graph-edges {
+.icon-grid.graph-view:active { cursor: grabbing; }
+.graph-scene {
   position: absolute;
   top: 0;
   left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.graph-edges-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
   pointer-events: none;
   z-index: 0;
+}
+.graph-node-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+}
+.icon-grid.graph-view .icon-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-height: calc(var(--icon-size) + 64px);
+  transform-origin: center center;
+  will-change: transform;
+  transition: opacity 200ms ease, scale 200ms ease;
+}
+.icon-grid.graph-view .icon-item.entering {
+  scale: var(--node-scale, 0.7);
+}
+.icon-grid.graph-view .icon-item.exiting {
+  pointer-events: none;
+  transition: transform 200ms ease, opacity 200ms ease;
 }
 .graph-edge {
   fill: none;
   stroke: #b9b3a6;
   stroke-width: 1.5;
+  transition: opacity 180ms ease, stroke 180ms ease;
 }
+.graph-edge.related { stroke: #6a8d74; stroke-width: 2; opacity: 0.85; }
+.graph-edge.dim { opacity: 0.25; }
+.icon-grid.graph-view .icon-item:hover ~ .graph-edges-svg .graph-edge { opacity: 0.4; }
 .branch-heading {
   border-bottom: 1px solid #ddd7cb;
   padding: 8px 12px;

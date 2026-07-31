@@ -75,6 +75,19 @@ assert.match(html, /id="graph-label"/);
 assert.match(script, /renderGraph/);
 assert.match(script, /layout === 'graph'/);
 assert.match(script, /state\.view\.layout/);
+assert.match(script, /forceSimulation/);
+assert.match(script, /forceLink/);
+assert.match(script, /forceManyBody/);
+assert.match(script, /forceCollide/);
+assert.match(script, /zoom\(/);
+assert.match(script, /scaleExtent/);
+assert.match(script, /graph-model-20260730b\.js/);
+assert.match(script, /vendor\/d3-force\.js/);
+assert.match(script, /vendor\/d3-zoom\.js/);
+assert.match(script, /ResizeObserver/);
+assert.match(script, /fitGraph/);
+assert.match(script, /translate3d/);
+assert.match(script, /prefers-reduced-motion/);
 
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);

@@ -24,6 +24,17 @@ import {
   webLinkIcon,
 } from './workspace-model-20260730b.js';
 
+import {
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceCollide,
+  forceX,
+  forceY,
+} from './vendor/d3-force.js';
+import { zoom, zoomIdentity } from './vendor/d3-zoom.js';
+import { visibleGraphItems, graphEdges, seedPosition } from './graph-model-20260730b.js';
+
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
 
 Canonical Papers repository: https://github.com/Futahua/Papers-3
@@ -255,103 +266,357 @@ function renderBinItems() {
   `).join('');
 }
 
-function renderGraph() {
-  const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
-  elements.grid.classList.add('graph-view');
-  if (visible.length === 0) {
-    elements.grid.innerHTML = '';
-    return;
+const graph = createGraphController();
+
+function createGraphController() {
+  const nodes = new Map();
+  let simulation = null;
+  let zoomBehavior = null;
+  let scene = null;
+  let edgeLayer = null;
+  let nodeLayer = null;
+  let svg = null;
+  let resizeObserver = null;
+  let rafId = 0;
+  let pendingFrame = false;
+  let initialized = false;
+  let attached = false;
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+
+  function attach() {
+    if (attached) return;
+    scene = document.createElement('div');
+    scene.className = 'graph-scene';
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'graph-edges-svg');
+    edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    svg.append(edgeLayer);
+    nodeLayer = document.createElement('div');
+    nodeLayer.className = 'graph-node-layer';
+    scene.append(svg, nodeLayer);
+    elements.grid.append(scene);
+    attached = true;
+
+    zoomBehavior = zoom()
+      .scaleExtent([0.35, 3])
+      .filter((event) => {
+        if (event.type === 'mousedown' && event.button === 0) {
+          return event.target.closest('.icon-item') === null
+            && event.target.closest('[data-expand]') === null;
+        }
+        return true;
+      })
+      .on('zoom', (event) => {
+        const { x, y, k } = event.transform;
+        scene.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
+      });
+    zoomBehavior(elements.grid);
+
+    resizeObserver = new ResizeObserver(() => {
+      if (elements.grid.clientWidth > 0 && elements.grid.clientHeight > 0 && simulation) {
+        simulation.force('cx').x(elements.grid.clientWidth / 2);
+        simulation.force('cy').y(elements.grid.clientHeight / 2);
+      }
+    });
+    resizeObserver.observe(elements.grid);
   }
 
-  const iconSize = state.view.iconSize;
-  const nodeWidth = iconSize + 42;
-  const rowHeight = iconSize + 64;
-  const columnWidth = nodeWidth + 110;
-  const padding = 28;
-  let nextLeaf = 0;
-  let maxDepth = 0;
-  const placed = new Map();
+  function detach() {
+    if (simulation) { simulation.stop(); simulation = null; }
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; pendingFrame = false; }
+    if (zoomBehavior) { zoomBehavior.on('zoom', null); }
+    if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+    nodes.forEach((n) => { if (n.element) n.element.remove(); });
+    nodes.clear();
+    if (scene) { scene.remove(); scene = null; }
+    edgeLayer = null;
+    nodeLayer = null;
+    svg = null;
+    attached = false;
+    initialized = false;
+  }
 
-  function place(itemId, depth) {
-    const candidate = item(itemId);
-    if (!candidate) return;
-    if (depth > maxDepth) maxDepth = depth;
-    const isExpanded =
-      !binMode
-      && candidate.kind === 'group'
-      && expanded.has(candidate.id);
-    const childItems = isExpanded ? itemsIn(state, candidate.id) : [];
-    if (childItems.length === 0) {
-      placed.set(candidate.id, {
-        candidate, depth, y: nextLeaf, expanded: false, childCount: 0,
-      });
-      nextLeaf += 1;
-      return;
-    }
-    const firstIndex = nextLeaf;
-    for (const child of childItems) place(child.id, depth + 1);
-    const lastIndex = nextLeaf - 1;
-    placed.set(candidate.id, {
-      candidate,
-      depth,
-      y: (firstIndex + lastIndex) / 2,
-      expanded: true,
-      childCount: childItems.length,
+  function scheduleRender() {
+    if (pendingFrame) return;
+    pendingFrame = true;
+    rafId = requestAnimationFrame(() => {
+      pendingFrame = false;
+      rafId = 0;
+      drawFrame();
     });
   }
 
-  for (const top of visible) place(top.id, 0);
+  function drawFrame() {
+    nodes.forEach((node) => {
+      if (node.exiting || !node.element) return;
+      node.element.style.transform =
+        `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
+    });
+    const lines = edgeLayer.querySelectorAll('path');
+    let i = 0;
+    nodes.forEach((node) => {
+      if (node.exiting || !node.parentNode) return;
+      for (const childId of node.childIds) {
+        const child = nodes.get(childId);
+        if (!child || child.exiting) continue;
+        const path = lines[i];
+        if (path) {
+          path.setAttribute('d', edgePath(node.x, node.y, child.x, child.y));
+          i += 1;
+        }
+      }
+    });
+  }
 
-  const totalRows = Math.max(1, nextLeaf);
-  const contentWidth = padding * 2 + (maxDepth + 1) * columnWidth;
-  const contentHeight = padding * 2 + totalRows * rowHeight;
+  function edgePath(x1, y1, x2, y2) {
+    const dx = (x2 - x1) / 2;
+    return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+  }
 
-  const xFor = (depth) => padding + depth * columnWidth;
-  const yFor = (row) => padding + row * rowHeight + rowHeight / 2;
-
-  let edges = '';
-  for (const node of placed.values()) {
-    if (!node.expanded) continue;
-    const px = xFor(node.depth) + nodeWidth;
-    const py = yFor(node.y);
-    for (const child of itemsIn(state, node.candidate.id)) {
-      const childNode = placed.get(child.id);
-      if (!childNode) continue;
-      const cx = xFor(childNode.depth);
-      const cy = yFor(childNode.y);
-      const dx = Math.max(24, (cx - px) / 2);
-      edges += `<path class="graph-edge" d="M ${px} ${py} C ${px + dx} ${py}, ${cx - dx} ${cy}, ${cx} ${cy}" />`;
+  function buildNodes(visibleItems) {
+    const incoming = new Map(visibleItems.map((vi) => [vi.id, vi]));
+    for (const id of [...nodes.keys()]) {
+      if (!incoming.has(id)) removeNode(id);
+    }
+    for (const vi of visibleItems) {
+      let node = nodes.get(vi.id);
+      if (node) {
+        node.exiting = false;
+        node.childIds = childIdsFor(vi);
+        continue;
+      }
+      const candidate = item(vi.id);
+      if (!candidate) continue;
+      const parent = candidate.parentId && candidate.parentId !== ROOT_ID
+        ? nodes.get(candidate.parentId)
+        : null;
+      const index = parent ? parent.childIds.length : visibleItems.filter((v) => v.depth === 0).indexOf(vi);
+      const seed = seedPosition(vi.id, parent?.x != null ? parent : null, Math.max(0, index), visibleItems.length);
+      node = {
+        id: vi.id,
+        candidate,
+        x: seed.x,
+        y: seed.y,
+        vx: 0,
+        vy: 0,
+        width: 0,
+        height: 0,
+        childIds: childIdsFor(vi),
+        parentNode: parent ?? null,
+        element: null,
+        edgeElements: [],
+        exiting: false,
+      };
+      nodes.set(vi.id, node);
+      createElementFor(node);
+    }
+    for (const node of nodes.values()) {
+      if (!node.exiting) node.parentNode = parentOf(node);
     }
   }
 
-  const nodes = [...placed.values()].map((node) => {
+  function parentOf(node) {
+    const candidate = node.candidate;
+    if (!candidate || candidate.parentId === ROOT_ID || candidate.parentId === 'bin') return null;
+    return nodes.get(candidate.parentId) ?? null;
+  }
+
+  function childIdsFor(vi) {
+    if (binMode || vi.kind !== 'group' || !expanded.has(vi.id)) return [];
+    return itemsIn(state, vi.id).map((c) => c.id);
+  }
+
+  function createElementFor(node) {
     const candidate = node.candidate;
     const isSelected = selected.has(candidate.id);
     const canExpand = candidate.kind === 'group' && !binMode;
     const isExpanded = canExpand && expanded.has(candidate.id);
-    const left = xFor(node.depth);
-    const top = yFor(node.y) - rowHeight / 2;
     const draggable = binMode ? 'false' : 'true';
-    return `
-      <div
-        class="icon-item ${isSelected ? 'selected' : ''}"
-        data-id="${candidate.id}"
-        data-kind="${candidate.kind}"
-        data-parent="${binMode ? 'bin' : (candidate.parentId ?? currentId)}"
-        draggable="${draggable}"
-        role="option"
-        aria-selected="${isSelected}"
-        tabindex="-1"
-        style="left:${left}px;top:${top}px;width:${nodeWidth}px;"
-      >
-        ${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}
-        <div class="item-icon">${iconMarkup(candidate)}</div>
-        <strong>${escapeHtml(candidate.name)}</strong>
-        ${descriptionMarkup(candidate)}
-      </div>`;
-  }).join('');
+    const el = document.createElement('div');
+    el.className = `icon-item graph-node${isSelected ? ' selected' : ''}${canExpand ? '' : ' leaf'}`;
+    el.dataset.id = candidate.id;
+    el.dataset.kind = candidate.kind;
+    el.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
+    el.setAttribute('draggable', draggable);
+    el.setAttribute('role', 'option');
+    el.setAttribute('aria-selected', String(isSelected));
+    el.setAttribute('tabindex', '-1');
+    el.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
+    el.innerHTML =
+      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+      + `<div class="item-icon">${iconMarkup(candidate)}</div>`
+      + `<strong>${escapeHtml(candidate.name)}</strong>`
+      + `${descriptionMarkup(candidate)}`;
+    nodeLayer.append(el);
+    node.element = el;
+    requestAnimationFrame(() => {
+      const rect = el.getBoundingClientRect();
+      node.width = rect.width || (state.view.iconSize + 42);
+      node.height = rect.height || (state.view.iconSize + 64);
+    });
+    if (reducedMotion?.matches) {
+      el.style.opacity = '1';
+    } else {
+      el.style.opacity = '0';
+      el.style.setProperty('--node-scale', '0.7');
+      el.classList.add('entering');
+      requestAnimationFrame(() => {
+        el.style.opacity = '1';
+        el.classList.remove('entering');
+      });
+    }
+  }
 
-  elements.grid.innerHTML = `<svg class="graph-edges" width="${contentWidth}" height="${contentHeight}" aria-hidden="true">${edges}</svg>${nodes}`;
+  function removeNode(id) {
+    const node = nodes.get(id);
+    if (!node) return;
+    if (reducedMotion?.matches || node.exiting) {
+      node.element?.remove();
+      nodes.delete(id);
+      return;
+    }
+    node.exiting = true;
+    const parent = node.parentNode;
+    const targetX = parent ? parent.x : node.x;
+    const targetY = parent ? parent.y : node.y;
+    node.element.classList.add('exiting');
+    node.element.style.transform = `translate3d(${targetX}px, ${targetY}px, 0) translate(-50%, -50%)`;
+    node.element.style.opacity = '0';
+    setTimeout(() => {
+      node.element?.remove();
+      nodes.delete(id);
+    }, 200);
+  }
+
+  function buildEdges() {
+    edgeLayer.innerHTML = '';
+    nodes.forEach((node) => {
+      node.edgeElements = [];
+      if (node.exiting) return;
+      for (const childId of node.childIds) {
+        const child = nodes.get(childId);
+        if (!child || child.exiting) continue;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-edge');
+        path.setAttribute('d', edgePath(node.x, node.y, child.x, child.y));
+        edgeLayer.append(path);
+        node.edgeElements.push(path);
+      }
+    });
+  }
+
+  function ensureSimulation() {
+    if (simulation) return;
+    const w = elements.grid.clientWidth || 800;
+    const h = elements.grid.clientHeight || 600;
+    simulation = forceSimulation()
+      .force('cx', forceX(w / 2).strength(0.05))
+      .force('cy', forceY(h / 2).strength(0.05))
+      .force('charge', forceManyBody().strength(-280))
+      .force('collide', forceCollide().radius((n) => Math.max(n.width, n.height) / 2 + 20).strength(0.9))
+      .force('link', forceLink().id((n) => n.id).distance(145).strength(0.14))
+      .alphaDecay(0.028)
+      .velocityDecay(0.32);
+    simulation.on('tick', scheduleRender);
+  }
+
+  function syncSimulation() {
+    ensureSimulation();
+    const nodeArray = [...nodes.values()].filter((n) => !n.exiting);
+    simulation.nodes(nodeArray);
+    const edgeArray = [];
+    nodes.forEach((node) => {
+      if (node.exiting) return;
+      for (const childId of node.childIds) {
+        const child = nodes.get(childId);
+        if (!child || child.exiting) continue;
+        edgeArray.push({ source: node.id, target: child.id });
+      }
+    });
+    simulation.force('link').links(edgeArray);
+    simulation.force('collide').radius((n) => Math.max(n.width, n.height) / 2 + 20);
+    simulation.force('cx').x(elements.grid.clientWidth / 2);
+    simulation.force('cy').y(elements.grid.clientHeight / 2);
+  }
+
+  function reheat(level = 0.35) {
+    if (!simulation) return;
+    simulation.alpha(Math.max(simulation.alpha(), level)).restart();
+  }
+
+  function fitGraph(padding = 90, animate = true) {
+    if (!scene || nodes.size === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    nodes.forEach((n) => {
+      if (n.exiting) return;
+      const halfW = (n.width || 100) / 2;
+      const halfH = (n.height || 120) / 2;
+      minX = Math.min(minX, n.x - halfW);
+      minY = Math.min(minY, n.y - halfH);
+      maxX = Math.max(maxX, n.x + halfW);
+      maxY = Math.max(maxY, n.y + halfH);
+    });
+    if (!Number.isFinite(minX)) return;
+    const w = elements.grid.clientWidth || 800;
+    const h = elements.grid.clientHeight || 600;
+    const scale = Math.min(
+      (w - padding * 2) / Math.max(1, maxX - minX),
+      (h - padding * 2) / Math.max(1, maxY - minY),
+      2,
+    );
+    const k = Math.max(0.35, Math.min(3, scale));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const tx = w / 2 - cx * k;
+    const ty = h / 2 - cy * k;
+    if (animate && !reducedMotion?.matches) {
+      zoomBehavior.transition(elements.grid).duration(550).call(zoomBehavior.transform, zoomIdentity.translate(tx, ty).scale(k));
+    } else {
+      zoomBehavior.transform(elements.grid, zoomIdentity.translate(tx, ty).scale(k));
+    }
+  }
+
+  function update(initialFit = false) {
+    if (elements.grid.clientWidth === 0 || elements.grid.clientHeight === 0) return;
+    const visible = visibleGraphItems(state, currentId, expanded, binMode);
+    if (visible.length === 0) {
+      nodes.forEach((_, id) => removeNode(id));
+      return;
+    }
+    if (!attached) attach();
+    buildNodes(visible);
+    buildEdges();
+    syncSimulation();
+    reheat(initialFit ? 0.7 : 0.35);
+    if (initialFit && !initialized) {
+      initialized = true;
+      setTimeout(() => fitGraph(), 500);
+    }
+  }
+
+  function refreshSelection() {
+    nodes.forEach((node) => {
+      if (!node.element) return;
+      const isSelected = selected.has(node.id);
+      node.element.classList.toggle('selected', isSelected);
+      node.element.setAttribute('aria-selected', String(isSelected));
+    });
+  }
+
+  return {
+    update,
+    detach,
+    refreshSelection,
+    reheat,
+    fitGraph,
+    get hasNodes() { return nodes.size > 0; },
+    get isAttached() { return attached; },
+  };
+}
+
+function renderGraph(initialFit = false) {
+  elements.grid.classList.add('graph-view');
+  graph.update(initialFit);
 }
 
 function render() {
@@ -366,8 +631,9 @@ function render() {
   const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
   elements.grid.dataset.blankParent = binMode ? 'bin' : currentId;
   if (layout === 'graph') {
-    renderGraph();
+    renderGraph(!graph.isAttached);
   } else {
+    if (graph.isAttached) graph.detach();
     elements.grid.classList.remove('graph-view');
     elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
   }
@@ -392,11 +658,15 @@ function render() {
 }
 
 function syncSelection() {
-  document.querySelectorAll('.icon-item').forEach((tile) => {
-    const isSelected = selected.has(tile.dataset.id);
-    tile.classList.toggle('selected', isSelected);
-    tile.setAttribute('aria-selected', String(isSelected));
-  });
+  if (layout === 'graph' && graph.isAttached) {
+    graph.refreshSelection();
+  } else {
+    document.querySelectorAll('.icon-item').forEach((tile) => {
+      const isSelected = selected.has(tile.dataset.id);
+      tile.classList.toggle('selected', isSelected);
+      tile.setAttribute('aria-selected', String(isSelected));
+    });
+  }
   elements.selectionStatus.hidden = selected.size === 0;
   elements.selectionStatus.textContent = selected.size === 1
     ? '1 item selected'
@@ -598,6 +868,7 @@ async function activate(itemId) {
     binMode = false;
     selected.clear();
     expanded.clear();
+    if (layout === 'graph') graph.detach();
     closeMenu();
     render();
     saveWorkspaceView();
@@ -1144,6 +1415,7 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   currentId = crumb.dataset.breadcrumb;
   selected.clear();
   expanded.clear();
+  if (layout === 'graph') graph.detach();
   render();
   saveWorkspaceView();
 });
