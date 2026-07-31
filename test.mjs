@@ -88,6 +88,13 @@ assert.match(script, /ResizeObserver/);
 assert.match(script, /fitGraph/);
 assert.match(script, /translate3d/);
 assert.match(script, /prefers-reduced-motion/);
+assert.match(script, /createGraphView/);
+assert.match(script, /destroyGraphView/);
+assert.match(script, /updateGraphView/);
+assert.match(script, /graph-node-shell/);
+assert.match(script, /graph-viewport/);
+assert.match(script, /graph-camera/);
+assert.match(script, /dataset\.view/);
 
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);

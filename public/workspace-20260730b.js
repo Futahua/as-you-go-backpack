@@ -272,7 +272,8 @@ function createGraphController() {
   const nodes = new Map();
   let simulation = null;
   let zoomBehavior = null;
-  let scene = null;
+  let viewport = null;
+  let camera = null;
   let edgeLayer = null;
   let nodeLayer = null;
   let svg = null;
@@ -281,59 +282,76 @@ function createGraphController() {
   let pendingFrame = false;
   let initialized = false;
   let attached = false;
+  const exitTimers = [];
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
-  function attach() {
+  function createGraphView() {
     if (attached) return;
-    scene = document.createElement('div');
-    scene.className = 'graph-scene';
+    elements.grid.innerHTML = '';
+    elements.grid.classList.add('graph-view');
+    elements.grid.dataset.view = 'graph';
+
+    viewport = document.createElement('div');
+    viewport.className = 'graph-viewport';
+    viewport.id = 'graph-viewport';
+    viewport.dataset.blankParent = binMode ? 'bin' : currentId;
+
+    camera = document.createElement('div');
+    camera.className = 'graph-camera';
+
     svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'graph-edges-svg');
+    svg.setAttribute('aria-hidden', 'true');
     edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     svg.append(edgeLayer);
+
     nodeLayer = document.createElement('div');
     nodeLayer.className = 'graph-node-layer';
-    scene.append(svg, nodeLayer);
-    elements.grid.append(scene);
+
+    camera.append(svg, nodeLayer);
+    viewport.append(camera);
+    elements.grid.append(viewport);
     attached = true;
 
     zoomBehavior = zoom()
       .scaleExtent([0.35, 3])
       .filter((event) => {
-        if (event.type === 'mousedown' && event.button === 0) {
-          return event.target.closest('.icon-item') === null
-            && event.target.closest('[data-expand]') === null;
-        }
+        if (event.type === 'mousedown' && event.button === 0) return false;
+        if (event.type === 'dblclick') return false;
+        if (event.type === 'wheel' && event.ctrlKey) return false;
         return true;
       })
-      .on('zoom', (event) => {
-        const { x, y, k } = event.transform;
-        scene.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
+      .on('zoom', ({ transform }) => {
+        camera.style.transform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`;
       });
-    zoomBehavior(elements.grid);
+    zoomBehavior(viewport);
 
     resizeObserver = new ResizeObserver(() => {
-      if (elements.grid.clientWidth > 0 && elements.grid.clientHeight > 0 && simulation) {
-        simulation.force('cx').x(elements.grid.clientWidth / 2);
-        simulation.force('cy').y(elements.grid.clientHeight / 2);
+      const w = viewport.clientWidth;
+      const h = viewport.clientHeight;
+      if (w > 0 && h > 0 && simulation) {
+        simulation.force('cx').x(w / 2);
+        simulation.force('cy').y(h / 2);
       }
     });
-    resizeObserver.observe(elements.grid);
+    resizeObserver.observe(viewport);
   }
 
-  function detach() {
+  function destroyGraphView() {
     if (simulation) { simulation.stop(); simulation = null; }
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; pendingFrame = false; }
-    if (zoomBehavior) { zoomBehavior.on('zoom', null); }
+    while (exitTimers.length) clearTimeout(exitTimers.pop());
     if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
-    nodes.forEach((n) => { if (n.element) n.element.remove(); });
     nodes.clear();
-    if (scene) { scene.remove(); scene = null; }
+    if (viewport) { viewport.remove(); viewport = null; }
+    camera = null;
     edgeLayer = null;
     nodeLayer = null;
     svg = null;
     attached = false;
     initialized = false;
+    elements.grid.classList.remove('graph-view');
+    elements.grid.dataset.view = 'explorer';
   }
 
   function scheduleRender() {
@@ -348,18 +366,18 @@ function createGraphController() {
 
   function drawFrame() {
     nodes.forEach((node) => {
-      if (node.exiting || !node.element) return;
-      node.element.style.transform =
+      if (node.exiting || !node.shell) return;
+      node.shell.style.transform =
         `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
     });
-    const lines = edgeLayer.querySelectorAll('path');
+    const paths = edgeLayer ? edgeLayer.querySelectorAll('path') : [];
     let i = 0;
     nodes.forEach((node) => {
-      if (node.exiting || !node.parentNode) return;
+      if (node.exiting) return;
       for (const childId of node.childIds) {
         const child = nodes.get(childId);
         if (!child || child.exiting) continue;
-        const path = lines[i];
+        const path = paths[i];
         if (path) {
           path.setAttribute('d', edgePath(node.x, node.y, child.x, child.y));
           i += 1;
@@ -369,12 +387,12 @@ function createGraphController() {
   }
 
   function edgePath(x1, y1, x2, y2) {
-    const dx = (x2 - x1) / 2;
-    return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+    const mx = (x1 + x2) / 2;
+    return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
   }
 
-  function buildNodes(visibleItems) {
-    const incoming = new Map(visibleItems.map((vi) => [vi.id, vi]));
+  function syncNodes(visibleItems) {
+    const incoming = new Set(visibleItems.map((vi) => vi.id));
     for (const id of [...nodes.keys()]) {
       if (!incoming.has(id)) removeNode(id);
     }
@@ -383,15 +401,18 @@ function createGraphController() {
       if (node) {
         node.exiting = false;
         node.childIds = childIdsFor(vi);
+        node.parentNode = parentOf(node);
         continue;
       }
       const candidate = item(vi.id);
       if (!candidate) continue;
-      const parent = candidate.parentId && candidate.parentId !== ROOT_ID
+      const parent = candidate.parentId && candidate.parentId !== ROOT_ID && candidate.parentId !== 'bin'
         ? nodes.get(candidate.parentId)
         : null;
-      const index = parent ? parent.childIds.length : visibleItems.filter((v) => v.depth === 0).indexOf(vi);
-      const seed = seedPosition(vi.id, parent?.x != null ? parent : null, Math.max(0, index), visibleItems.length);
+      const index = parent
+        ? parent.childIds.length
+        : visibleItems.filter((v) => v.depth === 0).indexOf(vi);
+      const seed = seedPosition(vi.id, parent, Math.max(0, index), visibleItems.length);
       node = {
         id: vi.id,
         candidate,
@@ -403,15 +424,11 @@ function createGraphController() {
         height: 0,
         childIds: childIdsFor(vi),
         parentNode: parent ?? null,
-        element: null,
-        edgeElements: [],
+        shell: null,
         exiting: false,
       };
       nodes.set(vi.id, node);
-      createElementFor(node);
-    }
-    for (const node of nodes.values()) {
-      if (!node.exiting) node.parentNode = parentOf(node);
+      createNodeShell(node);
     }
   }
 
@@ -426,43 +443,48 @@ function createGraphController() {
     return itemsIn(state, vi.id).map((c) => c.id);
   }
 
-  function createElementFor(node) {
+  function createNodeShell(node) {
     const candidate = node.candidate;
     const isSelected = selected.has(candidate.id);
     const canExpand = candidate.kind === 'group' && !binMode;
     const isExpanded = canExpand && expanded.has(candidate.id);
     const draggable = binMode ? 'false' : 'true';
-    const el = document.createElement('div');
-    el.className = `icon-item graph-node${isSelected ? ' selected' : ''}${canExpand ? '' : ' leaf'}`;
-    el.dataset.id = candidate.id;
-    el.dataset.kind = candidate.kind;
-    el.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
-    el.setAttribute('draggable', draggable);
-    el.setAttribute('role', 'option');
-    el.setAttribute('aria-selected', String(isSelected));
-    el.setAttribute('tabindex', '-1');
-    el.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
-    el.innerHTML =
+
+    const shell = document.createElement('div');
+    shell.className = 'graph-node-shell';
+    shell.dataset.graphNodeId = candidate.id;
+    shell.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
+
+    const iconItem = document.createElement('div');
+    iconItem.className = `icon-item${isSelected ? ' selected' : ''}`;
+    iconItem.dataset.id = candidate.id;
+    iconItem.dataset.kind = candidate.kind;
+    iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
+    iconItem.setAttribute('draggable', draggable);
+    iconItem.setAttribute('role', 'option');
+    iconItem.setAttribute('aria-selected', String(isSelected));
+    iconItem.setAttribute('tabindex', '-1');
+    iconItem.innerHTML =
       `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
       + `<div class="item-icon">${iconMarkup(candidate)}</div>`
       + `<strong>${escapeHtml(candidate.name)}</strong>`
       + `${descriptionMarkup(candidate)}`;
-    nodeLayer.append(el);
-    node.element = el;
-    requestAnimationFrame(() => {
-      const rect = el.getBoundingClientRect();
-      node.width = rect.width || (state.view.iconSize + 42);
-      node.height = rect.height || (state.view.iconSize + 64);
-    });
+
+    shell.append(iconItem);
+    nodeLayer.append(shell);
+    node.shell = shell;
+
+    node.width = shell.offsetWidth || (state.view.iconSize + 42);
+    node.height = shell.offsetHeight || (state.view.iconSize + 64);
+
     if (reducedMotion?.matches) {
-      el.style.opacity = '1';
+      shell.style.opacity = '1';
     } else {
-      el.style.opacity = '0';
-      el.style.setProperty('--node-scale', '0.7');
-      el.classList.add('entering');
+      shell.style.opacity = '0';
+      shell.style.scale = '0.7';
       requestAnimationFrame(() => {
-        el.style.opacity = '1';
-        el.classList.remove('entering');
+        shell.style.opacity = '1';
+        shell.style.scale = '1';
       });
     }
   }
@@ -471,7 +493,7 @@ function createGraphController() {
     const node = nodes.get(id);
     if (!node) return;
     if (reducedMotion?.matches || node.exiting) {
-      node.element?.remove();
+      node.shell?.remove();
       nodes.delete(id);
       return;
     }
@@ -479,19 +501,23 @@ function createGraphController() {
     const parent = node.parentNode;
     const targetX = parent ? parent.x : node.x;
     const targetY = parent ? parent.y : node.y;
-    node.element.classList.add('exiting');
-    node.element.style.transform = `translate3d(${targetX}px, ${targetY}px, 0) translate(-50%, -50%)`;
-    node.element.style.opacity = '0';
-    setTimeout(() => {
-      node.element?.remove();
+    node.shell.classList.add('exiting');
+    node.shell.style.transform = `translate3d(${targetX}px, ${targetY}px, 0) translate(-50%, -50%)`;
+    node.shell.style.opacity = '0';
+    node.shell.style.scale = '0.5';
+    const timer = setTimeout(() => {
+      node.shell?.remove();
       nodes.delete(id);
+      const idx = exitTimers.indexOf(timer);
+      if (idx >= 0) exitTimers.splice(idx, 1);
     }, 200);
+    exitTimers.push(timer);
   }
 
   function buildEdges() {
+    if (!edgeLayer) return;
     edgeLayer.innerHTML = '';
     nodes.forEach((node) => {
-      node.edgeElements = [];
       if (node.exiting) return;
       for (const childId of node.childIds) {
         const child = nodes.get(childId);
@@ -500,15 +526,14 @@ function createGraphController() {
         path.setAttribute('class', 'graph-edge');
         path.setAttribute('d', edgePath(node.x, node.y, child.x, child.y));
         edgeLayer.append(path);
-        node.edgeElements.push(path);
       }
     });
   }
 
   function ensureSimulation() {
     if (simulation) return;
-    const w = elements.grid.clientWidth || 800;
-    const h = elements.grid.clientHeight || 600;
+    const w = viewport?.clientWidth || 800;
+    const h = viewport?.clientHeight || 600;
     simulation = forceSimulation()
       .force('cx', forceX(w / 2).strength(0.05))
       .force('cy', forceY(h / 2).strength(0.05))
@@ -535,8 +560,10 @@ function createGraphController() {
     });
     simulation.force('link').links(edgeArray);
     simulation.force('collide').radius((n) => Math.max(n.width, n.height) / 2 + 20);
-    simulation.force('cx').x(elements.grid.clientWidth / 2);
-    simulation.force('cy').y(elements.grid.clientHeight / 2);
+    const w = viewport?.clientWidth || 800;
+    const h = viewport?.clientHeight || 600;
+    simulation.force('cx').x(w / 2);
+    simulation.force('cy').y(h / 2);
   }
 
   function reheat(level = 0.35) {
@@ -545,7 +572,7 @@ function createGraphController() {
   }
 
   function fitGraph(padding = 90, animate = true) {
-    if (!scene || nodes.size === 0) return;
+    if (!camera || !viewport || nodes.size === 0) return;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nodes.forEach((n) => {
       if (n.exiting) return;
@@ -557,8 +584,8 @@ function createGraphController() {
       maxY = Math.max(maxY, n.y + halfH);
     });
     if (!Number.isFinite(minX)) return;
-    const w = elements.grid.clientWidth || 800;
-    const h = elements.grid.clientHeight || 600;
+    const w = viewport.clientWidth || 800;
+    const h = viewport.clientHeight || 600;
     const scale = Math.min(
       (w - padding * 2) / Math.max(1, maxX - minX),
       (h - padding * 2) / Math.max(1, maxY - minY),
@@ -570,21 +597,25 @@ function createGraphController() {
     const tx = w / 2 - cx * k;
     const ty = h / 2 - cy * k;
     if (animate && !reducedMotion?.matches) {
-      zoomBehavior.transition(elements.grid).duration(550).call(zoomBehavior.transform, zoomIdentity.translate(tx, ty).scale(k));
+      zoomBehavior.transition(viewport).duration(550).call(
+        zoomBehavior.transform,
+        zoomIdentity.translate(tx, ty).scale(k),
+      );
     } else {
-      zoomBehavior.transform(elements.grid, zoomIdentity.translate(tx, ty).scale(k));
+      zoomBehavior.transform(viewport, zoomIdentity.translate(tx, ty).scale(k));
     }
   }
 
-  function update(initialFit = false) {
-    if (elements.grid.clientWidth === 0 || elements.grid.clientHeight === 0) return;
+  function updateGraphView(initialFit = false) {
+    const w = viewport?.clientWidth ?? 0;
+    const h = viewport?.clientHeight ?? 0;
+    if (w === 0 || h === 0) return;
     const visible = visibleGraphItems(state, currentId, expanded, binMode);
     if (visible.length === 0) {
       nodes.forEach((_, id) => removeNode(id));
       return;
     }
-    if (!attached) attach();
-    buildNodes(visible);
+    syncNodes(visible);
     buildEdges();
     syncSimulation();
     reheat(initialFit ? 0.7 : 0.35);
@@ -596,16 +627,19 @@ function createGraphController() {
 
   function refreshSelection() {
     nodes.forEach((node) => {
-      if (!node.element) return;
+      if (!node.shell) return;
+      const iconItem = node.shell.querySelector('.icon-item');
+      if (!iconItem) return;
       const isSelected = selected.has(node.id);
-      node.element.classList.toggle('selected', isSelected);
-      node.element.setAttribute('aria-selected', String(isSelected));
+      iconItem.classList.toggle('selected', isSelected);
+      iconItem.setAttribute('aria-selected', String(isSelected));
     });
   }
 
   return {
-    update,
-    detach,
+    createGraphView,
+    updateGraphView,
+    destroyGraphView,
     refreshSelection,
     reheat,
     fitGraph,
@@ -615,8 +649,10 @@ function createGraphController() {
 }
 
 function renderGraph(initialFit = false) {
-  elements.grid.classList.add('graph-view');
-  graph.update(initialFit);
+  if (!graph.isAttached) {
+    graph.createGraphView();
+  }
+  graph.updateGraphView(initialFit);
 }
 
 function render() {
@@ -633,8 +669,7 @@ function render() {
   if (layout === 'graph') {
     renderGraph(!graph.isAttached);
   } else {
-    if (graph.isAttached) graph.detach();
-    elements.grid.classList.remove('graph-view');
+    if (graph.isAttached) graph.destroyGraphView();
     elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
   }
   elements.empty.hidden = visible.length !== 0;
@@ -868,7 +903,7 @@ async function activate(itemId) {
     binMode = false;
     selected.clear();
     expanded.clear();
-    if (layout === 'graph') graph.detach();
+    if (layout === 'graph') graph.destroyGraphView();
     closeMenu();
     render();
     saveWorkspaceView();
@@ -1415,7 +1450,7 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   currentId = crumb.dataset.breadcrumb;
   selected.clear();
   expanded.clear();
-  if (layout === 'graph') graph.detach();
+  if (layout === 'graph') graph.destroyGraphView();
   render();
   saveWorkspaceView();
 });
