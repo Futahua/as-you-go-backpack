@@ -124,6 +124,9 @@ assert.match(script, /allActivePlacementIds/);
 assert.match(html, /link-edit-layer/);
 assert.match(html, /fork-link-edit/);
 assert.match(html, /apply-everywhere-link-edit/);
+assert.match(script, /collapsePlacements,/);
+assert.match(script, /visiblePlacementIdFor/);
+assert.match(script, /placementIds\.get\(/);
 
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);

@@ -27,6 +27,7 @@ import {
   setToolbarPosition,
   getToolbarPosition,
   forkPlacement,
+  collapsePlacements,
   placementCount,
 } from './workspace-model-20260730b.js';
 
@@ -197,6 +198,23 @@ function anyActivePlacementId(shortcutId) {
 function allActivePlacementIds(shortcutId) {
   const record = shortcut(shortcutId);
   return record?.placements.filter((placement) => !placement.bin).map((placement) => placement.id) ?? [];
+}
+
+/** The specific placement the user is currently looking at for this
+ * shortcut — the one matching its visible parent in the currently
+ * rendered graph node, falling back to any active placement if the node
+ * isn't on screen. Must be resolved at gesture-start time (copy/cut,
+ * drag start, bin move, editor open), not at commit time, since
+ * navigation or selection changes between gesture and commit shouldn't
+ * change which placement the action targets. */
+function visiblePlacementIdFor(shortcutId) {
+  const record = shortcut(shortcutId);
+  const visibleParentId = graph._getNode(shortcutId)?.parentIds?.[0];
+
+  return record?.placements.find((placement) =>
+    !placement.bin
+    && (!visibleParentId || placement.parentId === visibleParentId)
+  )?.id ?? anyActivePlacementId(shortcutId);
 }
 
 /** Resolves a Bin-context id — a group id, or one specific placement id —
@@ -1148,20 +1166,33 @@ async function activateSelection() {
 
 async function copyOrCut(mode) {
   if (selected.size === 0) return;
-  // For a cut, capture right now whether each selected shortcut currently
-  // shows more than one edge on screen — that decides, at paste time,
-  // whether the whole shared shortcut collapses into the destination or
-  // only the one placement this view represents moves there. Captured at
-  // cut-time, not paste-time, since navigating before pasting shouldn't
-  // change what "cut" already committed to.
+
+  // Capture right now, at the moment of Ctrl+C/Ctrl+X, both which specific
+  // placement each selected shortcut represents and (for a cut) whether it
+  // currently shows more than one edge on screen — both decide behavior at
+  // paste time and must not drift if selection or graph visibility changes
+  // before the user pastes.
   const collapseWhole = new Set();
-  if (mode === 'cut') {
-    for (const selectedId of selected) {
-      if (group(selectedId)) continue;
-      if (visibleParentCountFor(selectedId) > 1) collapseWhole.add(selectedId);
+  const placementIds = new Map();
+
+  for (const selectedId of selected) {
+    if (group(selectedId)) continue;
+
+    const placementId = visiblePlacementIdFor(selectedId);
+    if (placementId) placementIds.set(selectedId, placementId);
+
+    if (mode === 'cut' && visibleParentCountFor(selectedId) > 1) {
+      collapseWhole.add(selectedId);
     }
   }
-  clipboard = { mode, ids: [...selected], collapseWhole };
+
+  clipboard = {
+    mode,
+    ids: [...selected],
+    collapseWhole,
+    placementIds,
+  };
+
   setStatus('');
   closeMenu();
 }
@@ -1176,7 +1207,7 @@ async function pasteInto(parentId) {
       const wholeShortcutIds = clipboard.ids.filter((selectedId) => clipboard.collapseWhole.has(selectedId));
       const singlePlacementIds = clipboard.ids
         .filter((selectedId) => !group(selectedId) && !clipboard.collapseWhole.has(selectedId))
-        .map((shortcutId) => anyActivePlacementId(shortcutId))
+        .map((selectedId) => clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
         .filter(Boolean);
       if (groupIds.length > 0 || singlePlacementIds.length > 0) {
         next = moveSelection(next, [...groupIds, ...singlePlacementIds], parentId);
@@ -1186,7 +1217,9 @@ async function pasteInto(parentId) {
       }
     } else {
       const ids = clipboard.ids
-        .map((selectedId) => group(selectedId) ? selectedId : anyActivePlacementId(selectedId))
+        .map((selectedId) => group(selectedId)
+          ? selectedId
+          : clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
         .filter(Boolean);
       next = copySelection(next, ids, parentId);
     }
@@ -1288,7 +1321,11 @@ async function resolveEditorTargetIcon() {
 
 function showEditor(kind, existing = null, parentId = currentId) {
   closeMenu();
-  editorMode = { kind, item: existing, parentId };
+  const representedPlacementId =
+    (kind === 'shortcut' || kind === 'web') && existing
+      ? visiblePlacementIdFor(existing.id)
+      : null;
+  editorMode = { kind, item: existing, parentId, representedPlacementId };
   editorIcon = existing?.icon ?? null;
   editorTargetIcon =
     kind === 'shortcut' && existing && !existing.icon
@@ -1368,10 +1405,11 @@ async function commitEditorSave(forkFirst) {
     let workingState = state;
     let editItemId = editorMode.item?.id;
     if (forkFirst && editItemId) {
-      const anyPlacementId = anyActivePlacementId(editItemId);
-      if (anyPlacementId) {
+      const representedPlacementId =
+        editorMode.representedPlacementId ?? anyActivePlacementId(editItemId);
+      if (representedPlacementId) {
         const knownIds = new Set(workingState.shortcuts.map((candidate) => candidate.id));
-        workingState = forkPlacement(workingState, anyPlacementId);
+        workingState = forkPlacement(workingState, representedPlacementId);
         const forked = workingState.shortcuts.find((candidate) => !knownIds.has(candidate.id));
         if (forked) editItemId = forked.id;
       }
@@ -1422,7 +1460,7 @@ async function moveToBin() {
     if (group(selectedId)) return [selectedId];
     return visibleParentCountFor(selectedId) > 1
       ? allActivePlacementIds(selectedId)
-      : [anyActivePlacementId(selectedId)].filter(Boolean);
+      : [visiblePlacementIdFor(selectedId)].filter(Boolean);
   });
   await commit(binSelection(state, ids), 'Moved to Bin.');
 }
@@ -1529,9 +1567,16 @@ elements.grid.addEventListener('pointerdown', (event) => {
         syncSelection();
         saveWorkspaceView();
       }
+      const dragPlacementIds = new Map();
+      for (const id of selected) {
+        if (group(id)) continue;
+        const placementId = visiblePlacementIdFor(id);
+        if (placementId) dragPlacementIds.set(id, placementId);
+      }
       graphDrag = {
         pointerId: event.pointerId,
         itemIds: [...selected],
+        placementIds: dragPlacementIds,
         primaryNodeId: itemId,
         startClientX: event.clientX,
         startClientY: event.clientY,
@@ -1692,7 +1737,7 @@ elements.grid.addEventListener('pointerup', (event) => {
         }
       }
 
-      const graphDragCopy = { ...graphDrag, itemIds: [...graphDrag.itemIds] };
+      const graphDragCopy = { ...graphDrag, itemIds: [...graphDrag.itemIds], placementIds: graphDrag.placementIds };
       graphDrag = null;
 
       if (hitFolderId) {
@@ -1702,7 +1747,7 @@ elements.grid.addEventListener('pointerup', (event) => {
             !group(draggedId) && visibleParentCountFor(draggedId) > 1);
           const singlePlacementIds = graphDragCopy.itemIds
             .filter((draggedId) => !group(draggedId) && visibleParentCountFor(draggedId) <= 1)
-            .map((shortcutId) => anyActivePlacementId(shortcutId))
+            .map((shortcutId) => graphDragCopy.placementIds.get(shortcutId) ?? anyActivePlacementId(shortcutId))
             .filter(Boolean);
           let next = state;
           if (groupIds.length > 0 || singlePlacementIds.length > 0) {
@@ -2108,8 +2153,13 @@ function setupToolbarDragging() {
   document.querySelectorAll('.toolbar-float[data-toolbar-key]').forEach((element) => {
     element.addEventListener('pointerdown', (event) => {
       if (event.button !== 0) return;
+      // The breadcrumb pill's visible surface is almost entirely its own
+      // navigation buttons, so unlike the other toolbar-float elements it
+      // must allow starting a drag from those buttons too — the 4px move
+      // threshold below (and the click-suppression on release) is what
+      // still lets a plain click navigate normally.
       const interactiveAncestor = event.target.closest('button, a, input');
-      if (interactiveAncestor && interactiveAncestor !== element) return;
+      if (interactiveAncestor && interactiveAncestor !== element && !element.classList.contains('breadcrumbs')) return;
       const rect = element.getBoundingClientRect();
       drag = {
         element,

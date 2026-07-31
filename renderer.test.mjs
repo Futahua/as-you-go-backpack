@@ -18,6 +18,19 @@ import {
   forkPlacement,
 } from './model.mjs';
 
+/** Mirrors the renderer's visiblePlacementIdFor(): resolves the placement
+ * matching the shortcut's currently visible parent (per the graph node
+ * on screen for it), falling back to any active placement. Reimplemented
+ * here against the plain model/graph-model layer so the copy/cut/fork
+ * placement-resolution bug can be regression-tested without a DOM. */
+function visiblePlacementIdForNode(state, shortcutId, node) {
+  const record = state.shortcuts.find((candidate) => candidate.id === shortcutId);
+  const visibleParentId = node?.parentIds?.[0];
+  const match = record?.placements.find((placement) =>
+    !placement.bin && (!visibleParentId || placement.parentId === visibleParentId));
+  return match?.id ?? record?.placements.find((placement) => !placement.bin)?.id ?? null;
+}
+
 import {
   visibleGraphItems,
   graphEdges,
@@ -320,4 +333,81 @@ test('forking a placement out of the graph removes only that one edge, not the s
   const forkedNodes = items.filter((i) => i.id === forked.id);
   assert.equal(forkedNodes.length, 1);
   assert.deepEqual(forkedNodes[0].parentIds, [b.id]);
+});
+
+test('copying a shortcut into a folder selected by a single click produces a second placement and two visible edges', () => {
+  // Regression test for the clipboard placement-resolution bug: the
+  // clipboard only remembers the shortcut's shared identity id, so at
+  // paste time the renderer must resolve which specific placement was
+  // actually visible/selected, not an arbitrary active one. This is the
+  // exact "copy into a single-click-selected folder" scenario the
+  // original PR review could not get to pass manually.
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  state = createGroup(state, 'C');
+  const [a, b, c] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+
+  // Only A is expanded/visible when the user copies — the node's visible
+  // parent is A, so the clipboard must capture A's placement id.
+  const visibleItems = visibleGraphItems(state, ROOT_ID, new Set([a.id]), false);
+  const node = visibleItems.find((i) => i.id === original.id);
+  assert.deepEqual(node.parentIds, [a.id]);
+
+  const placementId = visiblePlacementIdForNode(state, original.id, node);
+  const expectedPlacementId = original.placements.find((p) => p.parentId === a.id).id;
+  assert.equal(placementId, expectedPlacementId);
+
+  // Paste (copy) into folder C, which the user selected with a single click.
+  state = copySelection(state, [placementId], c.id);
+
+  const record = state.shortcuts.find((candidate) => candidate.id === original.id);
+  assert.equal(record.placements.filter((p) => !p.bin).length, 2, 'a second placement now exists');
+  assert.ok(record.placements.some((p) => p.parentId === a.id));
+  assert.ok(record.placements.some((p) => p.parentId === c.id));
+
+  const itemsBothExpanded = visibleGraphItems(state, ROOT_ID, new Set([a.id, c.id]), false);
+  const sharedNodes = itemsBothExpanded.filter((i) => i.id === original.id);
+  assert.equal(sharedNodes.length, 1, 'still one shared node');
+  assert.deepEqual(new Set(sharedNodes[0].parentIds), new Set([a.id, c.id]));
+
+  const edgesToShared = graphEdges(itemsBothExpanded).filter((e) => e.target === original.id);
+  assert.equal(edgesToShared.length, 2, 'both folders show an edge to the shared shortcut');
+});
+
+test('forking from a placement in folder B (not the placement in folder A) forks the correct one', () => {
+  // Regression test for "Fork this one" forking an arbitrary placement
+  // instead of the one the editor was actually opened on. Here the editor
+  // represents the shortcut as seen from folder B, so the fork must land
+  // in B while the original stays correctly placed in A.
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  const [a, b] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  state = copySelection(state, [original.placements[0].id], b.id);
+
+  // The user opens the editor on the tile visible under B specifically.
+  const itemsUnderB = visibleGraphItems(state, ROOT_ID, new Set([b.id]), false);
+  const nodeInB = itemsUnderB.find((i) => i.id === original.id);
+  assert.deepEqual(nodeInB.parentIds, [b.id]);
+
+  const representedPlacementId = visiblePlacementIdForNode(state, original.id, nodeInB);
+  const expectedBPlacementId = state.shortcuts
+    .find((candidate) => candidate.id === original.id).placements
+    .find((placement) => placement.parentId === b.id).id;
+  assert.equal(representedPlacementId, expectedBPlacementId);
+
+  state = forkPlacement(state, representedPlacementId);
+
+  const items = visibleGraphItems(state, ROOT_ID, new Set([a.id, b.id]), false);
+  const originalNodes = items.filter((i) => i.id === original.id);
+  assert.equal(originalNodes.length, 1);
+  assert.deepEqual(originalNodes[0].parentIds, [a.id], 'the original stays in A');
+
+  const forked = state.shortcuts.find((candidate) => candidate.id !== original.id);
+  const forkedNodes = items.filter((i) => i.id === forked.id);
+  assert.equal(forkedNodes.length, 1);
+  assert.deepEqual(forkedNodes[0].parentIds, [b.id], 'the fork lands in B');
 });
