@@ -91,6 +91,7 @@ binButton: document.querySelector('#bin-button'),
 const pending = new Map();
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
+let undoState = null;
 let currentId = ROOT_ID;
 let selected = new Set();
 let selectionAnchor = null;
@@ -957,7 +958,8 @@ async function persist(nextState = state) {
   await operation;
 }
 
-async function commit(nextState) {
+async function commit(nextState, options = {}) {
+  if (!options.isUndo) undoState = state;
   state = normalizeState(nextState);
   selected.clear();
   captureWorkspaceView();
@@ -971,6 +973,14 @@ async function commit(nextState) {
     setStatus(error instanceof Error ? error.message : String(error));
     return false;
   }
+}
+
+async function undo() {
+  if (!undoState) return;
+  const previous = undoState;
+  undoState = null;
+  closeMenu();
+  await commit(previous, { isUndo: true });
 }
 
 function visibleItemIds() {
@@ -1104,6 +1114,11 @@ function currentSelectionParent() {
   return first?.parentId ?? currentId;
 }
 
+function selectedPasteDestination() {
+  const folder = [...selected].map((itemId) => group(itemId)).find(Boolean);
+  return folder ? folder.id : currentId;
+}
+
 async function activate(itemId) {
   const folder = group(itemId);
   if (folder) {
@@ -1153,6 +1168,25 @@ async function revealSelection() {
       setStatus(error instanceof Error ? error.message : String(error));
     }
   }
+}
+
+async function activateSelection() {
+  const shortcuts = [...selected]
+    .map((itemId) => shortcut(itemId))
+    .filter(Boolean);
+  if (shortcuts.length === 0) return;
+  closeMenu();
+  await Promise.all(shortcuts.map(async (chosen) => {
+    try {
+      if (isWebLink(chosen)) {
+        await request('papers:project:open-web-link', { url: chosen.target });
+      } else {
+        await request('papers:project:as-you-go-launch', { actionId: chosen.id });
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }));
 }
 
 async function copyOrCut(mode) {
@@ -1808,7 +1842,11 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.ctrlKey && event.key.toLowerCase() === 'v') {
     event.preventDefault();
-    pasteInto(currentId);
+    pasteInto(selectedPasteDestination());
+  }
+  if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+    event.preventDefault();
+    undo();
   }
   if (event.key === 'Delete' && selected.size > 0) {
     event.preventDefault();
@@ -1823,6 +1861,10 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && selected.size === 1 && !binMode) {
     event.preventDefault();
     activate([...selected][0]);
+  }
+  if (event.key === 'Enter' && selected.size > 1 && !binMode) {
+    event.preventDefault();
+    activateSelection();
   }
 });
 

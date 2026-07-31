@@ -104,6 +104,11 @@ assert.match(script, /revealSelection/);
 assert.match(script, /event\.key === 'Enter' && event\.ctrlKey/);
 assert.match(script, /directoryOf/);
 assert.match(script, /seenDirectories/);
+assert.match(script, /async function undo\(\)/);
+assert.match(script, /undoState/);
+assert.match(script, /event\.ctrlKey && event\.key\.toLowerCase\(\) === 'z'/);
+assert.match(script, /activateSelection/);
+assert.match(script, /selectedPasteDestination/);
 
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);
