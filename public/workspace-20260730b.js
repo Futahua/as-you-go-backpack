@@ -21,8 +21,24 @@ import {
   updateShortcut,
   updateWebLink,
   updateWorkspaceView,
-  webLinkIcon,
+  graphContextId,
+  getGraphPosition,
+  setGraphPositions,
+  removeGraphPositions,
 } from './workspace-model-20260730b.js';
+
+import {
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceCollide,
+  forceX,
+  forceY,
+} from './vendor/d3-force.js';
+import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
+import { select } from './vendor/d3-selection.js';
+import { visibleGraphItems, graphEdges, seedPosition } from './graph-model-20260730b.js';
+import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
 
@@ -48,9 +64,11 @@ const elements = {
   deleteAllBin: document.querySelector('#delete-all-bin'),
   selectionStatus: document.querySelector('#selection-status'),
   menu: document.querySelector('#context-menu'),
-  binButton: document.querySelector('#bin-button'),
+binButton: document.querySelector('#bin-button'),
   binLabel: document.querySelector('#bin-label'),
   binCount: document.querySelector('#bin-count'),
+  graphButton: document.querySelector('#graph-view-button'),
+  graphLabel: document.querySelector('#graph-label'),
   editorLayer: document.querySelector('#editor-layer'),
   editor: document.querySelector('#editor'),
   saveButton: document.querySelector('#save-editor'),
@@ -76,18 +94,65 @@ let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
 let currentId = ROOT_ID;
 let selected = new Set();
 let selectionAnchor = null;
-let expanded = new Set();
+let explorerExpanded = new Set();
+let graphExpanded = new Set();
 let clipboard = null;
 let editorMode = null;
 let editorIcon = null;
 let editorTargetIcon = null;
 let binMode = false;
+let layout = 'explorer';
 let dragIds = [];
 let marqueeDrag = null;
 let suppressBlankClick = false;
+let suppressGraphClick = false;
 let pendingPermanentIds = [];
 let zoomTimer = null;
 let saveQueue = Promise.resolve();
+let graphDrag = null;
+let graphShiftKeydown = null;
+let graphShiftKeyup = null;
+
+function installGraphShiftListeners() {
+  if (graphShiftKeydown) return;
+  graphShiftKeydown = (event) => {
+    if (event.key === 'Shift' && graphDrag) {
+      graphDrag.pinOnRelease = true;
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        if (node?.shell) {
+          node.shell.classList.remove('will-release');
+          node.shell.classList.add('will-pin');
+        }
+      }
+    }
+  };
+  graphShiftKeyup = (event) => {
+    if (event.key === 'Shift' && graphDrag) {
+      graphDrag.pinOnRelease = false;
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        if (node?.shell) {
+          node.shell.classList.remove('will-pin');
+          node.shell.classList.add('will-release');
+        }
+      }
+    }
+  };
+  window.addEventListener('keydown', graphShiftKeydown, { capture: true });
+  window.addEventListener('keyup', graphShiftKeyup, { capture: true });
+}
+
+function removeGraphShiftListeners() {
+  if (graphShiftKeydown) {
+    window.removeEventListener('keydown', graphShiftKeydown, { capture: true });
+    graphShiftKeydown = null;
+  }
+  if (graphShiftKeyup) {
+    window.removeEventListener('keyup', graphShiftKeyup, { capture: true });
+    graphShiftKeyup = null;
+  }
+}
 
 function request(type, detail = {}) {
   const requestId = crypto.randomUUID();
@@ -135,9 +200,11 @@ function isAvailableItem(itemId) {
 function captureWorkspaceView() {
   state = updateWorkspaceView(state, {
     currentGroupId: currentId,
-    expandedGroupIds: [...expanded],
+    expandedGroupIds: [...explorerExpanded],
+    graphExpandedGroupIds: [...graphExpanded],
     selectedItemIds: [...selected],
     binMode,
+    layout,
   });
 }
 
@@ -147,11 +214,16 @@ function restoreWorkspaceView() {
     requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
       ? requestedCurrent
       : ROOT_ID;
-  expanded = new Set(
+  explorerExpanded = new Set(
     state.view.expandedGroupIds.filter((groupId) =>
       Boolean(group(groupId)) && isAvailableItem(groupId)),
   );
+  graphExpanded = new Set(
+    (state.view.graphExpandedGroupIds ?? []).filter((groupId) =>
+      Boolean(group(groupId))),
+  );
   binMode = state.view.binMode;
+  layout = state.view.layout === 'graph' ? 'graph' : 'explorer';
   const binnedIds = new Set(binnedItems(state).map((candidate) => candidate.id));
   selected = new Set(
     state.view.selectedItemIds.filter((itemId) =>
@@ -188,7 +260,7 @@ function iconMarkup(candidate) {
     return `<img src="${escapeHtml(candidate.icon)}" alt="" />`;
   }
   if (isWebLink(candidate)) {
-    return `<img data-web-icon="${escapeHtml(webLinkIcon(candidate))}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
+    return `<img data-web-icon="${escapeHtml(candidate.target)}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
   }
   return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
 }
@@ -203,7 +275,7 @@ function renderItems(parentId, depth = 0) {
   return itemsIn(state, parentId).map((candidate) => {
     const isSelected = selected.has(candidate.id);
     const canExpand = candidate.kind === 'group';
-    const isExpanded = canExpand && expanded.has(candidate.id);
+    const isExpanded = canExpand && explorerExpanded.has(candidate.id);
     const tile = `
       <div
         class="icon-item ${isSelected ? 'selected' : ''}"
@@ -250,6 +322,534 @@ function renderBinItems() {
   `).join('');
 }
 
+const graph = createGraphController();
+
+function createGraphController() {
+  const nodes = new Map();
+  const edges = new Map();
+  let simulation = null;
+  let zoomBehavior = null;
+  let viewportSelection = null;
+  let viewport = null;
+  let camera = null;
+  let edgeLayer = null;
+  let nodeLayer = null;
+  let svg = null;
+  let resizeObserver = null;
+  let rafId = 0;
+  let pendingFrame = false;
+  let initialized = false;
+  let fitPending = false;
+  let attached = false;
+  let updatePending = false;
+  let pendingInitialFit = false;
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+
+  function createGraphView() {
+    if (attached) return;
+    viewport = document.createElement('div');
+    viewport.className = 'graph-viewport';
+    viewport.id = 'graph-viewport';
+    viewport.dataset.blankParent = binMode ? 'bin' : currentId;
+
+    camera = document.createElement('div');
+    camera.className = 'graph-camera';
+
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'graph-edges-svg');
+    svg.setAttribute('aria-hidden', 'true');
+    edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    svg.append(edgeLayer);
+
+    nodeLayer = document.createElement('div');
+    nodeLayer.className = 'graph-node-layer';
+
+    camera.append(svg, nodeLayer);
+    viewport.append(camera);
+    elements.grid.append(viewport);
+
+    try {
+      zoomBehavior = zoom()
+        .scaleExtent([0.35, 3])
+        .filter((event) => {
+          if (event.type === 'mousedown' && event.button === 0) return false;
+          if (event.type === 'dblclick') return false;
+          if (event.type === 'wheel' && event.ctrlKey) return false;
+          return true;
+        })
+        .on('zoom', ({ transform }) => {
+          if (camera) {
+            camera.style.transform = `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`;
+          }
+        });
+      viewportSelection = select(viewport);
+      viewportSelection.call(zoomBehavior);
+    } catch (error) {
+      viewport.remove();
+      viewport = null;
+      camera = null;
+      edgeLayer = null;
+      nodeLayer = null;
+      svg = null;
+      throw error;
+    }
+
+    resizeObserver = new ResizeObserver(() => {
+      const w = viewport?.clientWidth ?? 0;
+      const h = viewport?.clientHeight ?? 0;
+      if (w >= 2 && h >= 2) {
+        if (simulation) {
+          simulation.force('cx').x(w / 2);
+          simulation.force('cy').y(h / 2);
+        }
+        if (updatePending || fitPending) {
+          updatePending = false;
+          updateGraphView(pendingInitialFit);
+        }
+      }
+    });
+    resizeObserver.observe(viewport);
+    attached = true;
+  }
+
+  function destroyGraphView() {
+    if (graphDrag) {
+      graphDrag = null;
+      removeGraphShiftListeners();
+    }
+    if (simulation) { simulation.stop(); simulation = null; }
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; pendingFrame = false; }
+    nodes.forEach((node) => {
+      if (node.exitTimer) { clearTimeout(node.exitTimer); node.exitTimer = null; }
+    });
+    if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+    nodes.clear();
+    edges.clear();
+    if (viewport) { viewport.remove(); viewport = null; }
+    camera = null;
+    edgeLayer = null;
+    nodeLayer = null;
+    svg = null;
+    viewportSelection = null;
+    zoomBehavior = null;
+    attached = false;
+    initialized = false;
+    fitPending = false;
+    updatePending = false;
+    pendingInitialFit = false;
+  }
+
+  function scheduleRender() {
+    if (pendingFrame) return;
+    pendingFrame = true;
+    rafId = requestAnimationFrame(() => {
+      pendingFrame = false;
+      rafId = 0;
+      drawFrame();
+    });
+  }
+
+  function drawFrame() {
+    nodes.forEach((node) => {
+      if (node.exiting || !node.shell) return;
+      node.shell.style.transform =
+        `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
+    });
+    edges.forEach((edge) => {
+      const source = nodes.get(edge.sourceId);
+      const target = nodes.get(edge.targetId);
+      if (!source || !target || !edge.path) return;
+      edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+    });
+  }
+
+  function edgePath(x1, y1, x2, y2) {
+    const mx = (x1 + x2) / 2;
+    return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+  }
+
+  function buildCandidate(vi) {
+    const stored = item(vi.id);
+    if (!stored) return null;
+    return { ...stored, kind: vi.kind };
+  }
+
+  function syncNodes(visibleItems) {
+    const incoming = new Set(visibleItems.map((vi) => vi.id));
+    for (const id of [...nodes.keys()]) {
+      if (!incoming.has(id)) removeNode(id);
+    }
+    const byParent = new Map();
+    for (const vi of visibleItems) {
+      const key = vi.parentId ?? ROOT_ID;
+      if (!byParent.has(key)) byParent.set(key, []);
+      byParent.get(key).push(vi);
+    }
+    const ctxId = graphContextId(currentId, binMode);
+    for (const vi of visibleItems) {
+      let node = nodes.get(vi.id);
+      if (node) {
+        if (node.exitTimer) {
+          clearTimeout(node.exitTimer);
+          node.exitTimer = null;
+          node.exiting = false;
+          if (node.shell) {
+            node.shell.classList.remove('exiting');
+            node.shell.style.opacity = '';
+            node.shell.style.scale = '';
+          }
+        }
+        node.candidate = buildCandidate(vi);
+        node.childIds = childIdsFor(vi);
+        node.parentNode = parentOfNode(vi);
+        node.depth = vi.depth;
+        refreshNodeContent(node);
+        continue;
+      }
+      const candidate = buildCandidate(vi);
+      if (!candidate) continue;
+      const parent = candidate.parentId && candidate.parentId !== ROOT_ID && candidate.parentId !== 'bin'
+        ? nodes.get(candidate.parentId)
+        : null;
+      const siblings = byParent.get(candidate.parentId ?? ROOT_ID) ?? [];
+      const index = Math.max(0, siblings.findIndex((s) => s.id === vi.id));
+      const originX = viewport ? viewport.clientWidth / 2 : 400;
+      const originY = viewport ? viewport.clientHeight / 2 : 300;
+      const saved = getGraphPosition(state, ctxId, vi.id);
+      const seed = seedPosition(vi.id, parent, index, siblings.length, originX, originY);
+      node = {
+        id: vi.id,
+        candidate,
+        depth: vi.depth,
+        x: saved ? saved.x : seed.x,
+        y: saved ? saved.y : seed.y,
+        fx: saved ? saved.x : null,
+        fy: saved ? saved.y : null,
+        vx: 0,
+        vy: 0,
+        width: 0,
+        height: 0,
+        childIds: childIdsFor(vi),
+        parentNode: parent ?? null,
+        shell: null,
+        exiting: false,
+        exitTimer: null,
+        positioned: Boolean(saved),
+      };
+      nodes.set(vi.id, node);
+      createNodeShell(node);
+    }
+  }
+
+  function parentOfNode(vi) {
+    if (!vi.parentId || vi.parentId === ROOT_ID || vi.parentId === 'bin') return null;
+    return nodes.get(vi.parentId) ?? null;
+  }
+
+  function childIdsFor(vi) {
+    if (binMode || vi.kind !== 'group' || !graphExpanded.has(vi.id)) return [];
+    return itemsIn(state, vi.id).map((c) => c.id);
+  }
+
+  function refreshNodeContent(node) {
+    if (!node.shell) return;
+    const candidate = node.candidate;
+    if (!candidate) return;
+    const iconItem = node.shell.querySelector('.icon-item');
+    if (!iconItem) return;
+    const canExpand = candidate.kind === 'group' && !binMode;
+    const isExpanded = canExpand && graphExpanded.has(candidate.id);
+    const isSelected = selected.has(candidate.id);
+    iconItem.dataset.kind = candidate.kind;
+    iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
+    iconItem.setAttribute('draggable', 'false');
+    iconItem.setAttribute('aria-selected', String(isSelected));
+    iconItem.classList.toggle('selected', isSelected);
+    const signature = JSON.stringify([
+      candidate.kind,
+      candidate.name,
+      candidate.description ?? '',
+      candidate.target ?? '',
+      candidate.icon ?? null,
+      isExpanded,
+      binMode,
+      state.view.iconSize,
+    ]);
+    if (node.contentSignature !== signature) {
+      node.contentSignature = signature;
+      iconItem.innerHTML =
+        `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+        + `<div class="item-icon">${iconMarkup(candidate)}</div>`
+        + `<strong>${escapeHtml(candidate.name)}</strong>`
+        + `${descriptionMarkup(candidate)}`;
+      hydrateNodeIcons(node.shell);
+    }
+    node.width = node.shell.offsetWidth || (state.view.iconSize + 42);
+    node.height = node.shell.offsetHeight || (state.view.iconSize + 64);
+  }
+
+  function createNodeShell(node) {
+    const candidate = node.candidate;
+    if (!candidate) return;
+    const isSelected = selected.has(candidate.id);
+    const canExpand = candidate.kind === 'group' && !binMode;
+    const isExpanded = canExpand && graphExpanded.has(candidate.id);
+
+    const shell = document.createElement('div');
+    shell.className = 'graph-node-shell';
+    shell.dataset.graphNodeId = candidate.id;
+    shell.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
+
+    const iconItem = document.createElement('div');
+    iconItem.className = `icon-item${isSelected ? ' selected' : ''}`;
+    iconItem.dataset.id = candidate.id;
+    iconItem.dataset.kind = candidate.kind;
+    iconItem.dataset.parent = binMode ? 'bin' : (candidate.parentId ?? currentId);
+    iconItem.setAttribute('draggable', 'false');
+    iconItem.setAttribute('role', 'option');
+    iconItem.setAttribute('aria-selected', String(isSelected));
+    iconItem.setAttribute('tabindex', '-1');
+    iconItem.innerHTML =
+      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+      + `<div class="item-icon">${iconMarkup(candidate)}</div>`
+      + `<strong>${escapeHtml(candidate.name)}</strong>`
+      + `${descriptionMarkup(candidate)}`;
+
+    shell.append(iconItem);
+    nodeLayer.append(shell);
+    node.shell = shell;
+
+    node.contentSignature = JSON.stringify([
+      candidate.kind,
+      candidate.name,
+      candidate.description ?? '',
+      candidate.target ?? '',
+      candidate.icon ?? null,
+      isExpanded,
+      binMode,
+      state.view.iconSize,
+    ]);
+
+    node.width = shell.offsetWidth || (state.view.iconSize + 42);
+    node.height = shell.offsetHeight || (state.view.iconSize + 64);
+
+    if (reducedMotion?.matches) {
+      shell.style.opacity = '1';
+    } else {
+      shell.style.opacity = '0';
+      shell.style.scale = '0.7';
+      requestAnimationFrame(() => {
+        if (node.shell) {
+          shell.style.opacity = '1';
+          shell.style.scale = '1';
+        }
+      });
+    }
+  }
+
+  function removeNode(id) {
+    const node = nodes.get(id);
+    if (!node) return;
+    if (reducedMotion?.matches || node.exiting) {
+      node.shell?.remove();
+      nodes.delete(id);
+      return;
+    }
+    node.exiting = true;
+    const parent = node.parentNode;
+    const targetX = parent ? parent.x : node.x;
+    const targetY = parent ? parent.y : node.y;
+    if (node.shell) {
+      node.shell.classList.add('exiting');
+      node.shell.style.transform = `translate3d(${targetX}px, ${targetY}px, 0) translate(-50%, -50%)`;
+      node.shell.style.opacity = '0';
+      node.shell.style.scale = '0.5';
+    }
+    node.exitTimer = setTimeout(() => {
+      node.shell?.remove();
+      nodes.delete(id);
+      node.exitTimer = null;
+    }, 200);
+  }
+
+  function syncEdges() {
+    if (!edgeLayer) return;
+    const wanted = new Map();
+    nodes.forEach((node) => {
+      if (node.exiting) return;
+      for (const childId of node.childIds) {
+        const child = nodes.get(childId);
+        if (!child || child.exiting) continue;
+        const key = `${node.id}->${childId}`;
+        wanted.set(key, { sourceId: node.id, targetId: childId });
+      }
+    });
+    for (const [key, edge] of edges) {
+      if (!wanted.has(key)) {
+        edge.path?.remove();
+        edges.delete(key);
+      }
+    }
+    for (const [key, info] of wanted) {
+      let edge = edges.get(key);
+      const source = nodes.get(info.sourceId);
+      const target = nodes.get(info.targetId);
+      if (!source || !target) continue;
+      if (!edge) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-edge');
+        path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+        edgeLayer.append(path);
+        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
+        edges.set(key, edge);
+      }
+    }
+  }
+
+  function ensureSimulation() {
+    if (simulation) return;
+    const w = viewport?.clientWidth || 800;
+    const h = viewport?.clientHeight || 600;
+    simulation = forceSimulation()
+      .force('cx', forceX(w / 2).strength(0.05))
+      .force('cy', forceY(h / 2).strength(0.05))
+      .force('charge', forceManyBody().strength(-280))
+      .force('collide', forceCollide().radius((n) => Math.max(n.width, n.height) / 2 + 20).strength(0.9))
+      .force('link', forceLink().id((n) => n.id).distance(145).strength(0.14))
+      .alphaDecay(0.028)
+      .velocityDecay(0.32);
+    simulation.on('tick', scheduleRender);
+  }
+
+  function syncSimulation() {
+    ensureSimulation();
+    const nodeArray = [...nodes.values()].filter((n) => !n.exiting);
+    simulation.nodes(nodeArray);
+    const edgeArray = [];
+    edges.forEach((edge) => {
+      edgeArray.push({ source: edge.sourceId, target: edge.targetId });
+    });
+    simulation.force('link').links(edgeArray);
+    simulation.force('collide').radius((n) => Math.max(n.width, n.height) / 2 + 20);
+    const w = viewport?.clientWidth || 800;
+    const h = viewport?.clientHeight || 600;
+    simulation.force('cx').x(w / 2);
+    simulation.force('cy').y(h / 2);
+  }
+
+  function reheat(level = 0.35) {
+    if (!simulation) return;
+    simulation.alpha(Math.max(simulation.alpha(), level)).restart();
+  }
+
+  function fitGraph(padding = 90, animate = true) {
+    if (!camera || !viewport || !viewportSelection || nodes.size === 0) return false;
+    const w = viewport.clientWidth;
+    const h = viewport.clientHeight;
+    if (w < 2 || h < 2) return false;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let activeCount = 0;
+    nodes.forEach((n) => {
+      if (n.exiting) return;
+      activeCount += 1;
+      const halfW = (n.width || 100) / 2;
+      const halfH = (n.height || 120) / 2;
+      minX = Math.min(minX, n.x - halfW);
+      minY = Math.min(minY, n.y - halfH);
+      maxX = Math.max(maxX, n.x + halfW);
+      maxY = Math.max(maxY, n.y + halfH);
+    });
+    if (!Number.isFinite(minX) || activeCount === 0) return false;
+    const scale = Math.min(
+      (w - padding * 2) / Math.max(1, maxX - minX),
+      (h - padding * 2) / Math.max(1, maxY - minY),
+      2,
+    );
+    const k = Math.max(0.35, Math.min(3, scale));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const tx = w / 2 - cx * k;
+    const ty = h / 2 - cy * k;
+    const transform = zoomIdentity.translate(tx, ty).scale(k);
+    if (animate && !reducedMotion?.matches) {
+      viewportSelection.transition().duration(550).call(zoomBehavior.transform, transform);
+    } else {
+      zoomBehavior.transform(viewportSelection, transform);
+    }
+    return true;
+  }
+
+  function updateGraphView(initialFit = false) {
+    const w = viewport?.clientWidth ?? 0;
+    const h = viewport?.clientHeight ?? 0;
+    if (w < 2 || h < 2) {
+      updatePending = true;
+      pendingInitialFit = initialFit;
+      return;
+    }
+    updatePending = false;
+    const visible = visibleGraphItems(state, currentId, graphExpanded, binMode);
+    if (visible.length === 0) {
+      nodes.forEach((_, id) => removeNode(id));
+      return;
+    }
+    syncNodes(visible);
+    syncEdges();
+    syncSimulation();
+    reheat(initialFit ? 0.7 : 0.35);
+    if (initialFit && !initialized) {
+      fitPending = true;
+      setTimeout(() => {
+        if (fitPending && fitGraph()) {
+          fitPending = false;
+          initialized = true;
+        }
+      }, 500);
+    }
+  }
+
+  function refreshSelection() {
+    nodes.forEach((node) => {
+      if (!node.shell) return;
+      const iconItem = node.shell.querySelector('.icon-item');
+      if (!iconItem) return;
+      const isSelected = selected.has(node.id);
+      iconItem.classList.toggle('selected', isSelected);
+      iconItem.setAttribute('aria-selected', String(isSelected));
+    });
+  }
+
+  return {
+    createGraphView,
+    updateGraphView,
+    destroyGraphView,
+    refreshSelection,
+    reheat,
+    fitGraph,
+    _getNode: (id) => nodes.get(id) ?? null,
+    _setSimulationDecay() {
+      if (simulation) {
+        simulation.alphaTarget(0);
+        if (simulation.alpha() < simulation.alphaMin()) {
+          simulation.alpha(0.05).restart();
+        }
+      }
+    },
+    get hasNodes() { return nodes.size > 0; },
+    get isAttached() { return attached; },
+    get nodeCount() { return [...nodes.values()].filter((n) => !n.exiting).length; },
+    get edgeCount() { return edges.size; },
+    get _needsFullRebuild() { return false; },
+  };
+}
+
+function renderGraph(initialFit = false) {
+  if (!graph.isAttached) {
+    graph.createGraphView();
+  }
+  graph.updateGraphView(initialFit);
+}
+
 function render() {
   const iconSize = state.view.iconSize;
   document.documentElement.style.setProperty('--icon-size', `${iconSize}px`);
@@ -260,8 +860,40 @@ function render() {
       ).join('');
 
   const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
-  elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
   elements.grid.dataset.blankParent = binMode ? 'bin' : currentId;
+  elements.grid.dataset.view = layout;
+
+  if (layout === 'graph') {
+    if (!graph.isAttached) {
+      elements.grid.innerHTML = '';
+      console.assert(
+        elements.grid.querySelectorAll('.graph-viewport').length === 0
+      );
+      console.assert(
+        elements.grid.querySelectorAll('.expanded-branch').length === 0
+      );
+      console.assert(
+        elements.grid.querySelectorAll('.nested-icon-grid').length === 0
+      );
+      renderGraph(true);
+    } else {
+      graph.updateGraphView(false);
+    }
+    console.assert(
+      elements.grid.querySelectorAll('.graph-viewport').length === 1
+    );
+    console.assert(
+      [...elements.grid.querySelectorAll('.icon-item')]
+        .every(item => item.closest('.graph-node-shell'))
+    );
+  } else {
+    if (graph.isAttached) graph.destroyGraphView();
+    elements.grid.innerHTML = '';
+    console.assert(
+      elements.grid.querySelectorAll('.graph-viewport').length === 0
+    );
+    elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
+  }
   elements.empty.hidden = visible.length !== 0;
   elements.empty.textContent = binMode
     ? 'The Bin is empty.'
@@ -274,18 +906,23 @@ function render() {
   elements.binCount.textContent = String(binCount);
   elements.binButton.setAttribute('aria-pressed', String(binMode));
   elements.binLabel.textContent = binMode ? 'Close Bin' : 'Bin';
+  elements.graphButton.setAttribute('aria-pressed', String(layout === 'graph'));
+  elements.graphLabel.textContent = layout === 'graph' ? 'Explorer' : 'Graph';
   elements.deleteAllBin.hidden = !binMode || binCount === 0;
 
   hydrateIcons();
-  hydrateWebIcons();
 }
 
 function syncSelection() {
-  document.querySelectorAll('.icon-item').forEach((tile) => {
-    const isSelected = selected.has(tile.dataset.id);
-    tile.classList.toggle('selected', isSelected);
-    tile.setAttribute('aria-selected', String(isSelected));
-  });
+  if (layout === 'graph' && graph.isAttached) {
+    graph.refreshSelection();
+  } else {
+    document.querySelectorAll('.icon-item').forEach((tile) => {
+      const isSelected = selected.has(tile.dataset.id);
+      tile.classList.toggle('selected', isSelected);
+      tile.setAttribute('aria-selected', String(isSelected));
+    });
+  }
   elements.selectionStatus.hidden = selected.size === 0;
   elements.selectionStatus.textContent = selected.size === 1
     ? '1 item selected'
@@ -293,39 +930,22 @@ function syncSelection() {
 }
 
 async function hydrateIcons() {
-  const images = [...document.querySelectorAll('[data-default-icon]')];
-  await Promise.all(images.map(async (image) => {
-    const shortcutId = image.dataset.defaultIcon;
-    if (!iconCache.has(shortcutId)) {
-      try {
-        iconCache.set(
-          shortcutId,
-          await request('papers:project:as-you-go-shortcut-icon', { actionId: shortcutId }),
-        );
-      } catch {
-        iconCache.set(shortcutId, null);
-      }
-    }
-    const resolved = iconCache.get(shortcutId);
-    if (!resolved || !image.isConnected) return;
-    image.src = resolved;
-    image.hidden = false;
-    image.nextElementSibling?.setAttribute('hidden', '');
-  }));
+  await hydrateIconsScoped(
+    document,
+    iconCache,
+    (detail) => request('papers:project:as-you-go-shortcut-icon', detail),
+    (url) => request('papers:project:resolve-web-link-icon', { url }),
+  );
 }
 
-function hydrateWebIcons() {
-  document.querySelectorAll('[data-web-icon]').forEach((image) => {
-    image.addEventListener('load', () => {
-      image.hidden = false;
-      image.nextElementSibling?.setAttribute('hidden', '');
-    }, { once: true });
-    image.addEventListener('error', () => {
-      image.hidden = true;
-      image.nextElementSibling?.removeAttribute('hidden');
-    }, { once: true });
-    image.src = image.dataset.webIcon;
-  });
+function hydrateNodeIcons(shell) {
+  if (!shell) return;
+  hydrateIconsScoped(
+    shell,
+    iconCache,
+    (detail) => request('papers:project:as-you-go-shortcut-icon', detail),
+    (url) => request('papers:project:resolve-web-link-icon', { url }),
+  );
 }
 
 async function persist(nextState = state) {
@@ -464,6 +1084,10 @@ function openMenu(x, y, kind = 'selection', parentId = currentId) {
       menuButton('copy', chosen.length > 1 ? 'Copy items' : 'Copy'),
       menuButton('cut', chosen.length > 1 ? 'Cut items' : 'Cut'),
       menuButton('bin', chosen.length > 1 ? 'Move items to Bin' : 'Move to Bin', true),
+      layout === 'graph' ? '<hr />' : '',
+      layout === 'graph'
+        ? menuButton('reset-graph-position', chosen.length > 1 ? 'Follow folders automatically' : 'Follow folder automatically')
+        : '',
     ].join('');
   }
   elements.menu.innerHTML = content;
@@ -486,7 +1110,7 @@ async function activate(itemId) {
     currentId = folder.id;
     binMode = false;
     selected.clear();
-    expanded.clear();
+    if (layout === 'graph') graph.destroyGraphView();
     closeMenu();
     render();
     saveWorkspaceView();
@@ -529,10 +1153,14 @@ async function pasteInto(parentId) {
 }
 
 function showIconPreview(source) {
-  elements.iconPreview.hidden = !source;
-  elements.iconFallback.hidden = Boolean(source);
-  if (source) elements.iconPreview.src = source;
-  else elements.iconPreview.removeAttribute('src');
+  if (!source) {
+    elements.iconPreview.hidden = true;
+    elements.iconFallback.removeAttribute('hidden');
+    return;
+  }
+  elements.iconPreview.hidden = false;
+  elements.iconPreview.src = source;
+  elements.iconFallback.setAttribute('hidden', '');
 }
 
 function readAsDataUrl(blob) {
@@ -595,7 +1223,11 @@ async function resolveEditorTargetIcon() {
   if (editorIcon) return showIconPreview(editorIcon);
   if (editorTargetIcon) return showIconPreview(editorTargetIcon);
   if (editorMode?.kind === 'web') {
-    return showIconPreview(webLinkIcon({ target: elements.target.value.trim() }));
+    const target = elements.target.value.trim();
+    if (target) {
+      return hydrateWebPreview(elements.iconPreview, elements.iconFallback, target);
+    }
+    return showIconPreview(null);
   }
   if (editorMode?.kind === 'shortcut' && editorMode.item?.id) {
     try {
@@ -614,9 +1246,7 @@ function showEditor(kind, existing = null, parentId = currentId) {
   editorMode = { kind, item: existing, parentId };
   editorIcon = existing?.icon ?? null;
   editorTargetIcon =
-    kind === 'web' && existing && !existing.icon
-      ? webLinkIcon(existing)
-      : kind === 'shortcut' && existing && !existing.icon
+    kind === 'shortcut' && existing && !existing.icon
       ? iconCache.get(existing.id) ?? null
       : null;
   elements.editorTitle.textContent = kind === 'group'
@@ -746,6 +1376,24 @@ async function runMenuAction(action) {
   if (action === 'bin') return moveToBin();
   if (action === 'restore') return commit(restoreSelection(state, [...selected]), 'Restored.');
   if (action === 'delete-forever') return askPermanentDelete();
+  if (action === 'reset-graph-position') {
+    const ctxId = graphContextId(currentId, binMode);
+    state = removeGraphPositions(state, ctxId, [...selected]);
+    for (const id of selected) {
+      const node = graph._getNode(id);
+      if (node) {
+        node.fx = null;
+        node.fy = null;
+        node.positioned = false;
+        node.vx = 0;
+        node.vy = 0;
+      }
+    }
+    graph.reheat(0.3);
+    closeMenu();
+    saveWorkspaceView();
+    return;
+  }
 }
 
 elements.grid.addEventListener('click', (event) => {
@@ -753,8 +1401,9 @@ elements.grid.addEventListener('click', (event) => {
   const expandButton = event.target.closest('[data-expand]');
   if (expandButton) {
     const folderId = expandButton.dataset.expand;
-    if (expanded.has(folderId)) expanded.delete(folderId);
-    else expanded.add(folderId);
+    const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
+    if (targetSet.has(folderId)) targetSet.delete(folderId);
+    else targetSet.add(folderId);
     closeMenu();
     render();
     saveWorkspaceView();
@@ -762,6 +1411,10 @@ elements.grid.addEventListener('click', (event) => {
   }
   const tile = event.target.closest('.icon-item');
   if (tile) {
+    if (suppressGraphClick) {
+      suppressGraphClick = false;
+      return;
+    }
     selectItem(tile.dataset.id, event);
     return;
   }
@@ -769,6 +1422,10 @@ elements.grid.addEventListener('click', (event) => {
   if (blank) {
     if (suppressBlankClick) {
       suppressBlankClick = false;
+      return;
+    }
+    if (suppressGraphClick) {
+      suppressGraphClick = false;
       return;
     }
     selected.clear();
@@ -780,9 +1437,40 @@ elements.grid.addEventListener('click', (event) => {
 });
 
 elements.grid.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+
+  if (layout === 'graph' && !event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
+    const tile = event.target.closest('.icon-item');
+    const shell = tile?.closest('.graph-node-shell');
+    if (shell && event.pointerType !== 'touch') {
+      const itemId = tile.dataset.id;
+      if (!selected.has(itemId)) {
+        selected = new Set([itemId]);
+        selectionAnchor = itemId;
+        syncSelection();
+        saveWorkspaceView();
+      }
+      graphDrag = {
+        pointerId: event.pointerId,
+        itemIds: [...selected],
+        primaryNodeId: itemId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startWorldX: null,
+        startWorldY: null,
+        initialPositions: new Map(),
+        pinOnRelease: event.shiftKey,
+        moved: false,
+        thresholdPassed: false,
+      };
+      closeMenu();
+      event.preventDefault();
+      return;
+    }
+  }
+
   if (
-    event.button !== 0
-    || event.target.closest('.icon-item')
+    event.target.closest('.icon-item')
     || !event.target.closest('[data-blank-parent], [data-icon-grid]')
   ) return;
 
@@ -804,6 +1492,83 @@ elements.grid.addEventListener('pointerdown', (event) => {
 });
 
 elements.grid.addEventListener('pointermove', (event) => {
+  if (graphDrag && event.pointerId === graphDrag.pointerId) {
+    const shiftHeld = event.shiftKey === true;
+    if (shiftHeld !== graphDrag.pinOnRelease) {
+      graphDrag.pinOnRelease = shiftHeld;
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        if (node?.shell) {
+          if (shiftHeld) {
+            node.shell.classList.remove('will-release');
+            node.shell.classList.add('will-pin');
+          } else {
+            node.shell.classList.remove('will-pin');
+            node.shell.classList.add('will-release');
+          }
+        }
+      }
+    }
+    if (!graphDrag.thresholdPassed) {
+      const dx = event.clientX - graphDrag.startClientX;
+      const dy = event.clientY - graphDrag.startClientY;
+      if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+      graphDrag.thresholdPassed = true;
+      graphDrag.moved = true;
+      elements.grid.setPointerCapture(event.pointerId);
+      installGraphShiftListeners();
+      const viewport = elements.grid.querySelector('.graph-viewport');
+      let transform = { x: 0, y: 0, k: 1 };
+      if (viewport) {
+        try { transform = zoomTransform(viewport); } catch { /* use identity */ }
+      }
+      const rect = viewport?.getBoundingClientRect();
+
+      const localX = rect ? graphDrag.startClientX - rect.left : graphDrag.startClientX;
+      const localY = rect ? graphDrag.startClientY - rect.top : graphDrag.startClientY;
+      graphDrag.startWorldX = (localX - transform.x) / transform.k;
+      graphDrag.startWorldY = (localY - transform.y) / transform.k;
+      const pinClass = graphDrag.pinOnRelease ? 'will-pin' : 'will-release';
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        if (node) {
+          graphDrag.initialPositions.set(id, {
+            x: node.x, y: node.y, fx: node.fx, fy: node.fy,
+          });
+          if (node.shell) {
+            node.shell.classList.add('graph-dragging', pinClass);
+          }
+        }
+      }
+    }
+    if (!graphDrag.moved) return;
+    const viewport = elements.grid.querySelector('.graph-viewport');
+    let transform = { x: 0, y: 0, k: 1 };
+    if (viewport) {
+      try { transform = zoomTransform(viewport); } catch { /* use identity */ }
+    }
+    const rect = viewport?.getBoundingClientRect();
+    const localX = rect ? event.clientX - rect.left : event.clientX;
+    const localY = rect ? event.clientY - rect.top : event.clientY;
+    const worldX = (localX - transform.x) / transform.k;
+    const worldY = (localY - transform.y) / transform.k;
+    const deltaX = worldX - graphDrag.startWorldX;
+    const deltaY = worldY - graphDrag.startWorldY;
+    for (const id of graphDrag.itemIds) {
+      const node = graph._getNode(id);
+      if (!node) continue;
+      const initial = graphDrag.initialPositions.get(id);
+      if (!initial) continue;
+      node.fx = initial.x + deltaX;
+      node.fy = initial.y + deltaY;
+      node.x = node.fx;
+      node.y = node.fy;
+      node.positioned = true;
+    }
+    graph.reheat(0.12);
+    return;
+  }
+
   if (!marqueeDrag || event.pointerId !== marqueeDrag.pointerId) return;
   const bounds = marqueeBounds(
     marqueeDrag.startX,
@@ -819,12 +1584,121 @@ elements.grid.addEventListener('pointermove', (event) => {
   updateMarqueeSelection(bounds);
 });
 
-elements.grid.addEventListener('pointerup', finishMarquee);
-elements.grid.addEventListener('pointercancel', finishMarquee);
+elements.grid.addEventListener('pointerup', (event) => {
+  if (graphDrag && event.pointerId === graphDrag.pointerId) {
+    if (elements.grid.hasPointerCapture(event.pointerId)) {
+      elements.grid.releasePointerCapture(event.pointerId);
+    }
+    if (graphDrag.moved) {
+      graphDrag.pinOnRelease = event.shiftKey === true;
+      removeGraphShiftListeners();
+      suppressGraphClick = true;
+      document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
+      document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+      const shells = [...elements.grid.querySelectorAll('.graph-node-shell')];
+      shells.forEach((s) => s.style.pointerEvents = '');
+      let hitFolderId = null;
+      shells.forEach((s) => {
+        if (!graphDrag.itemIds.includes(s.dataset.graphNodeId)) {
+          s.style.pointerEvents = 'none';
+        }
+      });
+      const elAtPoint = document.elementFromPoint(event.clientX, event.clientY);
+      const hitShell = elAtPoint?.closest('.graph-node-shell');
+      shells.forEach((s) => s.style.pointerEvents = '');
+      if (hitShell && !graphDrag.itemIds.includes(hitShell.dataset.graphNodeId)) {
+        const hitItem = hitShell.querySelector('.icon-item');
+        if (hitItem?.dataset.kind === 'group') {
+          hitFolderId = hitItem.dataset.id;
+        }
+      }
+
+      const graphDragCopy = { ...graphDrag, itemIds: [...graphDrag.itemIds] };
+      graphDrag = null;
+
+      if (hitFolderId) {
+        try {
+          const next = moveSelection(state, graphDragCopy.itemIds, hitFolderId);
+          const ctxId = graphContextId(currentId, binMode);
+          state = removeGraphPositions(next, ctxId, graphDragCopy.itemIds);
+          commit(state, 'Moved.');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error));
+        }
+      } else if (graphDragCopy.pinOnRelease) {
+        const ctxId = graphContextId(currentId, binMode);
+        const updates = {};
+        for (const id of graphDragCopy.itemIds) {
+          const node = graph._getNode(id);
+          if (node) {
+            updates[id] = { x: node.x, y: node.y };
+          }
+        }
+        state = setGraphPositions(state, ctxId, updates);
+        graph._setSimulationDecay();
+        saveWorkspaceView();
+      } else {
+        const ctxId = graphContextId(currentId, binMode);
+        state = removeGraphPositions(state, ctxId, graphDragCopy.itemIds);
+        for (const id of graphDragCopy.itemIds) {
+          const node = graph._getNode(id);
+          if (node) {
+            node.fx = null;
+            node.fy = null;
+            node.positioned = false;
+          }
+        }
+        graph.reheat(0.25);
+        saveWorkspaceView();
+      }
+      return;
+    }
+    removeGraphShiftListeners();
+    graphDrag = null;
+    return;
+  }
+
+  if (marqueeDrag) {
+    finishMarquee(event);
+  }
+});
 
 elements.grid.addEventListener('dblclick', (event) => {
+  if (suppressGraphClick) {
+    suppressGraphClick = false;
+    return;
+  }
   const tile = event.target.closest('.icon-item');
-  if (tile) activate(tile.dataset.id);
+  if (!tile) return;
+  activate(tile.dataset.id);
+});
+
+elements.grid.addEventListener('pointercancel', (event) => {
+  if (graphDrag && event.pointerId === graphDrag.pointerId) {
+    if (elements.grid.hasPointerCapture(event.pointerId)) {
+      elements.grid.releasePointerCapture(event.pointerId);
+    }
+    removeGraphShiftListeners();
+    if (graphDrag.moved) {
+      for (const id of graphDrag.itemIds) {
+        const node = graph._getNode(id);
+        const initial = graphDrag.initialPositions.get(id);
+        if (node && initial) {
+          node.x = initial.x;
+          node.y = initial.y;
+          node.fx = initial.fx;
+          node.fy = initial.fy;
+        }
+      }
+      graph.reheat(0.2);
+    }
+    document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
+    document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+    removeGraphShiftListeners();
+    graphDrag = null;
+    return;
+  }
+  finishMarquee(event);
 });
 
 elements.grid.addEventListener('contextmenu', (event) => {
@@ -832,6 +1706,22 @@ elements.grid.addEventListener('contextmenu', (event) => {
   event.stopPropagation();
   const tile = event.target.closest('.icon-item');
   if (tile) {
+    if (event.ctrlKey && tile.dataset.kind === 'group') {
+      const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
+      const id = tile.dataset.id;
+      const folderIds = selected.has(id)
+        ? [...selected].filter((selectedId) => group(selectedId))
+        : [id];
+      const shouldExpand = !targetSet.has(id);
+      for (const folderId of folderIds) {
+        if (shouldExpand) targetSet.add(folderId);
+        else targetSet.delete(folderId);
+      }
+      closeMenu();
+      render();
+      saveWorkspaceView();
+      return;
+    }
     if (!selected.has(tile.dataset.id)) {
       selected = new Set([tile.dataset.id]);
       selectionAnchor = tile.dataset.id;
@@ -916,6 +1806,7 @@ elements.explorer.addEventListener('wheel', (event) => {
 }, { passive: false });
 
 elements.grid.addEventListener('dragstart', (event) => {
+  if (layout === 'graph') return;
   const tile = event.target.closest('.icon-item');
   if (!tile || binMode) return event.preventDefault();
   if (!selected.has(tile.dataset.id)) {
@@ -932,6 +1823,24 @@ elements.grid.addEventListener('dragstart', (event) => {
 elements.grid.addEventListener('dragover', (event) => {
   if (binMode) return;
   event.preventDefault();
+
+  if (layout === 'graph') {
+    document.querySelectorAll('.drop-inside, .drop-before, .graph-drop-target').forEach((node) =>
+      node.classList.remove('drop-inside', 'drop-before', 'graph-drop-target'));
+    if (event.dataTransfer.types.includes('Files')) {
+      const tile = event.target.closest('.icon-item');
+      const shell = tile?.closest('.graph-node-shell');
+      if (tile?.dataset.kind === 'group' && shell) {
+        shell.classList.add('graph-drop-target');
+        tile.classList.add('drop-inside');
+      }
+      event.dataTransfer.dropEffect = 'link';
+      return;
+    }
+    event.dataTransfer.dropEffect = 'none';
+    return;
+  }
+
   document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
     node.classList.remove('drop-inside', 'drop-before'));
   const tile = event.target.closest('.icon-item');
@@ -952,14 +1861,43 @@ elements.grid.addEventListener('dragover', (event) => {
 elements.grid.addEventListener('dragleave', (event) => {
   if (!elements.grid.contains(event.relatedTarget)) {
     elements.grid.classList.remove('drop-blank');
-    document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
-      node.classList.remove('drop-inside', 'drop-before'));
+    document.querySelectorAll('.drop-inside, .drop-before, .graph-drop-target').forEach((node) =>
+      node.classList.remove('drop-inside', 'drop-before', 'graph-drop-target'));
   }
 });
 
 elements.grid.addEventListener('drop', async (event) => {
   if (binMode) return;
   const droppedFiles = [...event.dataTransfer.files];
+
+  if (layout === 'graph') {
+    if (droppedFiles.length > 0) {
+      event.preventDefault();
+      const tile = event.target.closest('.icon-item');
+      const shell = tile?.closest('.graph-node-shell');
+      const blank = event.target.closest('[data-blank-parent]');
+      const destination = tile?.dataset.kind === 'group'
+        ? tile.dataset.id
+        : blank?.dataset.blankParent ?? currentId;
+      try {
+        const targets = await request('papers:project:resolve-dropped-targets', {
+          files: droppedFiles,
+        });
+        const next = createDroppedShortcuts(state, targets, destination);
+        if (next.shortcuts.length === state.shortcuts.length) {
+          setStatus('Those shortcuts already exist here.');
+          return;
+        }
+        await commit(next);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error));
+      } finally {
+        document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
+      }
+    }
+    return;
+  }
+
   if (droppedFiles.length > 0) {
     event.preventDefault();
     const tile = event.target.closest('.icon-item');
@@ -1032,13 +1970,20 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   if (!crumb) return;
   currentId = crumb.dataset.breadcrumb;
   selected.clear();
-  expanded.clear();
+  if (layout === 'graph') graph.destroyGraphView();
   render();
   saveWorkspaceView();
 });
 
 elements.binButton.addEventListener('click', () => {
   binMode = !binMode;
+  selected.clear();
+  closeMenu();
+  render();
+  saveWorkspaceView();
+});
+elements.graphButton.addEventListener('click', () => {
+  layout = layout === 'graph' ? 'explorer' : 'graph';
   selected.clear();
   closeMenu();
   render();
@@ -1061,14 +2006,14 @@ elements.iconDefaultButton.addEventListener('click', () => {
   editorIcon = null;
   if (editorMode?.kind === 'group') editorTargetIcon = null;
   if (editorMode?.kind === 'web') {
-    editorTargetIcon = webLinkIcon({ target: elements.target.value.trim() });
+    resolveEditorTargetIcon();
+    return;
   }
   resolveEditorTargetIcon();
 });
 elements.target.addEventListener('input', () => {
   if (editorMode?.kind !== 'web' || editorIcon) return;
-  editorTargetIcon = webLinkIcon({ target: elements.target.value.trim() });
-  showIconPreview(editorTargetIcon);
+  hydrateWebPreview(elements.iconPreview, elements.iconFallback, elements.target.value.trim());
 });
 elements.iconInput.addEventListener('change', async () => {
   const file = elements.iconInput.files[0];
@@ -1125,6 +2070,10 @@ window.addEventListener('message', (event) => {
   }
   if ('target' in event.data && 'icon' in event.data) {
     task.resolve({ target: event.data.target, icon: event.data.icon });
+    return;
+  }
+  if ('finalOrigin' in event.data) {
+    task.resolve({ icon: event.data.icon, mime: event.data.mime, finalOrigin: event.data.finalOrigin });
     return;
   }
   task.resolve(

@@ -15,6 +15,10 @@
         <div class="navigation-actions">
           <button class="quiet-button danger-text" id="delete-all-bin" type="button" hidden>Delete all</button>
           <button class="quiet-button pickup-copy" id="copy-prompt" type="button"><span aria-hidden="true">⧉</span><span class="copy-label">Copy agent pickup prompt</span></button>
+          <button class="quiet-button graph-button" id="graph-view-button" type="button" aria-pressed="false">
+            <span aria-hidden="true">⦿</span>
+            <span id="graph-label">Graph</span>
+          </button>
           <button class="quiet-button bin-button" id="bin-button" data-bin-view type="button" aria-pressed="false">
             <span aria-hidden="true">♲</span>
             <span id="bin-label">Bin</span>
@@ -30,6 +34,7 @@
           class="icon-grid"
           id="icon-grid"
           data-icon-grid
+          data-view="explorer"
           tabindex="0"
           aria-label="Items in this folder"
         ></div>

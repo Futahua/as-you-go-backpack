@@ -18,8 +18,11 @@ export function emptyState() {
       iconSize: DEFAULT_ICON_SIZE,
       currentGroupId: ROOT_ID,
       expandedGroupIds: [],
+      graphExpandedGroupIds: [],
       selectedItemIds: [],
       binMode: false,
+      layout: 'explorer',
+      graphPositions: {},
     },
   };
 }
@@ -75,6 +78,25 @@ export function binnedItems(state) {
   ]);
 }
 
+function normalizeGraphPositions(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const cleaned = {};
+  const entries = Object.entries(raw);
+  for (const [ctxKey, ctxValue] of entries) {
+    if (typeof ctxKey !== 'string' || !ctxValue || typeof ctxValue !== 'object' || Array.isArray(ctxValue)) continue;
+    const ctx = {};
+    let hasValid = false;
+    for (const [itemId, pos] of Object.entries(ctxValue)) {
+      if (typeof itemId !== 'string' || !pos || typeof pos !== 'object') continue;
+      if (!hasNumber(pos.x) || !hasNumber(pos.y)) continue;
+      ctx[itemId] = { x: pos.x, y: pos.y };
+      hasValid = true;
+    }
+    if (hasValid) cleaned[ctxKey] = ctx;
+  }
+  return cleaned;
+}
+
 export function normalizeState(raw) {
   const state = {
     schemaVersion: 1,
@@ -92,8 +114,11 @@ export function normalizeState(raw) {
           ? raw.view.currentGroupId
           : ROOT_ID,
       expandedGroupIds: stringIds(raw?.view?.expandedGroupIds),
+      graphExpandedGroupIds: stringIds(raw?.view?.graphExpandedGroupIds),
       selectedItemIds: stringIds(raw?.view?.selectedItemIds),
       binMode: raw?.view?.binMode === true,
+      layout: raw?.view?.layout === 'graph' ? 'graph' : 'explorer',
+      graphPositions: normalizeGraphPositions(raw?.view?.graphPositions),
     },
   };
 
@@ -215,9 +240,12 @@ export function createDroppedShortcuts(state, droppedTargets, parentId = ROOT_ID
 }
 
 function normalizeWebTarget(target) {
+  let raw = String(target ?? '').trim();
+  if (!raw) throw new Error('Web address must not be empty.');
+  if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw;
   let parsed;
   try {
-    parsed = new URL(String(target ?? '').trim());
+    parsed = new URL(raw);
   } catch {
     throw new Error('Web address must be a valid http or https URL.');
   }
@@ -239,7 +267,7 @@ export function isWebLink(candidate) {
 
 export function webLinkIcon(candidate) {
   if (!isWebLink(candidate)) return null;
-  return new URL('/favicon.ico', candidate.target).toString();
+  return candidate.target;
 }
 
 export function createWebLink(state, webLink) {
@@ -503,20 +531,83 @@ export function setIconSize(state, size) {
 }
 
 export function updateWorkspaceView(state, changes) {
+  const has = (key) => Object.prototype.hasOwnProperty.call(changes, key);
+  const layout =
+    has('layout') && (changes.layout === 'graph' || changes.layout === 'explorer')
+      ? changes.layout
+      : (state.view?.layout === 'graph' ? 'graph' : 'explorer');
   return {
     ...state,
     view: {
       ...state.view,
+      layout,
+      iconSize: state.view?.iconSize ?? DEFAULT_ICON_SIZE,
       currentGroupId:
-        typeof changes.currentGroupId === 'string'
+        has('currentGroupId') && typeof changes.currentGroupId === 'string'
           ? changes.currentGroupId
-          : ROOT_ID,
-      expandedGroupIds: stringIds(changes.expandedGroupIds),
-      selectedItemIds: stringIds(changes.selectedItemIds),
-      binMode: changes.binMode === true,
+          : (state.view?.currentGroupId ?? ROOT_ID),
+      expandedGroupIds: has('expandedGroupIds')
+        ? stringIds(changes.expandedGroupIds)
+        : (state.view?.expandedGroupIds ?? []),
+      graphExpandedGroupIds: has('graphExpandedGroupIds')
+        ? stringIds(changes.graphExpandedGroupIds)
+        : (state.view?.graphExpandedGroupIds ?? []),
+      selectedItemIds: has('selectedItemIds')
+        ? stringIds(changes.selectedItemIds)
+        : (state.view?.selectedItemIds ?? []),
+      binMode: has('binMode')
+        ? changes.binMode === true
+        : (state.view?.binMode === true),
+      graphPositions: has('graphPositions')
+        ? normalizeGraphPositions(changes.graphPositions)
+        : (state.view?.graphPositions ?? {}),
     },
   };
 }
+
+export function graphContextId(currentGroupId, binMode) {
+  return binMode ? 'bin' : (currentGroupId ?? ROOT_ID);
+}
+
+export function getGraphPosition(state, contextId, itemId) {
+  const ctx = state.view?.graphPositions?.[contextId];
+  if (!ctx || !ctx[itemId]) return null;
+  return { x: ctx[itemId].x, y: ctx[itemId].y };
+}
+
+export function setGraphPositions(state, contextId, updates) {
+  const ctx = { ...(state.view?.graphPositions?.[contextId] ?? {}) };
+  for (const [itemId, pos] of Object.entries(updates)) {
+    if (!hasNumber(pos?.x) || !hasNumber(pos?.y)) {
+      delete ctx[itemId];
+    } else {
+      ctx[itemId] = { x: pos.x, y: pos.y };
+    }
+  }
+  const graphPositions = { ...(state.view?.graphPositions ?? {}) };
+  if (Object.keys(ctx).length > 0) {
+    graphPositions[contextId] = ctx;
+  } else {
+    delete graphPositions[contextId];
+  }
+  return updateWorkspaceView(state, { graphPositions });
+}
+
+export function removeGraphPositions(state, contextId, itemIds) {
+  const ctx = { ...(state.view?.graphPositions?.[contextId] ?? {}) };
+  for (const itemId of itemIds) {
+    delete ctx[itemId];
+  }
+  const graphPositions = { ...(state.view?.graphPositions ?? {}) };
+  if (Object.keys(ctx).length > 0) {
+    graphPositions[contextId] = ctx;
+  } else {
+    delete graphPositions[contextId];
+  }
+  return updateWorkspaceView(state, { graphPositions });
+}
+
+export { normalizeGraphPositions };
 
 export function itemsIntersectingMarquee(items, rectangle) {
   const left = Math.min(rectangle.left, rectangle.right);

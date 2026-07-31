@@ -23,7 +23,20 @@ import {
   isWebLink,
   webLinkIcon,
   createDroppedShortcuts,
+  graphContextId,
+  getGraphPosition,
+  setGraphPositions,
+  removeGraphPositions,
+  normalizeGraphPositions,
 } from './model.mjs';
+
+import {
+  visibleGraphItems,
+  graphEdges,
+  seedPosition,
+  allFinite,
+  allUniquePositions,
+} from './public/graph-model-20260730b.js';
 
 test('a drag marquee selects every visible item rectangle it crosses', () => {
   const tiles = [
@@ -180,9 +193,33 @@ test('the local project preserves its explorer working position', () => {
     iconSize: 96,
     currentGroupId: state.groups[0].id,
     expandedGroupIds: [state.groups[0].id],
+    graphExpandedGroupIds: [],
     selectedItemIds: [state.shortcuts[0].id],
     binMode: false,
+    layout: 'explorer',
+    graphPositions: {},
   });
+});
+
+test('the explorer view mode defaults to explorer and persists as graph', () => {
+  assert.equal(emptyState().view.layout, 'explorer');
+
+  const graphed = updateWorkspaceView(emptyState(), { layout: 'graph' });
+  assert.equal(graphed.view.layout, 'graph');
+  const restored = normalizeState(JSON.parse(JSON.stringify(graphed)));
+  assert.equal(restored.view.layout, 'graph');
+
+  const explored = updateWorkspaceView(graphed, { layout: 'explorer' });
+  assert.equal(explored.view.layout, 'explorer');
+
+  const legacy = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
+  assert.equal(legacy.view.layout, 'explorer');
+
+  const unknown = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [], view: { layout: 'unknown' } });
+  assert.equal(unknown.view.layout, 'explorer');
+
+  const preserved = updateWorkspaceView(graphed, { currentGroupId: ROOT_ID });
+  assert.equal(preserved.view.layout, 'graph');
 });
 
 test('web links are http(s) shortcuts owned by the local project', () => {
@@ -194,12 +231,20 @@ test('web links are http(s) shortcuts owned by the local project', () => {
   assert.equal(isWebLink(linked.shortcuts[0]), true);
   assert.equal(
     webLinkIcon(linked.shortcuts[0]),
-    'https://github.com/favicon.ico',
+    'https://github.com/Futahua/Papers-3',
   );
   assert.throws(
     () => createWebLink(emptyState(), { name: 'Unsafe', target: 'javascript:alert(1)' }),
     /http or https/i,
   );
+});
+
+test('bare domain defaults to https', () => {
+  const linked = createWebLink(emptyState(), {
+    name: 'Example',
+    target: 'example.com',
+  });
+  assert.equal(linked.shortcuts[0].target, 'https://example.com/');
 });
 
 test('Explorer drops create quick shortcuts in the exact destination without duplicates', () => {
@@ -255,4 +300,500 @@ test('Delete bins items recoverably and permanent deletion is confined to the Bi
   assert.equal(deleted.groups.length, 0);
   assert.deepEqual(deleted.shortcuts.map((item) => item.name), ['Outside']);
   assert.throws(() => permanentlyDelete(restored, [folder.id]), /Bin/);
+});
+
+test('graph visibility includes every root item and only descendants of expanded folders', () => {
+  let state = createGroup(emptyState(), 'News');
+  state = createGroup(state, 'Letters');
+  const letters = state.groups[1];
+  state = createGroup(state, 'Real');
+  state = createShortcut(state, { name: 'CLIPS', target: 'C:\\clips.bat', parentId: letters.id });
+  state = createShortcut(state, { name: 'HiddenChild', target: 'C:\\hidden.exe', parentId: state.groups[2].id });
+
+  const collapsed = visibleGraphItems(state, ROOT_ID, new Set(), false);
+  assert.deepEqual(collapsed.map((i) => i.id), state.groups.map((g) => g.id));
+  assert.deepEqual(collapsed.map((i) => i.depth), [0, 0, 0]);
+
+  const expanded = visibleGraphItems(state, ROOT_ID, new Set([letters.id]), false);
+  const rootIds = state.groups.map((g) => g.id);
+  assert.ok(expanded.some((i) => i.id === rootIds[0]));
+  assert.ok(expanded.some((i) => i.id === rootIds[1]));
+  assert.ok(expanded.some((i) => i.id === rootIds[2]));
+  assert.ok(expanded.some((i) => i.id === state.shortcuts[0].id));
+  assert.ok(!expanded.some((i) => i.id === state.shortcuts[1].id));
+});
+
+test('expanded folders create exactly their parent-child edges; collapsed folders omit hidden descendants', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  state = createShortcut(state, { name: 's1', target: 'C:\\s1.exe', parentId: state.groups[0].id });
+  state = createShortcut(state, { name: 's2', target: 'C:\\s2.exe', parentId: state.groups[1].id });
+
+  const collapsedItems = visibleGraphItems(state, ROOT_ID, new Set(), false);
+  const collapsedEdges = graphEdges(collapsedItems);
+  assert.equal(collapsedEdges.length, 0);
+
+  const openItems = visibleGraphItems(state, ROOT_ID, new Set([state.groups[0].id]), false);
+  const openEdges = graphEdges(openItems);
+  assert.equal(openEdges.length, 1);
+  assert.equal(openEdges[0].source, state.groups[0].id);
+  assert.equal(openEdges[0].target, state.shortcuts[0].id);
+});
+
+test('child seed positions are finite and not all identical across siblings or rebuilds', () => {
+  const ids = ['n1', 'n2', 'n3', 'n4', 'n5'];
+  const parent = { x: 100, y: 50 };
+  const seeds = ids.map((id, i) => seedPosition(id, parent, i, ids.length));
+  assert.ok(allFinite(seeds));
+  assert.ok(allUniquePositions(seeds));
+
+  const rebuilt = ids.map((id, i) => seedPosition(id, parent, i, ids.length));
+  assert.deepEqual(rebuilt, seeds);
+});
+
+test('root seed positions are finite and distinct', () => {
+  const ids = ['a', 'b', 'c', 'd'];
+  const seeds = ids.map((id, i) => seedPosition(id, null, i, ids.length));
+  assert.ok(allFinite(seeds));
+  assert.ok(allUniquePositions(seeds));
+});
+
+test('graph visibility assigns unique sibling indices', () => {
+  let state = createGroup(emptyState(), 'Parent');
+  const parent = state.groups[0];
+  state = createShortcut(state, { name: 'A', target: 'C:\\a.exe', parentId: parent.id });
+  state = createShortcut(state, { name: 'B', target: 'C:\\b.exe', parentId: parent.id });
+  state = createShortcut(state, { name: 'C', target: 'C:\\c.exe', parentId: parent.id });
+
+  const items = visibleGraphItems(state, ROOT_ID, new Set([parent.id]), false);
+  const children = items.filter((i) => i.parentId === parent.id);
+  assert.deepEqual(children.map((i) => i.siblingIndex), [0, 1, 2]);
+  assert.equal(children[0].siblingCount, 3);
+});
+
+test('graph edges include stable keys', () => {
+  let state = createGroup(emptyState(), 'Parent');
+  const parent = state.groups[0];
+  state = createShortcut(state, { name: 'Child', target: 'C:\\child.exe', parentId: parent.id });
+  const items = visibleGraphItems(state, ROOT_ID, new Set([parent.id]), false);
+  const edges = graphEdges(items);
+  assert.equal(edges.length, 1);
+  assert.equal(edges[0].id, `${parent.id}->${state.shortcuts[0].id}`);
+});
+
+test('Bin graph mode shows binned items as flat roots with no edges', () => {
+  let state = createGroup(emptyState(), 'Folder');
+  const folder = state.groups[0];
+  state = createShortcut(state, { name: 'Inside', target: 'C:\\inside.exe', parentId: folder.id });
+  state = createShortcut(state, { name: 'Outside', target: 'C:\\outside.exe' });
+  const binned = binSelection(state, [folder.id], '2026-07-30T00:00:00.000Z');
+
+  const binItems = visibleGraphItems(binned, ROOT_ID, new Set(), true);
+  assert.ok(binItems.every((i) => i.depth === 0));
+  assert.ok(binItems.every((i) => i.parentId === 'bin'));
+  const binEdges = graphEdges(binItems);
+  assert.equal(binEdges.length, 0);
+});
+
+test('emptyState contains independent expansion fields and graphPositions', () => {
+  const state = emptyState();
+  assert.deepEqual(state.view.expandedGroupIds, []);
+  assert.deepEqual(state.view.graphExpandedGroupIds, []);
+  assert.deepEqual(state.view.graphPositions, {});
+});
+
+test('legacy state without new fields preserves existing data and defaults new fields', () => {
+  const legacy = { schemaVersion: 1, groups: [], shortcuts: [] };
+  const state = normalizeState(legacy);
+  assert.deepEqual(state.view.expandedGroupIds, []);
+  assert.deepEqual(state.view.graphExpandedGroupIds, []);
+  assert.deepEqual(state.view.graphPositions, {});
+  assert.equal(state.view.layout, 'explorer');
+});
+
+test('independent Explorer and Graph expansion do not interfere', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, []);
+
+  state = updateWorkspaceView(state, { graphExpandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [letters.id]);
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [] });
+  assert.deepEqual(state.view.expandedGroupIds, []);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [letters.id]);
+});
+
+test('partial update preserves omitted view fields', () => {
+  let state = updateWorkspaceView(emptyState(), {
+    expandedGroupIds: ['g1'],
+    graphExpandedGroupIds: ['g2'],
+    layout: 'graph',
+  });
+
+  state = updateWorkspaceView(state, { layout: 'explorer' });
+  assert.deepEqual(state.view.expandedGroupIds, ['g1']);
+  assert.deepEqual(state.view.graphExpandedGroupIds, ['g2']);
+  assert.equal(state.view.layout, 'explorer');
+
+  state = updateWorkspaceView(state, { selectedItemIds: ['s1'] });
+  assert.deepEqual(state.view.graphExpandedGroupIds, ['g2']);
+  assert.deepEqual(state.view.expandedGroupIds, ['g1']);
+
+  state = updateWorkspaceView(state, { binMode: true });
+  assert.equal(state.view.currentGroupId, ROOT_ID);
+  assert.equal(state.view.binMode, true);
+});
+
+test('position normalization accepts valid entries and discards invalid ones', () => {
+  const raw = {
+    root: {
+      item1: { x: 100, y: 200 },
+      item2: { x: 50.5, y: -30.2 },
+      badNan: { x: NaN, y: 100 },
+      badInf: { x: 100, y: Infinity },
+      badMissingX: { y: 100 },
+      badMissingY: { x: 100 },
+      badString: { x: '100', y: '200' },
+    },
+    badContext: 42,
+    emptyContext: {},
+  };
+  const result = normalizeGraphPositions(raw);
+  assert.deepEqual(result.root.item1, { x: 100, y: 200 });
+  assert.deepEqual(result.root.item2, { x: 50.5, y: -30.2 });
+  assert.equal(result.root.badNan, undefined);
+  assert.equal(result.root.badInf, undefined);
+  assert.equal(result.root.badMissingX, undefined);
+  assert.equal(result.root.badMissingY, undefined);
+  assert.equal(result.root.badString, undefined);
+  assert.equal(result.badContext, undefined);
+  assert.equal(result.emptyContext, undefined);
+});
+
+test('independent graph position contexts are isolated', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = setGraphPositions(state, 'bin', { item1: { x: 30, y: 40 } });
+
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+  assert.deepEqual(getGraphPosition(state, 'bin', 'item1'), { x: 30, y: 40 });
+
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 100, y: 200 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 100, y: 200 });
+  assert.deepEqual(getGraphPosition(state, 'bin', 'item1'), { x: 30, y: 40 });
+});
+
+test('removeGraphPositions removes only selected entries in current context', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+    item3: { x: 50, y: 60 },
+  });
+  state = setGraphPositions(state, 'bin', { item1: { x: 70, y: 80 } });
+
+  state = removeGraphPositions(state, ROOT_ID, ['item2']);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item2'), null);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item3'), { x: 50, y: 60 });
+  assert.deepEqual(getGraphPosition(state, 'bin', 'item1'), { x: 70, y: 80 });
+});
+
+test('removeGraphPositions cleans up empty context', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.deepEqual(state.view.graphPositions, {});
+});
+
+test('graphContextId returns bin for bin mode and currentGroupId otherwise', () => {
+  assert.equal(graphContextId(ROOT_ID, false), ROOT_ID);
+  assert.equal(graphContextId('group-1', false), 'group-1');
+  assert.equal(graphContextId(ROOT_ID, true), 'bin');
+});
+
+test('updateWorkspaceView preserves graphPositions when not supplied', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = updateWorkspaceView(state, { layout: 'graph' });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+});
+
+test('normalizeGraphPositions returns empty when given null/undefined/non-object', () => {
+  assert.deepEqual(normalizeGraphPositions(null), {});
+  assert.deepEqual(normalizeGraphPositions(undefined), {});
+  assert.deepEqual(normalizeGraphPositions(42), {});
+  assert.deepEqual(normalizeGraphPositions('string'), {});
+  assert.deepEqual(normalizeGraphPositions([]), {});
+});
+
+test('setGraphPositions stores coordinates and getGraphPosition retrieves them (simulates shift-drag pin)', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 100, y: 200 } });
+  const pos = getGraphPosition(state, ROOT_ID, 'item1');
+  assert.deepEqual(pos, { x: 100, y: 200 });
+  assert.ok(Number.isFinite(pos.x) && Number.isFinite(pos.y));
+});
+
+test('normal drag of an unpinned item removes saved positions (simulates release-without-shift from unpinned)', () => {
+  let state = emptyState();
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.deepEqual(state.view.graphPositions, {});
+});
+
+test('normal drag of a pinned item removes its saved coordinate and preserves other items', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+  });
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item2'), { x: 30, y: 40 });
+});
+
+test('shift-drag of a pinned item updates its saved coordinate', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 99, y: 88 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 99, y: 88 });
+});
+
+test('multi-selection shift-drag saves coordinates for all dragged items', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+    item3: { x: 50, y: 60 },
+  });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item2'), { x: 30, y: 40 });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item3'), { x: 50, y: 60 });
+});
+
+test('multi-selection normal drag removes coordinates only for dragged items', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+  });
+  state = setGraphPositions(state, ROOT_ID, { item3: { x: 50, y: 60 } });
+  state = removeGraphPositions(state, ROOT_ID, ['item1', 'item2']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item2'), null);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item3'), { x: 50, y: 60 });
+});
+
+test('folder drop always moves items and clears source context coordinates regardless of shift', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+  state = createGroup(state, 'Things');
+  const things = state.groups[1];
+  state = createShortcut(state, { name: 'CLIPS', target: 'C:\\clips.exe', parentId: letters.id });
+  const clips = state.shortcuts[0];
+
+  state = setGraphPositions(state, ROOT_ID, { [clips.id]: { x: 100, y: 200 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, clips.id), { x: 100, y: 200 });
+
+  const moved = moveSelection(state, [clips.id], things.id);
+  state = removeGraphPositions(moved, ROOT_ID, [clips.id]);
+
+  assert.equal(state.shortcuts[0].parentId, things.id);
+  assert.equal(getGraphPosition(state, ROOT_ID, clips.id), null);
+});
+
+test('free-space graph dragging never changes item parentId or order through setGraphPositions', () => {
+  let state = createShortcut(emptyState(), { name: 'A', target: 'C:\\a.exe' });
+  const item = state.shortcuts[0];
+  const originalParentId = item.parentId;
+  const originalOrder = item.order;
+
+  state = setGraphPositions(state, ROOT_ID, { [item.id]: { x: 999, y: 888 } });
+
+  assert.equal(state.shortcuts[0].parentId, originalParentId);
+  assert.equal(state.shortcuts[0].order, originalOrder);
+});
+
+test('removeGraphPositions on a non-existent item is a safe no-op', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = removeGraphPositions(state, ROOT_ID, ['nonexistent']);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+});
+
+test('context separation: same itemId can have positions in different contexts, removing from one does not affect another', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { shared: { x: 10, y: 20 } });
+  state = setGraphPositions(state, 'group-A', { shared: { x: 50, y: 60 } });
+
+  state = removeGraphPositions(state, ROOT_ID, ['shared']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'shared'), null);
+  assert.deepEqual(getGraphPosition(state, 'group-A', 'shared'), { x: 50, y: 60 });
+});
+
+test('Ctrl+click Explorer folder expands it without changing graph expansion', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, []);
+});
+
+test('Ctrl+click Explorer folder again collapses it', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  state = updateWorkspaceView(state, { expandedGroupIds: [] });
+  assert.deepEqual(state.view.expandedGroupIds, []);
+});
+
+test('Ctrl+click Graph folder expands it without changing Explorer expansion', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: ['group-a'] });
+  state = updateWorkspaceView(state, { graphExpandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, ['group-a']);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [letters.id]);
+});
+
+test('Ctrl+click does not change currentGroupId (does not navigate)', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  assert.equal(state.view.currentGroupId, ROOT_ID);
+});
+
+test('Ctrl+click does not change layout or binMode', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+  state = updateWorkspaceView(state, { layout: 'graph', binMode: true, expandedGroupIds: [letters.id] });
+
+  assert.equal(state.view.layout, 'graph');
+  assert.equal(state.view.binMode, true);
+});
+
+test('Ctrl+click does not modify graphPositions', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = createGroup(state, 'Letters');
+  const letters = state.groups[0];
+  state = updateWorkspaceView(state, { graphExpandedGroupIds: [letters.id] });
+
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+});
+
+test('Ctrl+click expansion persists through restore/reopen', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id], graphExpandedGroupIds: [letters.id] });
+  const serialized = JSON.parse(JSON.stringify(state));
+  const restored = normalizeState(serialized);
+
+  assert.deepEqual(restored.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(restored.view.graphExpandedGroupIds, [letters.id]);
+});
+
+test('expansion toggle preserves unique IDs (duplicate toggle does not cause duplicate entries)', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id, letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+});
+
+test('chevron works independently of Ctrl+click', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  state = updateWorkspaceView(state, { expandedGroupIds: [] });
+  assert.deepEqual(state.view.expandedGroupIds, []);
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+});
+
+test('normal click on a folder still activates it', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { currentGroupId: letters.id });
+  assert.equal(state.view.currentGroupId, letters.id);
+});
+
+test('expansion sets remain independent after multiple Ctrl+click toggles', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+  state = createGroup(state, 'Things');
+  const things = state.groups[1];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id], graphExpandedGroupIds: [things.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [things.id]);
+
+  state = updateWorkspaceView(state, { graphExpandedGroupIds: [letters.id, things.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [letters.id, things.id]);
+});
+
+test('drag starts without Shift, Shift pressed before release: node is pinned', () => {
+  let state = emptyState();
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 100, y: 200 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 100, y: 200 });
+});
+
+test('drag starts with Shift, Shift released before release: node is unpinned via removeGraphPositions', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+});
+
+test('pointerup Shift state determines final outcome regardless of prior toggles during drag', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, {
+    item1: { x: 10, y: 20 },
+    item2: { x: 30, y: 40 },
+  });
+
+  state = setGraphPositions(state, ROOT_ID, { item1: { x: 99, y: 88 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 99, y: 88 });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item2'), { x: 30, y: 40 });
+
+  state = removeGraphPositions(state, ROOT_ID, ['item2']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item2'), null);
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 99, y: 88 });
+});
+
+test('folder drop overrides final Shift state on pointerup', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+  state = createGroup(state, 'Things');
+  const things = state.groups[1];
+  state = createShortcut(state, { name: 'CLIPS', target: 'C:\\clips.exe', parentId: letters.id });
+  const clips = state.shortcuts[0];
+
+  state = setGraphPositions(state, ROOT_ID, { [clips.id]: { x: 100, y: 200 } });
+
+  const moved = moveSelection(state, [clips.id], things.id);
+  state = removeGraphPositions(moved, ROOT_ID, [clips.id]);
+
+  assert.equal(state.shortcuts[0].parentId, things.id);
+  assert.equal(getGraphPosition(state, ROOT_ID, clips.id), null);
+});
+
+test('removeGraphPositions on all entries cleans up context object', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, { item1: { x: 10, y: 20 } });
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+  state = removeGraphPositions(state, ROOT_ID, ['item1']);
+  assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
+  assert.deepEqual(state.view.graphPositions, {});
 });

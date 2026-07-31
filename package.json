@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test.mjs model.test.mjs"
+    "test": "node --test test.mjs model.test.mjs renderer.test.mjs"
+  },
+  "dependencies": {
+    "d3-force": "^3.0.0",
+    "d3-zoom": "^3.0.0"
   }
 }
