@@ -11,20 +11,20 @@
   <body>
     <main class="workspace">
       <section class="navigation" aria-label="Folder navigation">
-        <nav class="breadcrumbs" id="breadcrumbs" aria-label="Current group path"></nav>
-        <div class="navigation-actions">
-          <button class="quiet-button danger-text" id="delete-all-bin" type="button" hidden>Delete all</button>
-          <button class="quiet-button pickup-copy" id="copy-prompt" type="button"><span aria-hidden="true">⧉</span><span class="copy-label">Copy agent pickup prompt</span></button>
-          <button class="quiet-button graph-button" id="graph-view-button" type="button" aria-pressed="false">
-            <span aria-hidden="true">⦿</span>
-            <span id="graph-label">Graph</span>
-          </button>
-          <button class="quiet-button bin-button" id="bin-button" data-bin-view type="button" aria-pressed="false">
-            <span aria-hidden="true">♲</span>
-            <span id="bin-label">Bin</span>
-            <span class="bin-count" id="bin-count" hidden></span>
-          </button>
-        </div>
+        <nav class="breadcrumbs toolbar-float" id="breadcrumbs" data-toolbar-key="breadcrumbs" aria-label="Current group path"></nav>
+        <button class="quiet-button icon-button danger-text toolbar-float" id="delete-all-bin" data-toolbar-key="delete-all-bin" type="button" title="Delete all" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M8 6V4.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V6M6 6v9.5A1.5 1.5 0 0 0 7.5 17h5a1.5 1.5 0 0 0 1.5-1.5V6M8.5 9v5M11.5 9v5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="sr-only">Delete all</span>
+        </button>
+        <button class="quiet-button icon-button pickup-copy toolbar-float" id="copy-prompt" data-toolbar-key="copy-prompt" type="button" title="Copy agent pickup prompt">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M13 7V4.5A1.5 1.5 0 0 0 11.5 3h-7A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13H7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="sr-only copy-label">Copy agent pickup prompt</span>
+        </button>
+        <button class="quiet-button icon-button bin-button toolbar-float" id="bin-button" data-bin-view data-toolbar-key="bin-button" type="button" aria-pressed="false" title="Bin">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M8 6V4.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V6M6 6v9.5A1.5 1.5 0 0 0 7.5 17h5a1.5 1.5 0 0 0 1.5-1.5V6M8.5 9v5M11.5 9v5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="sr-only" id="bin-label">Bin</span>
+          <span class="bin-count" id="bin-count" hidden></span>
+        </button>
       </section>
 
       <p class="status" id="status" role="status" aria-live="polite"></p>
@@ -34,7 +34,7 @@
           class="icon-grid"
           id="icon-grid"
           data-icon-grid
-          data-view="explorer"
+          data-view="graph"
           tabindex="0"
           aria-label="Items in this folder"
         ></div>
@@ -72,6 +72,18 @@
             <button class="paper-button primary" id="save-editor" type="button">Save</button>
           </div>
         </form>
+      </section>
+
+      <section class="confirm-layer" id="link-edit-layer" hidden>
+        <div class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="link-edit-title">
+          <h2 id="link-edit-title">This shortcut is linked</h2>
+          <p>It appears in more than one folder. Apply this edit everywhere it's linked, or split this one location off as its own independent copy first?</p>
+          <div class="editor-actions">
+            <button class="paper-button" id="cancel-link-edit" type="button">Cancel</button>
+            <button class="paper-button" id="fork-link-edit" type="button">Fork this one</button>
+            <button class="paper-button primary" id="apply-everywhere-link-edit" type="button">Apply everywhere</button>
+          </div>
+        </div>
       </section>
 
       <section class="confirm-layer" id="confirm-layer" hidden>

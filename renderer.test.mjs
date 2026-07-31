@@ -14,6 +14,8 @@ import {
   getGraphPosition,
   graphContextId,
   moveSelection,
+  copySelection,
+  forkPlacement,
 } from './model.mjs';
 
 import {
@@ -257,4 +259,65 @@ test('graph context ID properly distinguishes bin from normal contexts', () => {
   assert.equal(graphContextId(ROOT_ID, true), 'bin');
   assert.equal(graphContextId('some-group-id', false), 'some-group-id');
   assert.equal(graphContextId('some-group-id', true), 'bin');
+});
+
+test('a shortcut linked into two simultaneously expanded folders appears once with two edges', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  const [a, b] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  const originalPlacementId = original.placements[0].id;
+  state = copySelection(state, [originalPlacementId], b.id);
+
+  const items = visibleGraphItems(state, ROOT_ID, new Set([a.id, b.id]), false);
+  const sharedNodes = items.filter((i) => i.id === original.id);
+  assert.equal(sharedNodes.length, 1, 'the shared shortcut collapses to exactly one node');
+  assert.deepEqual(new Set(sharedNodes[0].parentIds), new Set([a.id, b.id]));
+
+  const edges = graphEdges(items);
+  const edgesToShared = edges.filter((e) => e.target === original.id);
+  assert.equal(edgesToShared.length, 2, 'one edge from each folder that has it placed');
+  assert.deepEqual(new Set(edgesToShared.map((e) => e.source)), new Set([a.id, b.id]));
+});
+
+test('a linked shortcut visible from only one expanded folder still shows and links normally', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  const [a, b] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  state = copySelection(state, [original.placements[0].id], b.id);
+
+  // Only A expanded: the shared shortcut appears once, with one edge from A.
+  const items = visibleGraphItems(state, ROOT_ID, new Set([a.id]), false);
+  const sharedNodes = items.filter((i) => i.id === original.id);
+  assert.equal(sharedNodes.length, 1);
+  assert.deepEqual(sharedNodes[0].parentIds, [a.id]);
+  const edges = graphEdges(items);
+  assert.equal(edges.filter((e) => e.target === original.id).length, 1);
+});
+
+test('forking a placement out of the graph removes only that one edge, not the shared node elsewhere', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  const [a, b] = state.groups;
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\shared.exe', parentId: a.id });
+  const original = state.shortcuts[0];
+  state = copySelection(state, [original.placements[0].id], b.id);
+
+  const bPlacementId = state.shortcuts
+    .find((candidate) => candidate.id === original.id).placements
+    .find((placement) => placement.parentId === b.id).id;
+  state = forkPlacement(state, bPlacementId);
+
+  const items = visibleGraphItems(state, ROOT_ID, new Set([a.id, b.id]), false);
+  const originalNodes = items.filter((i) => i.id === original.id);
+  assert.equal(originalNodes.length, 1);
+  assert.deepEqual(originalNodes[0].parentIds, [a.id]);
+
+  const forked = state.shortcuts.find((candidate) => candidate.id !== original.id);
+  const forkedNodes = items.filter((i) => i.id === forked.id);
+  assert.equal(forkedNodes.length, 1);
+  assert.deepEqual(forkedNodes[0].parentIds, [b.id]);
 });

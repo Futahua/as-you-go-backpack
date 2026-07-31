@@ -14,7 +14,6 @@ import {
   normalizeState,
   permanentlyDelete,
   renameItem,
-  reorderSelection,
   restoreSelection,
   setIconSize,
   updateGroup,
@@ -25,6 +24,10 @@ import {
   getGraphPosition,
   setGraphPositions,
   removeGraphPositions,
+  setToolbarPosition,
+  getToolbarPosition,
+  forkPlacement,
+  placementCount,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -67,8 +70,6 @@ const elements = {
 binButton: document.querySelector('#bin-button'),
   binLabel: document.querySelector('#bin-label'),
   binCount: document.querySelector('#bin-count'),
-  graphButton: document.querySelector('#graph-view-button'),
-  graphLabel: document.querySelector('#graph-label'),
   editorLayer: document.querySelector('#editor-layer'),
   editor: document.querySelector('#editor'),
   saveButton: document.querySelector('#save-editor'),
@@ -86,6 +87,7 @@ binButton: document.querySelector('#bin-button'),
   iconDefaultButton: document.querySelector('#use-target-icon'),
   confirmLayer: document.querySelector('#confirm-layer'),
   confirmCopy: document.querySelector('#confirm-copy'),
+  linkEditLayer: document.querySelector('#link-edit-layer'),
 };
 
 const pending = new Map();
@@ -95,15 +97,12 @@ let undoState = null;
 let currentId = ROOT_ID;
 let selected = new Set();
 let selectionAnchor = null;
-let explorerExpanded = new Set();
 let graphExpanded = new Set();
 let clipboard = null;
 let editorMode = null;
 let editorIcon = null;
 let editorTargetIcon = null;
 let binMode = false;
-let layout = 'explorer';
-let dragIds = [];
 let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
@@ -187,6 +186,40 @@ function item(itemId) {
   return group(itemId) ?? shortcut(itemId);
 }
 
+/** Any one active (non-bin) placement id belonging to the given shortcut
+ * identity — enough for the model layer's placement-scoped functions
+ * (copySelection/moveSelection/collapsePlacements) to find the record. */
+function anyActivePlacementId(shortcutId) {
+  const record = shortcut(shortcutId);
+  return record?.placements.find((placement) => !placement.bin)?.id ?? null;
+}
+
+function allActivePlacementIds(shortcutId) {
+  const record = shortcut(shortcutId);
+  return record?.placements.filter((placement) => !placement.bin).map((placement) => placement.id) ?? [];
+}
+
+/** Resolves a Bin-context id — a group id, or one specific placement id —
+ * to its display name. Used for the Bin, where a tile's own id is the
+ * placement, not the shared shortcut identity. */
+function binItemName(binItemId) {
+  const asGroup = group(binItemId);
+  if (asGroup) return asGroup.name;
+  const owner = state.shortcuts.find((candidate) =>
+    candidate.placements.some((placement) => placement.id === binItemId));
+  return owner?.name ?? null;
+}
+
+/** How many distinct folders the given shortcut is currently shown linked
+ * into, in the graph node currently on screen for it — this is what decides
+ * whether cutting it collapses every placement into one, or only moves the
+ * one this view represents (per the creator's rule: 2+ visible edges means
+ * "act on the whole shared thing," exactly 1 means "act on this location"). */
+function visibleParentCountFor(shortcutId) {
+  const node = graph._getNode(shortcutId);
+  return node?.parentIds?.length ?? 1;
+}
+
 function isAvailableItem(itemId) {
   const candidate = item(itemId);
   if (!candidate || candidate.bin) return false;
@@ -201,11 +234,9 @@ function isAvailableItem(itemId) {
 function captureWorkspaceView() {
   state = updateWorkspaceView(state, {
     currentGroupId: currentId,
-    expandedGroupIds: [...explorerExpanded],
     graphExpandedGroupIds: [...graphExpanded],
     selectedItemIds: [...selected],
     binMode,
-    layout,
   });
 }
 
@@ -215,16 +246,11 @@ function restoreWorkspaceView() {
     requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
       ? requestedCurrent
       : ROOT_ID;
-  explorerExpanded = new Set(
-    state.view.expandedGroupIds.filter((groupId) =>
-      Boolean(group(groupId)) && isAvailableItem(groupId)),
-  );
   graphExpanded = new Set(
     (state.view.graphExpandedGroupIds ?? []).filter((groupId) =>
       Boolean(group(groupId))),
   );
   binMode = state.view.binMode;
-  layout = state.view.layout === 'graph' ? 'graph' : 'explorer';
   const binnedIds = new Set(binnedItems(state).map((candidate) => candidate.id));
   selected = new Set(
     state.view.selectedItemIds.filter((itemId) =>
@@ -266,61 +292,16 @@ function iconMarkup(candidate) {
   return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
 }
 
+function linkMarkup(candidate) {
+  return candidate.linked
+    ? '<span class="link-badge" title="Linked into more than one folder" aria-hidden="true">⛓</span>'
+    : '';
+}
+
 function descriptionMarkup(candidate) {
   return candidate.kind === 'shortcut' && candidate.description
     ? `<small>${escapeHtml(candidate.description)}</small>`
     : '';
-}
-
-function renderItems(parentId, depth = 0) {
-  return itemsIn(state, parentId).map((candidate) => {
-    const isSelected = selected.has(candidate.id);
-    const canExpand = candidate.kind === 'group';
-    const isExpanded = canExpand && explorerExpanded.has(candidate.id);
-    const tile = `
-      <div
-        class="icon-item ${isSelected ? 'selected' : ''}"
-        data-id="${candidate.id}"
-        data-kind="${candidate.kind}"
-        data-parent="${parentId}"
-        draggable="true"
-        role="option"
-        aria-selected="${isSelected}"
-        tabindex="-1"
-      >
-        ${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}
-        <div class="item-icon">${iconMarkup(candidate)}</div>
-        <strong>${escapeHtml(candidate.name)}</strong>
-        ${descriptionMarkup(candidate)}
-      </div>`;
-    if (!isExpanded) return tile;
-    return `${tile}
-      <section class="expanded-branch" data-branch-parent="${candidate.id}" style="--branch-depth:${depth + 1}">
-        <div class="branch-heading">${escapeHtml(candidate.name)}</div>
-        <div class="nested-icon-grid" data-blank-parent="${candidate.id}">
-          ${renderItems(candidate.id, depth + 1)}
-        </div>
-      </section>`;
-  }).join('');
-}
-
-function renderBinItems() {
-  return binnedItems(state).map((candidate) => `
-    <div
-      class="icon-item ${selected.has(candidate.id) ? 'selected' : ''}"
-      data-id="${candidate.id}"
-      data-kind="${candidate.kind}"
-      data-parent="bin"
-      draggable="false"
-      role="option"
-      aria-selected="${selected.has(candidate.id)}"
-      tabindex="-1"
-    >
-      <div class="item-icon">${iconMarkup(candidate)}</div>
-      <strong>${escapeHtml(candidate.name)}</strong>
-      ${descriptionMarkup(candidate)}
-    </div>
-  `).join('');
 }
 
 const graph = createGraphController();
@@ -472,7 +453,19 @@ function createGraphController() {
   function buildCandidate(vi) {
     const stored = item(vi.id);
     if (!stored) return null;
-    return { ...stored, kind: vi.kind };
+    return {
+      ...stored,
+      kind: vi.kind,
+      parentId: vi.parentId,
+      // Every folder this shortcut is currently placed in, per the visible
+      // graph (used to decide whether Ctrl+X collapses everything into one
+      // place or moves just the one placement this view represents).
+      parentIds: vi.parentIds ?? [vi.parentId],
+      // Whether the underlying shortcut has more than one active placement
+      // anywhere at all (not just in this view) — drives the link marker
+      // and the apply-everywhere-or-fork prompt on edit.
+      linked: vi.kind === 'shortcut' ? placementCount(stored) > 1 : false,
+    };
   }
 
   function syncNodes(visibleItems) {
@@ -488,6 +481,7 @@ function createGraphController() {
     }
     const ctxId = graphContextId(currentId, binMode);
     for (const vi of visibleItems) {
+      const parentIds = vi.parentIds ?? [vi.parentId];
       let node = nodes.get(vi.id);
       if (node) {
         if (node.exitTimer) {
@@ -501,16 +495,16 @@ function createGraphController() {
           }
         }
         node.candidate = buildCandidate(vi);
-        node.childIds = childIdsFor(vi);
-        node.parentNode = parentOfNode(vi);
+        node.parentIds = parentIds;
         node.depth = vi.depth;
         refreshNodeContent(node);
         continue;
       }
       const candidate = buildCandidate(vi);
       if (!candidate) continue;
-      const parent = candidate.parentId && candidate.parentId !== ROOT_ID && candidate.parentId !== 'bin'
-        ? nodes.get(candidate.parentId)
+      const firstParentId = parentIds[0];
+      const parent = firstParentId && firstParentId !== ROOT_ID && firstParentId !== 'bin'
+        ? nodes.get(firstParentId)
         : null;
       const siblings = byParent.get(candidate.parentId ?? ROOT_ID) ?? [];
       const index = Math.max(0, siblings.findIndex((s) => s.id === vi.id));
@@ -530,7 +524,7 @@ function createGraphController() {
         vy: 0,
         width: 0,
         height: 0,
-        childIds: childIdsFor(vi),
+        parentIds,
         parentNode: parent ?? null,
         shell: null,
         exiting: false,
@@ -540,16 +534,6 @@ function createGraphController() {
       nodes.set(vi.id, node);
       createNodeShell(node);
     }
-  }
-
-  function parentOfNode(vi) {
-    if (!vi.parentId || vi.parentId === ROOT_ID || vi.parentId === 'bin') return null;
-    return nodes.get(vi.parentId) ?? null;
-  }
-
-  function childIdsFor(vi) {
-    if (binMode || vi.kind !== 'group' || !graphExpanded.has(vi.id)) return [];
-    return itemsIn(state, vi.id).map((c) => c.id);
   }
 
   function refreshNodeContent(node) {
@@ -572,6 +556,7 @@ function createGraphController() {
       candidate.description ?? '',
       candidate.target ?? '',
       candidate.icon ?? null,
+      candidate.linked ?? false,
       isExpanded,
       binMode,
       state.view.iconSize,
@@ -580,6 +565,7 @@ function createGraphController() {
       node.contentSignature = signature;
       iconItem.innerHTML =
         `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+        + `${linkMarkup(candidate)}`
         + `<div class="item-icon">${iconMarkup(candidate)}</div>`
         + `<strong>${escapeHtml(candidate.name)}</strong>`
         + `${descriptionMarkup(candidate)}`;
@@ -612,6 +598,7 @@ function createGraphController() {
     iconItem.setAttribute('tabindex', '-1');
     iconItem.innerHTML =
       `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+      + `${linkMarkup(candidate)}`
       + `<div class="item-icon">${iconMarkup(candidate)}</div>`
       + `<strong>${escapeHtml(candidate.name)}</strong>`
       + `${descriptionMarkup(candidate)}`;
@@ -626,6 +613,7 @@ function createGraphController() {
       candidate.description ?? '',
       candidate.target ?? '',
       candidate.icon ?? null,
+      candidate.linked ?? false,
       isExpanded,
       binMode,
       state.view.iconSize,
@@ -673,18 +661,15 @@ function createGraphController() {
     }, 200);
   }
 
-  function syncEdges() {
+  function syncEdges(visibleItems) {
     if (!edgeLayer) return;
     const wanted = new Map();
-    nodes.forEach((node) => {
-      if (node.exiting) return;
-      for (const childId of node.childIds) {
-        const child = nodes.get(childId);
-        if (!child || child.exiting) continue;
-        const key = `${node.id}->${childId}`;
-        wanted.set(key, { sourceId: node.id, targetId: childId });
-      }
-    });
+    for (const edge of graphEdges(visibleItems)) {
+      const source = nodes.get(edge.source);
+      const target = nodes.get(edge.target);
+      if (!source || !target || source.exiting || target.exiting) continue;
+      wanted.set(edge.id, { sourceId: edge.source, targetId: edge.target });
+    }
     for (const [key, edge] of edges) {
       if (!wanted.has(key)) {
         edge.path?.remove();
@@ -795,7 +780,7 @@ function createGraphController() {
       return;
     }
     syncNodes(visible);
-    syncEdges();
+    syncEdges(visible);
     syncSimulation();
     reheat(initialFit ? 0.7 : 0.35);
     if (initialFit && !initialized) {
@@ -862,38 +847,14 @@ function render() {
 
   const visible = binMode ? binnedItems(state) : itemsIn(state, currentId);
   elements.grid.dataset.blankParent = binMode ? 'bin' : currentId;
-  elements.grid.dataset.view = layout;
+  elements.grid.dataset.view = 'graph';
+  elements.grid.classList.toggle('bin-canvas', binMode);
 
-  if (layout === 'graph') {
-    if (!graph.isAttached) {
-      elements.grid.innerHTML = '';
-      console.assert(
-        elements.grid.querySelectorAll('.graph-viewport').length === 0
-      );
-      console.assert(
-        elements.grid.querySelectorAll('.expanded-branch').length === 0
-      );
-      console.assert(
-        elements.grid.querySelectorAll('.nested-icon-grid').length === 0
-      );
-      renderGraph(true);
-    } else {
-      graph.updateGraphView(false);
-    }
-    console.assert(
-      elements.grid.querySelectorAll('.graph-viewport').length === 1
-    );
-    console.assert(
-      [...elements.grid.querySelectorAll('.icon-item')]
-        .every(item => item.closest('.graph-node-shell'))
-    );
-  } else {
-    if (graph.isAttached) graph.destroyGraphView();
+  if (!graph.isAttached) {
     elements.grid.innerHTML = '';
-    console.assert(
-      elements.grid.querySelectorAll('.graph-viewport').length === 0
-    );
-    elements.grid.innerHTML = binMode ? renderBinItems() : renderItems(currentId);
+    renderGraph(true);
+  } else {
+    graph.updateGraphView(false);
   }
   elements.empty.hidden = visible.length !== 0;
   elements.empty.textContent = binMode
@@ -907,15 +868,13 @@ function render() {
   elements.binCount.textContent = String(binCount);
   elements.binButton.setAttribute('aria-pressed', String(binMode));
   elements.binLabel.textContent = binMode ? 'Close Bin' : 'Bin';
-  elements.graphButton.setAttribute('aria-pressed', String(layout === 'graph'));
-  elements.graphLabel.textContent = layout === 'graph' ? 'Explorer' : 'Graph';
   elements.deleteAllBin.hidden = !binMode || binCount === 0;
 
   hydrateIcons();
 }
 
 function syncSelection() {
-  if (layout === 'graph' && graph.isAttached) {
+  if (graph.isAttached) {
     graph.refreshSelection();
   } else {
     document.querySelectorAll('.icon-item').forEach((tile) => {
@@ -1094,10 +1053,8 @@ function openMenu(x, y, kind = 'selection', parentId = currentId) {
       menuButton('copy', chosen.length > 1 ? 'Copy items' : 'Copy'),
       menuButton('cut', chosen.length > 1 ? 'Cut items' : 'Cut'),
       menuButton('bin', chosen.length > 1 ? 'Move items to Bin' : 'Move to Bin', true),
-      layout === 'graph' ? '<hr />' : '',
-      layout === 'graph'
-        ? menuButton('reset-graph-position', chosen.length > 1 ? 'Follow folders automatically' : 'Follow folder automatically')
-        : '',
+      '<hr />',
+      menuButton('reset-graph-position', chosen.length > 1 ? 'Follow folders automatically' : 'Follow folder automatically'),
     ].join('');
   }
   elements.menu.innerHTML = content;
@@ -1125,7 +1082,7 @@ async function activate(itemId) {
     currentId = folder.id;
     binMode = false;
     selected.clear();
-    if (layout === 'graph') graph.destroyGraphView();
+    graph.destroyGraphView();
     closeMenu();
     render();
     saveWorkspaceView();
@@ -1191,7 +1148,20 @@ async function activateSelection() {
 
 async function copyOrCut(mode) {
   if (selected.size === 0) return;
-  clipboard = { mode, ids: [...selected] };
+  // For a cut, capture right now whether each selected shortcut currently
+  // shows more than one edge on screen — that decides, at paste time,
+  // whether the whole shared shortcut collapses into the destination or
+  // only the one placement this view represents moves there. Captured at
+  // cut-time, not paste-time, since navigating before pasting shouldn't
+  // change what "cut" already committed to.
+  const collapseWhole = new Set();
+  if (mode === 'cut') {
+    for (const selectedId of selected) {
+      if (group(selectedId)) continue;
+      if (visibleParentCountFor(selectedId) > 1) collapseWhole.add(selectedId);
+    }
+  }
+  clipboard = { mode, ids: [...selected], collapseWhole };
   setStatus('');
   closeMenu();
 }
@@ -1199,10 +1169,27 @@ async function copyOrCut(mode) {
 async function pasteInto(parentId) {
   if (!clipboard || parentId === 'bin') return;
   try {
-    const next = clipboard.mode === 'cut'
-      ? moveSelection(state, clipboard.ids, parentId)
-      : copySelection(state, clipboard.ids, parentId);
     const wasCut = clipboard.mode === 'cut';
+    let next = state;
+    if (wasCut) {
+      const groupIds = clipboard.ids.filter((selectedId) => group(selectedId));
+      const wholeShortcutIds = clipboard.ids.filter((selectedId) => clipboard.collapseWhole.has(selectedId));
+      const singlePlacementIds = clipboard.ids
+        .filter((selectedId) => !group(selectedId) && !clipboard.collapseWhole.has(selectedId))
+        .map((shortcutId) => anyActivePlacementId(shortcutId))
+        .filter(Boolean);
+      if (groupIds.length > 0 || singlePlacementIds.length > 0) {
+        next = moveSelection(next, [...groupIds, ...singlePlacementIds], parentId);
+      }
+      for (const shortcutId of wholeShortcutIds) {
+        next = collapsePlacements(next, shortcutId, parentId);
+      }
+    } else {
+      const ids = clipboard.ids
+        .map((selectedId) => group(selectedId) ? selectedId : anyActivePlacementId(selectedId))
+        .filter(Boolean);
+      next = copySelection(next, ids, parentId);
+    }
     if (wasCut) clipboard = null;
     await commit(next, wasCut ? 'Moved.' : 'Copied.');
   } catch (error) {
@@ -1335,6 +1322,7 @@ function hideEditor() {
   editorIcon = null;
   editorTargetIcon = null;
   elements.editorLayer.hidden = true;
+  elements.linkEditLayer.hidden = true;
 }
 
 async function chooseTarget(kind) {
@@ -1355,17 +1343,44 @@ async function chooseTarget(kind) {
   }
 }
 
+function editedShortcutIsLinked() {
+  if (editorMode?.kind !== 'shortcut' && editorMode?.kind !== 'web') return false;
+  const existingId = editorMode.item?.id;
+  if (!existingId) return false;
+  const record = shortcut(existingId);
+  return record ? placementCount(record) > 1 : false;
+}
+
 async function saveEditor() {
   if (!editorMode || elements.saveButton.disabled) return;
+  if (editedShortcutIsLinked()) {
+    elements.linkEditLayer.hidden = false;
+    return;
+  }
+  await commitEditorSave(false);
+}
+
+async function commitEditorSave(forkFirst) {
   elements.saveButton.disabled = true;
   elements.saveButton.textContent = 'Saving…';
   const name = elements.name.value.trim();
   try {
+    let workingState = state;
+    let editItemId = editorMode.item?.id;
+    if (forkFirst && editItemId) {
+      const anyPlacementId = anyActivePlacementId(editItemId);
+      if (anyPlacementId) {
+        const knownIds = new Set(workingState.shortcuts.map((candidate) => candidate.id));
+        workingState = forkPlacement(workingState, anyPlacementId);
+        const forked = workingState.shortcuts.find((candidate) => !knownIds.has(candidate.id));
+        if (forked) editItemId = forked.id;
+      }
+    }
     let next;
     if (editorMode.kind === 'group') {
       next = editorMode.item
-        ? updateGroup(state, editorMode.item.id, { name, icon: editorIcon })
-        : createGroup(state, name, editorMode.parentId, editorIcon);
+        ? updateGroup(workingState, editorMode.item.id, { name, icon: editorIcon })
+        : createGroup(workingState, name, editorMode.parentId, editorIcon);
     } else {
       const changes = {
         name,
@@ -1375,13 +1390,13 @@ async function saveEditor() {
       };
       next = editorMode.kind === 'web'
         ? editorMode.item
-          ? updateWebLink(state, editorMode.item.id, changes)
-          : createWebLink(state, { ...changes, parentId: editorMode.parentId })
+          ? updateWebLink(workingState, editItemId, changes)
+          : createWebLink(workingState, { ...changes, parentId: editorMode.parentId })
         : editorMode.item
-          ? updateShortcut(state, editorMode.item.id, changes)
-          : createShortcut(state, { ...changes, parentId: editorMode.parentId });
+          ? updateShortcut(workingState, editItemId, changes)
+          : createShortcut(workingState, { ...changes, parentId: editorMode.parentId });
     }
-    const editedShortcutId = editorMode.kind === 'shortcut' ? editorMode.item?.id : null;
+    const editedShortcutId = editorMode.kind === 'group' ? null : editItemId;
     const refreshTargetIcon = Boolean(
       editedShortcutId
       && (!editorIcon || editorMode.item?.target !== elements.target.value.trim()),
@@ -1403,7 +1418,13 @@ async function saveEditor() {
 
 async function moveToBin() {
   if (selected.size === 0) return;
-  await commit(binSelection(state, [...selected]), 'Moved to Bin.');
+  const ids = [...selected].flatMap((selectedId) => {
+    if (group(selectedId)) return [selectedId];
+    return visibleParentCountFor(selectedId) > 1
+      ? allActivePlacementIds(selectedId)
+      : [anyActivePlacementId(selectedId)].filter(Boolean);
+  });
+  await commit(binSelection(state, ids), 'Moved to Bin.');
 }
 
 function askPermanentDelete(ids = [...selected], deletingAll = false) {
@@ -1412,7 +1433,7 @@ function askPermanentDelete(ids = [...selected], deletingAll = false) {
   elements.confirmCopy.textContent = deletingAll
     ? `Delete all ${ids.length} items permanently? This cannot be undone.`
     : ids.length === 1
-      ? `Delete “${item(ids[0])?.name ?? 'this item'}” permanently? This cannot be undone.`
+      ? `Delete “${binItemName(ids[0]) ?? 'this item'}” permanently? This cannot be undone.`
       : `Delete these ${ids.length} items permanently? This cannot be undone.`;
   elements.confirmLayer.hidden = false;
 }
@@ -1459,7 +1480,7 @@ elements.grid.addEventListener('click', (event) => {
   const expandButton = event.target.closest('[data-expand]');
   if (expandButton) {
     const folderId = expandButton.dataset.expand;
-    const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
+    const targetSet = graphExpanded;
     if (targetSet.has(folderId)) targetSet.delete(folderId);
     else targetSet.add(folderId);
     closeMenu();
@@ -1497,7 +1518,7 @@ elements.grid.addEventListener('click', (event) => {
 elements.grid.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return;
 
-  if (layout === 'graph' && !event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
+  if (!event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
     const tile = event.target.closest('.icon-item');
     const shell = tile?.closest('.graph-node-shell');
     if (shell && event.pointerType !== 'touch') {
@@ -1676,7 +1697,20 @@ elements.grid.addEventListener('pointerup', (event) => {
 
       if (hitFolderId) {
         try {
-          const next = moveSelection(state, graphDragCopy.itemIds, hitFolderId);
+          const groupIds = graphDragCopy.itemIds.filter((draggedId) => group(draggedId));
+          const wholeShortcutIds = graphDragCopy.itemIds.filter((draggedId) =>
+            !group(draggedId) && visibleParentCountFor(draggedId) > 1);
+          const singlePlacementIds = graphDragCopy.itemIds
+            .filter((draggedId) => !group(draggedId) && visibleParentCountFor(draggedId) <= 1)
+            .map((shortcutId) => anyActivePlacementId(shortcutId))
+            .filter(Boolean);
+          let next = state;
+          if (groupIds.length > 0 || singlePlacementIds.length > 0) {
+            next = moveSelection(next, [...groupIds, ...singlePlacementIds], hitFolderId);
+          }
+          for (const shortcutId of wholeShortcutIds) {
+            next = collapsePlacements(next, shortcutId, hitFolderId);
+          }
           const ctxId = graphContextId(currentId, binMode);
           state = removeGraphPositions(next, ctxId, graphDragCopy.itemIds);
           commit(state, 'Moved.');
@@ -1765,7 +1799,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
   const tile = event.target.closest('.icon-item');
   if (tile) {
     if (event.shiftKey && tile.dataset.kind === 'group') {
-      const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
+      const targetSet = graphExpanded;
       const id = tile.dataset.id;
       const folderIds = selected.has(id)
         ? [...selected].filter((selectedId) => group(selectedId))
@@ -1816,7 +1850,7 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden) return;
+  if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden || !elements.linkEditLayer.hidden) return;
   if (
     binMode
     && event.ctrlKey
@@ -1877,163 +1911,55 @@ elements.explorer.addEventListener('wheel', (event) => {
   zoomTimer = setTimeout(() => persist().catch((error) => setStatus(String(error))), 250);
 }, { passive: false });
 
-elements.grid.addEventListener('dragstart', (event) => {
-  if (layout === 'graph') return;
-  const tile = event.target.closest('.icon-item');
-  if (!tile || binMode) return event.preventDefault();
-  if (!selected.has(tile.dataset.id)) {
-    selected = new Set([tile.dataset.id]);
-    selectionAnchor = tile.dataset.id;
-    syncSelection();
-    saveWorkspaceView();
-  }
-  dragIds = [...selected];
-  event.dataTransfer.effectAllowed = 'copyMove';
-  event.dataTransfer.setData('text/plain', dragIds.join(','));
-});
-
 elements.grid.addEventListener('dragover', (event) => {
   if (binMode) return;
   event.preventDefault();
-
-  if (layout === 'graph') {
-    document.querySelectorAll('.drop-inside, .drop-before, .graph-drop-target').forEach((node) =>
-      node.classList.remove('drop-inside', 'drop-before', 'graph-drop-target'));
-    if (event.dataTransfer.types.includes('Files')) {
-      const tile = event.target.closest('.icon-item');
-      const shell = tile?.closest('.graph-node-shell');
-      if (tile?.dataset.kind === 'group' && shell) {
-        shell.classList.add('graph-drop-target');
-        tile.classList.add('drop-inside');
-      }
-      event.dataTransfer.dropEffect = 'link';
-      return;
-    }
-    event.dataTransfer.dropEffect = 'none';
-    return;
-  }
-
-  document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
-    node.classList.remove('drop-inside', 'drop-before'));
-  const tile = event.target.closest('.icon-item');
+  document.querySelectorAll('.drop-inside, .graph-drop-target').forEach((node) =>
+    node.classList.remove('drop-inside', 'graph-drop-target'));
   if (event.dataTransfer.types.includes('Files')) {
-    elements.grid.classList.toggle('drop-blank', tile?.dataset.kind !== 'group');
-    if (tile?.dataset.kind === 'group') tile.classList.add('drop-inside');
+    const tile = event.target.closest('.icon-item');
+    const shell = tile?.closest('.graph-node-shell');
+    if (tile?.dataset.kind === 'group' && shell) {
+      shell.classList.add('graph-drop-target');
+      tile.classList.add('drop-inside');
+    }
     event.dataTransfer.dropEffect = 'link';
     return;
   }
-  if (!tile) return elements.grid.classList.add('drop-blank');
-  elements.grid.classList.remove('drop-blank');
-  const rect = tile.getBoundingClientRect();
-  const nearEdge = event.clientX - rect.left < rect.width * 0.22;
-  tile.classList.add(tile.dataset.kind === 'group' && !nearEdge ? 'drop-inside' : 'drop-before');
-  event.dataTransfer.dropEffect = event.ctrlKey ? 'copy' : 'move';
+  event.dataTransfer.dropEffect = 'none';
 });
 
 elements.grid.addEventListener('dragleave', (event) => {
   if (!elements.grid.contains(event.relatedTarget)) {
-    elements.grid.classList.remove('drop-blank');
-    document.querySelectorAll('.drop-inside, .drop-before, .graph-drop-target').forEach((node) =>
-      node.classList.remove('drop-inside', 'drop-before', 'graph-drop-target'));
+    document.querySelectorAll('.drop-inside, .graph-drop-target').forEach((node) =>
+      node.classList.remove('drop-inside', 'graph-drop-target'));
   }
 });
 
 elements.grid.addEventListener('drop', async (event) => {
   if (binMode) return;
   const droppedFiles = [...event.dataTransfer.files];
-
-  if (layout === 'graph') {
-    if (droppedFiles.length > 0) {
-      event.preventDefault();
-      const tile = event.target.closest('.icon-item');
-      const shell = tile?.closest('.graph-node-shell');
-      const blank = event.target.closest('[data-blank-parent]');
-      const destination = tile?.dataset.kind === 'group'
-        ? tile.dataset.id
-        : blank?.dataset.blankParent ?? currentId;
-      try {
-        const targets = await request('papers:project:resolve-dropped-targets', {
-          files: droppedFiles,
-        });
-        const next = createDroppedShortcuts(state, targets, destination);
-        if (next.shortcuts.length === state.shortcuts.length) {
-          setStatus('Those shortcuts already exist here.');
-          return;
-        }
-        await commit(next);
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : String(error));
-      } finally {
-        document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
-      }
-    }
-    return;
-  }
-
-  if (droppedFiles.length > 0) {
-    event.preventDefault();
-    const tile = event.target.closest('.icon-item');
-    const blank = event.target.closest('[data-blank-parent]');
-    const destination = tile?.dataset.kind === 'group'
-      ? tile.dataset.id
-      : blank?.dataset.blankParent ?? tile?.dataset.parent ?? currentId;
-    try {
-      const targets = await request('papers:project:resolve-dropped-targets', {
-        files: droppedFiles,
-      });
-      const next = createDroppedShortcuts(state, targets, destination);
-      if (next.shortcuts.length === state.shortcuts.length) {
-        setStatus('Those shortcuts already exist here.');
-        return;
-      }
-      await commit(next);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      elements.grid.classList.remove('drop-blank');
-      document.querySelectorAll('.drop-inside, .drop-before').forEach((node) =>
-        node.classList.remove('drop-inside', 'drop-before'));
-    }
-    return;
-  }
-  if (dragIds.length === 0) return;
+  if (droppedFiles.length === 0) return;
   event.preventDefault();
   const tile = event.target.closest('.icon-item');
-  const copy = event.ctrlKey;
+  const blank = event.target.closest('[data-blank-parent]');
+  const destination = tile?.dataset.kind === 'group'
+    ? tile.dataset.id
+    : blank?.dataset.blankParent ?? currentId;
   try {
-    let next;
-    if (tile?.classList.contains('drop-inside')) {
-      next = copy
-        ? copySelection(state, dragIds, tile.dataset.id)
-        : moveSelection(state, dragIds, tile.dataset.id);
-    } else if (tile) {
-      if (dragIds.includes(tile.dataset.id)) return;
-      if (copy) {
-        next = copySelection(state, dragIds, tile.dataset.parent);
-      } else {
-        const moved = dragIds.every((itemId) => item(itemId)?.parentId === tile.dataset.parent)
-          ? state
-          : moveSelection(state, dragIds, tile.dataset.parent);
-        const reorderIds = dragIds.filter((itemId) => {
-          const candidate = moved.groups.find((entry) => entry.id === itemId)
-            ?? moved.shortcuts.find((entry) => entry.id === itemId);
-          return candidate?.parentId === tile.dataset.parent;
-        });
-        next = reorderSelection(moved, reorderIds, tile.dataset.parent, tile.dataset.id);
-      }
-    } else {
-      const blank = event.target.closest('[data-blank-parent]');
-      const destination = blank?.dataset.blankParent ?? currentId;
-      next = copy
-        ? copySelection(state, dragIds, destination)
-        : moveSelection(state, dragIds, destination);
+    const targets = await request('papers:project:resolve-dropped-targets', {
+      files: droppedFiles,
+    });
+    const next = createDroppedShortcuts(state, targets, destination);
+    if (next.shortcuts.length === state.shortcuts.length) {
+      setStatus('Those shortcuts already exist here.');
+      return;
     }
-    await commit(next, copy ? 'Copied.' : 'Moved.');
+    await commit(next);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   } finally {
-    dragIds = [];
-    elements.grid.classList.remove('drop-blank');
+    document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
   }
 });
 
@@ -2042,20 +1968,13 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   if (!crumb) return;
   currentId = crumb.dataset.breadcrumb;
   selected.clear();
-  if (layout === 'graph') graph.destroyGraphView();
+  graph.destroyGraphView();
   render();
   saveWorkspaceView();
 });
 
 elements.binButton.addEventListener('click', () => {
   binMode = !binMode;
-  selected.clear();
-  closeMenu();
-  render();
-  saveWorkspaceView();
-});
-elements.graphButton.addEventListener('click', () => {
-  layout = layout === 'graph' ? 'explorer' : 'graph';
   selected.clear();
   closeMenu();
   render();
@@ -2108,6 +2027,18 @@ elements.iconInput.addEventListener('change', async () => {
   }
 });
 
+document.querySelector('#cancel-link-edit').addEventListener('click', () => {
+  elements.linkEditLayer.hidden = true;
+});
+document.querySelector('#fork-link-edit').addEventListener('click', async () => {
+  elements.linkEditLayer.hidden = true;
+  await commitEditorSave(true);
+});
+document.querySelector('#apply-everywhere-link-edit').addEventListener('click', async () => {
+  elements.linkEditLayer.hidden = true;
+  await commitEditorSave(false);
+});
+
 document.querySelector('#cancel-confirm').addEventListener('click', () => {
   pendingPermanentIds = [];
   elements.confirmLayer.hidden = true;
@@ -2157,11 +2088,95 @@ window.addEventListener('message', (event) => {
   );
 });
 
+function applyToolbarPosition(element, key) {
+  const saved = getToolbarPosition(state, key);
+  if (!saved) return;
+  element.style.left = `${saved.x}px`;
+  element.style.top = `${saved.y}px`;
+  element.style.right = 'auto';
+}
+
+function restoreToolbarPositions() {
+  document.querySelectorAll('.toolbar-float[data-toolbar-key]').forEach((element) => {
+    applyToolbarPosition(element, element.dataset.toolbarKey);
+  });
+}
+
+function setupToolbarDragging() {
+  let drag = null;
+  let suppressClickFor = null;
+  document.querySelectorAll('.toolbar-float[data-toolbar-key]').forEach((element) => {
+    element.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      const interactiveAncestor = event.target.closest('button, a, input');
+      if (interactiveAncestor && interactiveAncestor !== element) return;
+      const rect = element.getBoundingClientRect();
+      drag = {
+        element,
+        key: element.dataset.toolbarKey,
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+        moved: false,
+      };
+      element.setPointerCapture(event.pointerId);
+    });
+    element.addEventListener('pointermove', (event) => {
+      if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
+      const dx = event.clientX - drag.startClientX;
+      const dy = event.clientY - drag.startClientY;
+      if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      if (!drag.moved) {
+        drag.moved = true;
+        drag.element.classList.add('toolbar-dragging');
+      }
+      const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
+      const x = event.clientX - workspaceRect.left - drag.offsetX;
+      const y = event.clientY - workspaceRect.top - drag.offsetY;
+      drag.element.style.left = `${x}px`;
+      drag.element.style.top = `${y}px`;
+      drag.element.style.right = 'auto';
+    });
+    const finishDrag = (event) => {
+      if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
+      if (element.hasPointerCapture(event.pointerId)) {
+        element.releasePointerCapture(event.pointerId);
+      }
+      const { key, moved } = drag;
+      drag.element.classList.remove('toolbar-dragging');
+      drag = null;
+      if (!moved) return;
+      suppressClickFor = element;
+      const rect = element.getBoundingClientRect();
+      const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
+      state = setToolbarPosition(state, key, {
+        x: rect.left - workspaceRect.left,
+        y: rect.top - workspaceRect.top,
+      });
+      void persist(state).catch((error) =>
+        setStatus(error instanceof Error ? error.message : String(error)));
+    };
+    element.addEventListener('pointerup', finishDrag);
+    element.addEventListener('pointercancel', finishDrag);
+    element.addEventListener('click', (event) => {
+      if (suppressClickFor === element) {
+        suppressClickFor = null;
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, { capture: true });
+  });
+}
+
 (async () => {
   try {
     const loaded = await request('papers:project:as-you-go-load');
     state = normalizeState(typeof loaded === 'string' ? JSON.parse(loaded) : loaded);
     restoreWorkspaceView();
+    restoreToolbarPositions();
+    setupToolbarDragging();
     render();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));

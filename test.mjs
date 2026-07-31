@@ -57,7 +57,6 @@ test('the local project owns its exact interface, pickup prompt and prepared act
   assert.match(html, /id="save-editor" type="button"/);
   assert.match(script, /dblclick/);
   assert.match(script, /contextmenu/);
-  assert.match(script, /dragstart/);
   assert.match(script, /pointerdown/);
   assert.match(script, /pointermove/);
   assert.match(script, /selection-marquee/);
@@ -70,12 +69,10 @@ test('the local project owns its exact interface, pickup prompt and prepared act
   assert.doesNotMatch(script, /description \|\| ['"]Shortcut['"]/);
 assert.match(script, /Backpack interfaces, behavior, and implementation belong outside Papers/);
 assert.match(script, /My request:\r?\n\[Describe what you want to experience\.\]/);
-assert.match(html, /id="graph-view-button"/);
-assert.match(html, /id="graph-label"/);
-assert.match(html, /data-view="explorer"/);
+assert.doesNotMatch(html, /id="graph-view-button"/);
+assert.match(html, /data-view="graph"/);
 assert.match(script, /renderGraph/);
-assert.match(script, /layout === 'graph'/);
-assert.match(script, /state\.view\.layout/);
+assert.doesNotMatch(script, /dragstart/);
 assert.match(script, /graph-model-20260730b\.js/);
 assert.match(script, /vendor\/d3-force\.js/);
 assert.match(script, /vendor\/d3-zoom\.js/);
@@ -109,6 +106,24 @@ assert.match(script, /undoState/);
 assert.match(script, /event\.ctrlKey && event\.key\.toLowerCase\(\) === 'z'/);
 assert.match(script, /activateSelection/);
 assert.match(script, /selectedPasteDestination/);
+assert.match(script, /setupToolbarDragging/);
+assert.match(script, /toolbar-float/);
+assert.match(script, /setToolbarPosition/);
+assert.match(script, /getToolbarPosition/);
+assert.match(html, /toolbar-float/);
+assert.doesNotMatch(html, /class="navigation-actions"/);
+assert.match(script, /bin-canvas/);
+assert.match(html, /icon-button/);
+assert.match(script, /forkPlacement/);
+assert.match(script, /collapsePlacements/);
+assert.match(script, /placementCount/);
+assert.match(script, /link-badge/);
+assert.match(script, /visibleParentCountFor/);
+assert.match(script, /anyActivePlacementId/);
+assert.match(script, /allActivePlacementIds/);
+assert.match(html, /link-edit-layer/);
+assert.match(html, /fork-link-edit/);
+assert.match(html, /apply-everywhere-link-edit/);
 
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);
