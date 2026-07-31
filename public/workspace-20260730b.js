@@ -106,6 +106,7 @@ let dragIds = [];
 let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
+let suppressCtrlClickOpen = null;
 let pendingPermanentIds = [];
 let zoomTimer = null;
 let saveQueue = Promise.resolve();
@@ -1403,6 +1404,26 @@ elements.grid.addEventListener('click', (event) => {
       suppressGraphClick = false;
       return;
     }
+    if (
+      event.ctrlKey
+      && tile.dataset.kind === 'group'
+      && !event.target.closest('[data-expand]')
+    ) {
+      const targetSet = layout === 'graph' ? graphExpanded : explorerExpanded;
+      const id = tile.dataset.id;
+      if (targetSet.has(id)) targetSet.delete(id);
+      else targetSet.add(id);
+      if (!selected.has(id)) {
+        selected = new Set([id]);
+        selectionAnchor = id;
+        syncSelection();
+      }
+      suppressCtrlClickOpen = id;
+      closeMenu();
+      render();
+      saveWorkspaceView();
+      return;
+    }
     selectItem(tile.dataset.id, event);
     return;
   }
@@ -1427,7 +1448,7 @@ elements.grid.addEventListener('click', (event) => {
 elements.grid.addEventListener('pointerdown', (event) => {
   if (event.button !== 0) return;
 
-  if (layout === 'graph' && !event.target.closest('[data-expand]') && !event.target.closest('button')) {
+  if (layout === 'graph' && !event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
     const tile = event.target.closest('.icon-item');
     const shell = tile?.closest('.graph-node-shell');
     if (shell && event.pointerType !== 'touch') {
@@ -1637,7 +1658,13 @@ elements.grid.addEventListener('dblclick', (event) => {
     return;
   }
   const tile = event.target.closest('.icon-item');
-  if (tile) activate(tile.dataset.id);
+  if (!tile) return;
+  if (suppressCtrlClickOpen === tile.dataset.id) {
+    suppressCtrlClickOpen = null;
+    return;
+  }
+  suppressCtrlClickOpen = null;
+  activate(tile.dataset.id);
 });
 
 elements.grid.addEventListener('pointercancel', (event) => {

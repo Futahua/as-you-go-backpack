@@ -628,3 +628,112 @@ test('context separation: same itemId can have positions in different contexts, 
   assert.equal(getGraphPosition(state, ROOT_ID, 'shared'), null);
   assert.deepEqual(getGraphPosition(state, 'group-A', 'shared'), { x: 50, y: 60 });
 });
+
+test('Ctrl+click Explorer folder expands it without changing graph expansion', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, []);
+});
+
+test('Ctrl+click Explorer folder again collapses it', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  state = updateWorkspaceView(state, { expandedGroupIds: [] });
+  assert.deepEqual(state.view.expandedGroupIds, []);
+});
+
+test('Ctrl+click Graph folder expands it without changing Explorer expansion', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: ['group-a'] });
+  state = updateWorkspaceView(state, { graphExpandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, ['group-a']);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [letters.id]);
+});
+
+test('Ctrl+click does not change currentGroupId (does not navigate)', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  assert.equal(state.view.currentGroupId, ROOT_ID);
+});
+
+test('Ctrl+click does not change layout or binMode', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+  state = updateWorkspaceView(state, { layout: 'graph', binMode: true, expandedGroupIds: [letters.id] });
+
+  assert.equal(state.view.layout, 'graph');
+  assert.equal(state.view.binMode, true);
+});
+
+test('Ctrl+click does not modify graphPositions', () => {
+  let state = setGraphPositions(emptyState(), ROOT_ID, { item1: { x: 10, y: 20 } });
+  state = createGroup(state, 'Letters');
+  const letters = state.groups[0];
+  state = updateWorkspaceView(state, { graphExpandedGroupIds: [letters.id] });
+
+  assert.deepEqual(getGraphPosition(state, ROOT_ID, 'item1'), { x: 10, y: 20 });
+});
+
+test('Ctrl+click expansion persists through restore/reopen', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id], graphExpandedGroupIds: [letters.id] });
+  const serialized = JSON.parse(JSON.stringify(state));
+  const restored = normalizeState(serialized);
+
+  assert.deepEqual(restored.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(restored.view.graphExpandedGroupIds, [letters.id]);
+});
+
+test('expansion toggle preserves unique IDs (duplicate toggle does not cause duplicate entries)', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id, letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+});
+
+test('chevron works independently of Ctrl+click', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  state = updateWorkspaceView(state, { expandedGroupIds: [] });
+  assert.deepEqual(state.view.expandedGroupIds, []);
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+});
+
+test('normal click on a folder still activates it', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+
+  state = updateWorkspaceView(state, { currentGroupId: letters.id });
+  assert.equal(state.view.currentGroupId, letters.id);
+});
+
+test('expansion sets remain independent after multiple Ctrl+click toggles', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+  state = createGroup(state, 'Things');
+  const things = state.groups[1];
+
+  state = updateWorkspaceView(state, { expandedGroupIds: [letters.id], graphExpandedGroupIds: [things.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [things.id]);
+
+  state = updateWorkspaceView(state, { graphExpandedGroupIds: [letters.id, things.id] });
+  assert.deepEqual(state.view.expandedGroupIds, [letters.id]);
+  assert.deepEqual(state.view.graphExpandedGroupIds, [letters.id, things.id]);
+});
