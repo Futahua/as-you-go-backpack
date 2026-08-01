@@ -168,11 +168,15 @@ export function createEditorDialog({
           ? updateGroup(workingState, editorMode.item.id, { name, icon: editorIcon })
           : createGroup(workingState, name, editorMode.parentId, editorIcon);
       } else {
+        const isNewShortcut = !editorMode.item && editorMode.kind === 'shortcut';
         const changes = {
           name,
           description: elements.description.value.trim(),
           target: elements.target.value.trim(),
-          icon: editorIcon,
+          // A newly added shortcut defaults to the target's own Windows icon
+          // (resolved when the target was picked) unless the creator chose a
+          // project-owned image.
+          icon: editorIcon ?? (isNewShortcut ? editorTargetIcon : null),
         };
         next = editorMode.kind === 'web'
           ? editorMode.item

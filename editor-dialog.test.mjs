@@ -37,13 +37,13 @@ function fakeNode() {
   };
 }
 
-function createHarness() {
+function createHarness({ host = {} } = {}) {
   const nodes = {};
   for (const key of [
     'editorTitle', 'name', 'description', 'descriptionLabel', 'target',
     'targetFields', 'targetActions', 'iconInput', 'iconPreview',
     'iconFallback', 'iconDefaultButton', 'editorError', 'editorLayer',
-    'saveButton', 'linkEditLayer', 'editor', 'target-input',
+    'saveButton', 'linkEditLayer', 'editor', 'target-input', 'pickFile',
   ]) {
     nodes[key] = fakeNode();
   }
@@ -96,7 +96,7 @@ function createHarness() {
     getState: () => state,
     getCurrentId: () => currentId,
     closeMenu: () => { closed += 1; },
-    host: { pickTarget: async () => null, shortcutIcon: async () => 'data:icon' },
+    host: { pickTarget: async () => null, shortcutIcon: async () => 'data:icon', ...host },
     iconCache,
     compressIconFile: async (file) => `data:${file.name}`,
     hydrateWebPreview: async () => {},
@@ -157,6 +157,25 @@ test('saving a new shortcut commits createShortcut', async () => {
   assert.equal(h.getLastCreated().kind, 'shortcut');
   assert.equal(h.getLastCreated().shortcut.name, 'App');
   assert.equal(h.committed.length, 1);
+});
+
+test('a new shortcut defaults to the picked target icon', async () => {
+  const h = createHarness({
+    host: {
+      pickTarget: async () => ({ target: 'C:\\app.exe', icon: 'data:target-icon' }),
+    },
+  });
+  h.editor.mount();
+  h.editor.showEditor('shortcut', null, 'parent-1');
+  h.nodes.name.value = 'App';
+  // Simulate the creator picking the target through the Choose file/app button;
+  // that sets the resolved target icon as the editor's target icon. The pick
+  // handler is async, so let it settle before saving.
+  h.nodes.pickFile._dispatch('click', {});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await h.editor.saveEditor();
+  assert.equal(h.getLastCreated().kind, 'shortcut');
+  assert.equal(h.getLastCreated().shortcut.icon, 'data:target-icon');
 });
 
 test('destroy removes the submit and save listeners', () => {
