@@ -357,6 +357,7 @@ test('promptLibrary round-trips through normalization and stays on other view up
       id: 'folder-dev',
       type: 'folder',
       title: 'Dev',
+      includeAll: false,
       children: [
         { id: 'prompt-a', type: 'prompt', title: 'One', text: 'first', includeInBatch: true },
       ],

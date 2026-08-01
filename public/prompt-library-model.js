@@ -25,12 +25,14 @@ export function createPromptNode(overrides = {}) {
   };
 }
 
-/** Creates a folder node. New folders are empty. */
+/** Creates a folder node. New folders are empty and do not override their
+ * descendants' batch inclusion (includeAll: false). */
 export function createPromptFolder(overrides = {}) {
   return {
     id: typeof overrides.id === 'string' && overrides.id ? overrides.id : createId('folder'),
     type: 'folder',
     title: typeof overrides.title === 'string' ? overrides.title : 'New folder',
+    includeAll: overrides.includeAll === true,
     children: [],
   };
 }
@@ -48,6 +50,9 @@ function normalizeNode(raw, seen) {
       id,
       type: 'folder',
       title: typeof raw.title === 'string' ? raw.title : 'New folder',
+      // Folders from the PR-5 shape may lack includeAll; they normalize to
+      // false (no override), preserving child configuration.
+      includeAll: raw.includeAll === true,
       children,
     };
   }
@@ -292,58 +297,84 @@ export function countPromptNodes(nodes) {
 }
 
 /**
- * Derived tri-state for a folder checkbox: 'checked' when every descendant
- * prompt is included, 'unchecked' when none are, 'indeterminate' otherwise.
- * Empty folders are 'unchecked'.
+ * Collects the prompts that belong in a normal batch copy, in depth-first
+ * visual order. A prompt is included when `forcedByAncestor` is true or its
+ * own includeInBatch is true. A folder recurses with
+ * `forcedByAncestor || folder.includeAll`, so a checked folder overrides every
+ * descendant prompt (and nested folder) below it without rewriting them.
  */
-export function folderBatchState(nodes, folderId) {
-  const ids = descendantPromptIds(nodes, folderId);
-  if (ids.length === 0) return 'unchecked';
-  let included = 0;
-  for (const id of ids) {
-    const node = findPromptNode(nodes, id);
-    if (node?.includeInBatch) included += 1;
-  }
-  if (included === 0) return 'unchecked';
-  if (included === ids.length) return 'checked';
-  return 'indeterminate';
-}
-
-/** Sets `includeInBatch` on every prompt under `folderId`. */
-export function setFolderBatchIncluded(nodes, folderId, included) {
-  const ids = new Set(descendantPromptIds(nodes, folderId));
-  const walk = (list) => list.map((node) => {
-    if (node.type === 'prompt' && ids.has(node.id)) {
-      return { ...node, includeInBatch: included === true };
-    }
-    if (node.type === 'folder') {
-      const children = walk(node.children);
-      return children === node.children ? node : { ...node, children };
-    }
-    return node;
-  });
-  return walk(nodes);
-}
-
-/** Batch text from checked, non-empty prompts in depth-first order, joined
- * with two blank lines. Folder titles are never included. Returns '' when no
- * checked prompt has text. */
-export function buildBatchPromptText(nodes) {
-  const parts = [];
-  const walk = (list) => {
+export function collectIncludedPrompts(nodes, forcedByAncestor = false) {
+  const included = [];
+  const walk = (list, forced) => {
     for (const node of list) {
       if (node.type === 'prompt') {
-        if (node.includeInBatch === true
-          && typeof node.text === 'string' && node.text.trim() !== '') {
-          parts.push(node.text);
-        }
+        if (forced || node.includeInBatch === true) included.push(node);
       } else {
-        walk(node.children);
+        walk(node.children, forced || node.includeAll === true);
       }
     }
   };
+  walk(nodes, forcedByAncestor === true);
+  return included;
+}
+
+/** Batch text from included prompts in depth-first order, joined with two
+ * blank lines. Folder titles are never included. Returns '' when no included
+ * prompt has text. */
+export function buildBatchPromptText(nodes) {
+  return collectIncludedPrompts(nodes)
+    .filter((node) => typeof node.text === 'string' && node.text.trim() !== '')
+    .map((node) => node.text)
+    .join('\n\n');
+}
+
+/** Reduces a set of ids to those with no selected ancestor (the roots of the
+ * selected region). Sorted by current depth-first visual order. */
+export function selectedRootIds(nodes, ids) {
+  const selected = new Set(ids);
+  const roots = [];
+  const walk = (list) => {
+    for (const node of list) {
+      if (!selected.has(node.id)) {
+        if (node.type === 'folder') walk(node.children);
+        continue;
+      }
+      roots.push(node.id);
+    }
+  };
   walk(nodes);
-  return parts.join('\n\n');
+  return roots;
+}
+
+/**
+ * Collects the prompt texts for an explicit Copy Selected, independent of the
+ * batch checkboxes. Selected folders contribute every descendant prompt;
+ * selected descendants under a selected folder are not duplicated (root
+ * reduction); result follows current depth-first visual order.
+ */
+export function collectPromptsFromSelectedRoots(nodes, ids) {
+  const roots = selectedRootIds(nodes, ids);
+  const rootSet = new Set(roots);
+  const texts = [];
+  const walk = (list) => {
+    for (const node of list) {
+      if (rootSet.has(node.id)) {
+        if (node.type === 'prompt') {
+          if (typeof node.text === 'string' && node.text.trim() !== '') texts.push(node.text);
+        } else {
+          for (const promptNode of collectIncludedPrompts(node.children, true)) {
+            if (typeof promptNode.text === 'string' && promptNode.text.trim() !== '') {
+              texts.push(promptNode.text);
+            }
+          }
+        }
+        continue;
+      }
+      if (node.type === 'folder') walk(node.children);
+    }
+  };
+  walk(nodes);
+  return texts.join('\n\n');
 }
 
 /** Returns an error string when the library cannot be saved, else null. */

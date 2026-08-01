@@ -11,8 +11,9 @@ import {
   movePromptNode,
   descendantPromptIds,
   countPromptNodes,
-  folderBatchState,
-  setFolderBatchIncluded,
+  collectIncludedPrompts,
+  selectedRootIds,
+  collectPromptsFromSelectedRoots,
   buildBatchPromptText,
   validatePromptLibrary,
   resolveCopierAction,
@@ -97,56 +98,119 @@ test('collapsed folders have no effect on copying (batch traverses the tree)', (
   assert.equal(buildBatchPromptText(library), 'inside');
 });
 
-test('folder tri-state is derived from descendants', () => {
+test('folder includeAll round-trips and folders lacking it normalize to false', () => {
+  const library = normalizePromptLibrary([
+    { id: 'folder-a', type: 'folder', title: 'A', includeAll: true, children: [prompt('p1', 'P', 'x', true)] },
+    { id: 'folder-b', type: 'folder', title: 'B', children: [prompt('p2', 'Q', 'y', false)] },
+  ], undefined, undefined);
+  assert.equal(library[0].includeAll, true);
+  assert.equal(library[1].includeAll, false, 'missing includeAll normalizes to false');
+  assert.equal(library[0].children[0].includeInBatch, true);
+});
+
+test('batch inclusion: unchecked folder defers to child choices', () => {
   const library = [
     {
-      id: 'folder-dev', type: 'folder', title: 'Dev',
+      id: 'folder-dev', type: 'folder', title: 'Dev', includeAll: false,
       children: [
         prompt('p1', 'A', 'one', true),
-        prompt('p2', 'B', 'two', true),
+        prompt('p2', 'B', 'two', false),
+        prompt('p3', 'C', 'three', true),
+      ],
+    },
+  ];
+  assert.equal(buildBatchPromptText(library), 'one\n\nthree');
+});
+
+test('batch inclusion: checked folder includes every descendant', () => {
+  const library = [
+    {
+      id: 'folder-dev', type: 'folder', title: 'Dev', includeAll: true,
+      children: [
+        prompt('p1', 'A', 'one', true),
+        prompt('p2', 'B', 'two', false),
         prompt('p3', 'C', 'three', false),
       ],
     },
   ];
-  assert.equal(folderBatchState(library, 'folder-dev'), 'indeterminate');
-  const allChecked = normalizePromptLibrary([
-    {
-      id: 'folder-dev', type: 'folder', title: 'Dev',
-      children: [prompt('p1', 'A', 'one', true), prompt('p2', 'B', 'two', true)],
-    },
-  ], undefined, undefined);
-  assert.equal(folderBatchState(allChecked, 'folder-dev'), 'checked');
-  const noneChecked = normalizePromptLibrary([
-    {
-      id: 'folder-dev', type: 'folder', title: 'Dev',
-      children: [prompt('p1', 'A', 'one', false), prompt('p2', 'B', 'two', false)],
-    },
-  ], undefined, undefined);
-  assert.equal(folderBatchState(noneChecked, 'folder-dev'), 'unchecked');
-  assert.equal(folderBatchState(library, 'missing'), 'unchecked');
+  assert.equal(buildBatchPromptText(library), 'one\n\ntwo\n\nthree');
 });
 
-test('checking and unchecking a folder updates every descendant prompt', () => {
+test('batch inclusion: checked outer folder overrides unchecked nested prompts', () => {
   const library = [
     {
-      id: 'folder-dev', type: 'folder', title: 'Dev',
+      id: 'folder-outer', type: 'folder', title: 'Outer', includeAll: true,
       children: [
         prompt('p1', 'A', 'one', false),
         {
-          id: 'folder-inner', type: 'folder', title: 'Inner',
+          id: 'folder-inner', type: 'folder', title: 'Inner', includeAll: false,
           children: [prompt('p2', 'B', 'two', false)],
         },
       ],
     },
-    prompt('p3', 'C', 'three', false),
   ];
-  const checked = setFolderBatchIncluded(library, 'folder-dev', true);
-  assert.equal(findPromptNode(checked, 'p1').includeInBatch, true);
-  assert.equal(findPromptNode(checked, 'p2').includeInBatch, true);
-  assert.equal(findPromptNode(checked, 'p3').includeInBatch, false, 'outside the folder is untouched');
-  const unchecked = setFolderBatchIncluded(checked, 'folder-dev', false);
-  assert.equal(findPromptNode(unchecked, 'p1').includeInBatch, false);
-  assert.equal(findPromptNode(unchecked, 'p2').includeInBatch, false);
+  assert.equal(buildBatchPromptText(library), 'one\n\ntwo');
+});
+
+test('batch inclusion: unchecked outer folder honors checked nested folder', () => {
+  const library = [
+    {
+      id: 'folder-outer', type: 'folder', title: 'Outer', includeAll: false,
+      children: [
+        prompt('p1', 'A', 'one', false),
+        {
+          id: 'folder-inner', type: 'folder', title: 'Inner', includeAll: true,
+          children: [prompt('p2', 'B', 'two', false)],
+        },
+      ],
+    },
+  ];
+  assert.equal(buildBatchPromptText(library), 'two');
+});
+
+test('toggling a folder does not rewrite child includeInBatch values', () => {
+  let library = normalizePromptLibrary([
+    {
+      id: 'folder-dev', type: 'folder', title: 'Dev', includeAll: false,
+      children: [
+        prompt('p1', 'A', 'one', true),
+        prompt('p2', 'B', 'two', false),
+      ],
+    },
+  ], undefined, undefined);
+  library = updatePromptNode(library, 'folder-dev', (node) => ({ ...node, includeAll: true }));
+  assert.equal(findPromptNode(library, 'p1').includeInBatch, true, 'child state remembered while folder checked');
+  assert.equal(findPromptNode(library, 'p2').includeInBatch, false);
+  library = updatePromptNode(library, 'folder-dev', (node) => ({ ...node, includeAll: false }));
+  assert.equal(findPromptNode(library, 'p2').includeInBatch, false, 'child state returns after folder unchecked');
+});
+
+test('selectedRootIds reduces to selected roots in depth-first order', () => {
+  const library = [
+    {
+      id: 'folder-a', type: 'folder', title: 'A', includeAll: false,
+      children: [prompt('p1', 'A', 'one', true), prompt('p2', 'B', 'two', false)],
+    },
+    prompt('p3', 'C', 'three', true),
+  ];
+  assert.deepEqual(selectedRootIds(library, ['p1', 'p2', 'folder-a']), ['folder-a']);
+  assert.deepEqual(selectedRootIds(library, ['p1', 'p3']), ['p1', 'p3']);
+  assert.deepEqual(selectedRootIds(library, []), []);
+});
+
+test('collectPromptsFromSelectedRoots copies explicit selection without duplicates', () => {
+  const library = [
+    {
+      id: 'folder-a', type: 'folder', title: 'A', includeAll: false,
+      children: [prompt('p1', 'A', 'one', false), prompt('p2', 'B', 'two', false)],
+    },
+    prompt('p3', 'C', 'three', true),
+  ];
+  // Folder plus its descendant selected: descendant is not duplicated.
+  assert.equal(collectPromptsFromSelectedRoots(library, ['folder-a', 'p1', 'p3']), 'one\n\ntwo\n\nthree');
+  assert.equal(collectPromptsFromSelectedRoots(library, ['p3']), 'three');
+  assert.equal(collectPromptsFromSelectedRoots(library, ['folder-a']), 'one\n\ntwo');
+  // Explicit copy ignores batch checkbox filtering (p1/p2 unchecked but copied).
 });
 
 test('moving before, after, and inside a folder', () => {
@@ -275,6 +339,7 @@ test('created prompt and folder nodes have unique ids and correct types', () => 
   assert.ok(createPromptFolder().type === 'folder');
   assert.deepEqual(createPromptFolder().children, []);
   assert.equal(createPromptNode().includeInBatch, false);
+  assert.equal(createPromptFolder().includeAll, false);
 });
 
 test('resolveCopierAction keeps selected-target precedence', () => {

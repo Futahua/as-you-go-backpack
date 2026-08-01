@@ -7,8 +7,6 @@ import {
   removePromptNode,
   movePromptNode,
   descendantPromptIds,
-  folderBatchState,
-  setFolderBatchIncluded,
   buildBatchPromptText,
   validatePromptLibrary,
 } from '../../prompt-library-model.js';
@@ -243,9 +241,7 @@ export function createPromptLibraryDialog({
     checkbox.type = 'checkbox';
     checkbox.className = 'prompt-checkbox';
     checkbox.setAttribute('aria-label', `Include every prompt inside ${node.title}`);
-    const folderState = folderBatchState(draftLibrary, node.id);
-    checkbox.checked = folderState === 'checked';
-    checkbox.indeterminate = folderState === 'indeterminate';
+    checkbox.checked = node.includeAll === true;
 
     let titleControl;
     if (renaming) {
@@ -381,8 +377,7 @@ export function createPromptLibraryDialog({
     const id = row.dataset.nodeId;
     if (!id) return;
     if (row.dataset.nodeType === 'folder') {
-      const state = folderBatchState(draftLibrary, id);
-      draftLibrary = setFolderBatchIncluded(draftLibrary, id, state !== 'checked');
+      draftLibrary = updatePromptNode(draftLibrary, id, (node) => ({ ...node, includeAll: event.target.checked }));
     } else {
       draftLibrary = updatePromptNode(draftLibrary, id, (node) => ({ ...node, includeInBatch: event.target.checked }));
     }

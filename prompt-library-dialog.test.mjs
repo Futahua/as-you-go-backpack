@@ -348,25 +348,29 @@ test('only one prompt editor opens at a time', () => {
   assert.equal(h.rowFor('prompt-a').querySelector('.prompt-card-title'), null, 'first editor closed');
 });
 
-test('folder checkbox becomes indeterminate', () => {
+test('folder checkbox reflects only the includeAll override, never indeterminate', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   const checkbox = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
-  assert.equal(checkbox.indeterminate, true, 'mixed descendants are indeterminate');
+  assert.equal(checkbox.checked, false, 'folder includeAll defaults to false');
+  assert.equal(checkbox.indeterminate, false, 'folder checkbox is never indeterminate');
 });
 
-test('checking a folder checks every descendant prompt on Save', async () => {
+test('checking a folder sets includeAll only and copies every descendant on Save', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   const checkbox = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
+  checkbox.checked = true;
   checkbox.dispatch('change', { target: checkbox });
   await h.nodes['prompt-save'].dispatch('click', { preventDefault });
   const saved = h.getState().view.promptLibrary;
-  const a = saved[0].children.find((n) => n.id === 'prompt-a');
-  const b = saved[0].children.find((n) => n.id === 'folder-inner').children[0];
+  const folder = saved[0];
+  assert.equal(folder.includeAll, true);
+  const a = folder.children.find((n) => n.id === 'prompt-a');
+  const b = folder.children.find((n) => n.id === 'folder-inner').children[0];
+  assert.equal(a.includeInBatch, true, 'child values are never rewritten');
+  assert.equal(b.includeInBatch, false, 'child values are never rewritten');
   const root = saved.find((n) => n.id === 'prompt-root');
-  assert.equal(a.includeInBatch, true);
-  assert.equal(b.includeInBatch, true);
   assert.equal(root.includeInBatch, true, 'root prompt outside the folder is untouched');
 });
 
