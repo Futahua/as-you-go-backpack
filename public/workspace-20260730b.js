@@ -55,6 +55,7 @@ import { createBinControls } from './app/components/bin-controls.js';
 import { bootstrapWorkspace } from './app/bootstrap.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
+import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 
 const host = createHostBridge(window);
 
@@ -1590,71 +1591,6 @@ document.addEventListener('click', (event) => {
   }
 });
 
-document.addEventListener('keydown', (event) => {
-  if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden || !elements.linkEditLayer.hidden) return;
-  if (
-    session.binMode
-    && event.ctrlKey
-    && ['c', 'x', 'v'].includes(event.key.toLowerCase())
-  ) {
-    event.preventDefault();
-    return;
-  }
-  if (event.key === 'Escape') {
-    store.clearSelection();
-    closeMenu();
-    syncSelection();
-    saveWorkspaceView();
-    return;
-  }
-  if (event.ctrlKey && event.key.toLowerCase() === 'a') {
-    event.preventDefault();
-    store.setSelection(visibleItemIds());
-    store.setSelectionAnchor(null);
-    syncSelection();
-    saveWorkspaceView();
-    return;
-  }
-  if (event.ctrlKey && event.key.toLowerCase() === 'c') {
-    event.preventDefault();
-    commands.copySelection();
-  }
-  if (event.ctrlKey && event.key.toLowerCase() === 'x') {
-    event.preventDefault();
-    commands.cutSelection();
-  }
-  if (event.ctrlKey && event.key.toLowerCase() === 'v') {
-    event.preventDefault();
-    commands.pasteInto(commands.selectedPasteDestinations());
-  }
-  if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
-    event.preventDefault();
-    commands.undo();
-  }
-  if (event.ctrlKey && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
-    event.preventDefault();
-    commands.redo();
-  }
-  if (event.key === 'Delete' && session.selected.size > 0) {
-    event.preventDefault();
-    if (session.binMode) confirmDialog.askPermanentDelete();
-    else commands.moveSelectionToBin();
-  }
-  if (event.key === 'Enter' && event.ctrlKey && session.selected.size > 0 && !session.binMode) {
-    event.preventDefault();
-    commands.revealSelection();
-    return;
-  }
-  if (event.key === 'Enter' && session.selected.size === 1 && !session.binMode) {
-    event.preventDefault();
-    commands.activateItem([...session.selected][0]);
-  }
-  if (event.key === 'Enter' && session.selected.size > 1 && !session.binMode) {
-    event.preventDefault();
-    commands.activateSelection();
-  }
-});
-
 elements.explorer.addEventListener('wheel', (event) => {
   if (!event.ctrlKey) return;
   event.preventDefault();
@@ -1914,6 +1850,16 @@ const binControls = createBinControls({
   saveWorkspaceView,
 });
 
+const keyboard = createKeyboardController({
+  document,
+  elements,
+  store,
+  commands,
+  closeMenu,
+  getVisibleItemIds: visibleItemIds,
+  confirmDialog,
+});
+
 bootstrapWorkspace({
   loadState: () => host.loadWorkspace(),
   setState: (next) => { state = store.install(next); },
@@ -1925,4 +1871,5 @@ bootstrapWorkspace({
   menu,
   editorDialog,
   binControls,
+  keyboard,
 });

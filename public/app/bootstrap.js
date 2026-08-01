@@ -15,11 +15,13 @@ export function bootstrapWorkspace({
   menu,
   editorDialog,
   binControls,
+  keyboard,
 }) {
   confirmDialog.mount();
   menu.mount();
   editorDialog.mount();
   binControls.mount();
+  keyboard.mount();
 
   return (async () => {
     try {

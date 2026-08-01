@@ -65,8 +65,7 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
 }
 
 test('selectItem without modifiers selects just the item and sets the anchor', () => {
-  const h = createHarness();
-  h.commands.selectItem('b', { shiftKey: false, ctrlKey: false, visibleItemIds: ['a', 'b', 'c'] });
+  const h = createHarness();  h.commands.selectItem('b', { shiftKey: false, ctrlKey: false, visibleItemIds: ['a', 'b', 'c'] });
   assert.deepEqual([...h.store.getSession().selected], ['b']);
   assert.equal(h.store.getSession().selectionAnchor, 'b');
   assert.equal(h.effects.sync, 1);
@@ -250,5 +249,24 @@ test('resetGraphPositions removes saved positions, resets nodes, reheats, and sa
   assert.equal(node.vy, 0);
   assert.equal(h.effects.reheat, 1);
   assert.equal(h.effects.close, 1);
+  assert.equal(h.effects.saves, 1);
+});
+
+test('clearSelection clears the selection and saves the view', () => {
+  const h = createHarness();
+  h.store.setSelection(['a', 'b']);
+  h.commands.clearSelection();
+  assert.equal(h.store.getSession().selected.size, 0);
+  assert.equal(h.effects.sync, 1);
+  assert.equal(h.effects.saves, 1);
+});
+
+test('selectAllVisible selects every visible item and clears the anchor', () => {
+  const h = createHarness();
+  h.store.setSelection(['a']);
+  h.commands.selectAllVisible(['a', 'b', 'c']);
+  assert.deepEqual([...h.store.getSession().selected], ['a', 'b', 'c']);
+  assert.equal(h.store.getSession().selectionAnchor, null);
+  assert.equal(h.effects.sync, 1);
   assert.equal(h.effects.saves, 1);
 });

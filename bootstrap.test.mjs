@@ -17,6 +17,7 @@ function createHarness({ loadWorkspace }) {
   const menu = fakeComponent();
   const editorDialog = fakeComponent();
   const binControls = fakeComponent();
+  const keyboard = fakeComponent();
   let state = null;
   let status = null;
   let rendered = 0;
@@ -32,10 +33,11 @@ function createHarness({ loadWorkspace }) {
     menu,
     editorDialog,
     binControls,
+    keyboard,
   });
 
   return {
-    promise, calls, toolbar, confirmDialog, menu, editorDialog, binControls,
+    promise, calls, toolbar, confirmDialog, menu, editorDialog, binControls, keyboard,
     getState: () => state,
     getStatus: () => status,
     getRendered: () => rendered,
@@ -49,6 +51,7 @@ test('behavior components mount synchronously even before loading resolves', () 
   assert.equal(h.menu.mounted, 1);
   assert.equal(h.editorDialog.mounted, 1);
   assert.equal(h.binControls.mounted, 1);
+  assert.equal(h.keyboard.mounted, 1);
 });
 
 test('when loading rejects, the fallback still renders and components stay wired', async () => {
@@ -61,6 +64,7 @@ test('when loading rejects, the fallback still renders and components stay wired
   assert.equal(h.menu.mounted, 1);
   assert.equal(h.editorDialog.mounted, 1);
   assert.equal(h.binControls.mounted, 1);
+  assert.equal(h.keyboard.mounted, 1);
   // The toolbar restores saved positions, so it only mounts after a
   // successful load and is skipped on the failure path.
   assert.equal(h.toolbar.mounted, 0);

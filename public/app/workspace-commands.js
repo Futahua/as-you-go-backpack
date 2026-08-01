@@ -53,6 +53,19 @@ export function createWorkspaceCommands({
     saveWorkspaceView();
   }
 
+  function clearSelection() {
+    store.clearSelection();
+    syncSelection();
+    saveWorkspaceView();
+  }
+
+  function selectAllVisible(visibleItemIds) {
+    store.setSelection(visibleItemIds);
+    store.setSelectionAnchor(null);
+    syncSelection();
+    saveWorkspaceView();
+  }
+
   function navigateToFolder(folderId) {
     const session = store.getSession();
     if (session.binMode) {
@@ -260,6 +273,8 @@ export function createWorkspaceCommands({
 
   return {
     selectItem,
+    clearSelection,
+    selectAllVisible,
     activateItem,
     revealSelection,
     activateSelection,
