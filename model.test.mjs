@@ -13,6 +13,8 @@ import {
   itemsIntersectingMarquee,
   moveSelection,
   normalizeState,
+  displayName,
+  UNTITLED_LABEL,
   renameItem,
   reorderSelection,
   restoreSelection,
@@ -978,4 +980,45 @@ test('removeGraphPositions on all entries cleans up context object', () => {
   state = removeGraphPositions(state, ROOT_ID, ['item1']);
   assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
   assert.deepEqual(state.view.graphPositions, {});
+});
+
+// ===========================================================================
+// Optional names. Items are identified visually, so a name is never required;
+// UNTITLED_LABEL is a presentational fallback only and is never stored.
+// ===========================================================================
+
+test('a folder can be created with no name', () => {
+  const state = createGroup(emptyState(), '');
+  assert.equal(state.groups.length, 1);
+  assert.equal(state.groups[0].name, '', 'stored empty, not filled in');
+});
+
+test('a shortcut can be created with no name but still needs a target', () => {
+  let state = createShortcut(emptyState(), { name: '', target: 'C:\thing' });
+  assert.equal(state.shortcuts[0].name, '');
+  assert.throws(
+    () => createShortcut(emptyState(), { name: 'x', target: '' }),
+    /target must not be empty/,
+    'a target is still required: without one the item is broken',
+  );
+});
+
+test('a name can be cleared after the fact', () => {
+  let state = createGroup(emptyState(), 'Named');
+  const id = state.groups[0].id;
+  state = renameItem(state, id, '');
+  assert.equal(state.groups[0].name, '', 'clearing a name is allowed, not just omitting one');
+});
+
+test('displayName falls back only for presentation', () => {
+  assert.equal(displayName({ name: '' }), UNTITLED_LABEL);
+  assert.equal(displayName({ name: '   ' }), UNTITLED_LABEL, 'whitespace counts as unnamed');
+  assert.equal(displayName({}), UNTITLED_LABEL);
+  assert.equal(displayName({ name: 'Real' }), 'Real', 'a real name is untouched');
+});
+
+test('an unnamed item survives a normalize round trip still unnamed', () => {
+  const state = createGroup(emptyState(), '');
+  const restored = normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.equal(restored.groups[0].name, '', 'normalization never invents a name');
 });

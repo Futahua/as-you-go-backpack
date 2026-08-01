@@ -12,6 +12,18 @@ const stringIds = (value) => Array.isArray(value)
   ? [...new Set(value.filter((candidate) => typeof candidate === 'string'))]
   : [];
 
+/** Names are optional everywhere: an unnamed item is identified by its icon
+ * and position, which is how the canvas is meant to be read. Text contexts
+ * that cannot show nothing — menus, breadcrumbs, confirmations, aria labels —
+ * use this fallback. It is presentational only: the stored name stays empty,
+ * so nothing ever silently acquires a name it was not given. */
+export const UNTITLED_LABEL = 'Untitled';
+
+export function displayName(candidate) {
+  const name = typeof candidate?.name === 'string' ? candidate.name.trim() : '';
+  return name || UNTITLED_LABEL;
+}
+
 export function emptyState() {
   return {
     schemaVersion: 1,
@@ -408,7 +420,6 @@ function nextOrder(state, parentId) {
 
 export function createGroup(state, name, parentId = ROOT_ID, icon = null) {
   const trimmed = String(name).trim();
-  if (!trimmed) throw new Error('Group name must not be empty.');
   assertParent(state, parentId);
   return {
     ...state,
@@ -425,7 +436,6 @@ export function createGroup(state, name, parentId = ROOT_ID, icon = null) {
 export function createShortcut(state, shortcut) {
   const name = String(shortcut.name ?? '').trim();
   const target = String(shortcut.target ?? '').trim();
-  if (!name) throw new Error('Shortcut name must not be empty.');
   if (!target) throw new Error('Shortcut target must not be empty.');
   const parentId = shortcut.parentId ?? ROOT_ID;
   assertParent(state, parentId);
@@ -514,7 +524,6 @@ export function updateWebLink(state, shortcutId, changes) {
 export function updateShortcut(state, shortcutId, changes) {
   const name = String(changes.name ?? '').trim();
   const target = String(changes.target ?? '').trim();
-  if (!name) throw new Error('Shortcut name must not be empty.');
   if (!target) throw new Error('Shortcut target must not be empty.');
   let found = false;
   const shortcuts = state.shortcuts.map((candidate) => {
@@ -557,7 +566,6 @@ export function forkPlacement(state, placementId_) {
 
 export function updateGroup(state, groupId, changes) {
   const name = String(changes.name ?? '').trim();
-  if (!name) throw new Error('Group name must not be empty.');
   let found = false;
   const groups = state.groups.map((candidate) => {
     if (candidate.id !== groupId) return candidate;
@@ -836,7 +844,6 @@ export function permanentlyDelete(state, ids) {
 
 export function renameItem(state, itemId, name) {
   const trimmed = String(name).trim();
-  if (!trimmed) throw new Error('Name must not be empty.');
   let found = false;
   const groups = state.groups.map((candidate) => candidate.id === itemId
     ? (found = true, { ...candidate, name: trimmed })

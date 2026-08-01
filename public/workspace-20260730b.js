@@ -31,6 +31,7 @@ import {
   forkPlacement,
   collapsePlacements,
   placementCount,
+  displayName,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -652,10 +653,10 @@ function createGraphController() {
     if (node.contentSignature !== signature) {
       node.contentSignature = signature;
       iconItem.innerHTML =
-        `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+        `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(displayName(candidate))}">›</button>` : ''}`
         + `${linkMarkup(candidate)}`
         + `<div class="item-icon">${iconMarkup(candidate)}</div>`
-        + `<strong>${escapeHtml(candidate.name)}</strong>`
+        + (candidate.name?.trim() ? `<strong>${escapeHtml(candidate.name)}</strong>` : '')
         + `${descriptionMarkup(candidate)}`;
       hydrateNodeIcons(node.shell);
     }
@@ -687,10 +688,10 @@ function createGraphController() {
     iconItem.setAttribute('aria-selected', String(isSelected));
     iconItem.setAttribute('tabindex', '-1');
     iconItem.innerHTML =
-      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(displayName(candidate))}">›</button>` : ''}`
       + `${linkMarkup(candidate)}`
       + `<div class="item-icon">${iconMarkup(candidate)}</div>`
-      + `<strong>${escapeHtml(candidate.name)}</strong>`
+      + (candidate.name?.trim() ? `<strong>${escapeHtml(candidate.name)}</strong>` : '')
       + `${descriptionMarkup(candidate)}`;
 
     shell.append(iconItem);
@@ -993,10 +994,10 @@ function render() {
   document.documentElement.style.setProperty('--icon-size', `${iconSize}px`);
   elements.breadcrumbs.innerHTML = session.binMode
     ? pathToBin(session.binCurrentId === 'bin' ? null : session.binCurrentId).map((candidate, index, path) =>
-        `<button type="button" data-bin-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
+        `<button type="button" data-bin-breadcrumb="${candidate.id}">${escapeHtml(displayName(candidate))}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
       ).join('')
     : pathTo(session.currentId).map((candidate, index, path) =>
-        `<button type="button" data-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
+        `<button type="button" data-breadcrumb="${candidate.id}">${escapeHtml(displayName(candidate))}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
       ).join('');
 
   const visible = session.binMode
