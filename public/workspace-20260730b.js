@@ -46,6 +46,7 @@ import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition } from './g
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
+import { getWorkspaceElements } from './app/dom.js';
 
 const host = createHostBridge(window);
 
@@ -63,42 +64,7 @@ Treat Backpacks as independently developed projects, closest to plugins in owner
 My request:
 [Describe what you want to experience.]`;
 
-const elements = {
-  status: document.querySelector('#status'),
-  grid: document.querySelector('#icon-grid'),
-  explorer: document.querySelector('#explorer'),
-  marquee: document.querySelector('#selection-marquee'),
-  empty: document.querySelector('#empty'),
-  breadcrumbs: document.querySelector('#breadcrumbs'),
-  deleteAllBin: document.querySelector('#delete-all-bin'),
-  restoreAllBin: document.querySelector('#restore-all-bin'),
-  selectionStatus: document.querySelector('#selection-status'),
-  menu: document.querySelector('#context-menu'),
-binButton: document.querySelector('#bin-button'),
-  binLabel: document.querySelector('#bin-label'),
-  binCount: document.querySelector('#bin-count'),
-  editorLayer: document.querySelector('#editor-layer'),
-  editor: document.querySelector('#editor'),
-  saveButton: document.querySelector('#save-editor'),
-  editorTitle: document.querySelector('#editor-title'),
-  editorError: document.querySelector('#editor-error'),
-  name: document.querySelector('#name-input'),
-  description: document.querySelector('#description-input'),
-  descriptionLabel: document.querySelector('#description-label'),
-  target: document.querySelector('#target-input'),
-  targetFields: document.querySelector('#target-fields'),
-  targetActions: document.querySelector('#target-actions'),
-  iconInput: document.querySelector('#icon-input'),
-  iconPreview: document.querySelector('#icon-preview'),
-  iconFallback: document.querySelector('#icon-fallback'),
-  iconDefaultButton: document.querySelector('#use-target-icon'),
-  confirmLayer: document.querySelector('#confirm-layer'),
-  confirmTitle: document.querySelector('#confirm-title'),
-  confirmCopy: document.querySelector('#confirm-copy'),
-  confirmDelete: document.querySelector('#confirm-delete'),
-  confirmRestore: document.querySelector('#confirm-restore'),
-  linkEditLayer: document.querySelector('#link-edit-layer'),
-};
+const elements = getWorkspaceElements(document);
 
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
