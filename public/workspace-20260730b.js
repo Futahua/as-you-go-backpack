@@ -52,6 +52,7 @@ import { createConfirmationDialog } from './app/components/confirmation-dialog.j
 import { createContextMenu } from './app/components/context-menu.js';
 import { createEditorDialog } from './app/components/editor-dialog.js';
 import { createBinControls } from './app/components/bin-controls.js';
+import { bootstrapWorkspace } from './app/bootstrap.js';
 
 const host = createHostBridge(window);
 
@@ -2109,19 +2110,16 @@ const binControls = createBinControls({
   saveWorkspaceView,
 });
 
-(async () => {
-  try {
-    const loaded = await host.loadWorkspace();
-    state = normalizeState(typeof loaded === 'string' ? JSON.parse(loaded) : loaded);
-    restoreWorkspaceView();
-    toolbar.mount();
-    confirmDialog.mount();
-    menu.mount();
-    editorDialog.mount();
-    binControls.mount();
-    render();
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error));
-    render();
-  }
-})();
+bootstrapWorkspace({
+  loadState: () => host.loadWorkspace(),
+  setState: (next) => { state = next; },
+  normalizeState,
+  restoreWorkspaceView,
+  setStatus,
+  render,
+  toolbar,
+  confirmDialog,
+  menu,
+  editorDialog,
+  binControls,
+});
