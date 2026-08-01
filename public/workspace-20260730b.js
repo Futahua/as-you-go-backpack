@@ -1308,8 +1308,8 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
       return;
     }
     await host.copyText(outcome.text);
-    const count = outcome.text.split('\n\n').filter((part) => part.trim() !== '').length;
-    confirmPickupCopy(`Copied ${count} ${count === 1 ? 'prompt' : 'prompts'}.`);
+    const noun = outcome.copied === 'paths' ? 'path' : 'prompt';
+    confirmPickupCopy(`Copied ${outcome.count} ${outcome.count === 1 ? noun : `${noun}s`}.`);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   }

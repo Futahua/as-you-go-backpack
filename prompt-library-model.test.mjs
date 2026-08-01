@@ -444,12 +444,45 @@ test('insertPromptNodes inserts inside a folder or before a sibling', () => {
 
 test('resolveCopierAction keeps selected-target precedence', () => {
   const library = [prompt('a', 'A', 'prompt body', true)];
-  assert.deepEqual(resolveCopierAction(['C:\\target'], library), { kind: 'copy', text: 'C:\\target' });
-  assert.deepEqual(resolveCopierAction(['a', 'b'], library), { kind: 'copy', text: 'a\nb' });
-  assert.deepEqual(resolveCopierAction([], library), { kind: 'copy', text: 'prompt body' });
+  assert.deepEqual(
+    resolveCopierAction(['C:\\target'], library),
+    { kind: 'copy', text: 'C:\\target', copied: 'paths', count: 1 },
+  );
+  assert.deepEqual(
+    resolveCopierAction(['a', 'b'], library),
+    { kind: 'copy', text: 'a\nb', copied: 'paths', count: 2 },
+  );
+  assert.deepEqual(
+    resolveCopierAction([], library),
+    { kind: 'copy', text: 'prompt body', copied: 'prompts', count: 1 },
+  );
 });
 
 test('resolveCopierAction opens the library when nothing is checked', () => {
   const library = [prompt('a', 'A', 'body', false)];
   assert.deepEqual(resolveCopierAction([], library), { kind: 'open' });
+});
+
+test('resolveCopierAction reports what it copied and how many', () => {
+  const library = [
+    prompt('a', 'A', 'first', true),
+    prompt('b', 'B', 'second', true),
+    prompt('c', 'C', 'excluded', false),
+  ];
+  // Paths are newline-joined, prompts blank-line-joined, so the count cannot be
+  // re-derived from the text with one separator. The caller reads count/copied.
+  const paths = resolveCopierAction(['C:\one', 'C:\two', 'C:\three'], library);
+  assert.equal(paths.copied, 'paths');
+  assert.equal(paths.count, 3, 'counts selected targets, not text blocks');
+
+  const prompts = resolveCopierAction([], library);
+  assert.equal(prompts.copied, 'prompts');
+  assert.equal(prompts.count, 2, 'counts included prompts only');
+});
+
+test('resolveCopierAction counts a single path as one path', () => {
+  const library = [prompt('a', 'A', 'body', true)];
+  const outcome = resolveCopierAction(['C:\only'], library);
+  assert.equal(outcome.copied, 'paths');
+  assert.equal(outcome.count, 1, 'a lone path is not reported as a prompt');
 });

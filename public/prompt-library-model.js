@@ -593,10 +593,21 @@ export function validatePromptLibrary(nodes) {
  * when nothing is checked the copier opens the library instead of copying. */
 export function resolveCopierAction(selectedTargets, promptNodes) {
   const targets = Array.isArray(selectedTargets) ? selectedTargets : [];
+  // A selection copies the selected shortcuts' targets; an empty selection
+  // falls back to the checked prompt batch. `copied` and `count` name which
+  // happened, so callers do not have to re-derive it from the text — the two
+  // use different separators and would be counted wrongly.
   if (targets.length > 0) {
-    return { kind: 'copy', text: targets.join('\n') };
+    return { kind: 'copy', text: targets.join('\n'), copied: 'paths', count: targets.length };
   }
   const text = buildBatchPromptText(promptNodes);
   if (!text) return { kind: 'open' };
-  return { kind: 'copy', text };
+  return {
+    kind: 'copy',
+    text,
+    copied: 'prompts',
+    count: collectIncludedPrompts(promptNodes).filter(
+      (node) => typeof node.text === 'string' && node.text.trim() !== '',
+    ).length,
+  };
 }
