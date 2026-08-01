@@ -1,3 +1,5 @@
+import { normalizePromptCards } from './prompt-library-model.js';
+
 export const ROOT_ID = 'root';
 export const DEFAULT_ICON_SIZE = 96;
 export const MIN_ICON_SIZE = 56;
@@ -22,7 +24,7 @@ export function emptyState() {
       selectedItemIds: [],
       binMode: false,
       layout: 'explorer',
-      pickupPrompt: null,
+      promptCards: [],
       graphPositions: {},
       toolbarPositions: {},
     },
@@ -330,8 +332,9 @@ export function normalizeState(raw) {
       layout: raw?.view?.layout === 'graph' ? 'graph' : 'explorer',
       graphPositions: normalizeGraphPositions(raw?.view?.graphPositions),
       toolbarPositions: normalizeFlatPositions(raw?.view?.toolbarPositions),
-      pickupPrompt:
-        typeof raw?.view?.pickupPrompt === 'string' ? raw.view.pickupPrompt : null,
+      // promptCards replaces pickupPrompt: legacy values are read here purely
+      // for migration (normalizePromptCards) and never written again.
+      promptCards: normalizePromptCards(raw?.view?.promptCards, raw?.view?.pickupPrompt),
     },
   };
 
@@ -873,15 +876,15 @@ export function updateWorkspaceView(state, changes) {
       toolbarPositions: has('toolbarPositions')
         ? normalizeFlatPositions(changes.toolbarPositions)
         : (state.view?.toolbarPositions ?? {}),
-      pickupPrompt: has('pickupPrompt')
-        ? (typeof changes.pickupPrompt === 'string' ? changes.pickupPrompt : null)
-        : (state.view?.pickupPrompt ?? null),
+      promptCards: has('promptCards')
+        ? normalizePromptCards(changes.promptCards)
+        : (state.view?.promptCards ?? []),
     },
   };
 }
 
-export function setPickupPrompt(state, text) {
-  return updateWorkspaceView(state, { pickupPrompt: typeof text === 'string' ? text : null });
+export function setPromptCards(state, cards) {
+  return updateWorkspaceView(state, { promptCards: normalizePromptCards(cards) });
 }
 
 export function graphContextId(currentGroupId, binMode) {

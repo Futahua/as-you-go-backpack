@@ -19,7 +19,7 @@ export function bootstrapWorkspace({
   keyboard,
   drop,
   pointer,
-  promptEditor,
+  promptLibrary,
 }) {
   confirmDialog.mount();
   menu.mount();
@@ -28,7 +28,7 @@ export function bootstrapWorkspace({
   keyboard.mount();
   drop.mount();
   pointer.mount();
-  promptEditor.mount();
+  promptLibrary.mount();
 
   return (async () => {
     try {

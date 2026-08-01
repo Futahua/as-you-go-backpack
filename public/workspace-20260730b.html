@@ -103,13 +103,17 @@
       </section>
 
       <section class="confirm-layer" id="prompt-layer" hidden>
-        <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
-          <h2 id="prompt-title">Copy prompt</h2>
-          <label>Agent pickup prompt<textarea id="prompt-input" class="prompt-input" rows="14"></textarea></label>
-          <p class="editor-error" id="prompt-error" role="alert"></p>
+        <div class="confirm-card prompt-library" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
+          <header class="prompt-library-header">
+            <h2 id="prompt-title">Copy prompts</h2>
+            <button id="prompt-add" type="button">Add prompt</button>
+          </header>
+          <p class="prompt-library-help">Checked prompts are copied together from top to bottom.</p>
+          <div id="prompt-card-list" class="prompt-card-list"></div>
+          <p id="prompt-error" class="editor-error" role="alert"></p>
           <div class="editor-actions editor-submit">
-            <button class="paper-button" id="prompt-cancel" type="button">Cancel</button>
-            <button class="paper-button primary" id="prompt-save" type="button">Save</button>
+            <button id="prompt-cancel" class="paper-button" type="button">Cancel</button>
+            <button id="prompt-save" class="paper-button primary" type="button">Save</button>
           </div>
         </div>
       </section>

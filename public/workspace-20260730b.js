@@ -48,7 +48,8 @@ import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
-import { createPickupPromptEditor } from './app/components/pickup-prompt-editor.js';
+import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
+import { resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
 import { createEditorDialog } from './app/components/editor-dialog.js';
@@ -1268,12 +1269,12 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
       .map((selectedId) => shortcutByRecordOrPlacementId(selectedId))
       .filter(Boolean)
       .map((candidate) => candidate.target);
-    const text = selectedTargets.length > 0
-      ? selectedTargets.join('\n')
-      : ((typeof state.view?.pickupPrompt === 'string' && state.view.pickupPrompt)
-          ? state.view.pickupPrompt
-          : PICKUP_PROMPT);
-    await host.copyText(text);
+    const outcome = resolveCopierAction(selectedTargets, promptLibrary.getSnapshotCards());
+    if (outcome.kind === 'open') {
+      promptLibrary.open({ message: 'Select at least one prompt for batch copying.' });
+      return;
+    }
+    await host.copyText(outcome.text);
     document.querySelector('.copy-label').textContent = 'Copied';
     setTimeout(() => {
       document.querySelector('.copy-label').textContent = 'Copy agent pickup prompt';
@@ -1441,10 +1442,12 @@ const keyboard = createKeyboardController({
   confirmDialog,
 });
 
-const promptEditor = createPickupPromptEditor({
+const promptLibrary = createPromptLibraryDialog({
   document,
   store,
   fallbackPrompt: PICKUP_PROMPT,
+  copyText: (text) => host.copyText(text),
+  setStatus,
 });
 
 bootstrapWorkspace({
@@ -1461,5 +1464,5 @@ bootstrapWorkspace({
   keyboard,
   drop,
   pointer,
-  promptEditor,
+  promptLibrary,
 });

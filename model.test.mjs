@@ -30,7 +30,7 @@ import {
   setGraphPositions,
   removeGraphPositions,
   normalizeGraphPositions,
-  setPickupPrompt,
+  setPromptCards,
 } from './model.mjs';
 
 import {
@@ -312,19 +312,46 @@ test('the local project preserves its explorer working position', () => {
     layout: 'explorer',
     graphPositions: {},
     toolbarPositions: {},
-    pickupPrompt: null,
+    promptCards: [],
   });
 });
 
-test('setPickupPrompt persists and normalizeState keeps it', () => {
+test('emptyState contains an empty prompt card list', () => {
+  assert.deepEqual(emptyState().view.promptCards, []);
+});
+
+test('a legacy pickupPrompt migrates to a checked card on normalize', () => {
+  const state = normalizeState({
+    schemaVersion: 1,
+    groups: [],
+    shortcuts: [],
+    view: { pickupPrompt: 'legacy prompt' },
+  });
+  assert.deepEqual(state.view.promptCards, [
+    { id: state.view.promptCards[0].id, title: 'Agent pickup prompt', text: 'legacy prompt', includeInBatch: true },
+  ]);
+});
+
+test('promptCards round-trip through normalization and stay on other view updates', () => {
   let state = emptyState();
-  assert.equal(state.view.pickupPrompt, null);
-  state = setPickupPrompt(state, '  Custom prompt  ');
-  assert.equal(state.view.pickupPrompt, '  Custom prompt  ');
+  const cards = [
+    { id: 'prompt-a', title: 'One', text: 'first', includeInBatch: true },
+    { id: 'prompt-b', title: 'Two', text: 'second', includeInBatch: false },
+  ];
+  state = setPromptCards(state, cards);
+  assert.deepEqual(state.view.promptCards, cards);
   const restored = normalizeState(JSON.parse(JSON.stringify(state)));
-  assert.equal(restored.view.pickupPrompt, '  Custom prompt  ');
-  state = setPickupPrompt(state, null);
-  assert.equal(state.view.pickupPrompt, null);
+  assert.deepEqual(restored.view.promptCards, cards);
+  const resized = updateWorkspaceView(state, { iconSize: 64 });
+  assert.deepEqual(resized.view.promptCards, cards);
+  assert.deepEqual(updateWorkspaceView(state, { promptCards: [] }).view.promptCards, []);
+});
+
+test('setPromptCards does not mutate its input', () => {
+  const state = emptyState();
+  const cards = [{ id: 'prompt-x', title: 'X', text: 'body', includeInBatch: true }];
+  setPromptCards(state, cards);
+  assert.deepEqual(state.view.promptCards, []);
 });
 
 test('the explorer view mode defaults to explorer and persists as graph', () => {
