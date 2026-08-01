@@ -53,6 +53,7 @@ import { createContextMenu } from './app/components/context-menu.js';
 import { createEditorDialog } from './app/components/editor-dialog.js';
 import { createBinControls } from './app/components/bin-controls.js';
 import { bootstrapWorkspace } from './app/bootstrap.js';
+import { createWorkspaceStore } from './app/workspace-store.js';
 
 const host = createHostBridge(window);
 
@@ -74,8 +75,6 @@ const elements = getWorkspaceElements(document);
 
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
-let undoStack = [];
-let redoStack = [];
 let currentId = ROOT_ID;
 let selected = new Set();
 let selectionAnchor = null;
@@ -87,7 +86,6 @@ let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
 let zoomTimer = null;
-let saveQueue = Promise.resolve();
 let graphDrag = null;
 let graphShiftKeydown = null;
 let graphShiftKeyup = null;
@@ -232,13 +230,17 @@ function isAvailableItem(itemId) {
   return true;
 }
 
-function captureWorkspaceView() {
-  state = updateWorkspaceView(state, {
+function captureWorkspaceViewFrom(currentState) {
+  return updateWorkspaceView(currentState, {
     currentGroupId: currentId,
     graphExpandedGroupIds: [...graphExpanded],
     selectedItemIds: [...selected],
     binMode,
   });
+}
+
+function captureWorkspaceView() {
+  return captureWorkspaceViewFrom(state);
 }
 
 function restoreWorkspaceView() {
@@ -258,12 +260,12 @@ function restoreWorkspaceView() {
       binMode ? binnedIds.has(itemId) : isAvailableItem(itemId)),
   );
   selectionAnchor = [...selected].at(-1) ?? null;
-  captureWorkspaceView();
+  state = store.replace(captureWorkspaceView());
 }
 
 function saveWorkspaceView() {
-  captureWorkspaceView();
-  void persist(state).catch((error) =>
+  state = store.replace(captureWorkspaceView());
+  void store.save(state).catch((error) =>
     setStatus(error instanceof Error ? error.message : String(error)));
 }
 
@@ -1033,50 +1035,19 @@ function hydrateNodeIcons(shell) {
 }
 
 async function persist(nextState = state) {
-  const snapshot = JSON.stringify(nextState);
-  const operation = saveQueue
-    .catch(() => undefined)
-    .then(() => host.saveWorkspace(snapshot));
-  saveQueue = operation;
-  await operation;
+  return store.save(nextState);
 }
 
 async function commit(nextState, options = {}) {
-  if (options.isUndo) {
-    redoStack.push(state);
-  } else if (options.isRedo) {
-    undoStack.push(state);
-  } else {
-    undoStack.push(state);
-    redoStack.length = 0;
-  }
-  state = normalizeState(nextState);
-  selected.clear();
-  captureWorkspaceView();
-  closeMenu();
-  render();
-  try {
-    await persist(state);
-    setStatus('');
-    return true;
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error));
-    return false;
-  }
+  return store.commit(nextState, options);
 }
 
 async function undo() {
-  if (undoStack.length === 0) return;
-  const previous = undoStack.pop();
-  closeMenu();
-  await commit(previous, { isUndo: true });
+  await store.undo();
 }
 
 async function redo() {
-  if (redoStack.length === 0) return;
-  const next = redoStack.pop();
-  closeMenu();
-  await commit(next, { isRedo: true });
+  await store.redo();
 }
 
 function visibleItemIds() {
@@ -1358,7 +1329,7 @@ async function runMenuAction(action) {
   if (action === 'delete-forever') return confirmDialog.askPermanentDelete();
   if (action === 'reset-graph-position') {
     const ctxId = graphContextId(currentId, binMode);
-    state = removeGraphPositions(state, ctxId, [...selected]);
+    state = store.replace(removeGraphPositions(state, ctxId, [...selected]));
     for (const id of selected) {
       const node = graph._getNode(id);
       if (node) {
@@ -1642,8 +1613,7 @@ elements.grid.addEventListener('pointerup', (event) => {
             next = collapsePlacements(next, shortcutId, hitFolderId);
           }
           const ctxId = graphContextId(currentId, binMode);
-          state = removeGraphPositions(next, ctxId, graphDragCopy.itemIds);
-          commit(state, 'Moved.');
+          commit(removeGraphPositions(next, ctxId, graphDragCopy.itemIds), 'Moved.');
         } catch (error) {
           setStatus(error instanceof Error ? error.message : String(error));
         }
@@ -1656,12 +1626,12 @@ elements.grid.addEventListener('pointerup', (event) => {
             updates[id] = { x: node.x, y: node.y };
           }
         }
-        state = setGraphPositions(state, ctxId, updates);
+        state = store.replace(setGraphPositions(state, ctxId, updates));
         graph._setSimulationDecay();
         saveWorkspaceView();
       } else {
         const ctxId = graphContextId(currentId, binMode);
-        state = removeGraphPositions(state, ctxId, graphDragCopy.itemIds);
+        state = store.replace(removeGraphPositions(state, ctxId, graphDragCopy.itemIds));
         for (const id of graphDragCopy.itemIds) {
           const node = graph._getNode(id);
           if (node) {
@@ -1883,7 +1853,7 @@ document.addEventListener('keydown', (event) => {
 elements.explorer.addEventListener('wheel', (event) => {
   if (!event.ctrlKey) return;
   event.preventDefault();
-  state = setIconSize(state, state.view.iconSize + (event.deltaY < 0 ? 12 : -12));
+  state = store.replace(setIconSize(state, state.view.iconSize + (event.deltaY < 0 ? 12 : -12)));
   render();
   clearTimeout(zoomTimer);
   zoomTimer = setTimeout(() => persist().catch((error) => setStatus(String(error))), 250);
@@ -2031,11 +2001,27 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
   }
 });
 
+const store = createWorkspaceStore({
+  getState: () => state,
+  setState: (next) => { state = next; },
+  normalizeState,
+  persist: (snapshot) => host.saveWorkspace(snapshot),
+  setStatus,
+  prepare: (next) => {
+    selected.clear();
+    return captureWorkspaceViewFrom(next);
+  },
+  afterCommit: () => {
+    closeMenu();
+    render();
+  },
+});
+
 const toolbar = createToolbarController({
   window,
   document,
   getState: () => state,
-  setState: (next) => { state = next; },
+  setState: (next) => { state = store.replace(next); },
   setToolbarPosition,
   getToolbarPosition,
   persist,
@@ -2112,7 +2098,7 @@ const binControls = createBinControls({
 
 bootstrapWorkspace({
   loadState: () => host.loadWorkspace(),
-  setState: (next) => { state = next; },
+  setState: (next) => { state = store.install(next); },
   normalizeState,
   restoreWorkspaceView,
   setStatus,
