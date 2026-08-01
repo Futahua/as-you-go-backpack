@@ -31,10 +31,27 @@
   position: absolute;
   left: 0;
   top: 0;
-  width: max-content;
+  /* A finite width so long names wrap inside the tile instead of defining an
+   * unbounded parent (max-content). The upper bound tracks --icon-size so the
+   * square icon always fits; the label box is at most 40px wider than it. */
+  width: clamp(84px, calc(var(--icon-size) + 28px), calc(var(--icon-size) + 40px));
   height: max-content;
   will-change: transform;
   transition: opacity 200ms ease, scale 200ms ease;
+}
+.graph-node-shell .icon-item {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+.graph-node-shell .icon-item strong,
+.graph-node-shell .icon-item small {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .graph-node-shell.exiting {
   pointer-events: none;
