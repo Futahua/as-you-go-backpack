@@ -184,11 +184,17 @@ test('a non-member may not be dropped inside a set', () => {
   assert.equal(canDropInsideRegions(sets, 'outsider', ['a']), false);
 });
 
-test('a shared item may move anywhere in the union of its sets', () => {
+test('a shared item lives in the intersection, not either set alone', () => {
   const sets = [set('a', ['shared']), set('b', ['shared'])];
-  assert.equal(canDropInsideRegions(sets, 'shared', ['a']), true);
-  assert.equal(canDropInsideRegions(sets, 'shared', ['b']), true);
-  assert.equal(canDropInsideRegions(sets, 'shared', ['a', 'b']), true, 'and the intersection');
+  assert.equal(
+    canDropInsideRegions(sets, 'shared', ['a', 'b']), true,
+    'the overlap is where it belongs',
+  );
+  assert.equal(
+    canDropInsideRegions(sets, 'shared', ['a']), false,
+    'the part of a that b does not cover is out of bounds',
+  );
+  assert.equal(canDropInsideRegions(sets, 'shared', ['b']), false);
 });
 
 test('an item in one set may not enter the part of another it does not belong to', () => {
@@ -197,10 +203,13 @@ test('an item in one set may not enter the part of another it does not belong to
   assert.equal(canDropInsideRegions(sets, 'i1', ['a', 'b']), false, 'overlap needs both');
 });
 
-test('open space outside every set accepts anything', () => {
+test('open space accepts setless items but not members', () => {
   const sets = [set('a', ['i1'])];
-  assert.equal(canDropInsideRegions(sets, 'outsider', []), true);
-  assert.equal(canDropInsideRegions(sets, 'i1', []), true, 'a member may leave its set region');
+  assert.equal(canDropInsideRegions(sets, 'outsider', []), true, 'setless items roam freely');
+  assert.equal(
+    canDropInsideRegions(sets, 'i1', []), false,
+    'a member cannot leave its own set region',
+  );
 });
 
 test('droppableItems filters a multi-item drag instead of vetoing it', () => {
@@ -253,4 +262,24 @@ test('a state with no itemSets key normalizes to an empty list', async () => {
   const { normalizeState } = await import('./public/workspace-model-20260730b.js');
   const restored = normalizeState({ groups: [], shortcuts: [], view: {} });
   assert.deepEqual(restored.view.itemSets, [], 'older saved states migrate untouched');
+});
+
+test('an item in three sets needs all three present', () => {
+  const sets = [set('a', ['x']), set('b', ['x']), set('c', ['x'])];
+  assert.equal(canDropInsideRegions(sets, 'x', ['a', 'b', 'c']), true);
+  assert.equal(canDropInsideRegions(sets, 'x', ['a', 'b']), false, 'c is missing');
+});
+
+test('a set member cannot be dropped into a foreign set even partly', () => {
+  const sets = [set('a', ['i1']), set('b', ['i2'])];
+  assert.equal(canDropInsideRegions(sets, 'i1', ['a']), true, 'its own set is fine');
+  assert.equal(canDropInsideRegions(sets, 'i1', ['a', 'b']), false, 'b is foreign to i1');
+});
+
+test('droppableItems keeps a mixed drag to the items the region suits', () => {
+  const sets = [set('a', ['shared', 'i1']), set('b', ['shared'])];
+  // The a-only region suits i1 but not shared, which needs a and b together.
+  assert.deepEqual(droppableItems(sets, ['i1', 'shared'], ['a']), ['i1']);
+  // The overlap suits shared but not i1, which does not belong to b.
+  assert.deepEqual(droppableItems(sets, ['i1', 'shared'], ['a', 'b']), ['shared']);
 });

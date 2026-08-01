@@ -40,6 +40,9 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     graphContextId: () => 'ctx',
     removeGraphPositions: (s, ctxId, ids) => ({ ...s, positionsRemoved: ids }),
     setGraphPositions: (s, ctxId, positions) => ({ ...s, pinned: positions }),
+    // The real one: sets are the behavior under test, and a stub would let a
+    // membership mistake through.
+    setItemSets: (s, sets) => ({ ...s, view: { ...s.view, itemSets: sets } }),
     createWebLink: (s, input) => ({ ...s, webLink: input }),
     createDroppedShortcuts: (s, targets, destination) => ({
       ...s,
@@ -449,4 +452,137 @@ test('activateItem opens a web link even with revealDirectoryTarget', async () =
   assert.deepEqual(h.effects.openWeb, ['https://example.com']);
   assert.deepEqual(h.effects.reveal, []);
   assert.deepEqual(h.effects.launch, []);
+});
+
+// ===========================================================================
+// Item sets: G groups a selection, Ctrl+G edits membership, Ctrl+A scopes to
+// the picked set, and Alt+click acts on the inverse of the selection.
+// ===========================================================================
+
+const setsHarness = () => createHarness({
+  groups: [{ id: 'g1' }, { id: 'g2' }, { id: 'g3' }, { id: 'g4' }],
+});
+const itemSets = (h) => h.store.getSnapshot().view?.itemSets ?? [];
+
+test('G groups the current selection into a set', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1', 'g2']);
+  await h.commands.groupSelectionIntoSet('Mine');
+  assert.equal(itemSets(h).length, 1);
+  assert.deepEqual(itemSets(h)[0].memberIds, ['g1', 'g2']);
+  assert.equal(itemSets(h)[0].title, 'Mine');
+});
+
+test('G with nothing selected does nothing', async () => {
+  const h = setsHarness();
+  await h.commands.groupSelectionIntoSet();
+  assert.deepEqual(itemSets(h), []);
+});
+
+test('sets may overlap: grouping a shared item keeps its other membership', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1', 'g2']);
+  await h.commands.groupSelectionIntoSet('A');
+  h.store.setSelection(['g2', 'g3']);
+  await h.commands.groupSelectionIntoSet('B');
+  assert.deepEqual(itemSets(h)[0].memberIds, ['g1', 'g2'], 'first set untouched');
+  assert.deepEqual(itemSets(h)[1].memberIds, ['g2', 'g3'], 'g2 is in both');
+});
+
+test('Ctrl+G shares the selection with the chosen sets', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1']);
+  await h.commands.groupSelectionIntoSet('A');
+  h.store.setSelection(['g2']);
+  await h.commands.groupSelectionIntoSet('B');
+  h.store.setSelection(['g3']);
+  await h.commands.groupSelectionIntoSet('C');
+  const [a, b, c] = itemSets(h).map((s) => s.id);
+
+  // Move g1 out of A and share it between B and C.
+  h.store.setSelection(['g1']);
+  await h.commands.shareSelectionWithSets([b, c]);
+  const after = itemSets(h);
+  assert.equal(after.find((s) => s.id === a), undefined, 'A is emptied and dropped');
+  assert.ok(after.find((s) => s.id === b).memberIds.includes('g1'));
+  assert.ok(after.find((s) => s.id === c).memberIds.includes('g1'));
+});
+
+test('Ctrl+G with no sets regresses the selection to setless', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1', 'g2']);
+  await h.commands.groupSelectionIntoSet('A');
+  h.store.setSelection(['g1']);
+  await h.commands.shareSelectionWithSets([]);
+  assert.deepEqual(itemSets(h)[0].memberIds, ['g2'], 'g1 left the set');
+});
+
+test('Ctrl+G can group setless items into an existing set', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1']);
+  await h.commands.groupSelectionIntoSet('A');
+  const [a] = itemSets(h).map((s) => s.id);
+  h.store.setSelection(['g4']);
+  await h.commands.shareSelectionWithSets([a]);
+  assert.deepEqual(itemSets(h)[0].memberIds, ['g1', 'g4']);
+});
+
+test('Ctrl+A selects only the picked set members', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1', 'g2']);
+  await h.commands.groupSelectionIntoSet('A');
+  // Clicking a member picks its set.
+  h.commands.selectItem('g1', { shiftKey: false, ctrlKey: false, visibleItemIds: ['g1'] });
+  h.commands.selectAllVisible(['g1', 'g2', 'g3', 'g4']);
+  assert.deepEqual([...h.store.getSession().selected], ['g1', 'g2'], 'never reaches outside the set');
+});
+
+test('Ctrl+A outside every set selects only setless items', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1', 'g2']);
+  await h.commands.groupSelectionIntoSet('A');
+  h.commands.selectItem('g3', { shiftKey: false, ctrlKey: false, visibleItemIds: ['g3'] });
+  h.commands.selectAllVisible(['g1', 'g2', 'g3', 'g4']);
+  assert.deepEqual([...h.store.getSession().selected], ['g3', 'g4'], 'never reaches inside a set');
+});
+
+test('Ctrl+A keeps the anchor so a second press does not widen its scope', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1', 'g2']);
+  await h.commands.groupSelectionIntoSet('A');
+  h.commands.selectItem('g1', { shiftKey: false, ctrlKey: false, visibleItemIds: ['g1'] });
+  h.commands.selectAllVisible(['g1', 'g2', 'g3', 'g4']);
+  h.commands.selectAllVisible(['g1', 'g2', 'g3', 'g4']);
+  assert.deepEqual([...h.store.getSession().selected], ['g1', 'g2'], 'still scoped after a repeat');
+  assert.equal(h.store.getSession().selectionAnchor, 'g1', 'the anchor still picks the set');
+});
+
+test('Ctrl+A with no sets defined still selects everything visible', () => {
+  const h = setsHarness();
+  h.commands.selectAllVisible(['g1', 'g2', 'g3']);
+  assert.deepEqual(
+    [...h.store.getSession().selected], ['g1', 'g2', 'g3'],
+    'with nothing grouped every item is setless, so behavior is unchanged',
+  );
+});
+
+test('the inverse scope is the picked set minus the selection', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1', 'g2', 'g3']);
+  await h.commands.groupSelectionIntoSet('A');
+  h.commands.selectItem('g1', { shiftKey: false, ctrlKey: false, visibleItemIds: ['g1'] });
+  h.commands.selectItem('g2', { shiftKey: false, ctrlKey: true, visibleItemIds: ['g1', 'g2'] });
+  // g1 and g2 selected inside set A: Alt+click should act on g3.
+  assert.deepEqual(h.commands.inverseSelectionScope(['g1', 'g2', 'g3', 'g4']), ['g3']);
+});
+
+test('the inverse scope outside a set covers setless items only', async () => {
+  const h = setsHarness();
+  h.store.setSelection(['g1']);
+  await h.commands.groupSelectionIntoSet('A');
+  h.commands.selectItem('g3', { shiftKey: false, ctrlKey: false, visibleItemIds: ['g3'] });
+  assert.deepEqual(
+    h.commands.inverseSelectionScope(['g1', 'g2', 'g3', 'g4']), ['g2', 'g4'],
+    'set members stay out when no set is picked',
+  );
 });

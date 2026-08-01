@@ -7,8 +7,10 @@
  *
  * Sets have no stored position or size. Their outline is derived from where
  * their members happen to be, so nothing can desync: a member that moves
- * simply reshapes its own set. The only spatial rule that needs enforcing is
- * that a non-member may not be dropped inside a set's region.
+ * simply reshapes its own set. Spatially, a non-member may not be dropped
+ * inside a set's region, and an item belonging to several sets lives in their
+ * intersection — it cannot sit in the part of one set the others do not
+ * cover, which is what keeps a Venn overlap meaningful.
  *
  * Sets are deliberately flat: a member id always refers to a workspace item,
  * never to another set, so there is no nesting to traverse and no cycle to
@@ -175,16 +177,26 @@ export function forgetItems(sets, itemIds) {
   return setMembership(sets, itemIds, []);
 }
 
-/** Whether `itemId` may be dropped at a position inside `regionSetIds`.
+/** Whether `itemId` may be dropped at a position covered by `regionSetIds`.
  *
- * Members move freely: a member reshapes its own set rather than crossing its
- * boundary, and an item in several sets may move anywhere within their union.
- * A non-member may not enter a region it does not belong to. */
+ * Two rules, and a shared item must satisfy both:
+ *
+ * - a non-member may not enter a region it does not belong to, so every
+ *   region present must be one of the item's own sets;
+ * - an item in several sets lives in their intersection, so every set it
+ *   belongs to must be present at the destination. A shared item therefore
+ *   cannot sit in the part of one set that the other does not cover.
+ *
+ * Setless items are unconstrained outside sets and blocked inside any. */
 export function canDropInsideRegions(sets, itemId, regionSetIds) {
-  const regions = Array.isArray(regionSetIds) ? regionSetIds : [];
-  if (regions.length === 0) return true;
-  const own = new Set(setsContaining(sets, itemId).map((set) => set.id));
-  return regions.every((setId) => own.has(setId));
+  const regions = new Set(Array.isArray(regionSetIds) ? regionSetIds : []);
+  const own = setsContaining(sets, itemId).map((set) => set.id);
+  // No region may be foreign to the item.
+  for (const setId of regions) {
+    if (!own.includes(setId)) return false;
+  }
+  // No set of the item's may be missing from the region.
+  return own.every((setId) => regions.has(setId));
 }
 
 /** Filters a dragged selection to the items actually allowed at a

@@ -1,3 +1,5 @@
+import { selectAllScope, inverseScope, addItemSet, setMembership } from '../sets-model.js';
+
 /** Application command layer. Commands are the named user-intent operations
  * that coordinate session mutation, persistence, and narrow rendering/host
  * effects. They depend only on the store, model/host operations, and the
@@ -24,6 +26,7 @@ export function createWorkspaceCommands({
   graphContextId,
   removeGraphPositions,
   setGraphPositions,
+  setItemSets,
   createWebLink,
   createDroppedShortcuts,
   syncSelection,
@@ -62,11 +65,62 @@ export function createWorkspaceCommands({
     saveWorkspaceView();
   }
 
+  /** Ctrl+A, scoped by sets: with a set picked (from the last clicked item)
+   * only its members are selected; with none picked only setless items are,
+   * so select-all outside a set never reaches inside one.
+   *
+   * The anchor is deliberately preserved — it is what picks the set, and
+   * clearing it would make a second Ctrl+A silently widen its own scope. */
   function selectAllVisible(visibleItemIds) {
-    store.setSelection(visibleItemIds);
-    store.setSelectionAnchor(null);
+    const session = store.getSession();
+    const sets = store.getSnapshot().view?.itemSets ?? [];
+    store.setSelection(selectAllScope(sets, visibleItemIds, session.selectionAnchor));
     syncSelection();
     saveWorkspaceView();
+  }
+
+  /** G: groups the current selection into a new set. Sets may overlap, so
+   * items already in another set keep that membership too. */
+  async function groupSelectionIntoSet(title) {
+    const ids = [...store.getSession().selected];
+    if (ids.length === 0) return;
+    const snapshot = store.getSnapshot();
+    const next = addItemSet(snapshot.view?.itemSets ?? [], ids, title ? { title } : {});
+    if (next === (snapshot.view?.itemSets ?? [])) return;
+    try {
+      await store.commit(setItemSets(snapshot, next));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Ctrl+G: replaces which sets the selection belongs to. An empty setIds
+   * regresses the items to setless, which is how something leaves every set.
+   * Sets left with no members are dropped. */
+  async function shareSelectionWithSets(setIds) {
+    const ids = [...store.getSession().selected];
+    if (ids.length === 0) return;
+    const snapshot = store.getSnapshot();
+    const current = snapshot.view?.itemSets ?? [];
+    const next = setMembership(current, ids, setIds);
+    if (next === current) return;
+    try {
+      await store.commit(setItemSets(snapshot, next));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** The folders Alt+click acts on: the select-all scope minus the current
+   * selection. Collapses "select all, deselect a few, act" into one gesture. */
+  function inverseSelectionScope(visibleItemIds) {
+    const session = store.getSession();
+    return inverseScope(
+      store.getSnapshot().view?.itemSets ?? [],
+      visibleItemIds,
+      session.selectionAnchor,
+      [...session.selected],
+    );
   }
 
   /** Begins a marquee gesture. With preserveSelection, the current selection
@@ -440,6 +494,9 @@ export function createWorkspaceCommands({
     selectItem,
     clearSelection,
     selectAllVisible,
+    groupSelectionIntoSet,
+    shareSelectionWithSets,
+    inverseSelectionScope,
     beginMarqueeSelection,
     updateMarqueeSelection,
     finishMarqueeSelection,
