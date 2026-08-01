@@ -251,22 +251,74 @@ function insertNodes(nodes, parentId, nodesToInsert, beforeId) {
     next.splice(index, 0, ...nodesToInsert);
     return next;
   }
-  return nodes.map((candidate) => {
-    if (candidate.id === parentId) {
-      const children = [...candidate.children];
-      const index = beforeId == null
-        ? children.length
-        : children.findIndex((child) => child.id === beforeId);
-      if (index === -1) return candidate;
-      children.splice(index, 0, ...nodesToInsert);
-      return { ...candidate, children };
+  let changed = false;
+  const walk = (list) => {
+    const next = [];
+    let levelChanged = false;
+    for (const candidate of list) {
+      if (candidate.id === parentId) {
+        const children = [...candidate.children];
+        const index = beforeId == null
+          ? children.length
+          : children.findIndex((child) => child.id === beforeId);
+        if (index === -1) {
+          next.push(candidate);
+          continue;
+        }
+        children.splice(index, 0, ...nodesToInsert);
+        next.push({ ...candidate, children });
+        levelChanged = true;
+        changed = true;
+      } else if (candidate.type === 'folder') {
+        const inner = walk(candidate.children);
+        if (inner !== candidate.children) {
+          next.push({ ...candidate, children: inner });
+          levelChanged = true;
+          changed = true;
+        } else {
+          next.push(candidate);
+        }
+      } else {
+        next.push(candidate);
+      }
     }
-    if (candidate.type === 'folder') {
-      const inner = insertNodes(candidate.children, parentId, nodesToInsert, beforeId);
-      if (inner !== candidate.children) return { ...candidate, children: inner };
-    }
-    return candidate;
-  });
+    return levelChanged ? next : list;
+  };
+  const result = walk(nodes);
+  return changed ? result : nodes;
+}
+
+/**
+ * Deep-clones prompt/folder nodes for an internal paste, regenerating every id
+ * recursively so pasted copies never collide with their source. Titles, text,
+ * includeInBatch, includeAll, children, and order are preserved.
+ */
+export function clonePromptNodesForPaste(nodes) {
+  const clone = (node) => (node.type === 'folder'
+    ? {
+        id: createId('folder'),
+        type: 'folder',
+        title: node.title,
+        includeAll: node.includeAll === true,
+        children: node.children.map(clone),
+      }
+    : {
+        id: createId('prompt'),
+        type: 'prompt',
+        title: node.title,
+        text: node.text,
+        includeInBatch: node.includeInBatch === true,
+      });
+  return (Array.isArray(nodes) ? nodes : []).map(clone);
+}
+
+/** Inserts already-cloned nodes into the tree at a destination (folder, or
+ * root when null) before `beforeId` (or appended when null). Returns the
+ * original tree when the destination/beforeId is invalid. Non-mutating. */
+export function insertPromptNodes(nodes, destinationParentId = null, beforeId = null, nodesToInsert) {
+  const list = Array.isArray(nodesToInsert) ? nodesToInsert : [];
+  if (list.length === 0) return nodes;
+  return insertNodes(nodes, destinationParentId, list, beforeId);
 }
 
 /**

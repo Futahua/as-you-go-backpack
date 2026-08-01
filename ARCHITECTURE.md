@@ -44,6 +44,15 @@ selected-shortcut precedence and reads the saved snapshot through
 `includeAll` override (never a derived tri-state) and checking a folder never
 rewrites descendant prompt checkboxes.
 
+While `#prompt-layer` is open, the workspace keyboard controller is inert; the
+prompt-tree controller owns tree shortcuts (Ctrl/C/X/V are dialog-local
+copy/cut/paste via `treeClipboard` — never the OS clipboard or `copyText`,
+which is reserved for prompt double-click and "Copy prompt text"). Feedback
+for modal actions uses the local `#prompt-status`, not the workspace status.
+New prompt / New folder are permanent header buttons; New prompt inserts
+inside the selected folder only when exactly one folder row is selected,
+otherwise at root.
+
 ## Interaction controllers
 
 Controllers live in `public/app/interactions/` and own browser events for one gesture

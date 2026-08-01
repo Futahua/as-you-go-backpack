@@ -6,10 +6,12 @@ import {
   updatePromptNode,
   removePromptNode,
   movePromptNodes,
+  clonePromptNodesForPaste,
+  insertPromptNodes,
   descendantPromptIds,
-  collectPromptsFromSelectedRoots,
   buildBatchPromptText,
   validatePromptLibrary,
+  selectedRootIds,
 } from '../../prompt-library-model.js';
 import {
   createTreeSelection,
@@ -78,18 +80,21 @@ export function createPromptLibraryDialog({
   let expandedPromptId = null;
   let editingFolderId = null;
   let confirmingDeleteIds = null;
+  let treeClipboard = null;
+  let cutIds = new Set();
   let saving = false;
 
   const icon = (name) => createSvg(document, ICONS[name]);
 
   const layer = document.querySelector('#prompt-layer');
-  const addButton = document.querySelector('#prompt-add');
-  const addMenu = document.querySelector('#prompt-add-menu');
+  const addPromptButton = document.querySelector('#prompt-add-prompt');
+  const addFolderButton = document.querySelector('#prompt-add-folder');
   const cardList = document.querySelector('#prompt-card-list');
   const error = document.querySelector('#prompt-error');
   const cancelButton = document.querySelector('#prompt-cancel');
   const saveButton = document.querySelector('#prompt-save');
   const copyButton = document.querySelector('#copy-prompt');
+  const status = document.querySelector('#prompt-status');
   const deleteConfirm = document.querySelector('#prompt-delete-confirm');
   const deleteMessage = document.querySelector('#prompt-delete-message');
   const deleteOk = document.querySelector('#prompt-delete-ok');
@@ -159,9 +164,14 @@ export function createPromptLibraryDialog({
       const node = findPromptNode(draftLibrary, id);
       if (node && node.type === 'prompt') copyToClipboard(node.text);
     },
-    onCopySelected(ids) {
-      const text = collectPromptsFromSelectedRoots(draftLibrary, ids);
-      if (text) copyToClipboard(text);
+    onCopyNodes(ids) {
+      copyNodes(ids);
+    },
+    onCutNodes(ids) {
+      cutNodes(ids);
+    },
+    onPaste() {
+      pasteTreeClipboard();
     },
     onDelete(ids) {
       deleteRoots(ids);
@@ -219,10 +229,89 @@ export function createPromptLibraryDialog({
 
   function copyToClipboard(text) {
     void copyText(text).then(() => {
-      if (setStatus) setStatus('Prompt copied.');
+      statusMessage('Prompt copied.');
     }).catch((caught) => {
       error.textContent = caught instanceof Error ? caught.message : String(caught);
     });
+  }
+
+  /** Prompt-library-local live feedback, always inside the modal. */
+  function statusMessage(message) {
+    status.textContent = message;
+  }
+
+  function copyNodes(ids) {
+    const roots = selectedRootIds(draftLibrary, ids);
+    if (roots.length === 0) return;
+    const nodes = roots
+      .map((id) => findPromptNode(draftLibrary, id))
+      .filter(Boolean)
+      .map(cloneNode);
+    treeClipboard = { mode: 'copy', nodes };
+    cutIds.clear();
+    statusMessage(`${nodes.length} ${nodes.length === 1 ? 'item' : 'items'} copied.`);
+    render();
+  }
+
+  function cutNodes(ids) {
+    const roots = selectedRootIds(draftLibrary, ids);
+    if (roots.length === 0) return;
+    treeClipboard = { mode: 'cut', nodeIds: roots };
+    cutIds = new Set(roots);
+    statusMessage(`${roots.length} ${roots.length === 1 ? 'item' : 'items'} cut.`);
+    render();
+  }
+
+  function pasteTreeClipboard() {
+    if (!treeClipboard) return;
+    const selected = [...controller.getSelection().selectedIds];
+    let destinationParentId = null;
+    let beforeId = null;
+    if (selected.length === 1) {
+      const node = findPromptNode(draftLibrary, selected[0]);
+      if (node?.type === 'folder') {
+        destinationParentId = selected[0];
+      } else {
+        const row = rowForId(selected[0]);
+        destinationParentId = row?.dataset.parentId || null;
+        beforeId = row?.dataset.nextId || null;
+      }
+    }
+    syncExpandedEditorFromDom();
+    let next = draftLibrary;
+    let pastedIds = [];
+    if (treeClipboard.mode === 'copy') {
+      const clones = clonePromptNodesForPaste(treeClipboard.nodes);
+      const inserted = insertPromptNodes(draftLibrary, destinationParentId, beforeId, clones);
+      if (inserted !== draftLibrary) {
+        next = inserted;
+        pastedIds = clones.map((node) => node.id);
+      }
+    } else {
+      const moved = movePromptNodes(draftLibrary, { nodeIds: treeClipboard.nodeIds, destinationParentId, beforeId });
+      if (moved !== draftLibrary) {
+        next = moved;
+        pastedIds = treeClipboard.nodeIds;
+        treeClipboard = null;
+        cutIds.clear();
+      }
+    }
+    if (next !== draftLibrary) {
+      draftLibrary = next;
+      if (destinationParentId && !expandedFolderIds.has(destinationParentId)) {
+        expandedFolderIds.add(destinationParentId);
+      }
+      controller.setSelection(selectOnlyPaste(pastedIds));
+      statusMessage(`${pastedIds.length} ${pastedIds.length === 1 ? 'item' : 'items'} pasted.`);
+      render();
+    } else {
+      statusMessage('This folder cannot be moved inside itself.');
+    }
+  }
+
+  function selectOnlyPaste(ids) {
+    const first = ids[0] ?? null;
+    return { selectedIds: new Set(ids), anchorId: first, focusedId: first };
   }
 
   function collapseFolder(id) {
@@ -259,6 +348,9 @@ export function createPromptLibraryDialog({
     cardList.textContent = '';
     cardList.append(renderNodes(draftLibrary, null, 0));
     controller.refreshRowStates();
+    for (const row of rows()) {
+      row.classList.toggle('prompt-cut', cutIds.has(row.dataset.nodeId));
+    }
     renderDeleteConfirm();
   }
 
@@ -290,6 +382,7 @@ export function createPromptLibraryDialog({
     row.setAttribute('role', 'treeitem');
     row.setAttribute('aria-level', String(depth + 1));
     row.setAttribute('aria-expanded', String(expanded));
+    row.classList.toggle('prompt-row-expanded', expanded);
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -536,6 +629,16 @@ export function createPromptLibraryDialog({
       expandedFolderIds.delete(id);
     }
     if (expandedPromptId && ids.includes(expandedPromptId)) expandedPromptId = null;
+    if (treeClipboard?.mode === 'cut') {
+      const remaining = treeClipboard.nodeIds.filter((id) => !ids.includes(id));
+      if (remaining.length === 0) {
+        treeClipboard = null;
+        cutIds.clear();
+      } else {
+        treeClipboard = { ...treeClipboard, nodeIds: remaining };
+        cutIds = new Set(remaining);
+      }
+    }
     confirmingDeleteIds = null;
     repairSelectionAfterTreeChangeAndRender();
   }
@@ -564,6 +667,16 @@ export function createPromptLibraryDialog({
 
   // -------------------------------------------------------------- add
 
+  function addPromptFromHeader() {
+    const selected = [...controller.getSelection().selectedIds];
+    let parentId = null;
+    if (selected.length === 1) {
+      const node = findPromptNode(draftLibrary, selected[0]);
+      if (node?.type === 'folder') parentId = selected[0];
+    }
+    addPrompt(parentId);
+  }
+
   function addPrompt(parentId) {
     const added = createPromptNode();
     if (parentId == null) {
@@ -576,6 +689,7 @@ export function createPromptLibraryDialog({
       expandedFolderIds.add(parentId);
     }
     expandedPromptId = added.id;
+    controller.setSelection(selectOnlyPaste([added.id]));
     render();
     focusInRow(added.id, '.prompt-card-title');
   }
@@ -593,22 +707,9 @@ export function createPromptLibraryDialog({
     }
     expandedFolderIds.add(added.id);
     editingFolderId = added.id;
+    controller.setSelection(selectOnlyPaste([added.id]));
     render();
     focusInRow(added.id, '.prompt-folder-rename');
-  }
-
-  function onAddClick() {
-    addMenu.hidden = !addMenu.hidden;
-    addButton.setAttribute('aria-expanded', String(!addMenu.hidden));
-  }
-
-  function onAddMenuItem(event) {
-    const kind = event.target.dataset?.promptAdd;
-    if (!kind) return;
-    addMenu.hidden = true;
-    addButton.setAttribute('aria-expanded', 'false');
-    if (kind === 'prompt') addPrompt(null);
-    else addFolder(null);
   }
 
   // -------------------------------------------------------------- rename
@@ -663,38 +764,58 @@ export function createPromptLibraryDialog({
   }
 
   function buildMenuItems(id, node, multi) {
+    const hasClipboard = treeClipboard != null;
     if (multi) {
-      return [
-        { id: 'copy-selected', label: 'Copy selected' },
+      const items = [
+        { id: 'copy-items', label: 'Copy items' },
+        { id: 'cut-items', label: 'Cut items' },
+      ];
+      if (hasClipboard) items.push({ id: 'paste', label: 'Paste' });
+      items.push(
         { id: 'include', label: 'Include in batch' },
         { id: 'exclude', label: 'Exclude from batch' },
         { id: 'delete', label: 'Delete' },
-      ];
+      );
+      return items;
     }
     if (node.type === 'folder') {
       const expanded = expandedFolderIds.has(id);
-      return [
+      const items = [
         { id: 'expand-toggle', label: expanded ? 'Collapse' : 'Expand' },
         { id: 'rename', label: 'Rename' },
+        { id: 'copy-items', label: 'Copy item' },
+        { id: 'cut-items', label: 'Cut item' },
+      ];
+      if (hasClipboard) items.push({ id: 'paste', label: 'Paste inside' });
+      items.push(
         { id: node.includeAll ? 'exclude' : 'include', label: node.includeAll ? 'Use child selections' : 'Include everything inside' },
         { id: 'new-prompt-inside', label: 'New prompt inside' },
         { id: 'new-folder-inside', label: 'New folder inside' },
         { id: 'delete', label: 'Delete' },
-      ];
+      );
+      return items;
     }
-    return [
-      { id: 'copy', label: 'Copy' },
-      { id: 'edit', label: 'Edit' },
+    const items = [
+      { id: 'edit', label: 'Open / Edit' },
+      { id: 'copy-text', label: 'Copy prompt text' },
+      { id: 'copy-items', label: 'Copy item' },
+      { id: 'cut-items', label: 'Cut item' },
+    ];
+    if (hasClipboard) items.push({ id: 'paste', label: 'Paste after' });
+    items.push(
       { id: node.includeInBatch ? 'exclude' : 'include', label: node.includeInBatch ? 'Exclude from batch' : 'Include in batch' },
       { id: 'delete', label: 'Delete' },
-    ];
+    );
+    return items;
   }
 
   function handleMenuAction(action, id, multi) {
     const ids = multi ? [...controller.getSelection().selectedIds] : [id];
-    if (action === 'copy') intents.onCopyPrompt(id);
-    else if (action === 'copy-selected') intents.onCopySelected(ids);
-    else if (action === 'edit') intents.onOpenPrompt(id);
+    if (action === 'edit') intents.onOpenPrompt(id);
+    else if (action === 'copy-text') intents.onCopyPrompt(id);
+    else if (action === 'copy-items') copyNodes(ids);
+    else if (action === 'cut-items') cutNodes(ids);
+    else if (action === 'paste') pasteTreeClipboard();
     else if (action === 'expand-toggle') intents.onToggleFolder(id);
     else if (action === 'rename') intents.onBeginRename(id);
     else if (action === 'include') setBatchIncludedFor(ids, true);
@@ -726,17 +847,21 @@ export function createPromptLibraryDialog({
     expandedPromptId = null;
     editingFolderId = null;
     confirmingDeleteIds = null;
+    treeClipboard = null;
+    cutIds.clear();
     contextMenu.close();
-    addMenu.hidden = true;
-    addButton.setAttribute('aria-expanded', 'false');
     controller.setSelection(createTreeSelection());
     error.textContent = options.message || '';
+    status.textContent = '';
     render();
     layer.hidden = false;
   }
 
   function close() {
     contextMenu.close();
+    treeClipboard = null;
+    cutIds.clear();
+    status.textContent = '';
     layer.hidden = true;
     error.textContent = '';
   }
@@ -782,8 +907,8 @@ export function createPromptLibraryDialog({
       event.preventDefault();
       open();
     }, { signal });
-    addButton.addEventListener('click', onAddClick, { signal });
-    addMenu.addEventListener('click', onAddMenuItem, { signal });
+    addPromptButton.addEventListener('click', addPromptFromHeader, { signal });
+    addFolderButton.addEventListener('click', () => addFolder(null), { signal });
     deleteOk.addEventListener('click', onDeleteOk, { signal });
     deleteCancel.addEventListener('click', onDeleteCancel, { signal });
     cancelButton.addEventListener('click', onCancel, { signal });

@@ -224,17 +224,15 @@ function createHarness({ initialView = null } = {}) {
     setStatus: () => {},
   });
   const topIds = [
-    'prompt-layer', 'prompt-add', 'prompt-add-menu', 'prompt-card-list', 'prompt-tree-menu',
+    'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-card-list', 'prompt-tree-menu', 'prompt-status',
     'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   nodes['prompt-layer'].hidden = true;
-  const promptItem = makeNode('button');
-  promptItem.dataset.promptAdd = 'prompt';
-  const folderItem = makeNode('button');
-  folderItem.dataset.promptAdd = 'folder';
-  nodes['prompt-add-menu'].append(promptItem, folderItem);
+  nodes['prompt-status'].setAttribute('role', 'status');
+  nodes['prompt-status'].setAttribute('aria-live', 'polite');
+
   const documentMock = {
     querySelector: (sel) => nodes[sel.slice(1)] ?? null,
     createElement: (tag) => makeNode(tag),
@@ -548,7 +546,7 @@ test('context menu for a single prompt offers copy/edit/include/delete', () => {
   clickRow(h, 'prompt-root');
   h.rowFor('prompt-root').dispatch('contextmenu', { target: h.rowFor('prompt-root'), clientX: 10, clientY: 10, preventDefault });
   const labels = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').map((b) => b.textContent);
-  assert.deepEqual(labels, ['Copy', 'Edit', 'Exclude from batch', 'Delete']);
+  assert.deepEqual(labels, ['Open / Edit', 'Copy prompt text', 'Copy item', 'Cut item', 'Exclude from batch', 'Delete']);
 });
 
 test('context menu for a folder offers expand/rename/include/new-inside/delete', () => {
@@ -574,16 +572,20 @@ test('context menu include/exclude updates the node', () => {
   assert.equal(h.rowFor('prompt-a').querySelector('.prompt-checkbox').checked, false, 'prompt excluded');
 });
 
-test('context menu Copy selected deduplicates descendants and ignores checkboxes', () => {
+test('context-menu Copy prompt text copies the draft prompt body only', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  clickRow(h, 'folder-dev');
-  clickRow(h, 'prompt-a', { ctrlKey: true });
-  h.rowFor('folder-dev').dispatch('contextmenu', { target: h.rowFor('folder-dev'), clientX: 10, clientY: 10, preventDefault });
-  const copyItem = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').find((b) => b.textContent === 'Copy selected');
+  openPrompt(h, 'prompt-root');
+  const textarea = h.textareaFor('prompt-root');
+  textarea.value = 'unsaved body';
+  textarea.dispatch('input', { target: textarea });
+  clickRow(h, 'prompt-root');
+  h.rowFor('prompt-root').dispatch('contextmenu', { target: h.rowFor('prompt-root'), clientX: 10, clientY: 10, preventDefault });
+  const copyItem = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').find((b) => b.textContent === 'Copy prompt text');
   copyItem.dispatch('click', { target: copyItem, preventDefault, stopPropagation });
   return Promise.resolve().then(() => {
-    assert.deepEqual(h.copied, ['one\n\ntwo'], 'folder descendants copied once, unchecked prompts included');
+    assert.deepEqual(h.copied, ['unsaved body']);
+    assert.ok(h.nodes['prompt-status'].textContent.includes('Prompt copied'), 'feedback is local to the modal');
   });
 });
 
@@ -712,17 +714,15 @@ test('persistence failure leaves the dialog open and re-enables Save', async () 
     setStatus: () => {},
   });
   const topIds = [
-    'prompt-layer', 'prompt-add', 'prompt-add-menu', 'prompt-card-list', 'prompt-tree-menu',
+    'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-card-list', 'prompt-tree-menu', 'prompt-status',
     'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   nodes['prompt-layer'].hidden = true;
-  const promptItem = makeNode('button');
-  promptItem.dataset.promptAdd = 'prompt';
-  const folderItem = makeNode('button');
-  folderItem.dataset.promptAdd = 'folder';
-  nodes['prompt-add-menu'].append(promptItem, folderItem);
+  nodes['prompt-status'].setAttribute('role', 'status');
+  nodes['prompt-status'].setAttribute('aria-live', 'polite');
+
   const documentMock = {
     querySelector: (sel) => nodes[sel.slice(1)] ?? null,
     createElement: (tag) => makeNode(tag),
@@ -758,6 +758,118 @@ test('persistence failure leaves the dialog open and re-enables Save', async () 
   assert.equal(nodes['prompt-layer'].hidden, false, 'dialog stays open');
   assert.ok(nodes['prompt-error'].textContent.includes('disk full'));
   assert.equal(nodes['prompt-save'].disabled, false);
+});
+
+test('Ctrl+C stores nodes internally without calling copyText', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  keyOn(h, { key: 'c', ctrlKey: true });
+  assert.deepEqual(h.copied, [], 'no OS clipboard write');
+  assert.ok(h.nodes['prompt-status'].textContent.includes('2 items copied'));
+});
+
+test('Ctrl+V duplicates copied nodes with recursively unique ids', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  keyOn(h, { key: 'c', ctrlKey: true });
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const saved = h.getState().view.promptLibrary;
+  const ids = new Set();
+  const walk = (list) => list.forEach((n) => { ids.add(n.id); if (n.type === 'folder') walk(n.children); });
+  walk(saved);
+  const count = [...ids].filter((id) => id.startsWith('prompt-') || id.startsWith('folder-')).length;
+  assert.ok(count >= 6, 'originals and unique-id clones both present');
+  assert.equal(ids.size, count, 'all ids unique across the tree');
+});
+
+test('Ctrl+X marks cut roots and Ctrl+V moves them atomically into a selected folder', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  keyOn(h, { key: 'x', ctrlKey: true });
+  assert.ok(h.rowFor('prompt-root'), 'cut rows remain visible');
+  assert.ok(h.rowFor('prompt-root').classList.contains('prompt-cut'));
+  clickRow(h, 'folder-dev');
+  keyOn(h, { key: 'v', ctrlKey: true });
+  assert.ok(h.nodes['prompt-status'].textContent.includes('1 item pasted'));
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const children = h.getState().view.promptLibrary[0].children;
+  assert.ok(children.some((n) => n.id === 'prompt-root'), 'cut prompt moved inside folder-dev');
+  assert.equal(h.getState().view.promptLibrary.some((n) => n.id === 'prompt-root'), false);
+});
+
+test('pasting a folder into its own descendant is rejected', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'folder-dev');
+  keyOn(h, { key: 'x', ctrlKey: true });
+  const toggle = h.rowFor('folder-inner').querySelector('.prompt-folder-toggle');
+  toggle.dispatch('click', { target: toggle, preventDefault, stopPropagation });
+  clickRow(h, 'prompt-b');
+  keyOn(h, { key: 'v', ctrlKey: true });
+  assert.ok(h.nodes['prompt-status'].textContent.includes('cannot be moved inside itself'));
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  assert.equal(h.getState().view.promptLibrary[0].id, 'folder-dev', 'folder stayed at root');
+});
+
+test('editable controls keep native copy/cut/paste', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  openPrompt(h, 'prompt-root');
+  const input = h.rowFor('prompt-root').querySelector('.prompt-card-title');
+  input.dispatch('keydown', { target: input, key: 'c', ctrlKey: true, preventDefault, stopPropagation });
+  assert.deepEqual(h.copied, [], 'no copy triggered from inside an editable control');
+});
+
+test('New prompt respects the exactly-one-selected-folder rule', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'folder-inner');
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const inner = h.getState().view.promptLibrary[0].children[1];
+  assert.equal(inner.children[inner.children.length - 1].type, 'prompt', 'added inside the selected folder');
+
+  const h2 = createHarness({ initialView: treeFixture().view });
+  open(h2);
+  clickRow(h2, 'prompt-a');
+  clickRow(h2, 'prompt-root', { ctrlKey: true });
+  h2.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  await h2.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const saved = h2.getState().view.promptLibrary;
+  assert.equal(saved[saved.length - 1].type, 'prompt', 'multi-selection adds at root');
+});
+
+test('New folder adds at root and enters rename', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-folder'].dispatch('click', { preventDefault });
+  const newFolder = h.folderRows().find((row) => row.querySelector('.prompt-folder-rename'));
+  assert.ok(newFolder, 'new folder in rename mode');
+  assert.equal(newFolder.dataset.parentId, '', 'added at root');
+});
+
+test('local status is live feedback and not the global workspace status', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  assert.equal(h.nodes['prompt-status'].getAttribute('role'), 'status');
+  assert.equal(h.nodes['prompt-status'].getAttribute('aria-live'), 'polite');
+  clickRow(h, 'prompt-root');
+  keyOn(h, { key: 'x', ctrlKey: true });
+  assert.ok(h.nodes['prompt-status'].textContent.includes('1 item cut'));
+  assert.deepEqual(h.statuses, [], 'global setStatus is never used for modal actions');
+});
+
+test('expanded prompt row carries the expanded styling class', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  openPrompt(h, 'prompt-root');
+  assert.ok(h.rowFor('prompt-root').classList.contains('prompt-row-expanded'));
 });
 
 test('destroy removes all listeners', () => {

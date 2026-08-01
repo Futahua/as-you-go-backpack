@@ -223,8 +223,20 @@ export function createPromptTreeController({
     if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'c') {
       event.preventDefault();
       if (selection.selectedIds.size > 0) {
-        intents.onCopySelected([...selectedRootIds(getTree(), [...selection.selectedIds])]);
+        intents.onCopyNodes([...selectedRootIds(getTree(), [...selection.selectedIds])]);
       }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'x') {
+      event.preventDefault();
+      if (selection.selectedIds.size > 0) {
+        intents.onCutNodes([...selectedRootIds(getTree(), [...selection.selectedIds])]);
+      }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'v') {
+      event.preventDefault();
+      intents.onPaste();
       return;
     }
     if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'a') {

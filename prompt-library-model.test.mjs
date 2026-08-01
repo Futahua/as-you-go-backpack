@@ -15,6 +15,8 @@ import {
   collectIncludedPrompts,
   selectedRootIds,
   collectPromptsFromSelectedRoots,
+  clonePromptNodesForPaste,
+  insertPromptNodes,
   buildBatchPromptText,
   validatePromptLibrary,
   resolveCopierAction,
@@ -405,6 +407,39 @@ test('created prompt and folder nodes have unique ids and correct types', () => 
   assert.deepEqual(createPromptFolder().children, []);
   assert.equal(createPromptNode().includeInBatch, false);
   assert.equal(createPromptFolder().includeAll, false);
+});
+
+test('clonePromptNodesForPaste regenerates every id recursively', () => {
+  const nodes = [
+    {
+      id: 'folder-a', type: 'folder', title: 'A', includeAll: true,
+      children: [prompt('p1', 'P', 'one', true)],
+    },
+  ];
+  const clones = clonePromptNodesForPaste(nodes);
+  assert.notEqual(clones[0].id, 'folder-a');
+  assert.notEqual(clones[0].children[0].id, 'p1');
+  assert.equal(clones[0].title, 'A');
+  assert.equal(clones[0].includeAll, true);
+  assert.equal(clones[0].children[0].title, 'P');
+  assert.equal(clones[0].children[0].text, 'one');
+  assert.equal(clones[0].children[0].includeInBatch, true);
+  const all = new Set([nodes[0].id, nodes[0].children[0].id, clones[0].id, clones[0].children[0].id]);
+  assert.equal(all.size, 4, 'source and clone ids are all distinct');
+});
+
+test('insertPromptNodes inserts inside a folder or before a sibling', () => {
+  const library = [
+    { id: 'folder-x', type: 'folder', title: 'X', includeAll: false, children: [prompt('a', 'A', 'one', true)] },
+    prompt('b', 'B', 'two', true),
+  ];
+  const inside = insertPromptNodes(library, 'folder-x', null, [prompt('c', 'C', 'three', true)]);
+  assert.deepEqual(findPromptNode(inside, 'folder-x').children.map((n) => n.id), ['a', 'c']);
+  const before = insertPromptNodes(library, null, 'b', [prompt('d', 'D', 'four', true)]);
+  assert.deepEqual(before.map((n) => n.id), ['folder-x', 'd', 'b']);
+  assert.equal(insertPromptNodes(library, 'folder-x', 'zz', [prompt('e', 'E', 'five', true)]), library, 'invalid beforeId returns original');
+  assert.equal(insertPromptNodes(library, 'zz', null, [prompt('e', 'E', 'five', true)]), library, 'invalid parent returns original');
+  assert.equal(insertPromptNodes(library, 'folder-x', null, []), library, 'empty insert returns original');
 });
 
 test('resolveCopierAction keeps selected-target precedence', () => {
