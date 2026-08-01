@@ -1,7 +1,7 @@
 /** Owns prompt-tree DOM interaction: row selection, keyboard navigation,
  * double-click, context-menu requests, and pointer drag planning. Translates
  * events into plain intents via injected callbacks; never calls the host,
- * persists state, or owns Save/Cancel. Tree traversal comes from the pure
+ * persists state, or owns save/close. Tree traversal comes from the pure
  * prompt-library-model and prompt-tree-selection modules. */
 import {
   createTreeSelection,
@@ -30,7 +30,7 @@ export function createPromptTreeController({
   // not wrap it.
   viewport = list,
   // Keyboard scope for tree-level shortcuts. Must contain the tree, the add
-  // buttons, Save/Cancel, the context menu, and the editors so Ctrl+Z/Y/C/X/V
+  // buttons, Close, the context menu, and the editors so Ctrl+Z/Y/C/X/V
   // work from anywhere non-editable in the modal. Defaults to the viewport.
   keyboardTarget = viewport,
   getTree,
@@ -93,10 +93,6 @@ export function createPromptTreeController({
     }
   }
 
-  function emitSelection(next) {
-    setSelection(next);
-  }
-
   // ------------------------------------------------------------------ clicks
 
   function onRowClick(event) {
@@ -121,18 +117,18 @@ export function createPromptTreeController({
     if (!row) {
       // Blank root space: clear rows, target root, and take focus so the next
       // Ctrl+V has a live keyboard target. The clipboard is deliberately kept.
-      emitSelection(clearSelection());
+      setSelection(clearSelection());
       intents.onBlankClick?.();
       focusRoot();
       return;
     }
     const id = row.dataset.nodeId;
     if (event.ctrlKey || event.metaKey) {
-      emitSelection(toggleSelected(selection, id));
+      setSelection(toggleSelected(selection, id));
     } else if (event.shiftKey) {
-      emitSelection(selectVisibleRange(selection, id, visibleIds()));
+      setSelection(selectVisibleRange(selection, id, visibleIds()));
     } else {
-      emitSelection(selectOnly(selection, id));
+      setSelection(selectOnly(selection, id));
     }
     focusRow(selection.focusedId ?? id);
   }
@@ -151,7 +147,7 @@ export function createPromptTreeController({
     const row = event.target.closest('.prompt-tree-row');
     if (!row) {
       // Same root targeting as a blank left-click, then open the root menu.
-      emitSelection(clearSelection());
+      setSelection(clearSelection());
       intents.onBlankClick?.();
       focusRoot();
       intents.onOpenRootContextMenu?.(event.clientX, event.clientY);
@@ -159,7 +155,7 @@ export function createPromptTreeController({
     }
     const id = row.dataset.nodeId;
     if (!selection.selectedIds.has(id)) {
-      emitSelection(selectOnly(selection, id));
+      setSelection(selectOnly(selection, id));
     }
     focusRow(id);
     intents.onOpenContextMenu(event.clientX, event.clientY, id);
@@ -293,7 +289,7 @@ export function createPromptTreeController({
     }
     if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'a') {
       event.preventDefault();
-      emitSelection(selectAllVisible(selection, visibleIds()));
+      setSelection(selectAllVisible(selection, visibleIds()));
       return;
     }
     if (event.key === 'Escape') {
@@ -352,7 +348,7 @@ export function createPromptTreeController({
       // Start dragging exactly once: an already-selected row drags the whole
       // selection; an unselected row is selected first and then dragged.
       if (!drag.rowSelected) {
-        emitSelection(selectOnly(selection, drag.rowId));
+        setSelection(selectOnly(selection, drag.rowId));
       }
       drag.draggedIds = [...selectedRootIds(getTree(), [...selection.selectedIds])];
       setDraggingVisual(drag.draggedIds);
@@ -472,7 +468,7 @@ export function createPromptTreeController({
     viewport.addEventListener('pointerup', onPointerUp, { signal });
     viewport.addEventListener('pointercancel', onPointerCancel, { signal });
     // Keyboard is bound to the whole modal so tree shortcuts work from the add
-    // buttons, Save/Cancel, and blank dialog background — not just the rows.
+    // buttons, Close, and blank dialog background — not just the rows.
     if (keyboardTarget !== viewport) {
       keyboardTarget.addEventListener('keydown', onKeyDown, { signal });
     } else {

@@ -81,7 +81,7 @@ function createIconButton(document, { className, label, icon }) {
 
 /** Panel composition root for the prompt library. Owns opening/closing, the
  * draft tree, expansion/editor/rename/delete-confirm state, rendering, and
- * Save/Cancel. Selection, keyboard, double-click, context menu, and drag
+ * auto-save. Selection, keyboard, double-click, context menu, and drag
  * interactions are delegated to the prompt-tree controller and context menu,
  * which emit plain intents back into this panel. */
 export function createPromptLibraryDialog({
@@ -263,7 +263,7 @@ export function createPromptLibraryDialog({
     list: cardList,
     viewport,
     // Whole-modal keyboard scope: tree shortcuts must work from the add
-    // buttons, Save/Cancel and blank dialog background, not only from a row.
+    // buttons, Close and blank dialog background, not only from a row.
     keyboardTarget: layer,
     getTree: () => draftLibrary,
     getExpandedFolders: () => expandedFolderIds,
@@ -705,13 +705,6 @@ export function createPromptLibraryDialog({
   function rowForId(id) {
     for (const row of rows()) {
       if (row.dataset.nodeId === id) return row;
-    }
-    return null;
-  }
-
-  function detailsForId(id) {
-    for (const details of cardList.querySelectorAll('.prompt-card-details')) {
-      if (details.dataset.nodeId === id) return details;
     }
     return null;
   }
