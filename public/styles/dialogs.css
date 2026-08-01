@@ -47,6 +47,7 @@
 .editor textarea { resize: vertical; }
 .editor-actions { gap: 8px; flex-wrap: wrap; }
 .editor-submit { justify-content: flex-end; margin-top: 18px; }
+.confirm-card .editor-actions { justify-content: flex-end; }
 .paper-button.primary { border-color: #4c725a; background: #4c725a; color: white; }
 .paper-button.danger { border-color: #9d4939; background: #9d4939; color: white; }
 .file-button { display: inline-flex !important; margin: 0 !important; font-weight: 400 !important; }
