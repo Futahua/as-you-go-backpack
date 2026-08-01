@@ -1045,15 +1045,22 @@ test('expanded prompt row carries the expanded styling class', () => {
   assert.ok(h.rowFor('prompt-root').classList.contains('prompt-row-expanded'));
 });
 
-test('copying a folder is rejected while moving it stays supported', () => {
+test('copying a folder pastes an independent cloned subtree', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   clickRow(h, 'folder-dev');
   keyOn(h, { key: 'c', ctrlKey: true });
-  assert.ok(h.nodes['prompt-status'].textContent.includes('Folders can be moved but not copied'), 'folder copy rejected');
-  keyOn(h, { key: 'x', ctrlKey: true });
-  assert.ok(h.nodes['prompt-status'].textContent.includes('1 item cut'), 'folder cut still supported');
-  assert.ok(h.rowFor('folder-dev').classList.contains('prompt-cut'));
+  assert.ok(h.nodes['prompt-status'].textContent.includes('1 item copied'), 'folder copy allowed');
+  blankClick(h);
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await save(h);
+  const saved = h.getState().view.promptLibrary;
+  assert.ok(saved.length > 2, 'a folder clone was added at root');
+  const clone = saved[saved.length - 1];
+  assert.equal(clone.type, 'folder');
+  assert.equal(clone.title, 'Dev');
+  assert.notEqual(clone.id, 'folder-dev', 'the clone is an independent record');
+  assert.equal(clone.children.length, 2, 'the whole subtree was copied');
 });
 
 test('prompt dialog use never changes workspace entity counts', async () => {

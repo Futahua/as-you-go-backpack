@@ -123,7 +123,7 @@ test('two distinct shortcut records stay two nodes even when names match', () =>
   assert.notEqual(items[0].id, items[1].id);
 });
 
-test('workspace copySelection deep-clones folder subtrees (leak mechanism)', () => {
+test('workspace folder copy intentionally clones the subtree as independent records', () => {
   let state = createGroup(emptyState(), 'Letters');
   const letters = state.groups[0];
   state = createGroup(state, 'Run', letters.id);
@@ -132,11 +132,11 @@ test('workspace copySelection deep-clones folder subtrees (leak mechanism)', () 
   const groupCount = state.groups.length;
   const shortcutCount = state.shortcuts.length;
   const copied = copySelection(state, [letters.id], ROOT_ID);
-  assert.ok(copied.groups.length > groupCount, 'copying a folder clones its subtree');
+  assert.ok(copied.groups.length > groupCount, 'copying a folder clones its subtree (folders are not synced aliases)');
   const newGroups = copied.groups.slice(groupCount);
-  assert.ok(newGroups.some((g) => g.name === 'Letters'), 'a cloned Letters group was created');
-  assert.ok(newGroups.some((g) => g.name === 'Run'), 'a cloned Run group was created');
-  assert.equal(copied.shortcuts.length, shortcutCount, 'shortcut records are not duplicated; placements stay linked');
+  assert.ok(newGroups.some((g) => g.name === 'Letters'), 'a new Letters group was created');
+  assert.ok(newGroups.some((g) => g.name === 'Run'), 'a new Run group was created');
+  assert.equal(copied.shortcuts.length, shortcutCount, 'shortcut records stay canonical; placements remain linked');
 });
 
 test('graph model can be built with no Explorer DOM mounted', () => {  const state = makeFixtureState();
