@@ -54,6 +54,7 @@ import { createEditorDialog } from './app/components/editor-dialog.js';
 import { createBinControls } from './app/components/bin-controls.js';
 import { bootstrapWorkspace } from './app/bootstrap.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
+import { createWorkspaceCommands } from './app/workspace-commands.js';
 
 const host = createHostBridge(window);
 
@@ -90,6 +91,12 @@ const store = createWorkspaceStore({
   },
 });
 const session = store.getSession();
+
+const commands = createWorkspaceCommands({
+  store,
+  syncSelection,
+  saveWorkspaceView,
+});
 let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
@@ -1052,38 +1059,8 @@ async function commit(nextState, options = {}) {
   return store.commit(nextState, options);
 }
 
-async function undo() {
-  await store.undo();
-}
-
-async function redo() {
-  await store.redo();
-}
-
 function visibleItemIds() {
   return [...elements.grid.querySelectorAll('.icon-item')].map((node) => node.dataset.id);
-}
-
-function selectItem(itemId, event) {
-  if (event.shiftKey && session.selectionAnchor) {
-    const ids = visibleItemIds();
-    const from = ids.indexOf(session.selectionAnchor);
-    const to = ids.indexOf(itemId);
-    if (from >= 0 && to >= 0) {
-      if (!event.ctrlKey) store.clearSelection();
-      const [start, end] = from < to ? [from, to] : [to, from];
-      ids.slice(start, end + 1).forEach((id) => store.addToSelection(id));
-    }
-  } else if (event.ctrlKey) {
-    if (session.selected.has(itemId)) store.removeFromSelection(itemId);
-    else store.addToSelection(itemId);
-    store.setSelectionAnchor(itemId);
-  } else {
-    store.setSelection([itemId]);
-    store.setSelectionAnchor(itemId);
-  }
-  syncSelection();
-  saveWorkspaceView();
 }
 
 function marqueeBounds(startX, startY, endX, endY) {
@@ -1375,7 +1352,11 @@ elements.grid.addEventListener('click', (event) => {
       return;
     }
     if (tile.classList.contains('bin-origin-ghost')) return;
-    selectItem(tile.dataset.id, event);
+    commands.selectItem(tile.dataset.id, {
+      shiftKey: event.shiftKey,
+      ctrlKey: event.ctrlKey,
+      visibleItemIds: visibleItemIds(),
+    });
     return;
   }
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
@@ -1831,11 +1812,11 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
-    undo();
+    commands.undo();
   }
   if (event.ctrlKey && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) {
     event.preventDefault();
-    redo();
+    commands.redo();
   }
   if (event.key === 'Delete' && session.selected.size > 0) {
     event.preventDefault();
