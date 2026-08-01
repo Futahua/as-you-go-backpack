@@ -50,6 +50,7 @@ import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
+import { createEditorDialog } from './app/components/editor-dialog.js';
 
 const host = createHostBridge(window);
 
@@ -78,9 +79,6 @@ let selected = new Set();
 let selectionAnchor = null;
 let graphExpanded = new Set();
 let clipboard = null;
-let editorMode = null;
-let editorIcon = null;
-let editorTargetIcon = null;
 let binMode = false;
 let binCurrentId = 'bin';
 let marqueeDrag = null;
@@ -1319,174 +1317,6 @@ async function pasteInto(parentIds) {
   }
 }
 
-function showIconPreview(source) {
-  if (!source) {
-    elements.iconPreview.hidden = true;
-    elements.iconFallback.removeAttribute('hidden');
-    return;
-  }
-  elements.iconPreview.hidden = false;
-  elements.iconPreview.src = source;
-  elements.iconFallback.setAttribute('hidden', '');
-}
-
-async function resolveEditorTargetIcon() {
-  if (editorIcon) return showIconPreview(editorIcon);
-  if (editorTargetIcon) return showIconPreview(editorTargetIcon);
-  if (editorMode?.kind === 'web') {
-    const target = elements.target.value.trim();
-    if (target) {
-      return hydrateWebPreview(elements.iconPreview, elements.iconFallback, target);
-    }
-    return showIconPreview(null);
-  }
-  if (editorMode?.kind === 'shortcut' && editorMode.item?.id) {
-    try {
-      editorTargetIcon = await host.shortcutIcon({
-        actionId: editorMode.item.id,
-      });
-    } catch {
-      editorTargetIcon = null;
-    }
-  }
-  showIconPreview(editorTargetIcon);
-}
-
-function showEditor(kind, existing = null, parentId = currentId) {
-  closeMenu();
-  const representedPlacementId =
-    (kind === 'shortcut' || kind === 'web') && existing
-      ? visiblePlacementIdFor(existing.id)
-      : null;
-  editorMode = { kind, item: existing, parentId, representedPlacementId };
-  editorIcon = existing?.icon ?? null;
-  editorTargetIcon =
-    kind === 'shortcut' && existing && !existing.icon
-      ? iconCache.get(existing.id) ?? null
-      : null;
-  elements.editorTitle.textContent = kind === 'group'
-    ? existing ? 'Edit folder' : 'New folder'
-    : kind === 'web'
-      ? existing ? 'Edit web link' : 'Add web link'
-      : existing ? 'Edit shortcut' : 'Add shortcut';
-  elements.name.value = existing?.name ?? '';
-  elements.description.value = existing?.description ?? '';
-  elements.target.value = existing?.target ?? '';
-  elements.descriptionLabel.hidden = kind === 'group';
-  elements.targetFields.hidden = kind === 'group';
-  elements.target.readOnly = kind !== 'web';
-  elements.target.placeholder = kind === 'web' ? 'https://example.com' : '';
-  elements.targetActions.hidden = kind === 'web';
-  elements.iconFallback.textContent = kind === 'group' ? '▰' : '↗';
-  elements.iconDefaultButton.textContent =
-    kind === 'group' ? 'Use folder icon' : kind === 'web' ? 'Use website icon' : 'Use target icon';
-  elements.iconInput.value = '';
-  elements.editorError.textContent = '';
-  elements.editorLayer.hidden = false;
-  resolveEditorTargetIcon();
-  elements.name.focus();
-}
-
-function hideEditor() {
-  editorMode = null;
-  editorIcon = null;
-  editorTargetIcon = null;
-  elements.editorLayer.hidden = true;
-  elements.linkEditLayer.hidden = true;
-}
-
-async function chooseTarget(kind) {
-  try {
-    const result = await host.pickTarget(kind);
-    if (!result) return;
-    if (typeof result === 'string') {
-      elements.target.value = result;
-      editorTargetIcon = null;
-    } else {
-      if (!result.target) return;
-      elements.target.value = result.target ?? '';
-      editorTargetIcon = result.icon ?? null;
-    }
-    if (!editorIcon) showIconPreview(editorTargetIcon);
-  } catch (error) {
-    elements.editorError.textContent = error instanceof Error ? error.message : String(error);
-  }
-}
-
-function editedShortcutIsLinked() {
-  if (editorMode?.kind !== 'shortcut' && editorMode?.kind !== 'web') return false;
-  const existingId = editorMode.item?.id;
-  if (!existingId) return false;
-  const record = shortcut(existingId);
-  return record ? placementCount(record) > 1 : false;
-}
-
-async function saveEditor() {
-  if (!editorMode || elements.saveButton.disabled) return;
-  if (editedShortcutIsLinked()) {
-    elements.linkEditLayer.hidden = false;
-    return;
-  }
-  await commitEditorSave(false);
-}
-
-async function commitEditorSave(forkFirst) {
-  elements.saveButton.disabled = true;
-  elements.saveButton.textContent = 'Saving…';
-  const name = elements.name.value.trim();
-  try {
-    let workingState = state;
-    let editItemId = editorMode.item?.id;
-    if (forkFirst && editItemId) {
-      const representedPlacementId =
-        editorMode.representedPlacementId ?? anyActivePlacementId(editItemId);
-      if (representedPlacementId) {
-        const knownIds = new Set(workingState.shortcuts.map((candidate) => candidate.id));
-        workingState = forkPlacement(workingState, representedPlacementId);
-        const forked = workingState.shortcuts.find((candidate) => !knownIds.has(candidate.id));
-        if (forked) editItemId = forked.id;
-      }
-    }
-    let next;
-    if (editorMode.kind === 'group') {
-      next = editorMode.item
-        ? updateGroup(workingState, editorMode.item.id, { name, icon: editorIcon })
-        : createGroup(workingState, name, editorMode.parentId, editorIcon);
-    } else {
-      const changes = {
-        name,
-        description: elements.description.value.trim(),
-        target: elements.target.value.trim(),
-        icon: editorIcon,
-      };
-      next = editorMode.kind === 'web'
-        ? editorMode.item
-          ? updateWebLink(workingState, editItemId, changes)
-          : createWebLink(workingState, { ...changes, parentId: editorMode.parentId })
-        : editorMode.item
-          ? updateShortcut(workingState, editItemId, changes)
-          : createShortcut(workingState, { ...changes, parentId: editorMode.parentId });
-    }
-    const editedShortcutId = editorMode.kind === 'group' ? null : editItemId;
-    const refreshTargetIcon = Boolean(
-      editedShortcutId
-      && (!editorIcon || editorMode.item?.target !== elements.target.value.trim()),
-    );
-    if (await commit(next, 'Saved.')) {
-      if (refreshTargetIcon) {
-        iconCache.delete(editedShortcutId);
-        render();
-      }
-      hideEditor();
-    }
-  } catch (error) {
-    elements.editorError.textContent = error instanceof Error ? error.message : String(error);
-  } finally {
-    elements.saveButton.disabled = false;
-    elements.saveButton.textContent = 'Save';
-  }
-}
-
 /** Resolves a set of graph item ids (groups or shared shortcut identities)
  * to the exact Bin-context ids binSelection() needs — a linked shortcut
  * with more than one visible edge bins every one of its placements (the
@@ -1509,16 +1339,16 @@ async function moveToBin() {
 
 async function runMenuAction(action) {
   const onlyId = selected.size === 1 ? [...selected][0] : null;
-  if (action === 'new-folder') return showEditor('group', null, elements.menu.dataset.parent);
-  if (action === 'new-shortcut') return showEditor('shortcut', null, elements.menu.dataset.parent);
-  if (action === 'new-web-link') return showEditor('web', null, elements.menu.dataset.parent);
+  if (action === 'new-folder') return editorDialog.showEditor('group', null, elements.menu.dataset.parent);
+  if (action === 'new-shortcut') return editorDialog.showEditor('shortcut', null, elements.menu.dataset.parent);
+  if (action === 'new-web-link') return editorDialog.showEditor('web', null, elements.menu.dataset.parent);
   if (action === 'paste') return pasteInto(elements.menu.dataset.parent);
   if (action === 'open' && onlyId) return activate(onlyId);
   if (action === 'edit' && onlyId) {
     const chosen = shortcut(onlyId);
-    return showEditor(isWebLink(chosen) ? 'web' : 'shortcut', chosen);
+    return editorDialog.showEditor(isWebLink(chosen) ? 'web' : 'shortcut', chosen);
   }
-  if (action === 'rename' && onlyId) return showEditor('group', group(onlyId));
+  if (action === 'rename' && onlyId) return editorDialog.showEditor('group', group(onlyId));
   if (action === 'copy') return copyOrCut('copy');
   if (action === 'cut') return copyOrCut('cut');
   if (action === 'bin') return moveToBin();
@@ -2209,95 +2039,6 @@ elements.restoreAllBin.addEventListener('click', () => {
   confirmDialog.askRestoreConfirm(binnedItems(state).map((candidate) => candidate.id), true);
 });
 
-elements.editor.addEventListener('submit', (event) => {
-  event.preventDefault();
-  void saveEditor();
-});
-const saveButton = elements.saveButton;
-saveButton.addEventListener('click', () => void saveEditor());
-document.querySelector('#cancel-editor').addEventListener('click', hideEditor);
-document.querySelector('#pick-file').addEventListener('click', () => chooseTarget('file'));
-document.querySelector('#pick-folder').addEventListener('click', () => chooseTarget('folder'));
-elements.iconDefaultButton.addEventListener('click', () => {
-  editorIcon = null;
-  if (editorMode?.kind === 'group') editorTargetIcon = null;
-  if (editorMode?.kind === 'web') {
-    resolveEditorTargetIcon();
-    return;
-  }
-  resolveEditorTargetIcon();
-});
-elements.target.addEventListener('input', () => {
-  if (editorMode?.kind !== 'web' || editorIcon) return;
-  hydrateWebPreview(elements.iconPreview, elements.iconFallback, elements.target.value.trim());
-});
-elements.iconInput.addEventListener('change', async () => {
-  const file = elements.iconInput.files[0];
-  if (!file) return;
-  if (!file.type.startsWith('image/')) {
-    elements.editorError.textContent = 'Choose an image file.';
-    return;
-  }
-  elements.saveButton.disabled = true;
-  elements.editorError.textContent = 'Preparing icon…';
-  try {
-    editorIcon = await compressIconFile(file);
-    elements.editorError.textContent = '';
-    showIconPreview(editorIcon);
-  } catch (error) {
-    elements.editorError.textContent =
-      error instanceof Error ? error.message : String(error);
-  } finally {
-    elements.saveButton.disabled = false;
-  }
-});
-
-const iconDropZone = document.querySelector('.icon-choice');
-iconDropZone.addEventListener('dragover', (event) => {
-  if (event.dataTransfer.types.includes('Files')) {
-    event.preventDefault();
-    event.stopPropagation();
-    iconDropZone.classList.add('drag-over');
-  }
-});
-iconDropZone.addEventListener('dragleave', () => {
-  iconDropZone.classList.remove('drag-over');
-});
-iconDropZone.addEventListener('drop', async (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  iconDropZone.classList.remove('drag-over');
-  const file = [...event.dataTransfer.files].find((f) => f.type.startsWith('image/'));
-  if (!file) {
-    elements.editorError.textContent = 'Drop an image file.';
-    return;
-  }
-  elements.saveButton.disabled = true;
-  elements.editorError.textContent = 'Preparing icon…';
-  try {
-    editorIcon = await compressIconFile(file);
-    elements.editorError.textContent = '';
-    showIconPreview(editorIcon);
-  } catch (error) {
-    elements.editorError.textContent =
-      error instanceof Error ? error.message : String(error);
-  } finally {
-    elements.saveButton.disabled = false;
-  }
-});
-
-document.querySelector('#cancel-link-edit').addEventListener('click', () => {
-  elements.linkEditLayer.hidden = true;
-});
-document.querySelector('#fork-link-edit').addEventListener('click', async () => {
-  elements.linkEditLayer.hidden = true;
-  await commitEditorSave(true);
-});
-document.querySelector('#apply-everywhere-link-edit').addEventListener('click', async () => {
-  elements.linkEditLayer.hidden = true;
-  await commitEditorSave(false);
-});
-
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
     const selectedTargets = [...selected]
@@ -2351,6 +2092,33 @@ const menu = createContextMenu({
 const closeMenu = () => menu.closeMenu();
 const openMenu = (...args) => menu.openMenu(...args);
 
+const editorDialog = createEditorDialog({
+  elements,
+  document,
+  getState: () => state,
+  getCurrentId: () => currentId,
+  closeMenu,
+  host,
+  iconCache,
+  compressIconFile,
+  hydrateWebPreview,
+  commit,
+  render,
+  shortcut,
+  isWebLink,
+  placementCount,
+  forkPlacement,
+  anyActivePlacementId,
+  visiblePlacementIdFor,
+  updateGroup,
+  createGroup,
+  updateWebLink,
+  createWebLink,
+  updateShortcut,
+  createShortcut,
+});
+const showEditor = (...args) => editorDialog.showEditor(...args);
+
 (async () => {
   try {
     const loaded = await host.loadWorkspace();
@@ -2359,6 +2127,7 @@ const openMenu = (...args) => menu.openMenu(...args);
     toolbar.mount();
     confirmDialog.mount();
     menu.mount();
+    editorDialog.mount();
     render();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));

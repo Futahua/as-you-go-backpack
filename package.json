@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test.mjs model.test.mjs renderer.test.mjs host-bridge.test.mjs dom.test.mjs toolbar-controller.test.mjs confirmation-dialog.test.mjs context-menu.test.mjs"
+    "test": "node --test test.mjs model.test.mjs renderer.test.mjs host-bridge.test.mjs dom.test.mjs toolbar-controller.test.mjs confirmation-dialog.test.mjs context-menu.test.mjs editor-dialog.test.mjs"
   },
   "dependencies": {
     "d3-force": "^3.0.0",
