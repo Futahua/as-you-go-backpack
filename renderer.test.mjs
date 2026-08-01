@@ -40,7 +40,8 @@ import {
   seedPosition,
   allFinite,
   allUniquePositions,
-  assignDistinctFolderHues,
+  assignSpatialFolderHues,
+  hueDistance,
 } from './public/graph-model-20260730b.js';
 
 function makeFixtureState() {
@@ -644,59 +645,53 @@ test('forking from a placement in folder B (not the placement in folder A) forks
   assert.deepEqual(forkedNodes[0].parentIds, [b.id], 'the fork lands in B');
 });
 
-function hueDistance(a, b) {
-  const d = Math.abs(a - b) % 360;
-  return Math.min(d, 360 - d);
-}
-
-test('assignDistinctFolderHues keeps nearby folders clearly apart across the spectrum', () => {
-  const visibleItems = [
-    { id: 'A', kind: 'group', parentId: ROOT_ID },
-    { id: 'B', kind: 'group', parentId: ROOT_ID },
-    { id: 'C', kind: 'group', parentId: ROOT_ID },
-    { id: 's1', kind: 'shortcut', parentId: 'A' },
-    { id: 'A1', kind: 'group', parentId: 'A' },
-  ];
+test('assignSpatialFolderHues keeps nearby folders apart by position', () => {
+  const center = { cx: 0, cy: 0 };
+  // Two folders close together on the canvas must never share the exact hue.
   const colors = new Map();
-  assignDistinctFolderHues(visibleItems, colors);
-  // Sibling root folders A, B, C must all be visibly apart.
+  assignSpatialFolderHues([
+    { id: 'A', x: 0, y: 0 },
+    { id: 'B', x: 60, y: 0 },
+  ], colors, center);
   assert.ok(hueDistance(colors.get('A'), colors.get('B')) >= 15);
-  assert.ok(hueDistance(colors.get('A'), colors.get('C')) >= 15);
-  assert.ok(hueDistance(colors.get('B'), colors.get('C')) >= 15);
-  // Child A1 differs from its parent A.
-  assert.ok(hueDistance(colors.get('A1'), colors.get('A')) >= 15);
-  // Every folder has a valid hue on the full 0..360 wheel.
-  for (const id of ['A', 'B', 'C', 'A1']) {
+
+  // Far-apart folders (beyond the near threshold) can share a hue; moving them
+  // closer re-evaluates so they no longer match.
+  const far = new Map();
+  assignSpatialFolderHues([
+    { id: 'A', x: 0, y: 0 },
+    { id: 'B', x: 1200, y: 0 },
+  ], far, center);
+  assert.equal(hueDistance(far.get('A'), far.get('B')), 0, 'far folders may share a hue');
+  assignSpatialFolderHues([
+    { id: 'A', x: 0, y: 0 },
+    { id: 'B', x: 60, y: 0 },
+  ], far, center);
+  assert.ok(hueDistance(far.get('A'), far.get('B')) >= 15, 'close folders separate');
+});
+
+test('assignSpatialFolderHues derives hue from absolute position', () => {
+  const center = { cx: 0, cy: 0 };
+  const colors = new Map();
+  // A lone folder on the right of center gets a hue near 0/360 (east angle).
+  assignSpatialFolderHues([{ id: 'R', x: 300, y: 0 }], colors, center);
+  const east = colors.get('R');
+  assert.ok(east < 90 || east > 270, 'east-of-center folder is a warm hue');
+  // A lone folder below center is 90° further around the wheel.
+  assignSpatialFolderHues([{ id: 'D', x: 0, y: 300 }], colors, center);
+  const south = colors.get('D');
+  assert.ok(hueDistance(south, (east + 90) % 360) < 20, 'south hue is ~90° from east');
+});
+
+test('assignSpatialFolderHues produces a valid hue for every folder', () => {
+  const colors = new Map();
+  assignSpatialFolderHues([
+    { id: 'A', x: -200, y: 100 },
+    { id: 'B', x: 200, y: 300 },
+    { id: 'C', x: 0, y: -100 },
+  ], colors, { cx: 0, cy: 0 });
+  for (const id of ['A', 'B', 'C']) {
     const hue = colors.get(id);
     assert.ok(hue >= 0 && hue <= 360);
   }
-});
-
-test('assignDistinctFolderHues spans the spectrum for isolated folders', () => {
-  const colors = new Map();
-  assignDistinctFolderHues([{ id: 'X', kind: 'group', parentId: ROOT_ID }], colors);
-  assignDistinctFolderHues([{ id: 'Y', kind: 'group', parentId: ROOT_ID }], colors);
-  // Different folder ids seed different hues, so unrelated folders vary too.
-  assert.notEqual(colors.get('X'), colors.get('Y'));
-});
-
-test('assignDistinctFolderHues keeps an existing stable hue', () => {
-  const colors = new Map([['A', 120]]);
-  assignDistinctFolderHues([{ id: 'A', kind: 'group', parentId: ROOT_ID }], colors);
-  assert.equal(colors.get('A'), 120);
-});
-
-test('assignDistinctFolderHues recolors a conflicting folder', () => {
-  const colors = new Map([
-    ['A', 0],
-    ['B', 0], // conflict with new sibling A
-  ]);
-  assignDistinctFolderHues(
-    [
-      { id: 'A', kind: 'group', parentId: ROOT_ID },
-      { id: 'B', kind: 'group', parentId: ROOT_ID },
-    ],
-    colors,
-  );
-  assert.ok(hueDistance(colors.get('A'), colors.get('B')) >= 15);
 });

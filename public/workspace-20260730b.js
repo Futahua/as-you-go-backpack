@@ -42,7 +42,7 @@ import {
 } from './vendor/d3-force.js';
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
-import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignDistinctFolderHues } from './graph-model-20260730b.js';
+import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -440,6 +440,7 @@ function createGraphController() {
       node.shell.style.transform =
         `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
     });
+    syncFolderColors();
     edges.forEach((edge) => {
       const source = nodes.get(edge.sourceId);
       const target = nodes.get(edge.targetId);
@@ -511,7 +512,6 @@ function createGraphController() {
       byParent.get(key).push(vi);
     }
     const ctxId = graphContextId(session.currentId, session.binMode);
-    assignDistinctFolderHues(visibleItems, folderColors);
     for (const vi of visibleItems) {
       const parentIds = vi.parentIds ?? [vi.parentId];
       let node = nodes.get(vi.id);
@@ -576,6 +576,40 @@ function createGraphController() {
     iconItem.classList.toggle('folder-colored', Boolean(color));
     if (color) iconItem.style.setProperty('--folder-color', color);
     else iconItem.style.removeProperty('--folder-color');
+  }
+
+  /** Recomputes folder hues from their current canvas positions (so colors
+   * follow dragging and relative distance), then re-applies only the shells
+   * and edges whose color actually changed. */
+  function syncFolderColors() {
+    const folderNodes = [...nodes.values()].filter(
+      (node) => !node.exiting && node.shell && node.candidate?.kind === 'group',
+    );
+    if (folderNodes.length === 0) return;
+    const center = {
+      cx: (viewport?.clientWidth ?? 800) / 2,
+      cy: (viewport?.clientHeight ?? 600) / 2,
+    };
+    assignSpatialFolderHues(
+      folderNodes.map((node) => ({ id: node.id, x: node.x, y: node.y })),
+      folderColors,
+      center,
+    );
+    for (const node of folderNodes) {
+      const hue = folderColors.get(node.id);
+      if (node.appliedFolderHue === hue) continue;
+      node.appliedFolderHue = hue;
+      const iconItem = node.shell.querySelector('.icon-item');
+      if (iconItem) applyFolderColor(iconItem, node.candidate);
+    }
+    edges.forEach((edge) => {
+      const source = nodes.get(edge.sourceId);
+      if (!source || source.candidate?.kind !== 'group' || !edge.path) return;
+      const stroke = folderColor(source.candidate.id) ?? '';
+      if (edge.appliedStroke === stroke) return;
+      edge.appliedStroke = stroke;
+      edge.path.style.stroke = stroke;
+    });
   }
 
   function refreshNodeContent(node) {
@@ -729,21 +763,15 @@ function createGraphController() {
       const source = nodes.get(info.sourceId);
       const target = nodes.get(info.targetId);
       if (!source || !target) continue;
-      // Edges out of a folder take that folder's color; the rest keep the
-      // default gray from CSS. Inline style overrides the .graph-edge stroke.
-      const color = source.candidate?.kind === 'group' ? folderColor(source.candidate.id) : null;
+      // Edge stroke colors are owned by syncFolderColors, which recomputes them
+      // from folder positions each frame.
       if (!edge) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'graph-edge');
         path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
-        if (color) path.style.stroke = color;
         edgeLayer.append(path);
         edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
         edges.set(key, edge);
-      } else if (color) {
-        edge.path.style.stroke = color;
-      } else {
-        edge.path.style.stroke = '';
       }
     }
   }
