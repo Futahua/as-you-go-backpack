@@ -48,6 +48,7 @@ import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
+import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 
 const host = createHostBridge(window);
 
@@ -84,8 +85,6 @@ let binCurrentId = 'bin';
 let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
-let pendingPermanentIds = [];
-let pendingRestoreIds = [];
 let zoomTimer = null;
 let saveQueue = Promise.resolve();
 let graphDrag = null;
@@ -1556,36 +1555,6 @@ async function moveToBin() {
   await commit(binSelection(state, resolveBinTargets([...selected])), 'Moved to Bin.');
 }
 
-function askPermanentDelete(ids = [...selected], deletingAll = false) {
-  if (ids.length === 0) return;
-  pendingPermanentIds = [...ids];
-  pendingRestoreIds = [];
-  elements.confirmTitle.textContent = 'Delete permanently?';
-  elements.confirmCopy.textContent = deletingAll
-    ? `Delete all ${ids.length} items permanently? This cannot be undone.`
-    : ids.length === 1
-      ? `Delete “${binItemName(ids[0]) ?? 'this item'}” permanently? This cannot be undone.`
-      : `Delete these ${ids.length} items permanently? This cannot be undone.`;
-  elements.confirmDelete.hidden = false;
-  elements.confirmRestore.hidden = true;
-  elements.confirmLayer.hidden = false;
-}
-
-function askRestoreConfirm(ids, restoringAll = false) {
-  if (ids.length === 0) return;
-  pendingRestoreIds = [...ids];
-  pendingPermanentIds = [];
-  elements.confirmTitle.textContent = 'Restore?';
-  elements.confirmCopy.textContent = restoringAll
-    ? `Restore all ${ids.length} items?`
-    : ids.length === 1
-      ? `Restore “${binItemName(ids[0]) ?? 'this item'}”?`
-      : `Restore these ${ids.length} items?`;
-  elements.confirmDelete.hidden = true;
-  elements.confirmRestore.hidden = false;
-  elements.confirmLayer.hidden = false;
-}
-
 async function runMenuAction(action) {
   const onlyId = selected.size === 1 ? [...selected][0] : null;
   if (action === 'new-folder') return showEditor('group', null, elements.menu.dataset.parent);
@@ -1601,8 +1570,8 @@ async function runMenuAction(action) {
   if (action === 'copy') return copyOrCut('copy');
   if (action === 'cut') return copyOrCut('cut');
   if (action === 'bin') return moveToBin();
-  if (action === 'restore') return askRestoreConfirm([...selected]);
-  if (action === 'delete-forever') return askPermanentDelete();
+  if (action === 'restore') return confirmDialog.askRestoreConfirm([...selected]);
+  if (action === 'delete-forever') return confirmDialog.askPermanentDelete();
   if (action === 'reset-graph-position') {
     const ctxId = graphContextId(currentId, binMode);
     state = removeGraphPositions(state, ctxId, [...selected]);
@@ -2114,7 +2083,7 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.key === 'Delete' && selected.size > 0) {
     event.preventDefault();
-    if (binMode) askPermanentDelete();
+    if (binMode) confirmDialog.askPermanentDelete();
     else moveToBin();
   }
   if (event.key === 'Enter' && event.ctrlKey && selected.size > 0 && !binMode) {
@@ -2280,17 +2249,17 @@ elements.binButton.addEventListener('click', () => {
 });
 elements.deleteAllBin.addEventListener('click', () => {
   if (selected.size > 0) {
-    askPermanentDelete([...selected], false);
+    confirmDialog.askPermanentDelete([...selected], false);
     return;
   }
-  askPermanentDelete(binnedItems(state).map((candidate) => candidate.id), true);
+  confirmDialog.askPermanentDelete(binnedItems(state).map((candidate) => candidate.id), true);
 });
 elements.restoreAllBin.addEventListener('click', () => {
   if (selected.size > 0) {
-    askRestoreConfirm([...selected], false);
+    confirmDialog.askRestoreConfirm([...selected], false);
     return;
   }
-  askRestoreConfirm(binnedItems(state).map((candidate) => candidate.id), true);
+  confirmDialog.askRestoreConfirm(binnedItems(state).map((candidate) => candidate.id), true);
 });
 
 elements.editor.addEventListener('submit', (event) => {
@@ -2382,24 +2351,6 @@ document.querySelector('#apply-everywhere-link-edit').addEventListener('click', 
   await commitEditorSave(false);
 });
 
-document.querySelector('#cancel-confirm').addEventListener('click', () => {
-  pendingPermanentIds = [];
-  pendingRestoreIds = [];
-  elements.confirmLayer.hidden = true;
-});
-document.querySelector('#confirm-delete').addEventListener('click', async () => {
-  const next = permanentlyDelete(state, pendingPermanentIds);
-  pendingPermanentIds = [];
-  elements.confirmLayer.hidden = true;
-  await commit(next, 'Deleted permanently.');
-});
-document.querySelector('#confirm-restore').addEventListener('click', async () => {
-  const next = restoreSelection(state, pendingRestoreIds);
-  pendingRestoreIds = [];
-  elements.confirmLayer.hidden = true;
-  await commit(next, 'Restored.');
-});
-
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
     const selectedTargets = [...selected]
@@ -2428,12 +2379,23 @@ const toolbar = createToolbarController({
   setStatus,
 });
 
+const confirmDialog = createConfirmationDialog({
+  elements,
+  getState: () => state,
+  getSelectedIds: () => [...selected],
+  binItemName,
+  permanentlyDelete,
+  restoreSelection,
+  commit,
+});
+
 (async () => {
   try {
     const loaded = await host.loadWorkspace();
     state = normalizeState(typeof loaded === 'string' ? JSON.parse(loaded) : loaded);
     restoreWorkspaceView();
     toolbar.mount();
+    confirmDialog.mount();
     render();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));

@@ -45,6 +45,7 @@ export function getWorkspaceElements(document) {
     confirmCopy: requiredElement(document, '#confirm-copy'),
     confirmDelete: requiredElement(document, '#confirm-delete'),
     confirmRestore: requiredElement(document, '#confirm-restore'),
+    cancelConfirm: requiredElement(document, '#cancel-confirm'),
     linkEditLayer: requiredElement(document, '#link-edit-layer'),
   };
 }
