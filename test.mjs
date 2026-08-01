@@ -158,6 +158,15 @@ assert.match(script, /'selective'/);
 assert.match(script, /if \(!binMode && selected\.size > 0\) {\s*moveToBin\(\);/);
 assert.doesNotMatch(script, /binIconTrash/);
 assert.doesNotMatch(html, /bin-icon-circle/);
+assert.match(script, /function extractDroppedUrl/);
+assert.match(script, /function nameForDroppedUrl/);
+assert.match(script, /createWebLink\(state, {\s*name,\s*target: url,\s*icon,/);
+assert.match(script, /text\/uri-list/);
+assert.match(script, /resolved\?\.title/);
+assert.match(script, /tile\.blur\(\);/);
+assert.match(script, /function toolbarPositionFromRect/);
+assert.match(script, /distanceFromRight < distanceFromLeft/);
+assert.match(script, /element\.style\.bottom = `\$\{clampToolbarOffset\(-y, height, spanY\) \* 100\}%`/);
 
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);
