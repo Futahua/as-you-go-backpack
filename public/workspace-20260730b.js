@@ -42,7 +42,7 @@ import {
 } from './vendor/d3-force.js';
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
-import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignDistinctFolderColors } from './graph-model-20260730b.js';
+import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignDistinctFolderHues } from './graph-model-20260730b.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -322,16 +322,14 @@ function createGraphController() {
   let pendingInitialFit = false;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
-  // Distinct, paper-friendly folder colors. Kept in a session map keyed by
-  // folder id so a folder keeps its color across renders and navigation.
-  const FOLDER_PALETTE = [
-    '#4c725a', '#b05a4a', '#4a6fa5', '#8a5fa8',
-    '#c0873a', '#3f7d8c', '#a8547c', '#6b8f3f',
-  ];
+  // Folder hues span the whole color spectrum (see assignDistinctFolderHues),
+  // kept per folder id in a session map so a folder keeps its color across
+  // renders and navigation.
   const folderColors = new Map();
 
   function folderColor(id) {
-    return folderColors.get(id) ?? null;
+    const hue = folderColors.get(id);
+    return typeof hue === 'number' ? `hsl(${hue} 65% 50%)` : null;
   }
 
   function createGraphView() {
@@ -513,7 +511,7 @@ function createGraphController() {
       byParent.get(key).push(vi);
     }
     const ctxId = graphContextId(session.currentId, session.binMode);
-    assignDistinctFolderColors(visibleItems, folderColors, FOLDER_PALETTE);
+    assignDistinctFolderHues(visibleItems, folderColors);
     for (const vi of visibleItems) {
       const parentIds = vi.parentIds ?? [vi.parentId];
       let node = nodes.get(vi.id);

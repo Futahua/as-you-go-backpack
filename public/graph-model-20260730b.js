@@ -196,14 +196,27 @@ export function allUniquePositions(nodes) {
   return keys.size === nodes.length;
 }
 
+/** Minimum hue separation in degrees that counts as "visibly different". */
+const MIN_HUE_DISTANCE = 15;
+
+/** Angular distance between two hues on the 0..360 circle, in degrees. */
+function hueDistance(a, b) {
+  const d = Math.abs(a - b) % 360;
+  return Math.min(d, 360 - d);
+}
+
 /**
- * Gives every visible folder a color from `palette` that differs from the
- * folders near it (its parent folder and its sibling folders), so adjacent
- * folders are easy to tell apart. `colors` is the persistent id -> color map
- * (a folder keeps its color across renders). An existing assignment is kept
- * unless it now conflicts with a neighbor's color.
+ * Gives every visible folder a hue across the whole color spectrum, chosen so
+ * that folders near it (its parent folder and its sibling folders) never share
+ * the exact same color and are spread as far apart as the neighbors allow.
+ *
+ * `colors` is the persistent folderId -> hue map (a folder keeps its hue across
+ * renders). An existing hue is kept unless it has drifted within MIN_HUE_DISTANCE
+ * of a neighbor. A new hue is placed at the midpoint of the largest gap between
+ * the sorted neighbor hues, which maximises separation on the color wheel; an
+ * isolated folder is seeded from its id so unrelated folders also vary.
  */
-export function assignDistinctFolderColors(visibleItems, colors, palette) {
+export function assignDistinctFolderHues(visibleItems, colors) {
   const isFolder = (vi) => vi.kind === 'group';
   const byParent = new Map();
   for (const vi of visibleItems) {
@@ -213,6 +226,7 @@ export function assignDistinctFolderColors(visibleItems, colors, palette) {
   }
   const folderById = new Map(visibleItems.filter(isFolder).map((vi) => [vi.id, vi]));
   const folderIds = [...folderById.keys()].sort();
+
   for (const id of folderIds) {
     const vi = folderById.get(id);
     const neighbors = new Set();
@@ -223,10 +237,38 @@ export function assignDistinctFolderColors(visibleItems, colors, palette) {
     for (const sibling of byParent.get(parentId ?? ROOT_ID) ?? []) {
       if (sibling.id !== id && isFolder(sibling)) neighbors.add(sibling.id);
     }
-    const used = new Set([...neighbors].map((nid) => colors.get(nid)).filter(Boolean));
+    const neighborHues = [...neighbors]
+      .map((nid) => colors.get(nid))
+      .filter((hue) => typeof hue === 'number');
+
     const current = colors.get(id);
-    if (current && !used.has(current)) continue;
-    colors.set(id, palette.find((color) => !used.has(color)) ?? palette[0]);
+    if (
+      typeof current === 'number'
+      && neighborHues.every((hue) => hueDistance(current, hue) >= MIN_HUE_DISTANCE)
+    ) {
+      continue; // existing hue is still clearly distinct — keep it stable
+    }
+
+    let hue;
+    if (neighborHues.length === 0) {
+      hue = hashString(id) % 360;
+    } else {
+      const sorted = [...neighborHues].sort((a, b) => a - b);
+      let gapStart = sorted[0];
+      let largestGap = -1;
+      for (let i = 0; i < sorted.length; i += 1) {
+        // The wrap-around gap adds a full turn after the last sorted hue, so a
+        // single neighbor still leaves the whole 360° circle available.
+        const next = sorted[(i + 1) % sorted.length] + (i === sorted.length - 1 ? 360 : 0);
+        const gap = next - sorted[i];
+        if (gap > largestGap) {
+          largestGap = gap;
+          gapStart = sorted[i];
+        }
+      }
+      hue = (gapStart + largestGap / 2) % 360;
+    }
+    colors.set(id, Math.round(hue));
   }
   return colors;
 }
