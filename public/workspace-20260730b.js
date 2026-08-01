@@ -75,7 +75,6 @@ const elements = getWorkspaceElements(document);
 
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
-let clipboard = null;
 
 const store = createWorkspaceStore({
   getState: () => state,
@@ -1247,7 +1246,7 @@ async function copyOrCut(mode) {
     }
   }
 
-  clipboard = {
+  session.clipboard = {
     mode,
     ids: [...session.selected],
     collapseWhole,
@@ -1260,19 +1259,19 @@ async function copyOrCut(mode) {
 
 async function pasteInto(parentIds) {
   const destinations = Array.isArray(parentIds) ? parentIds : [parentIds];
-  if (!clipboard || destinations.length === 0 || destinations.includes('bin')) return;
+  if (!session.clipboard || destinations.length === 0 || destinations.includes('bin')) return;
   try {
-    const wasCut = clipboard.mode === 'cut';
+    const wasCut = session.clipboard.mode === 'cut';
     let next = state;
     if (wasCut) {
       // A cut item can only move to one place, so multi-folder selection is
       // ignored here — only the first destination applies.
       const parentId = destinations[0];
-      const groupIds = clipboard.ids.filter((selectedId) => group(selectedId));
-      const wholeShortcutIds = clipboard.ids.filter((selectedId) => clipboard.collapseWhole.has(selectedId));
-      const singlePlacementIds = clipboard.ids
-        .filter((selectedId) => !group(selectedId) && !clipboard.collapseWhole.has(selectedId))
-        .map((selectedId) => clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
+      const groupIds = session.clipboard.ids.filter((selectedId) => group(selectedId));
+      const wholeShortcutIds = session.clipboard.ids.filter((selectedId) => session.clipboard.collapseWhole.has(selectedId));
+      const singlePlacementIds = session.clipboard.ids
+        .filter((selectedId) => !group(selectedId) && !session.clipboard.collapseWhole.has(selectedId))
+        .map((selectedId) => session.clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
         .filter(Boolean);
       if (groupIds.length > 0 || singlePlacementIds.length > 0) {
         next = moveSelection(next, [...groupIds, ...singlePlacementIds], parentId);
@@ -1281,10 +1280,10 @@ async function pasteInto(parentIds) {
         next = collapsePlacements(next, shortcutId, parentId);
       }
     } else {
-      const ids = clipboard.ids
+      const ids = session.clipboard.ids
         .map((selectedId) => group(selectedId)
           ? selectedId
-          : clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
+          : session.clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
         .filter(Boolean);
       // Copying always links; pasting into multiple selected folders at once
       // links a new placement into each one.
@@ -1292,7 +1291,7 @@ async function pasteInto(parentIds) {
         next = copySelection(next, ids, parentId);
       }
     }
-    if (wasCut) clipboard = null;
+    if (wasCut) session.clipboard = null;
     await commit(next, wasCut ? 'Moved.' : 'Copied.');
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
@@ -2036,7 +2035,7 @@ const menu = createContextMenu({
   window,
   getCurrentId: () => session.currentId,
   getBinMode: () => session.binMode,
-  getClipboard: () => clipboard,
+  getClipboard: () => session.clipboard,
   getSelectedItems: () => [...session.selected].map(item).filter(Boolean),
   isWebLink,
   onAction: runMenuAction,
