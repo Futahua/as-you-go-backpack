@@ -23,6 +23,27 @@ clear responsibility lives in a module.
 | Styling | the matching file under `public/styles/` |
 | Compatibility composition | `public/workspace-20260730b.js` |
 
+## Prompt library (copy button)
+
+The prompt library is a nested tree of prompts and folders persisted in
+`view.promptLibrary`. It is split across four modules plus one pure model:
+
+| Responsibility | Module |
+|---|---|
+| Pure tree data (normalize/migrate, create/find/update/remove, single and atomic multi-node move, batch inclusion via folder `includeAll`, explicit Copy Selected, validation) | `public/prompt-library-model.js` |
+| Pure temporary row-selection logic (select/toggle/range/visible order/collapse repair; no DOM/store/host) | `public/app/components/prompt-tree-selection.js` |
+| Tree DOM interaction → plain intents (clicks, keyboard, drag, context-menu requests; selection state; no host/persistence) | `public/app/components/prompt-tree-controller.js` |
+| Prompt-tree context menu (rendering, keyboard nav, dismissal, action intents) | `public/app/components/prompt-tree-context-menu.js` |
+| Panel composition root (open/close, draft tree, expansion/editor/rename/delete-confirm, rendering, Save/Cancel) | `public/app/components/prompt-library-dialog.js` |
+
+Rules: the dialog clones the saved library into a `draftLibrary` and owns
+persistence via `setPromptLibrary` + `store.replace/save`; the controller and
+context menu never call the host or persist state; the toolbar copier keeps
+selected-shortcut precedence and reads the saved snapshot through
+`getSnapshotLibrary()`/`getBatchText()`. Folder checkboxes persist an
+`includeAll` override (never a derived tri-state) and checking a folder never
+rewrites descendant prompt checkboxes.
+
 ## Interaction controllers
 
 Controllers live in `public/app/interactions/` and own browser events for one gesture
