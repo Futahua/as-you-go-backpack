@@ -3,6 +3,24 @@ import test from 'node:test';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createPromptLibraryDialog } from './public/app/components/prompt-library-dialog.js';
 
+function matchSimple(node, selector) {
+  if (!node) return false;
+  if (selector.startsWith('#')) return node.attributes.id === selector.slice(1);
+  if (selector.startsWith('.')) return node.classList.contains(selector.slice(1));
+  if (selector.startsWith('[')) {
+    const m = selector.match(/^\[([\w-]+)(?:="([^"]*)")?\]$/);
+    if (!m) return false;
+    const attr = m[1];
+    const value = m[2];
+    const got = node.dataset[attr] ?? node.attributes[attr];
+    if (value !== undefined) { if (got !== value) return false; }
+    else if (got === undefined) return false;
+  } else if (node.tagName !== selector.toUpperCase()) {
+    return false;
+  }
+  return true;
+}
+
 function simpleParts(token) {
   const parts = [];
   const re = /([.#][\w-]+|\[[^\]]+\]|[\w-]+)/g;
@@ -32,13 +50,9 @@ function matchToken(node, token) {
   return true;
 }
 
-function matchSimple(node, selector) {
-  return matchToken(node, selector);
-}
-
 function matchDescendant(node, parts, index) {
   if (index < 0) return true;
-  if (!matchSimple(node, parts[index])) return false;
+  if (!matchToken(node, parts[index])) return false;
   if (index === 0) return true;
   let current = node.parentNode;
   while (current) {
@@ -86,21 +100,15 @@ function makeNode(tag) {
       child.parentNode = node;
       return child;
     },
-    append(...children) {
-      for (const child of children) node.appendChild(child);
-    },
+    append(...children) { for (const child of children) node.appendChild(child); },
     remove() {
       if (node.parentNode) {
         node.parentNode.children = node.parentNode.children.filter((c) => c !== node);
       }
       node.parentNode = null;
     },
-    setAttribute(name, value) {
-      node.attributes[name] = String(value);
-    },
-    getAttribute(name) {
-      return node.attributes[name];
-    },
+    setAttribute(name, value) { node.attributes[name] = String(value); },
+    getAttribute(name) { return node.attributes[name]; },
     addEventListener(type, fn, options) {
       const entry = { fn, options };
       node.listeners[type] = node.listeners[type] || [];
@@ -131,9 +139,7 @@ function makeNode(tag) {
       walk(node);
       return found;
     },
-    querySelector(selector) {
-      return node.querySelectorAll(selector)[0] ?? null;
-    },
+    querySelector(selector) { return node.querySelectorAll(selector)[0] ?? null; },
     closest(selector) {
       let current = node;
       while (current) {
@@ -143,14 +149,8 @@ function makeNode(tag) {
       return null;
     },
     focus() {},
-    getBoundingClientRect() {
-      return { top: 0, left: 0, width: 100, height: 100, right: 100, bottom: 100 };
-    },
-    style: {
-      setProperty(name, value) {
-        node._style[name] = value;
-      },
-    },
+    getBoundingClientRect() { return { top: 0, left: 0, width: 100, height: 100, right: 100, bottom: 100 }; },
+    style: { setProperty(name, value) { node._style[name] = value; } },
   };
   const classes = new Set();
   Object.defineProperty(node, 'className', {
@@ -177,11 +177,7 @@ function makeNode(tag) {
       if (force === undefined) {
         if (classes.has(name)) classes.delete(name);
         else classes.add(name);
-      } else if (force) {
-        classes.add(name);
-      } else {
-        classes.delete(name);
-      }
+      } else if (force) { classes.add(name); } else { classes.delete(name); }
     },
     contains(name) { return classes.has(name); },
   };
@@ -203,14 +199,12 @@ const treeFixture = () => ({
   shortcuts: [],
   view: { promptLibrary: [
     {
-      id: 'folder-dev', type: 'folder', title: 'Dev',
+      id: 'folder-dev', type: 'folder', title: 'Dev', includeAll: false,
       children: [
         { id: 'prompt-a', type: 'prompt', title: 'Alpha', text: 'one', includeInBatch: true },
         {
-          id: 'folder-inner', type: 'folder', title: 'Inner',
-          children: [
-            { id: 'prompt-b', type: 'prompt', title: 'Beta', text: 'two', includeInBatch: false },
-          ],
+          id: 'folder-inner', type: 'folder', title: 'Inner', includeAll: false,
+          children: [{ id: 'prompt-b', type: 'prompt', title: 'Beta', text: 'two', includeInBatch: false }],
         },
       ],
     },
@@ -230,7 +224,7 @@ function createHarness({ initialView = null } = {}) {
     setStatus: () => {},
   });
   const topIds = [
-    'prompt-layer', 'prompt-add', 'prompt-add-menu', 'prompt-card-list',
+    'prompt-layer', 'prompt-add', 'prompt-add-menu', 'prompt-card-list', 'prompt-tree-menu',
     'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
@@ -246,6 +240,22 @@ function createHarness({ initialView = null } = {}) {
     createElement: (tag) => makeNode(tag),
     createElementNS: (ns, tag) => makeNode(tag),
     createDocumentFragment: () => { const f = makeNode('fragment'); f.isFragment = true; return f; },
+    listeners: {},
+    addEventListener(type, fn, options) {
+      const entry = { fn, options };
+      documentMock.listeners[type] = documentMock.listeners[type] || [];
+      documentMock.listeners[type].push(entry);
+      if (options?.signal) {
+        options.signal.addEventListener('abort', () => {
+          documentMock.listeners[type] = (documentMock.listeners[type] || []).filter((e) => e !== entry);
+        });
+      }
+    },
+    dispatch(type, event = {}) {
+      const results = [];
+      for (const entry of documentMock.listeners[type] || []) results.push(entry.fn(event));
+      return results.length === 1 ? results[0] : Promise.all(results);
+    },
   };
   const copied = [];
   const statuses = [];
@@ -271,304 +281,363 @@ function createHarness({ initialView = null } = {}) {
 const preventDefault = () => {};
 const stopPropagation = () => {};
 const open = (h, o) => h.dialog.open(o);
-const pillIn = (row, action) => row.querySelectorAll('[data-prompt-action]').find((b) => b.dataset.promptAction === action);
 
-function drag(h, sourceId, targetRow, clientY) {
-  const source = h.rowFor(sourceId);
-  const handle = source.querySelector('.prompt-tree-handle');
-  const dataTransfer = { effectAllowed: '', dropEffect: '', setData() {} };
-  handle.dispatch('dragstart', { target: handle, dataTransfer, preventDefault, stopPropagation });
-  targetRow.dispatch('dragover', { target: targetRow, clientY, dataTransfer, preventDefault, stopPropagation });
-  targetRow.dispatch('drop', { target: targetRow, dataTransfer, preventDefault, stopPropagation });
-  targetRow.dispatch('dragend', { target: targetRow, preventDefault, stopPropagation });
-}
+const clickRow = (h, id, modifiers = {}) => {
+  const row = h.rowFor(id);
+  row.dispatch('click', { target: row, ...modifiers, preventDefault, stopPropagation });
+};
+const keyOn = (h, event = {}) => {
+  const list = h.nodes['prompt-card-list'];
+  list.dispatch('keydown', { target: list, ...event, preventDefault, stopPropagation });
+};
+const openPrompt = (h, id) => {
+  const chevron = h.rowFor(id).querySelector('.prompt-card-toggle');
+  chevron.dispatch('click', { target: chevron, preventDefault, stopPropagation });
+};
+const chevronOf = (h, id) => h.rowFor(id).querySelector('.prompt-card-toggle');
 
 test('right-clicking the copy button opens the library', () => {
   const h = createHarness({ initialView: treeFixture().view });
   h.nodes['copy-prompt'].dispatch('contextmenu', { preventDefault });
   assert.equal(h.nodes['prompt-layer'].hidden, false);
-  assert.equal(h.rows().length > 0, true);
+  assert.ok(h.rows().length > 0);
 });
 
-test('nested rows receive the correct depth', () => {
+test('left-click selects one row and ctrl-click toggles without clearing', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  assert.equal(h.rowFor('folder-dev')._style['--prompt-depth'], '0');
-  assert.equal(h.rowFor('prompt-a')._style['--prompt-depth'], '1');
-  assert.equal(h.rowFor('folder-inner')._style['--prompt-depth'], '1');
-  assert.equal(h.rowFor('prompt-root')._style['--prompt-depth'], '0');
-  assert.equal(h.rowFor('prompt-b'), undefined, 'children of a collapsed deep folder are hidden');
+  clickRow(h, 'prompt-a');
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'true');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'true');
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'true', 'ctrl keeps prior selection');
+  clickRow(h, 'prompt-a', { ctrlKey: true });
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'false', 'ctrl toggles off');
 });
 
-test('a folder chevron expands and collapses its descendants', () => {
+test('shift-click selects the visible range', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  assert.ok(h.rowFor('prompt-a'), 'top-level folder expanded by default');
-  assert.equal(h.rowFor('prompt-b'), undefined, 'deep folder children hidden while collapsed');
-  h.rowFor('folder-dev').querySelector('.prompt-folder-toggle').dispatch('click', { target: h.rowFor('folder-dev').querySelector('.prompt-folder-toggle'), preventDefault, stopPropagation });
-  assert.equal(h.rowFor('prompt-a'), undefined, 'collapse hides the subtree');
-  assert.equal(h.rowFor('folder-inner'), undefined);
-  h.rowFor('folder-dev').querySelector('.prompt-folder-toggle').dispatch('click', { target: h.rowFor('folder-dev').querySelector('.prompt-folder-toggle'), preventDefault, stopPropagation });
-  assert.ok(h.rowFor('prompt-a'), 're-expanding shows the subtree again');
-  assert.equal(h.rowFor('prompt-b'), undefined, 'deep folder is still collapsed');
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { shiftKey: true });
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'true');
+  assert.equal(h.rowFor('folder-inner').getAttribute('aria-selected'), 'true');
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'true');
 });
 
-test('multiple folders can remain expanded', () => {
-  const view = {
-    promptLibrary: [
-      { id: 'folder-a', type: 'folder', title: 'A', children: [{ id: 'p1', type: 'prompt', title: 'P', text: 'x', includeInBatch: true }] },
-      { id: 'folder-b', type: 'folder', title: 'B', children: [{ id: 'p2', type: 'prompt', title: 'Q', text: 'y', includeInBatch: true }] },
-    ],
-  };
-  const h = createHarness({ initialView: view });
+test('right-click preserves the selected group and selects an unselected row alone', () => {
+  const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  assert.ok(h.rowFor('p1') && h.rowFor('p2'), 'both folders open by default');
-  h.rowFor('folder-a').querySelector('.prompt-folder-toggle').dispatch('click', { target: h.rowFor('folder-a').querySelector('.prompt-folder-toggle'), preventDefault, stopPropagation });
-  assert.equal(h.rowFor('p1'), undefined, 'closing one folder hides only its subtree');
-  assert.ok(h.rowFor('p2'), 'the other folder stays expanded');
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  h.rowFor('prompt-a').dispatch('contextmenu', { target: h.rowFor('prompt-a'), clientX: 10, clientY: 10, preventDefault });
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'true');
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'true', 'existing group preserved');
+  h.rowFor('folder-inner').dispatch('contextmenu', { target: h.rowFor('folder-inner'), clientX: 10, clientY: 10, preventDefault });
+  assert.equal(h.rowFor('folder-inner').getAttribute('aria-selected'), 'true');
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'false', 'unselected row selects alone');
 });
 
-test('only one prompt editor opens at a time', () => {
-  const view = {
-    promptLibrary: [
-      { id: 'folder-dev', type: 'folder', title: 'Dev', children: [{ id: 'prompt-a', type: 'prompt', title: 'A', text: 'one', includeInBatch: true }] },
-      { id: 'prompt-b', type: 'prompt', title: 'B', text: 'two', includeInBatch: true },
-    ],
-  };
-  const h = createHarness({ initialView: view });
+test('checkbox and chevron clicks never alter row selection', () => {
+  const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  const openPrompt = (id) => {
-    const row = h.rowFor(id);
-    const btn = row.querySelector('.prompt-prompt-open');
-    btn.dispatch('click', { target: btn, preventDefault, stopPropagation });
-  };
-  openPrompt('prompt-a');
-  openPrompt('prompt-b');
-  assert.ok(h.rowFor('prompt-b').querySelector('.prompt-card-title'), 'second prompt editor open');
+  clickRow(h, 'prompt-root');
+  h.rowFor('prompt-root').querySelector('.prompt-checkbox').dispatch('click', { target: h.rowFor('prompt-root').querySelector('.prompt-checkbox'), preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'true', 'checkbox leaves selection');
+  chevronOf(h, 'prompt-root').dispatch('click', { target: chevronOf(h, 'prompt-root'), preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'true', 'chevron leaves selection');
+});
+
+test('blank click clears selection', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  h.nodes['prompt-card-list'].dispatch('click', { target: h.nodes['prompt-card-list'], preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'false');
+});
+
+test('Ctrl+A selects every visible row', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  keyOn(h, { key: 'a', ctrlKey: true });
+  const selected = h.rows().filter((r) => r.getAttribute('aria-selected') === 'true').length;
+  assert.equal(selected, h.rows().length, 'all visible rows selected');
+});
+
+test('double-clicking a prompt copies its current draft text only', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  openPrompt(h, 'prompt-root');
+  const textarea = h.textareaFor('prompt-root');
+  textarea.value = 'unsaved draft body';
+  textarea.dispatch('input', { target: textarea });
+  h.rowFor('prompt-root').dispatch('dblclick', { target: h.rowFor('prompt-root'), preventDefault, stopPropagation });
+  return Promise.resolve().then(() => {
+    assert.deepEqual(h.copied, ['unsaved draft body']);
+  });
+});
+
+test('double-clicking a folder expands it instead of copying', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.rowFor('folder-inner').dispatch('dblclick', { target: h.rowFor('folder-inner'), preventDefault, stopPropagation });
+  assert.ok(h.rowFor('prompt-b'), 'collapsed folder expanded on double-click');
+  assert.deepEqual(h.copied, []);
+  h.rowFor('folder-inner').dispatch('dblclick', { target: h.rowFor('folder-inner'), preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-b'), undefined, 'double-click toggles back');
+});
+
+test('only one prompt editor opens at a time with no duplicate title field', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  openPrompt(h, 'prompt-a');
+  openPrompt(h, 'prompt-root');
+  const rootRow = h.rowFor('prompt-root');
+  assert.ok(rootRow.querySelector('.prompt-card-title'), 'editor opens');
+  assert.equal(rootRow.querySelectorAll('.prompt-card-title').length, 1, 'no duplicate title field');
+  assert.equal(rootRow.querySelector('.prompt-prompt-title'), null, 'collapsed title replaced inline');
   assert.equal(h.rowFor('prompt-a').querySelector('.prompt-card-title'), null, 'first editor closed');
 });
 
-test('folder checkbox reflects only the includeAll override, never indeterminate', () => {
+test('title and text survive collapse and re-render', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  const checkbox = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
-  assert.equal(checkbox.checked, false, 'folder includeAll defaults to false');
-  assert.equal(checkbox.indeterminate, false, 'folder checkbox is never indeterminate');
-});
-
-test('checking a folder sets includeAll only and copies every descendant on Save', async () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  const checkbox = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
-  checkbox.checked = true;
-  checkbox.dispatch('change', { target: checkbox });
+  openPrompt(h, 'prompt-root');
+  const titleInput = h.rowFor('prompt-root').querySelector('.prompt-card-title');
+  titleInput.value = 'Renamed';
+  titleInput.dispatch('input', { target: titleInput });
+  const textarea = h.textareaFor('prompt-root');
+  textarea.value = 'edited body';
+  textarea.dispatch('input', { target: textarea });
+  chevronOf(h, 'prompt-root').dispatch('click', { target: chevronOf(h, 'prompt-root'), preventDefault, stopPropagation });
+  openPrompt(h, 'prompt-root');
+  assert.equal(h.rowFor('prompt-root').querySelector('.prompt-card-title').value, 'Renamed');
+  assert.equal(h.textareaFor('prompt-root').value, 'edited body');
   await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  const saved = h.getState().view.promptLibrary;
-  const folder = saved[0];
-  assert.equal(folder.includeAll, true);
-  const a = folder.children.find((n) => n.id === 'prompt-a');
-  const b = folder.children.find((n) => n.id === 'folder-inner').children[0];
-  assert.equal(a.includeInBatch, true, 'child values are never rewritten');
-  assert.equal(b.includeInBatch, false, 'child values are never rewritten');
-  const root = saved.find((n) => n.id === 'prompt-root');
-  assert.equal(root.includeInBatch, true, 'root prompt outside the folder is untouched');
+  assert.equal(h.getState().view.promptLibrary[1].title, 'Renamed');
+  assert.equal(h.getState().view.promptLibrary[1].text, 'edited body');
 });
 
-test('Add menu adds a root prompt and a root folder', () => {
-  const h = createHarness();
-  open(h);
-  h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  assert.equal(h.nodes['prompt-add-menu'].hidden, false);
-  const promptItem = h.nodes['prompt-add-menu'].querySelector('[data-prompt-add="prompt"]');
-  promptItem.dispatch('click', { target: promptItem, preventDefault, stopPropagation });
-  assert.equal(h.promptRows().length, 2, 'default + added prompt');
-  assert.ok(h.promptRows()[1].querySelector('.prompt-card-title'), 'added prompt editor opens');
-});
-
-test('add prompt inside a folder nests and expands ancestors', async () => {
+test('folder F2 rename commits on Enter and cancels on Escape', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  const addInside = pillIn(h.rowFor('folder-dev'), 'add-prompt-inside');
-  addInside.dispatch('click', { target: addInside, preventDefault, stopPropagation });
-  const added = h.promptRows().find((row) => row.dataset.parentId === 'folder-dev' && row.querySelector('.prompt-card-title'));
-  assert.ok(added, 'new prompt nested under folder-dev and opened');
-  added.querySelector('.prompt-card-title').value = 'Added';
-  added.querySelector('.prompt-card-title').dispatch('input', { target: added.querySelector('.prompt-card-title') });
-  const addedText = h.textareaFor(added.dataset.nodeId);
-  addedText.value = 'new body';
-  addedText.dispatch('input', { target: addedText });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  const saved = h.getState().view.promptLibrary[0].children;
-  assert.equal(saved[saved.length - 1].type, 'prompt');
-  assert.equal(saved[saved.length - 1].title, 'Added');
-});
-
-test('add folder inside a folder enters inline rename', () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  const addFolder = pillIn(h.rowFor('folder-dev'), 'add-folder-inside');
-  addFolder.dispatch('click', { target: addFolder, preventDefault, stopPropagation });
-  const newFolder = h.folderRows().find((row) => row.dataset.parentId === 'folder-dev' && row.querySelector('.prompt-folder-rename'));
-  assert.ok(newFolder, 'new folder nested and in rename mode');
-  assert.equal(newFolder.querySelector('.prompt-folder-rename').value, 'New folder');
-});
-
-test('inline folder rename commits on Enter', async () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  const title = h.rowFor('folder-dev').querySelector('.prompt-folder-title');
-  title.dispatch('dblclick', { target: title, preventDefault, stopPropagation });
-  const input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
-  assert.ok(input, 'rename input replaces the title');
+  clickRow(h, 'folder-dev');
+  keyOn(h, { key: 'F2' });
+  let input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
+  assert.ok(input, 'rename input appears');
   input.value = 'Development';
   input.dispatch('keydown', { target: input, key: 'Enter', preventDefault, stopPropagation });
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Development');
+  keyOn(h, { key: 'F2' });
+  input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
+  input.value = 'Discarded';
+  input.dispatch('keydown', { target: input, key: 'Escape', preventDefault, stopPropagation });
   assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Development');
   await h.nodes['prompt-save'].dispatch('click', { preventDefault });
   assert.equal(h.getState().view.promptLibrary[0].title, 'Development');
 });
 
-test('Escape restores the prior folder title', () => {
+test('folder rename commits on focusout', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  const title = h.rowFor('folder-dev').querySelector('.prompt-folder-title');
-  title.dispatch('dblclick', { target: title, preventDefault, stopPropagation });
+  clickRow(h, 'folder-dev');
+  keyOn(h, { key: 'F2' });
   const input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
-  input.value = 'Discarded';
-  input.dispatch('keydown', { target: input, key: 'Escape', preventDefault, stopPropagation });
-  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Dev');
+  input.value = 'Blurred';
+  input.dispatch('focusout', { target: input, preventDefault, stopPropagation });
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Blurred');
 });
 
-test('dragging a prompt inside a folder moves it there', async () => {
+test('multiple folders can remain expanded; collapse removes hidden selection', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  drag(h, 'prompt-root', h.rowFor('folder-dev'), 50);
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  const saved = h.getState().view.promptLibrary[0].children;
-  assert.deepEqual(saved.map((n) => n.id), ['prompt-a', 'folder-inner', 'prompt-root']);
-  assert.equal(h.getState().view.promptLibrary.some((n) => n.id === 'prompt-root'), false);
-});
-
-test('dragging a folder inside another folder moves its subtree', async () => {
-  const view = {
-    promptLibrary: [
-      { id: 'folder-a', type: 'folder', title: 'A', children: [{ id: 'p1', type: 'prompt', title: 'P', text: 'x', includeInBatch: true }] },
-      { id: 'folder-b', type: 'folder', title: 'B', children: [] },
-    ],
-  };
-  const h = createHarness({ initialView: view });
-  open(h);
-  drag(h, 'folder-a', h.rowFor('folder-b'), 50);
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  const saved = h.getState().view.promptLibrary;
-  assert.equal(saved.length, 1);
-  assert.deepEqual(saved[0].children.map((n) => n.id), ['folder-a']);
-  assert.deepEqual(saved[0].children[0].children.map((n) => n.id), ['p1'], 'subtree preserved');
-});
-
-test('a cycle drop into a descendant is rejected', async () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  // expand the deep folder so its row is present
   h.rowFor('folder-inner').querySelector('.prompt-folder-toggle').dispatch('click', { target: h.rowFor('folder-inner').querySelector('.prompt-folder-toggle'), preventDefault, stopPropagation });
-  drag(h, 'folder-dev', h.rowFor('folder-inner'), 50);
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  const saved = h.getState().view.promptLibrary;
-  assert.equal(saved[0].id, 'folder-dev', 'folder stayed at root');
-  assert.equal(saved.length, 2);
+  assert.ok(h.rowFor('prompt-b'), 'deep folder expands');
+  clickRow(h, 'prompt-b', { ctrlKey: true });
+  clickRow(h, 'folder-inner', { ctrlKey: true });
+  assert.equal(h.rowFor('prompt-b').getAttribute('aria-selected'), 'true');
+  h.rowFor('folder-inner').querySelector('.prompt-folder-toggle').dispatch('click', { target: h.rowFor('folder-inner').querySelector('.prompt-folder-toggle'), preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-b'), undefined, 'folder collapsed');
+  assert.equal(h.rowFor('folder-inner').getAttribute('aria-selected'), 'true', 'hidden selection repaired to the folder');
 });
 
-test('keyboard reorder and nesting move nodes', async () => {
+test('prompt and folder checkboxes update config without touching selection', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  const handle = h.rowFor('prompt-root').querySelector('.prompt-tree-handle');
-  handle.dispatch('keydown', { target: handle, altKey: true, key: 'ArrowUp', preventDefault, stopPropagation });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  const saved = h.getState().view.promptLibrary;
-  assert.equal(saved[0].id, 'prompt-root', 'moved above folder-dev');
+  clickRow(h, 'prompt-root');
+  const promptCheckbox = h.rowFor('prompt-root').querySelector('.prompt-checkbox');
+  promptCheckbox.checked = false;
+  promptCheckbox.dispatch('change', { target: promptCheckbox });
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'true');
+  const folderCheckbox = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
+  folderCheckbox.checked = true;
+  folderCheckbox.dispatch('change', { target: folderCheckbox });
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-checkbox').checked, true);
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-checkbox').indeterminate, false);
 });
 
-test('individual Copy copies the current draft text of that prompt', () => {
+test('folder includeAll never rewrites descendant prompt checkboxes', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  const copyPill = pillIn(h.rowFor('prompt-root'), 'copy');
-  copyPill.dispatch('click', { target: copyPill, preventDefault, stopPropagation });
+  const folderCheckbox = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
+  folderCheckbox.checked = true;
+  folderCheckbox.dispatch('change', { target: folderCheckbox });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const saved = h.getState().view.promptLibrary[0];
+  assert.equal(saved.includeAll, true);
+  assert.equal(saved.children[0].includeInBatch, true);
+  assert.equal(saved.children[1].children[0].includeInBatch, false, 'child state preserved');
+});
+
+test('checkboxes carry explicit accessible labels', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  assert.equal(h.rowFor('prompt-a').querySelector('.prompt-checkbox').getAttribute('aria-label'), 'Include Alpha in batch');
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-checkbox').getAttribute('aria-label'), 'Include every prompt inside Dev');
+});
+
+test('context menu for a single prompt offers copy/edit/include/delete', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  h.rowFor('prompt-root').dispatch('contextmenu', { target: h.rowFor('prompt-root'), clientX: 10, clientY: 10, preventDefault });
+  const labels = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').map((b) => b.textContent);
+  assert.deepEqual(labels, ['Copy', 'Edit', 'Exclude from batch', 'Delete']);
+});
+
+test('context menu for a folder offers expand/rename/include/new-inside/delete', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'folder-dev');
+  h.rowFor('folder-dev').dispatch('contextmenu', { target: h.rowFor('folder-dev'), clientX: 10, clientY: 10, preventDefault });
+  const labels = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').map((b) => b.textContent);
+  assert.ok(labels.includes('Collapse'));
+  assert.ok(labels.includes('Rename'));
+  assert.ok(labels.includes('New prompt inside'));
+  assert.ok(labels.includes('New folder inside'));
+  assert.ok(labels.includes('Delete'));
+});
+
+test('context menu include/exclude updates the node', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  h.rowFor('prompt-a').dispatch('contextmenu', { target: h.rowFor('prompt-a'), clientX: 10, clientY: 10, preventDefault });
+  const includeItem = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').find((b) => b.textContent === 'Exclude from batch');
+  includeItem.dispatch('click', { target: includeItem, preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-a').querySelector('.prompt-checkbox').checked, false, 'prompt excluded');
+});
+
+test('context menu Copy selected deduplicates descendants and ignores checkboxes', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'folder-dev');
+  clickRow(h, 'prompt-a', { ctrlKey: true });
+  h.rowFor('folder-dev').dispatch('contextmenu', { target: h.rowFor('folder-dev'), clientX: 10, clientY: 10, preventDefault });
+  const copyItem = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').find((b) => b.textContent === 'Copy selected');
+  copyItem.dispatch('click', { target: copyItem, preventDefault, stopPropagation });
   return Promise.resolve().then(() => {
-    assert.deepEqual(h.copied, ['three']);
+    assert.deepEqual(h.copied, ['one\n\ntwo'], 'folder descendants copied once, unchecked prompts included');
   });
 });
 
-test('draft survives collapsing, editing, and reordering', async () => {
+test('Delete key deletes the selected roots once', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  const openBtn = h.rowFor('prompt-root').querySelector('.prompt-prompt-open');
-  openBtn.dispatch('click', { target: openBtn, preventDefault, stopPropagation });
-  const titleInput = h.rowFor('prompt-root').querySelector('.prompt-card-title');
-  titleInput.value = 'Renamed root';
-  titleInput.dispatch('input', { target: titleInput });
-  const textarea = h.textareaFor('prompt-root');
-  textarea.value = 'edited body';
-  textarea.dispatch('input', { target: textarea });
-  // collapse it, then reorder it
-  const toggle = h.rowFor('prompt-root').querySelector('.prompt-card-toggle');
-  toggle.dispatch('click', { target: toggle, preventDefault, stopPropagation });
-  const handle = h.rowFor('prompt-root').querySelector('.prompt-tree-handle');
-  handle.dispatch('keydown', { target: handle, altKey: true, key: 'ArrowUp', preventDefault, stopPropagation });
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  keyOn(h, { key: 'Delete' });
+  assert.equal(h.nodes['prompt-delete-confirm'].hidden, false, 'multi-selection confirms');
+  h.nodes['prompt-delete-ok'].dispatch('click', { preventDefault });
+  assert.equal(h.rowFor('prompt-a'), undefined);
+  assert.equal(h.rowFor('prompt-root'), undefined);
   await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  const saved = h.getState().view.promptLibrary[0];
-  assert.equal(saved.id, 'prompt-root');
-  assert.equal(saved.title, 'Renamed root');
-  assert.equal(saved.text, 'edited body');
+  assert.equal(h.getState().view.promptLibrary[0].children[0].children[0].id, 'prompt-b', 'remaining prompts preserved');
 });
 
-test('Cancel discards all draft edits', () => {
+test('the final prompt cannot be deleted through folder confirmation', () => {
+  const view = { promptLibrary: [
+    { id: 'folder-x', type: 'folder', title: 'X', includeAll: false, children: [{ id: 'prompt-p', type: 'prompt', title: 'P', text: 'body', includeInBatch: true }] },
+  ] };
+  const h = createHarness({ initialView: view });
+  open(h);
+  clickRow(h, 'folder-x');
+  keyOn(h, { key: 'Delete' });
+  assert.equal(h.nodes['prompt-delete-confirm'].hidden, true, 'impossible delete never confirmed');
+  assert.ok(h.nodes['prompt-error'].textContent.includes('at least one'));
+  assert.ok(h.rowFor('folder-x'), 'folder intact');
+});
+
+test('confirmation message counts contained prompts', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  const openBtn = h.rowFor('prompt-root').querySelector('.prompt-prompt-open');
-  openBtn.dispatch('click', { target: openBtn, preventDefault, stopPropagation });
+  clickRow(h, 'folder-dev');
+  keyOn(h, { key: 'Delete' });
+  assert.ok(h.nodes['prompt-delete-message'].textContent.includes('2 contained prompts'));
+});
+
+test('pointer drag of an unselected row selects it first, then moves it inside a folder', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const src = h.rowFor('prompt-root');
+  const target = h.rowFor('folder-dev');
+  const data = { pointerId: 5 };
+  src.dispatch('pointerdown', { ...data, button: 0, clientX: 50, clientY: 50, target: src });
+  target.dispatch('pointermove', { ...data, clientX: 200, clientY: 200, target, preventDefault, stopPropagation });
+  target.dispatch('pointermove', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
+  assert.ok(src.classList.contains('prompt-dragging'), 'dragged styling persists during dragover');
+  target.dispatch('pointerup', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const saved = h.getState().view.promptLibrary[0].children;
+  assert.deepEqual(saved.map((n) => n.id), ['prompt-a', 'folder-inner', 'prompt-root'], 'moved inside folder');
+  assert.equal(h.getState().view.promptLibrary.some((n) => n.id === 'prompt-root'), false);
+});
+
+test('a folder cannot be dragged into its own descendant', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const toggle = h.rowFor('folder-inner').querySelector('.prompt-folder-toggle');
+  toggle.dispatch('click', { target: toggle, preventDefault, stopPropagation });
+  const src = h.rowFor('folder-dev');
+  const target = h.rowFor('prompt-b');
+  const data = { pointerId: 6 };
+  src.dispatch('pointerdown', { ...data, button: 0, clientX: 50, clientY: 50, target: src });
+  target.dispatch('pointermove', { ...data, clientX: 200, clientY: 200, target, preventDefault, stopPropagation });
+  target.dispatch('pointermove', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
+  target.dispatch('pointerup', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  assert.equal(h.getState().view.promptLibrary[0].id, 'folder-dev', 'cycle rejected');
+  assert.equal(h.getState().view.promptLibrary.length, 2, 'no nodes lost');
+});
+
+test('Enter opens the focused prompt editor', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  keyOn(h, { key: 'Enter' });
+  assert.ok(h.rowFor('prompt-root').querySelector('.prompt-card-title'), 'editor opened');
+});
+
+test('Save persists and Cancel discards all draft changes', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  openPrompt(h, 'prompt-root');
   const textarea = h.textareaFor('prompt-root');
   textarea.value = 'draft';
   textarea.dispatch('input', { target: textarea });
   h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
+  assert.equal(h.getState().view.promptLibrary[1].text, 'three', 'cancel discards');
+  open(h);
+  openPrompt(h, 'prompt-root');
+  const t2 = h.textareaFor('prompt-root');
+  t2.value = 'saved';
+  t2.dispatch('input', { target: t2 });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  assert.equal(h.getState().view.promptLibrary[1].text, 'saved');
   assert.equal(h.nodes['prompt-layer'].hidden, true);
-  assert.equal(h.getState().view.promptLibrary[1].text, 'three', 'saved data untouched');
 });
 
-test('SVG-only controls retain accessible labels and no visible words', () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  const copyPill = pillIn(h.rowFor('prompt-root'), 'copy');
-  assert.equal(copyPill.getAttribute('aria-label'), 'Copy prompt');
-  assert.equal(copyPill.textContent, '');
-  assert.ok(copyPill.querySelector('svg'), 'copy control is an SVG pill');
-  const deletePill = pillIn(h.rowFor('prompt-root'), 'delete');
-  assert.equal(deletePill.getAttribute('aria-label'), 'Delete prompt');
-  assert.equal(deletePill.textContent, '');
-  assert.ok(deletePill.querySelector('svg'));
-});
-
-test('deleting the final remaining prompt is blocked', () => {
-  const h = createHarness();
-  open(h);
-  const deletePill = pillIn(h.promptRows()[0], 'delete');
-  deletePill.dispatch('click', { target: deletePill, preventDefault, stopPropagation });
-  assert.equal(h.promptRows().length, 1);
-  assert.ok(h.nodes['prompt-error'].textContent.includes('at least one'));
-});
-
-test('deleting a non-empty folder requires confirmation', () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  const deletePill = pillIn(h.rowFor('folder-dev'), 'delete');
-  deletePill.dispatch('click', { target: deletePill, preventDefault, stopPropagation });
-  assert.equal(h.nodes['prompt-delete-confirm'].hidden, false);
-  assert.ok(h.nodes['prompt-delete-message'].textContent.includes('2 contained prompts'));
-  h.nodes['prompt-delete-ok'].dispatch('click', { preventDefault });
-  assert.equal(h.nodes['prompt-delete-confirm'].hidden, true);
-  assert.equal(h.rowFor('folder-dev'), undefined, 'folder and subtree removed');
-  assert.ok(h.rowFor('prompt-root'));
-});
-
-test('persistence failure leaves the dialog open', async () => {
+test('persistence failure leaves the dialog open and re-enables Save', async () => {
   let state = { groups: [], shortcuts: [], view: { promptLibrary: [{ id: 'prompt-x', type: 'prompt', title: 'X', text: 'body', includeInBatch: true }] } };
   const store = createWorkspaceStore({
     getState: () => state,
@@ -578,17 +647,38 @@ test('persistence failure leaves the dialog open', async () => {
     setStatus: () => {},
   });
   const topIds = [
-    'prompt-layer', 'prompt-add', 'prompt-add-menu', 'prompt-card-list',
+    'prompt-layer', 'prompt-add', 'prompt-add-menu', 'prompt-card-list', 'prompt-tree-menu',
     'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   nodes['prompt-layer'].hidden = true;
+  const promptItem = makeNode('button');
+  promptItem.dataset.promptAdd = 'prompt';
+  const folderItem = makeNode('button');
+  folderItem.dataset.promptAdd = 'folder';
+  nodes['prompt-add-menu'].append(promptItem, folderItem);
   const documentMock = {
     querySelector: (sel) => nodes[sel.slice(1)] ?? null,
     createElement: (tag) => makeNode(tag),
     createElementNS: (ns, tag) => makeNode(tag),
     createDocumentFragment: () => { const f = makeNode('fragment'); f.isFragment = true; return f; },
+    listeners: {},
+    addEventListener(type, fn, options) {
+      const entry = { fn, options };
+      documentMock.listeners[type] = documentMock.listeners[type] || [];
+      documentMock.listeners[type].push(entry);
+      if (options?.signal) {
+        options.signal.addEventListener('abort', () => {
+          documentMock.listeners[type] = (documentMock.listeners[type] || []).filter((e) => e !== entry);
+        });
+      }
+    },
+    dispatch(type, event = {}) {
+      const results = [];
+      for (const entry of documentMock.listeners[type] || []) results.push(entry.fn(event));
+      return results.length === 1 ? results[0] : Promise.all(results);
+    },
   };
   const dialog = createPromptLibraryDialog({
     document: documentMock,
@@ -602,73 +692,7 @@ test('persistence failure leaves the dialog open', async () => {
   await nodes['prompt-save'].dispatch('click', { preventDefault });
   assert.equal(nodes['prompt-layer'].hidden, false, 'dialog stays open');
   assert.ok(nodes['prompt-error'].textContent.includes('disk full'));
-  assert.equal(nodes['prompt-save'].disabled, false, 'save re-enabled');
-});
-
-test('typing in the prompt textarea updates the draft immediately', () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  const openBtn = h.rowFor('prompt-root').querySelector('.prompt-prompt-open');
-  openBtn.dispatch('click', { target: openBtn, preventDefault, stopPropagation });
-  const textarea = h.textareaFor('prompt-root');
-  textarea.value = 'typed unsaved text';
-  textarea.dispatch('input', { target: textarea });
-  const copyPill = pillIn(h.rowFor('prompt-root'), 'copy');
-  copyPill.dispatch('click', { target: copyPill, preventDefault, stopPropagation });
-  return Promise.resolve().then(() => {
-    assert.deepEqual(h.copied, ['typed unsaved text']);
-  });
-});
-
-test('folder rename commits on focusout', () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  const title = h.rowFor('folder-dev').querySelector('.prompt-folder-title');
-  title.dispatch('dblclick', { target: title, preventDefault, stopPropagation });
-  const input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
-  input.value = 'Blurred';
-  input.dispatch('focusout', { target: input, preventDefault, stopPropagation });
-  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Blurred');
-});
-
-test('checkboxes carry explicit accessible labels', () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  assert.equal(
-    h.rowFor('prompt-a').querySelector('.prompt-checkbox').getAttribute('aria-label'),
-    'Include Alpha in batch',
-  );
-  assert.equal(
-    h.rowFor('folder-dev').querySelector('.prompt-checkbox').getAttribute('aria-label'),
-    'Include every prompt inside Dev',
-  );
-});
-
-test('the final prompt cannot be removed through folder deletion', () => {
-  const view = { promptLibrary: [
-    { id: 'folder-x', type: 'folder', title: 'X', children: [{ id: 'prompt-p', type: 'prompt', title: 'P', text: 'body', includeInBatch: true }] },
-  ] };
-  const h = createHarness({ initialView: view });
-  open(h);
-  const deletePill = pillIn(h.rowFor('folder-x'), 'delete');
-  deletePill.dispatch('click', { target: deletePill, preventDefault, stopPropagation });
-  assert.equal(h.nodes['prompt-delete-confirm'].hidden, true, 'impossible delete is never confirmed');
-  assert.ok(h.nodes['prompt-error'].textContent.includes('at least one'));
-  assert.ok(h.rowFor('folder-x'), 'folder stays intact');
-});
-
-test('the dragged row keeps its styling during dragover', () => {
-  const h = createHarness({ initialView: treeFixture().view });
-  open(h);
-  const source = h.rowFor('prompt-root');
-  const handle = source.querySelector('.prompt-tree-handle');
-  const dataTransfer = { effectAllowed: '', dropEffect: '', setData() {} };
-  handle.dispatch('dragstart', { target: handle, dataTransfer, preventDefault, stopPropagation });
-  assert.ok(source.classList.contains('prompt-dragging'));
-  const target = h.rowFor('folder-dev');
-  target.dispatch('dragover', { target, clientY: 50, dataTransfer, preventDefault, stopPropagation });
-  assert.ok(source.classList.contains('prompt-dragging'), 'dragging class survives dragover cleanup');
-  assert.ok(target.classList.contains('prompt-drop-inside'));
+  assert.equal(nodes['prompt-save'].disabled, false);
 });
 
 test('destroy removes all listeners', () => {
@@ -677,5 +701,5 @@ test('destroy removes all listeners', () => {
   assert.ok(before > 0);
   h.dialog.destroy();
   assert.equal(h.nodes['copy-prompt'].listeners.contextmenu?.length ?? 0, 0);
-  assert.equal(h.nodes['prompt-card-list'].listeners.drop?.length ?? 0, 0);
+  assert.equal(h.nodes['prompt-card-list'].listeners.pointerup?.length ?? 0, 0);
 });
