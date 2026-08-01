@@ -512,11 +512,10 @@ button { color: inherit; }
   place-items: center;
   overflow: hidden;
 }
-.icon-preview-shell.drag-over {
+.icon-choice.drag-over {
   border-color: var(--green);
   background: var(--green-soft);
-  outline: 2px dashed var(--green);
-  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--green);
 }
 .icon-preview { max-width: 68px; max-height: 68px; object-fit: contain; }
 #icon-fallback {

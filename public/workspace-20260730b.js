@@ -2430,7 +2430,7 @@ elements.iconInput.addEventListener('change', async () => {
   }
 });
 
-const iconDropZone = document.querySelector('.icon-preview-shell');
+const iconDropZone = document.querySelector('.icon-choice');
 iconDropZone.addEventListener('dragover', (event) => {
   if (event.dataTransfer.types.includes('Files')) {
     event.preventDefault();
