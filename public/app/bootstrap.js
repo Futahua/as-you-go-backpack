@@ -17,6 +17,7 @@ export function bootstrapWorkspace({
   binControls,
   keyboard,
   drop,
+  pointer,
 }) {
   confirmDialog.mount();
   menu.mount();
@@ -24,6 +25,7 @@ export function bootstrapWorkspace({
   binControls.mount();
   keyboard.mount();
   drop.mount();
+  pointer.mount();
 
   return (async () => {
     try {

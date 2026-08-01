@@ -39,6 +39,7 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     resolveBinTargets: (ids) => ids,
     graphContextId: () => 'ctx',
     removeGraphPositions: (s, ctxId, ids) => ({ ...s, positionsRemoved: ids }),
+    setGraphPositions: (s, ctxId, positions) => ({ ...s, pinned: positions }),
     createWebLink: (s, input) => ({ ...s, webLink: input }),
     createDroppedShortcuts: (s, targets, destination) => ({
       ...s,
@@ -357,4 +358,54 @@ test('dropFiles reports when shortcuts already exist without committing', async 
   await h.commands.dropFiles([{ name: 'a.txt' }], 'g1');
   assert.equal(h.effects.status[0], 'Those shortcuts already exist here.');
   assert.equal(h.store.getSnapshot().dropped, undefined);
+});
+
+test('dragDropToBin bins resolved targets and clears positions', async () => {
+  const h = createHarness({
+    model: {
+      resolveBinTargets: (ids) => ids.flatMap((id) => (id === 's1' ? ['p1', 'p1b'] : [id])),
+    },
+  });
+  await h.commands.dragDropToBin({ itemIds: ['g1', 's1'] });
+  assert.deepEqual(h.store.getSnapshot().binned, ['g1', 'p1', 'p1b']);
+  assert.deepEqual(h.store.getSnapshot().positionsRemoved, ['g1', 's1']);
+});
+
+test('dragDropToFolder moves groups and single placements into the folder', async () => {
+  const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'G' }] });
+  await h.commands.dragDropToFolder({
+    itemIds: ['g1', 's1'],
+    placementIds: new Map([['s1', 'p-s1']]),
+    folderId: 'dest',
+  });
+  assert.deepEqual(h.store.getSnapshot().moved, ['g1', 'p-s1', 'dest']);
+  assert.deepEqual(h.store.getSnapshot().positionsRemoved, ['g1', 's1']);
+});
+
+test('dragDropToFolder collapses whole linked shortcuts', async () => {
+  const h = createHarness({
+    model: {
+      visibleParentCountFor: (id) => (id === 's1' ? 2 : 1),
+    },
+  });
+  await h.commands.dragDropToFolder({
+    itemIds: ['s1'],
+    placementIds: new Map([['s1', 'p-s1']]),
+    folderId: 'dest',
+  });
+  assert.deepEqual(h.store.getSnapshot().collapsed, ['s1', 'dest']);
+});
+
+test('pinDraggedNodes saves the pinned positions', () => {
+  const h = createHarness();
+  h.commands.pinDraggedNodes({ positions: { s1: { x: 10, y: 20 } } });
+  assert.deepEqual(h.store.getSnapshot().pinned, { s1: { x: 10, y: 20 } });
+  assert.equal(h.effects.saves, 1);
+});
+
+test('releaseDraggedNodes removes the positions and saves', () => {
+  const h = createHarness();
+  h.commands.releaseDraggedNodes({ itemIds: ['s1'] });
+  assert.deepEqual(h.store.getSnapshot().positionsRemoved, ['s1']);
+  assert.equal(h.effects.saves, 1);
 });

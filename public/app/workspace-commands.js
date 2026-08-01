@@ -23,6 +23,7 @@ export function createWorkspaceCommands({
   binSelection,
   graphContextId,
   removeGraphPositions,
+  setGraphPositions,
   createWebLink,
   createDroppedShortcuts,
   syncSelection,
@@ -294,6 +295,65 @@ export function createWorkspaceCommands({
     saveWorkspaceView();
   }
 
+  /** Drops a dragged selection onto the Bin pill: bins every resolved
+   * placement and clears their graph positions. */
+  async function dragDropToBin({ itemIds }) {
+    const session = store.getSession();
+    const ctxId = graphContextId(session.currentId, session.binMode);
+    try {
+      const next = removeGraphPositions(
+        binSelection(store.getSnapshot(), resolveBinTargets(itemIds)),
+        ctxId,
+        itemIds,
+      );
+      await store.commit(next);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Drops a dragged selection into a folder: moves groups and single
+   * placements, collapses whole linked shortcuts, and clears positions. */
+  async function dragDropToFolder({ itemIds, placementIds, folderId }) {
+    const session = store.getSession();
+    const ctxId = graphContextId(session.currentId, session.binMode);
+    try {
+      const groupIds = itemIds.filter((draggedId) => group(draggedId));
+      const wholeShortcutIds = itemIds.filter((draggedId) =>
+        !group(draggedId) && visibleParentCountFor(draggedId) > 1);
+      const singlePlacementIds = itemIds
+        .filter((draggedId) => !group(draggedId) && visibleParentCountFor(draggedId) <= 1)
+        .map((shortcutId) => placementIds.get(shortcutId) ?? anyActivePlacementId(shortcutId))
+        .filter(Boolean);
+      let next = store.getSnapshot();
+      if (groupIds.length > 0 || singlePlacementIds.length > 0) {
+        next = moveSelection(next, [...groupIds, ...singlePlacementIds], folderId);
+      }
+      for (const shortcutId of wholeShortcutIds) {
+        next = collapsePlacements(next, shortcutId, folderId);
+      }
+      await store.commit(removeGraphPositions(next, ctxId, itemIds));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Pins a dragged selection to its current graph coordinates. */
+  function pinDraggedNodes({ positions }) {
+    const session = store.getSession();
+    const ctxId = graphContextId(session.currentId, session.binMode);
+    store.replace(setGraphPositions(store.getSnapshot(), ctxId, positions));
+    saveWorkspaceView();
+  }
+
+  /** Releases a dragged selection, clearing its saved graph positions. */
+  function releaseDraggedNodes({ itemIds }) {
+    const session = store.getSession();
+    const ctxId = graphContextId(session.currentId, session.binMode);
+    store.replace(removeGraphPositions(store.getSnapshot(), ctxId, itemIds));
+    saveWorkspaceView();
+  }
+
   function nameForDroppedUrl(url) {
     try {
       const hostname = new URL(url).hostname.replace(/^www\./i, '');
@@ -360,6 +420,10 @@ export function createWorkspaceCommands({
     pasteInto,
     moveSelectionToBin,
     resetGraphPositions,
+    dragDropToBin,
+    dragDropToFolder,
+    pinDraggedNodes,
+    releaseDraggedNodes,
     dropUrl,
     dropFiles,
     selectedPasteDestinations,

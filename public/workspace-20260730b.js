@@ -58,6 +58,7 @@ import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
+import { createPointerController } from './app/interactions/pointer-controller.js';
 
 const host = createHostBridge(window);
 
@@ -98,50 +99,6 @@ const session = store.getSession();
 let suppressBlankClick = false;
 let suppressGraphClick = false;
 let zoomTimer = null;
-let graphDrag = null;
-let graphShiftKeydown = null;
-let graphShiftKeyup = null;
-
-function installGraphShiftListeners() {
-  if (graphShiftKeydown) return;
-  graphShiftKeydown = (event) => {
-    if (event.key === 'Shift' && graphDrag) {
-      graphDrag.pinOnRelease = true;
-      for (const id of graphDrag.itemIds) {
-        const node = graph._getNode(id);
-        if (node?.shell) {
-          node.shell.classList.remove('will-release');
-          node.shell.classList.add('will-pin');
-        }
-      }
-    }
-  };
-  graphShiftKeyup = (event) => {
-    if (event.key === 'Shift' && graphDrag) {
-      graphDrag.pinOnRelease = false;
-      for (const id of graphDrag.itemIds) {
-        const node = graph._getNode(id);
-        if (node?.shell) {
-          node.shell.classList.remove('will-pin');
-          node.shell.classList.add('will-release');
-        }
-      }
-    }
-  };
-  window.addEventListener('keydown', graphShiftKeydown, { capture: true });
-  window.addEventListener('keyup', graphShiftKeyup, { capture: true });
-}
-
-function removeGraphShiftListeners() {
-  if (graphShiftKeydown) {
-    window.removeEventListener('keydown', graphShiftKeydown, { capture: true });
-    graphShiftKeydown = null;
-  }
-  if (graphShiftKeyup) {
-    window.removeEventListener('keyup', graphShiftKeyup, { capture: true });
-    graphShiftKeyup = null;
-  }
-}
 
 function setStatus(text = '') {
   elements.status.textContent = text;
@@ -346,6 +303,7 @@ function createGraphController() {
   const nodes = new Map();
   const edges = new Map();
   const originEdges = new Map();
+  let onDragCancel = null;
   let simulation = null;
   let zoomBehavior = null;
   let viewportSelection = null;
@@ -432,10 +390,7 @@ function createGraphController() {
   }
 
   function destroyGraphView() {
-    if (graphDrag) {
-      graphDrag = null;
-      removeGraphShiftListeners();
-    }
+    onDragCancel?.();
     if (simulation) { simulation.stop(); simulation = null; }
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; pendingFrame = false; }
     nodes.forEach((node) => {
@@ -935,6 +890,7 @@ function createGraphController() {
     reheat,
     fitGraph,
     _getNode: (id) => nodes.get(id) ?? null,
+    _setOnDragCancel(callback) { onDragCancel = callback; },
     _setSimulationDecay() {
       if (simulation) {
         simulation.alphaTarget(0);
@@ -1147,314 +1103,6 @@ elements.grid.addEventListener('click', (event) => {
   }
 });
 
-elements.grid.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0) return;
-
-  if (!event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
-    const tile = event.target.closest('.icon-item');
-    const shell = tile?.closest('.graph-node-shell');
-    if (shell && event.pointerType !== 'touch' && !tile.classList.contains('bin-origin-ghost')) {
-      const itemId = tile.dataset.id;
-      if (!session.selected.has(itemId)) {
-        store.setSelection([itemId]);
-        store.setSelectionAnchor(itemId);
-        syncSelection();
-        saveWorkspaceView();
-      }
-      const dragPlacementIds = new Map();
-      for (const id of session.selected) {
-        if (group(id)) continue;
-        const placementId = visiblePlacementIdFor(id);
-        if (placementId) dragPlacementIds.set(id, placementId);
-      }
-      graphDrag = {
-        pointerId: event.pointerId,
-        itemIds: [...session.selected],
-        placementIds: dragPlacementIds,
-        primaryNodeId: itemId,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startWorldX: null,
-        startWorldY: null,
-        initialPositions: new Map(),
-        pinOnRelease: event.shiftKey,
-        moved: false,
-        thresholdPassed: false,
-      };
-      closeMenu();
-      event.preventDefault();
-      return;
-    }
-  }
-
-  if (
-    event.target.closest('.icon-item')
-    || !event.target.closest('[data-blank-parent], [data-icon-grid]')
-  ) return;
-
-  closeMenu();
-  marquee.start({
-    pointerId: event.pointerId,
-    clientX: event.clientX,
-    clientY: event.clientY,
-    preserveSelection: event.ctrlKey,
-  });
-  event.preventDefault();
-});
-
-elements.grid.addEventListener('pointermove', (event) => {
-  if (graphDrag && event.pointerId === graphDrag.pointerId) {
-    const shiftHeld = event.shiftKey === true;
-    if (shiftHeld !== graphDrag.pinOnRelease) {
-      graphDrag.pinOnRelease = shiftHeld;
-      for (const id of graphDrag.itemIds) {
-        const node = graph._getNode(id);
-        if (node?.shell) {
-          if (shiftHeld) {
-            node.shell.classList.remove('will-release');
-            node.shell.classList.add('will-pin');
-          } else {
-            node.shell.classList.remove('will-pin');
-            node.shell.classList.add('will-release');
-          }
-        }
-      }
-    }
-    if (!graphDrag.thresholdPassed) {
-      const dx = event.clientX - graphDrag.startClientX;
-      const dy = event.clientY - graphDrag.startClientY;
-      if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
-      graphDrag.thresholdPassed = true;
-      graphDrag.moved = true;
-      elements.grid.setPointerCapture(event.pointerId);
-      installGraphShiftListeners();
-      const viewport = elements.grid.querySelector('.graph-viewport');
-      let transform = { x: 0, y: 0, k: 1 };
-      if (viewport) {
-        try { transform = zoomTransform(viewport); } catch { /* use identity */ }
-      }
-      const rect = viewport?.getBoundingClientRect();
-
-      const localX = rect ? graphDrag.startClientX - rect.left : graphDrag.startClientX;
-      const localY = rect ? graphDrag.startClientY - rect.top : graphDrag.startClientY;
-      graphDrag.startWorldX = (localX - transform.x) / transform.k;
-      graphDrag.startWorldY = (localY - transform.y) / transform.k;
-      const pinClass = graphDrag.pinOnRelease ? 'will-pin' : 'will-release';
-      for (const id of graphDrag.itemIds) {
-        const node = graph._getNode(id);
-        if (node) {
-          graphDrag.initialPositions.set(id, {
-            x: node.x, y: node.y, fx: node.fx, fy: node.fy,
-          });
-          if (node.shell) {
-            node.shell.classList.add('graph-dragging', pinClass);
-          }
-        }
-      }
-    }
-    if (!graphDrag.moved) return;
-    const viewport = elements.grid.querySelector('.graph-viewport');
-    let transform = { x: 0, y: 0, k: 1 };
-    if (viewport) {
-      try { transform = zoomTransform(viewport); } catch { /* use identity */ }
-    }
-    const rect = viewport?.getBoundingClientRect();
-    const localX = rect ? event.clientX - rect.left : event.clientX;
-    const localY = rect ? event.clientY - rect.top : event.clientY;
-    const worldX = (localX - transform.x) / transform.k;
-    const worldY = (localY - transform.y) / transform.k;
-    const deltaX = worldX - graphDrag.startWorldX;
-    const deltaY = worldY - graphDrag.startWorldY;
-    for (const id of graphDrag.itemIds) {
-      const node = graph._getNode(id);
-      if (!node) continue;
-      const initial = graphDrag.initialPositions.get(id);
-      if (!initial) continue;
-      node.fx = initial.x + deltaX;
-      node.fy = initial.y + deltaY;
-      node.x = node.fx;
-      node.y = node.fy;
-      node.positioned = true;
-    }
-    graph.reheat(0.12);
-
-    if (!session.binMode && elements.binButton) {
-      const overBin = elements.binButton.contains(document.elementFromPoint(event.clientX, event.clientY));
-      elements.binButton.classList.toggle('graph-bin-drop-target', overBin);
-    }
-    return;
-  }
-
-  if (!marquee.isActive(event.pointerId)) return;
-  marquee.move({
-    pointerId: event.pointerId,
-    clientX: event.clientX,
-    clientY: event.clientY,
-  });
-});
-
-elements.grid.addEventListener('pointerup', (event) => {
-  if (graphDrag && event.pointerId === graphDrag.pointerId) {
-    if (elements.grid.hasPointerCapture(event.pointerId)) {
-      elements.grid.releasePointerCapture(event.pointerId);
-    }
-    if (graphDrag.moved) {
-      graphDrag.pinOnRelease = event.shiftKey === true;
-      removeGraphShiftListeners();
-      suppressGraphClick = true;
-      document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
-      document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
-      elements.binButton?.classList.remove('graph-bin-drop-target');
-      const hitBin = !session.binMode && elements.binButton?.contains(document.elementFromPoint(event.clientX, event.clientY));
-      const shells = [...elements.grid.querySelectorAll('.graph-node-shell')];
-      shells.forEach((s) => s.style.pointerEvents = '');
-      let hitFolderId = null;
-      if (!hitBin) {
-        shells.forEach((s) => {
-          if (!graphDrag.itemIds.includes(s.dataset.graphNodeId)) {
-            s.style.pointerEvents = 'none';
-          }
-        });
-        const elAtPoint = document.elementFromPoint(event.clientX, event.clientY);
-        const hitShell = elAtPoint?.closest('.graph-node-shell');
-        shells.forEach((s) => s.style.pointerEvents = '');
-        if (hitShell && !graphDrag.itemIds.includes(hitShell.dataset.graphNodeId)) {
-          const hitItem = hitShell.querySelector('.icon-item');
-          if (hitItem?.dataset.kind === 'group') {
-            hitFolderId = hitItem.dataset.id;
-          }
-        }
-      }
-
-      const graphDragCopy = { ...graphDrag, itemIds: [...graphDrag.itemIds], placementIds: graphDrag.placementIds };
-      graphDrag = null;
-
-      if (hitBin) {
-        try {
-          const ctxId = graphContextId(session.currentId, session.binMode);
-          const next = removeGraphPositions(
-            binSelection(state, resolveBinTargets(graphDragCopy.itemIds)),
-            ctxId,
-            graphDragCopy.itemIds,
-          );
-          commit(next, 'Moved to Bin.');
-        } catch (error) {
-          setStatus(error instanceof Error ? error.message : String(error));
-        }
-      } else if (hitFolderId) {
-        try {
-          const groupIds = graphDragCopy.itemIds.filter((draggedId) => group(draggedId));
-          const wholeShortcutIds = graphDragCopy.itemIds.filter((draggedId) =>
-            !group(draggedId) && visibleParentCountFor(draggedId) > 1);
-          const singlePlacementIds = graphDragCopy.itemIds
-            .filter((draggedId) => !group(draggedId) && visibleParentCountFor(draggedId) <= 1)
-            .map((shortcutId) => graphDragCopy.placementIds.get(shortcutId) ?? anyActivePlacementId(shortcutId))
-            .filter(Boolean);
-          let next = state;
-          if (groupIds.length > 0 || singlePlacementIds.length > 0) {
-            next = moveSelection(next, [...groupIds, ...singlePlacementIds], hitFolderId);
-          }
-          for (const shortcutId of wholeShortcutIds) {
-            next = collapsePlacements(next, shortcutId, hitFolderId);
-          }
-          const ctxId = graphContextId(session.currentId, session.binMode);
-          commit(removeGraphPositions(next, ctxId, graphDragCopy.itemIds), 'Moved.');
-        } catch (error) {
-          setStatus(error instanceof Error ? error.message : String(error));
-        }
-      } else if (graphDragCopy.pinOnRelease) {
-        const ctxId = graphContextId(session.currentId, session.binMode);
-        const updates = {};
-        for (const id of graphDragCopy.itemIds) {
-          const node = graph._getNode(id);
-          if (node) {
-            updates[id] = { x: node.x, y: node.y };
-          }
-        }
-        state = store.replace(setGraphPositions(state, ctxId, updates));
-        graph._setSimulationDecay();
-        saveWorkspaceView();
-      } else {
-        const ctxId = graphContextId(session.currentId, session.binMode);
-        state = store.replace(removeGraphPositions(state, ctxId, graphDragCopy.itemIds));
-        for (const id of graphDragCopy.itemIds) {
-          const node = graph._getNode(id);
-          if (node) {
-            node.fx = null;
-            node.fy = null;
-            node.positioned = false;
-          }
-        }
-        graph.reheat(0.25);
-        saveWorkspaceView();
-      }
-      return;
-    }
-    removeGraphShiftListeners();
-    graphDrag = null;
-    return;
-  }
-
-  if (marquee.isActive(event.pointerId)) {
-    suppressBlankClick = marquee.finish(event.pointerId);
-  }
-});
-
-function isDirectoryTarget(target) {
-  if (!target) return false;
-  const normalized = target.replace(/\\/g, '/');
-  const lastSlash = normalized.lastIndexOf('/');
-  const basename = lastSlash === -1 ? normalized : normalized.slice(lastSlash + 1);
-  return !basename.includes('.');
-}
-
-elements.grid.addEventListener('dblclick', (event) => {
-  if (suppressGraphClick) {
-    suppressGraphClick = false;
-    return;
-  }
-  const tile = event.target.closest('.icon-item');
-  if (!tile) return;
-  const id = tile.dataset.id;
-  const chosen = shortcut(id);
-  if (chosen && !isWebLink(chosen) && isDirectoryTarget(chosen.target)) {
-    closeMenu();
-    host.revealShortcut(id).catch((error) =>
-      setStatus(error instanceof Error ? error.message : String(error)));
-    return;
-  }
-  commands.activateItem(id);
-});
-
-elements.grid.addEventListener('pointercancel', (event) => {
-  if (graphDrag && event.pointerId === graphDrag.pointerId) {
-    if (elements.grid.hasPointerCapture(event.pointerId)) {
-      elements.grid.releasePointerCapture(event.pointerId);
-    }
-    removeGraphShiftListeners();
-    if (graphDrag.moved) {
-      for (const id of graphDrag.itemIds) {
-        const node = graph._getNode(id);
-        const initial = graphDrag.initialPositions.get(id);
-        if (node && initial) {
-          node.x = initial.x;
-          node.y = initial.y;
-          node.fx = initial.fx;
-          node.fy = initial.fy;
-        }
-      }
-      graph.reheat(0.2);
-    }
-    document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
-    document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
-    elements.binButton?.classList.remove('graph-bin-drop-target');
-    removeGraphShiftListeners();
-    graphDrag = null;
-    return;
-  }
-  const moved = marquee.finish(event.pointerId);
-  if (moved !== null) suppressBlankClick = moved;
-});
 
 elements.grid.addEventListener('contextmenu', (event) => {
   event.preventDefault();
@@ -1463,14 +1111,8 @@ elements.grid.addEventListener('contextmenu', (event) => {
   // sequence without ever dispatching pointerup/pointercancel to the grid
   // (observed with Shift+right-click on a folder) — leaving graph-dragging/
   // will-pin/graph-drop-target visuals stuck on whatever tile the pointer
-  // last touched. Clear them defensively any time the menu opens.
-  document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
-  document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
-  elements.binButton?.classList.remove('graph-bin-drop-target');
-  if (graphDrag) {
-    removeGraphShiftListeners();
-    graphDrag = null;
-  }
+  // last touched. Cancel the drag defensively any time the menu opens.
+  pointer.cancelDrag();
   const tile = event.target.closest('.icon-item');
   if (tile && tile.classList.contains('bin-origin-ghost')) return;
   if (tile) {
@@ -1633,6 +1275,7 @@ const commands = createWorkspaceCommands({
   binSelection,
   graphContextId,
   removeGraphPositions,
+  setGraphPositions,
   createWebLink,
   createDroppedShortcuts,
   syncSelection,
@@ -1656,6 +1299,23 @@ const drop = createDropController({
   store,
   commands,
 });
+
+const pointer = createPointerController({
+  window,
+  document,
+  elements,
+  store,
+  commands,
+  graph,
+  marquee,
+  zoomTransform,
+  group,
+  visiblePlacementIdFor,
+  closeMenu,
+  setSuppressGraphClick: (value) => { suppressGraphClick = value; },
+  setSuppressBlankClick: (value) => { suppressBlankClick = value; },
+});
+graph._setOnDragCancel(() => pointer.cancelDrag());
 
 const editorDialog = createEditorDialog({
   elements,
@@ -1723,4 +1383,5 @@ bootstrapWorkspace({
   binControls,
   keyboard,
   drop,
+  pointer,
 });
