@@ -97,8 +97,10 @@ export function createWorkspaceCommands({
   /** Ctrl+G: replaces which sets the selection belongs to. An empty setIds
    * regresses the items to setless, which is how something leaves every set.
    * Sets left with no members are dropped. */
-  async function shareSelectionWithSets(setIds) {
-    const ids = [...store.getSession().selected];
+  async function shareSelectionWithSets(setIds, itemIds = null) {
+    // The membership mode captures its subjects when it opens, so clicking
+    // around inside the mode cannot change what is being edited.
+    const ids = itemIds ?? [...store.getSession().selected];
     if (ids.length === 0) return;
     const snapshot = store.getSnapshot();
     const current = snapshot.view?.itemSets ?? [];

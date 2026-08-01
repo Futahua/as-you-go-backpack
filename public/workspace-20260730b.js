@@ -56,6 +56,7 @@ import { createConfirmationDialog } from './app/components/confirmation-dialog.j
 import { createContextMenu } from './app/components/context-menu.js';
 import { createEditorDialog } from './app/components/editor-dialog.js';
 import { createBinControls } from './app/components/bin-controls.js';
+import { createSetMembershipMode } from './app/components/set-membership-mode.js';
 import { bootstrapWorkspace } from './app/bootstrap.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
@@ -1146,6 +1147,12 @@ elements.grid.addEventListener('click', (event) => {
       return;
     }
     if (tile.classList.contains('bin-origin-ghost')) return;
+    // While the membership picker is open a click chooses the set the clicked
+    // item belongs to, rather than changing the selection being edited.
+    if (setMembershipMode.isActive()) {
+      setMembershipMode.toggleFromItem(tile.dataset.id);
+      return;
+    }
     // Alt+click batch-expands everything the selection leaves out: the
     // select-all scope minus what is selected. Selection is untouched, so it
     // replaces "select all, deselect a few, Shift+right-click".
@@ -1490,6 +1497,14 @@ const binControls = createBinControls({
   saveWorkspaceView,
 });
 
+const setMembershipMode = createSetMembershipMode({
+  getSets: () => state.view?.itemSets ?? [],
+  getSelectedIds: () => [...store.getSession().selected],
+  shareSelectionWithSets: (setIds, itemIds) => commands.shareSelectionWithSets(setIds, itemIds),
+  render: () => render(),
+  setStatus,
+});
+
 const keyboard = createKeyboardController({
   document,
   elements,
@@ -1498,6 +1513,8 @@ const keyboard = createKeyboardController({
   closeMenu,
   getVisibleItemIds: visibleItemIds,
   confirmDialog,
+  beginSetMembershipEdit: () => setMembershipMode.begin(),
+  setMembershipMode,
 });
 
 const promptLibrary = createPromptLibraryDialog({

@@ -16,6 +16,7 @@ export function createKeyboardController({
   getVisibleItemIds,
   confirmDialog,
   beginSetMembershipEdit,
+  setMembershipMode,
 }) {
   let abortController = null;
 
@@ -34,6 +35,20 @@ export function createKeyboardController({
       if (session.binMode && event.ctrlKey && ['c', 'x', 'v'].includes(key)) {
         event.preventDefault();
         return;
+      }
+      // The set membership picker owns Escape and Enter while it is open, so
+      // cancelling it does not also clear the selection it is editing.
+      if (setMembershipMode?.isActive()) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setMembershipMode.cancel();
+          return;
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          void setMembershipMode.confirm();
+          return;
+        }
       }
       if (event.key === 'Escape') {
         // Close the menu before clearing/syncing/saving, matching the

@@ -7,7 +7,7 @@ function fakeNode() {
   return { hidden: true };
 }
 
-function createHarness({ binMode = false, initialState = null } = {}) {
+function createHarness({ binMode = false, initialState = null, membershipActive = false } = {}) {
   const listeners = [];
   const documentMock = {
     addEventListener(type, handler, options) {
@@ -30,7 +30,7 @@ function createHarness({ binMode = false, initialState = null } = {}) {
     setStatus: () => {},
     initialSession: { binMode },
   });
-  const called = { close: 0, permanentDelete: 0, membershipEdit: 0 };
+  const called = { close: 0, permanentDelete: 0, membershipEdit: 0, membershipCancel: 0, membershipConfirm: 0 };
   const commandSpies = {};
   for (const name of [
     'clearSelection', 'selectAllVisible', 'copySelection', 'cutSelection',
@@ -55,6 +55,11 @@ function createHarness({ binMode = false, initialState = null } = {}) {
     getVisibleItemIds: () => ['a', 'b', 'c'],
     confirmDialog: { askPermanentDelete: () => { called.permanentDelete += 1; } },
     beginSetMembershipEdit: () => { called.membershipEdit += 1; },
+    setMembershipMode: {
+      isActive: () => membershipActive,
+      cancel: () => { called.membershipCancel += 1; },
+      confirm: async () => { called.membershipConfirm += 1; },
+    },
   });
   controller.mount();
   return { controller, store, elements, commandSpies, called, listeners };
@@ -252,4 +257,34 @@ test('G does nothing while a modal layer is open', () => {
   h.elements.promptLayer.hidden = false;
   h.listeners[0].handler(key({ key: 'g' }));
   assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 0);
+});
+
+test('Escape cancels the membership picker instead of clearing the selection', () => {
+  const h = createHarness({ membershipActive: true });
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'Escape' }));
+  assert.equal(h.called.membershipCancel, 1);
+  assert.equal(
+    h.commandSpies['clearSelection:calls'], 0,
+    'cancelling must not also clear the selection it was editing',
+  );
+});
+
+test('Enter confirms the membership picker instead of activating an item', () => {
+  const h = createHarness({ membershipActive: true });
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'Enter' }));
+  assert.equal(h.called.membershipConfirm, 1);
+  assert.equal(h.commandSpies['activateItem:calls'], 0, 'Enter does not open the item');
+});
+
+test('with the picker closed Escape and Enter behave normally', () => {
+  const h = createHarness();
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'Escape' }));
+  assert.equal(h.commandSpies['clearSelection:calls'], 1);
+  h.listeners[0].handler(key({ key: 'Enter' }));
+  assert.equal(h.commandSpies['activateItem:calls'], 1);
+  assert.equal(h.called.membershipCancel, 0);
+  assert.equal(h.called.membershipConfirm, 0);
 });
