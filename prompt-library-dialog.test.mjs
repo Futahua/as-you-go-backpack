@@ -233,6 +233,7 @@ function buildPromptLayerTree(nodes) {
   for (const id of [
     'prompt-add-prompt', 'prompt-add-folder', 'prompt-status', 'prompt-delete-confirm',
     'prompt-tree-viewport', 'prompt-tree-menu', 'prompt-error', 'prompt-cancel', 'prompt-save',
+    'prompt-copy-selected',
   ]) {
     card.appendChild(nodes[id]);
   }
@@ -274,7 +275,7 @@ function createHarness({ initialView = null } = {}) {
   const topIds = [
     'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-tree-viewport', 'prompt-card-list',
     'prompt-root-surface', 'prompt-tree-menu', 'prompt-status',
-    'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
+    'prompt-error', 'prompt-cancel', 'prompt-save', 'prompt-copy-selected', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
@@ -959,7 +960,7 @@ test('persistence failure leaves the dialog open and re-enables Save', async () 
   const topIds = [
     'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-tree-viewport', 'prompt-card-list',
     'prompt-root-surface', 'prompt-tree-menu', 'prompt-status',
-    'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
+    'prompt-error', 'prompt-cancel', 'prompt-save', 'prompt-copy-selected', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
@@ -1690,4 +1691,96 @@ test('the context menu can put a folder into exclude and back to neutral', async
   const dev = h.getState().view.promptLibrary[0];
   assert.equal(dev.includeAll, false, 'neutral clears include');
   assert.equal(dev.excludeAll, false, 'neutral also clears exclude, never stranding the folder');
+});
+
+// ===========================================================================
+// Copy all: copies the highlighted rows, independent of the batch checkboxes.
+// The checkboxes drive the quick copy from outside the dialog; this button
+// copies what is selected in the tree.
+// ===========================================================================
+
+const copySelected = (h) => h.nodes['prompt-copy-selected'].dispatch('click', { preventDefault, stopPropagation });
+
+test('Copy all is disabled until rows are selected', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  assert.equal(h.nodes['prompt-copy-selected'].disabled, true, 'disabled with no selection');
+  clickRow(h, 'prompt-root');
+  assert.equal(h.nodes['prompt-copy-selected'].disabled, false, 'enabled once something is selected');
+  blankClick(h);
+  assert.equal(h.nodes['prompt-copy-selected'].disabled, true, 'disabled again when selection clears');
+});
+
+test('Copy all copies a selected prompt regardless of its checkbox', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  // prompt-b is excluded from the batch; selecting it must still copy it.
+  clickRow(h, 'prompt-b');
+  copySelected(h);
+  assert.deepEqual(h.copied, ['two'], 'unchecked prompt still copied when selected');
+});
+
+test('Copy all copies every prompt inside a selected folder, children unselected', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  // folder-dev is neutral and prompt-b inside it is unchecked; selecting the
+  // folder alone must still copy everything it contains.
+  clickRow(h, 'folder-dev');
+  copySelected(h);
+  assert.deepEqual(h.copied, ['one\n\ntwo'], 'whole folder subtree copied in visual order');
+});
+
+test('Copy all does not duplicate a prompt selected under a selected folder', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  clickRow(h, 'folder-dev');
+  clickRow(h, 'prompt-a', { ctrlKey: true });
+  copySelected(h);
+  assert.deepEqual(h.copied, ['one\n\ntwo'], 'root reduction stops the double copy');
+});
+
+test('Copy all joins multiple selected roots in visual order', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  clickRow(h, 'folder-dev', { ctrlKey: true });
+  copySelected(h);
+  assert.deepEqual(h.copied, ['one\n\ntwo\n\nthree'], 'depth-first visual order, not click order');
+});
+
+test('Copy all ignores folder exclude-all overrides', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const box = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
+  box.dispatch('click', { target: box, preventDefault, stopPropagation });
+  box.dispatch('click', { target: box, preventDefault, stopPropagation });
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-checkbox').dataset.batchState, 'exclude');
+  clickRow(h, 'folder-dev');
+  copySelected(h);
+  assert.deepEqual(h.copied, ['one\n\ntwo'], 'an explicit selection copies even an excluded folder');
+});
+
+test('Copy all reports when the selection has no prompt text', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-folder'].dispatch('click', { preventDefault });
+  const empty = h.folderRows()[h.folderRows().length - 1].dataset.nodeId;
+  blankClick(h);
+  clickRow(h, empty);
+  copySelected(h);
+  assert.deepEqual(h.copied, [], 'nothing sent to the clipboard');
+  assert.ok(h.nodes['prompt-status'].textContent.includes('Nothing to copy'));
+});
+
+test('Copy all does not touch the draft, history, or the workspace store', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  const before = JSON.parse(JSON.stringify(h.getState()));
+  open(h);
+  clickRow(h, 'folder-dev');
+  copySelected(h);
+  keyOn(h, { key: 'z', ctrlKey: true });
+  assert.ok(h.nodes['prompt-status'].textContent.includes('Nothing to undo'), 'copying is not an undoable edit');
+  assert.deepEqual(h.getState(), before, 'workspace store untouched');
 });

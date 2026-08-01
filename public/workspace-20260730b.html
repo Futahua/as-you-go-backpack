@@ -105,7 +105,7 @@
       <section class="confirm-layer" id="prompt-layer" hidden>
         <div class="confirm-card prompt-library" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
           <header class="prompt-library-header">
-            <h2 id="prompt-title">Copy prompts</h2>
+            <h2 id="prompt-title">Copy</h2>
             <div class="prompt-library-add-actions">
               <button id="prompt-add-prompt" class="paper-button" type="button">
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3h6l4 4v10a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 4 17V4.5A1.5 1.5 0 0 1 5.5 3z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 8v6M7 11h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -131,6 +131,7 @@
           <div id="prompt-tree-menu" class="prompt-tree-menu" role="menu" hidden></div>
           <p id="prompt-error" class="editor-error" role="alert"></p>
           <div class="editor-actions editor-submit">
+            <button id="prompt-copy-selected" class="paper-button" type="button" disabled title="Select rows to copy their prompt text">Copy all</button>
             <button id="prompt-cancel" class="paper-button" type="button">Cancel</button>
             <button id="prompt-save" class="paper-button primary" type="button">Save</button>
           </div>

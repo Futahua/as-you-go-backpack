@@ -12,6 +12,7 @@ import {
   buildBatchPromptText,
   validatePromptLibrary,
   selectedRootIds,
+  collectPromptsFromSelectedRoots,
   folderBatchState,
   folderBatchFields,
   nextFolderBatchState,
@@ -118,6 +119,7 @@ export function createPromptLibraryDialog({
   const viewport = document.querySelector('#prompt-tree-viewport') ?? cardList;
   const error = document.querySelector('#prompt-error');
   const cancelButton = document.querySelector('#prompt-cancel');
+  const copySelectedButton = document.querySelector('#prompt-copy-selected');
   const saveButton = document.querySelector('#prompt-save');
   const copyButton = document.querySelector('#copy-prompt');
   const status = document.querySelector('#prompt-status');
@@ -158,6 +160,7 @@ export function createPromptLibraryDialog({
       activeDestination = selected.length === 1
         ? { type: 'node', nodeId: selected[0] }
         : { type: 'root', nodeId: null };
+      refreshCopySelected();
     },
 
     onToggleFolder(id) {
@@ -282,6 +285,31 @@ export function createPromptLibraryDialog({
   /** Prompt-library-local live feedback, always inside the modal. */
   function statusMessage(message) {
     status.textContent = message;
+  }
+
+  /** Copy all is only meaningful with a selection, so it stays disabled until
+   * there is one. Kept in sync from the single selection-change path. */
+  function refreshCopySelected() {
+    const count = controller.getSelection().selectedIds.size;
+    copySelectedButton.disabled = count === 0;
+    copySelectedButton.title = count === 0
+      ? 'Select rows to copy their prompt text'
+      : 'Copy the prompt text of every selected row';
+  }
+
+  /** Copies the text of the selected rows, independent of the batch
+   * checkboxes. A selected folder contributes every prompt inside it whether
+   * or not its children are selected; root reduction stops a prompt selected
+   * under an already-selected folder being copied twice. */
+  function copySelectedPromptText() {
+    const ids = [...controller.getSelection().selectedIds];
+    if (ids.length === 0) return;
+    const text = collectPromptsFromSelectedRoots(draftLibrary, ids);
+    if (!text) {
+      statusMessage('Nothing to copy: the selected rows have no prompt text.');
+      return;
+    }
+    copyToClipboard(text);
   }
 
   function copyNodes(ids) {
@@ -1134,6 +1162,7 @@ export function createPromptLibraryDialog({
     activeDestination = { type: 'root', nodeId: null };
     contextMenu.close();
     controller.setSelection(createTreeSelection());
+    refreshCopySelected();
     error.textContent = options.message || '';
     status.textContent = '';
     render();
@@ -1197,6 +1226,7 @@ export function createPromptLibraryDialog({
     addFolderButton.addEventListener('click', () => addFolder(null), { signal });
     deleteOk.addEventListener('click', onDeleteOk, { signal });
     deleteCancel.addEventListener('click', onDeleteCancel, { signal });
+    copySelectedButton.addEventListener('click', copySelectedPromptText, { signal });
     cancelButton.addEventListener('click', onCancel, { signal });
     saveButton.addEventListener('click', () => onSave(), { signal });
     cardList.addEventListener('input', onTreeInput, { signal });
