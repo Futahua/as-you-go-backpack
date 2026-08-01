@@ -41,9 +41,28 @@ Rules: the dialog clones the saved library into a `draftLibrary` and owns
 persistence via `setPromptLibrary` + `store.replace/save`; the controller and
 context menu never call the host or persist state; the toolbar copier keeps
 selected-shortcut precedence and reads the saved snapshot through
-`getSnapshotLibrary()`/`getBatchText()`. Folder checkboxes persist an
-`includeAll` override (never a derived tri-state) and checking a folder never
-rewrites descendant prompt checkboxes.
+`getSnapshotLibrary()`/`getBatchText()`. Folder checkboxes persist an explicit
+override (never a derived tri-state) and setting one never rewrites descendant
+prompt checkboxes.
+
+A folder's override is one of three states, stored as two booleans so libraries
+saved before exclude-all existed migrate untouched:
+
+| state | stored | meaning |
+| --- | --- | --- |
+| neutral | both false | each descendant's own checkbox decides |
+| include | `includeAll` | everything inside is copied |
+| exclude | `excludeAll` | nothing inside is copied, even a checked prompt |
+
+The **nearest** override wins, so an excluded folder inside an included one
+copies nothing and an included folder inside an excluded one copies everything.
+Clicking a folder checkbox cycles neutral → include → exclude → neutral; the
+context menu offers whichever two states the folder is not currently in, and
+"Use child selections" clears both flags so a folder is never stranded in
+exclude. Exclude renders as a red box with a white minus (a native checkbox has
+no excluded state), and rows under a non-neutral folder take that override's
+colour — green for include, struck-through red for exclude — because their own
+checkbox no longer decides anything.
 
 Batch checkboxes support two bulk gestures, each one undo entry, and neither
 ever changes row selection (the tree controller ignores `.prompt-checkbox`

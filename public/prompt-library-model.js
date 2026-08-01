@@ -26,15 +26,48 @@ export function createPromptNode(overrides = {}) {
 }
 
 /** Creates a folder node. New folders are empty and do not override their
- * descendants' batch inclusion (includeAll: false). */
+ * descendants' batch inclusion (neutral: includeAll and excludeAll both
+ * false). */
 export function createPromptFolder(overrides = {}) {
   return {
     id: typeof overrides.id === 'string' && overrides.id ? overrides.id : createId('folder'),
     type: 'folder',
     title: typeof overrides.title === 'string' ? overrides.title : 'New folder',
-    includeAll: overrides.includeAll === true,
+    ...folderOverrideFields(overrides),
     children: [],
   };
+}
+
+/** A folder's batch override is one of three states, stored as two booleans so
+ * older saved libraries (which only ever had includeAll) migrate untouched:
+ *
+ *   neutral  — both false: each descendant's own checkbox decides
+ *   include  — includeAll: everything inside is copied
+ *   exclude  — excludeAll: nothing inside is copied
+ *
+ * The two can never both be true; include wins if malformed data says so. */
+function folderOverrideFields(raw) {
+  const includeAll = raw?.includeAll === true;
+  return { includeAll, excludeAll: !includeAll && raw?.excludeAll === true };
+}
+
+/** The three-state override as a single value, for UI and cycling. */
+export function folderBatchState(node) {
+  if (node?.includeAll === true) return 'include';
+  if (node?.excludeAll === true) return 'exclude';
+  return 'neutral';
+}
+
+/** Maps a three-state value back onto the stored booleans. */
+export function folderBatchFields(state) {
+  return { includeAll: state === 'include', excludeAll: state === 'exclude' };
+}
+
+/** Click order for the folder checkbox: neutral → include → exclude → neutral. */
+export function nextFolderBatchState(state) {
+  if (state === 'neutral') return 'include';
+  if (state === 'include') return 'exclude';
+  return 'neutral';
 }
 
 function normalizeNode(raw, seen) {
@@ -50,9 +83,9 @@ function normalizeNode(raw, seen) {
       id,
       type: 'folder',
       title: typeof raw.title === 'string' ? raw.title : 'New folder',
-      // Folders from the PR-5 shape may lack includeAll; they normalize to
-      // false (no override), preserving child configuration.
-      includeAll: raw.includeAll === true,
+      // Folders from the PR-5 shape may lack includeAll/excludeAll; they
+      // normalize to neutral, preserving child configuration.
+      ...folderOverrideFields(raw),
       children,
     };
   }
@@ -299,7 +332,7 @@ export function clonePromptNodesForPaste(nodes) {
         id: createId('folder'),
         type: 'folder',
         title: node.title,
-        includeAll: node.includeAll === true,
+        ...folderOverrideFields(node),
         children: node.children.map(clone),
       }
     : {
@@ -420,23 +453,31 @@ export function countPromptNodes(nodes) {
 
 /**
  * Collects the prompts that belong in a normal batch copy, in depth-first
- * visual order. A prompt is included when `forcedByAncestor` is true or its
- * own includeInBatch is true. A folder recurses with
- * `forcedByAncestor || folder.includeAll`, so a checked folder overrides every
- * descendant prompt (and nested folder) below it without rewriting them.
+ * visual order. Each folder carries one of three overrides down the walk:
+ *
+ *   include — every descendant prompt is copied whatever its own checkbox says
+ *   exclude — no descendant prompt is copied, even a checked one
+ *   neutral — inherit whatever the nearest overriding ancestor decided
+ *
+ * The nearest override wins, so an excluded folder inside an included one
+ * copies nothing, and an included folder inside an excluded one copies
+ * everything. No descendant checkbox is ever rewritten, so clearing an
+ * override restores exactly what was configured before.
  */
 export function collectIncludedPrompts(nodes, forcedByAncestor = false) {
   const included = [];
   const walk = (list, forced) => {
     for (const node of list) {
       if (node.type === 'prompt') {
-        if (forced || node.includeInBatch === true) included.push(node);
+        if (forced === 'exclude') continue;
+        if (forced === 'include' || node.includeInBatch === true) included.push(node);
       } else {
-        walk(node.children, forced || node.includeAll === true);
+        const own = folderBatchState(node);
+        walk(node.children, own === 'neutral' ? forced : own);
       }
     }
   };
-  walk(nodes, forcedByAncestor === true);
+  walk(nodes, forcedByAncestor === true ? 'include' : forcedByAncestor || 'neutral');
   return included;
 }
 

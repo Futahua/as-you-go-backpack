@@ -12,6 +12,9 @@ import {
   buildBatchPromptText,
   validatePromptLibrary,
   selectedRootIds,
+  folderBatchState,
+  folderBatchFields,
+  nextFolderBatchState,
 } from '../../prompt-library-model.js';
 import {
   createTreeSelection,
@@ -506,15 +509,27 @@ export function createPromptLibraryDialog({
     renderDeleteConfirm();
   }
 
-  function renderNodes(nodes, parentId, depth) {
+  /** `inherited` is the nearest ancestor folder override ('include',
+   * 'exclude', or 'neutral'). Rows under a non-neutral ancestor render greyed
+   * out, because their own checkbox no longer decides anything. */
+  function renderNodes(nodes, parentId, depth, inherited = 'neutral') {
     const fragment = document.createDocumentFragment();
     nodes.forEach((node, index) => {
       const nextId = nodes[index + 1]?.id ?? null;
       fragment.append(node.type === 'folder'
-        ? createFolderElement(node, parentId, depth, nextId)
-        : createPromptElement(node, parentId, depth, nextId));
+        ? createFolderElement(node, parentId, depth, nextId, inherited)
+        : createPromptElement(node, parentId, depth, nextId, inherited));
     });
     return fragment;
+  }
+
+  /** Marks a row as governed by an ancestor folder override, so its own
+   * checkbox reads as overridden (green under include, red under exclude)
+   * rather than as the thing deciding inclusion. */
+  function applyInheritedBatch(row, inherited) {
+    if (inherited !== 'include' && inherited !== 'exclude') return;
+    row.classList.add('prompt-batch-forced', `prompt-batch-${inherited}`);
+    row.dataset.batchForced = inherited;
   }
 
   function setRowMeta(row, node, parentId, depth, nextId) {
@@ -525,11 +540,12 @@ export function createPromptLibraryDialog({
     row.style.setProperty('--prompt-depth', String(depth));
   }
 
-  function createPromptElement(node, parentId, depth, nextId) {
+  function createPromptElement(node, parentId, depth, nextId, inherited = 'neutral') {
     const expanded = node.id === expandedPromptId;
     const fragment = document.createDocumentFragment();
     const row = document.createElement('div');
     row.className = 'prompt-tree-row prompt-prompt-row';
+    applyInheritedBatch(row, inherited);
     setRowMeta(row, node, parentId, depth, nextId);
     row.setAttribute('role', 'treeitem');
     row.setAttribute('aria-level', String(depth + 1));
@@ -578,22 +594,30 @@ export function createPromptLibraryDialog({
     return fragment;
   }
 
-  function createFolderElement(node, parentId, depth, nextId) {
+  function createFolderElement(node, parentId, depth, nextId, inherited = 'neutral') {
     const expanded = expandedFolderIds.has(node.id);
     const renaming = editingFolderId === node.id;
     const fragment = document.createDocumentFragment();
     const row = document.createElement('div');
     row.className = 'prompt-tree-row prompt-folder-row';
+    applyInheritedBatch(row, inherited);
     setRowMeta(row, node, parentId, depth, nextId);
     row.setAttribute('role', 'treeitem');
     row.setAttribute('aria-level', String(depth + 1));
     row.setAttribute('aria-expanded', String(expanded));
 
+    // Three-state folder override. A native checkbox has no "excluded" state,
+    // so exclude renders as an indeterminate box styled red with a minus.
+    const state = folderBatchState(node);
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.className = 'prompt-checkbox';
-    checkbox.setAttribute('aria-label', `Include every prompt inside ${node.title}`);
-    checkbox.checked = node.includeAll === true;
+    checkbox.className = 'prompt-checkbox prompt-folder-checkbox';
+    checkbox.dataset.batchState = state;
+    checkbox.setAttribute('aria-label', state === 'exclude'
+      ? `Exclude every prompt inside ${node.title}`
+      : `Include every prompt inside ${node.title}`);
+    checkbox.checked = state === 'include';
+    checkbox.indeterminate = state === 'exclude';
 
     const chevronBtn = document.createElement('button');
     chevronBtn.type = 'button';
@@ -629,7 +653,12 @@ export function createPromptLibraryDialog({
       children.className = 'prompt-tree-children';
       children.setAttribute('role', 'group');
       children.style.setProperty('--prompt-depth', String(depth + 1));
-      children.append(renderNodes(node.children, node.id, depth + 1));
+      // The nearest override wins: a neutral folder passes its ancestor's
+      // state through, a non-neutral one replaces it for everything below.
+      children.append(renderNodes(
+        node.children, node.id, depth + 1,
+        state === 'neutral' ? inherited : state,
+      ));
       fragment.append(children);
     }
     return fragment;
@@ -724,6 +753,19 @@ export function createPromptLibraryDialog({
     const checkbox = event.target.closest('.prompt-checkbox');
     if (!checkbox) return;
     pendingCheckboxShift = event.shiftKey === true;
+
+    // A folder's override has three states, which a native checkbox cannot
+    // express on its own, so folders cycle here and never reach the change
+    // handler. Bulk and range gestures still apply the two-state value.
+    const row = checkbox.closest('.prompt-tree-row');
+    const id = row?.dataset.nodeId;
+    if (!id || row.dataset.nodeType !== 'folder') return;
+    const selected = [...controller.getSelection().selectedIds];
+    const bulk = selected.length > 1 && selected.includes(id);
+    if (bulk || (pendingCheckboxShift && checkboxAnchorId && checkboxAnchorId !== id)) return;
+    event.preventDefault();
+    checkboxAnchorId = id;
+    cycleFolderBatch(id);
   }
 
   /** Applies one checked value to many rows as a single undo entry. Prompts get
@@ -733,12 +775,23 @@ export function createPromptLibraryDialog({
     const next = ids.reduce(
       (tree, id) => updatePromptNode(tree, id, (node) => (
         node.type === 'folder'
-          ? { ...node, includeAll: checked }
+          ? { ...node, ...folderBatchFields(checked ? 'include' : 'neutral') }
           : { ...node, includeInBatch: checked }
       )),
       history.present,
     );
     commitTreeMutation(next, checked ? 'include' : 'exclude');
+  }
+
+  /** Advances one folder through neutral → include → exclude → neutral. */
+  function cycleFolderBatch(id) {
+    const node = findPromptNode(draftLibrary, id);
+    if (node?.type !== 'folder') return;
+    const state = nextFolderBatchState(folderBatchState(node));
+    commitTreeMutation(
+      updatePromptNode(history.present, id, (folder) => ({ ...folder, ...folderBatchFields(state) })),
+      state === 'exclude' ? 'exclude' : 'include',
+    );
   }
 
   function onCheckboxChange(event) {
@@ -986,7 +1039,7 @@ export function createPromptLibraryDialog({
       ];
       if (hasClipboard) items.push({ id: 'paste', label: 'Paste inside' });
       items.push(
-        { id: node.includeAll ? 'exclude' : 'include', label: node.includeAll ? 'Use child selections' : 'Include everything inside' },
+        ...folderBatchMenuItems(node),
         { id: 'new-prompt-inside', label: 'New prompt inside' },
         { id: 'new-folder-inside', label: 'New folder inside' },
         { id: 'delete', label: 'Delete' },
@@ -1004,6 +1057,17 @@ export function createPromptLibraryDialog({
       { id: node.includeInBatch ? 'exclude' : 'include', label: node.includeInBatch ? 'Exclude from batch' : 'Include in batch' },
       { id: 'delete', label: 'Delete' },
     );
+    return items;
+  }
+
+  /** The two folder-override states other than the current one, so the menu
+   * always offers a way into each of the three. */
+  function folderBatchMenuItems(node) {
+    const state = folderBatchState(node);
+    const items = [];
+    if (state !== 'include') items.push({ id: 'folder-include', label: 'Include everything inside' });
+    if (state !== 'exclude') items.push({ id: 'folder-exclude', label: 'Exclude everything inside' });
+    if (state !== 'neutral') items.push({ id: 'folder-neutral', label: 'Use child selections' });
     return items;
   }
 
@@ -1028,17 +1092,24 @@ export function createPromptLibraryDialog({
     else if (action === 'rename') intents.onBeginRename(id);
     else if (action === 'include') setBatchIncludedFor(ids, true);
     else if (action === 'exclude') setBatchIncludedFor(ids, false);
+    else if (action === 'folder-include') setBatchIncludedFor(ids, true, 'include');
+    else if (action === 'folder-exclude') setBatchIncludedFor(ids, false, 'exclude');
+    else if (action === 'folder-neutral') setBatchIncludedFor(ids, false, 'neutral');
     else if (action === 'new-prompt-inside') addPrompt(id);
     else if (action === 'new-folder-inside') addFolder(id);
     else if (action === 'delete') deleteRoots(ids);
   }
 
-  function setBatchIncludedFor(ids, included) {
+  /** Menu include/exclude. Folders take an explicit three-state value so
+   * "Use child selections" clears both override flags rather than leaving a
+   * folder stranded in exclude. */
+  function setBatchIncludedFor(ids, included, folderState = null) {
+    const state = folderState ?? (included ? 'include' : 'neutral');
     const next = ids.reduce(
       (tree, id) => updatePromptNode(tree, id, (node) => (
         node.type === 'prompt'
           ? { ...node, includeInBatch: included }
-          : { ...node, includeAll: included }
+          : { ...node, ...folderBatchFields(state) }
       )),
       history.present,
     );

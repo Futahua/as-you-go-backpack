@@ -1543,3 +1543,151 @@ test('Shift+click without a prior checkbox anchor toggles only that row', async 
   assert.equal(roots.find((n) => n.id === 'prompt-root').includeInBatch, false, 'clicked row toggled');
   assert.equal(roots[0].children.find((n) => n.id === 'prompt-a').includeInBatch, true, 'nothing else touched');
 });
+
+// ===========================================================================
+// Folder exclude-all: the third batch state.
+// ===========================================================================
+
+const folderBox = (h, id) => h.rowFor(id).querySelector('.prompt-checkbox');
+const cycleFolder = (h, id) => {
+  const box = folderBox(h, id);
+  box.dispatch('click', { target: box, preventDefault, stopPropagation });
+};
+
+test('the folder checkbox cycles neutral, include, exclude, neutral', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  assert.equal(folderBox(h, 'folder-dev').dataset.batchState, 'neutral', 'starts neutral');
+  cycleFolder(h, 'folder-dev');
+  assert.equal(folderBox(h, 'folder-dev').dataset.batchState, 'include');
+  cycleFolder(h, 'folder-dev');
+  assert.equal(folderBox(h, 'folder-dev').dataset.batchState, 'exclude');
+  cycleFolder(h, 'folder-dev');
+  assert.equal(folderBox(h, 'folder-dev').dataset.batchState, 'neutral', 'cycles back');
+});
+
+test('the exclude state renders as an indeterminate box, not a check', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  cycleFolder(h, 'folder-dev');
+  cycleFolder(h, 'folder-dev');
+  const box = folderBox(h, 'folder-dev');
+  assert.equal(box.checked, false, 'exclude is not a check');
+  assert.equal(box.indeterminate, true, 'exclude renders indeterminate');
+  assert.ok(box.getAttribute('aria-label').startsWith('Exclude'), 'label says exclude');
+});
+
+test('excluding a folder drops its checked prompts from the batch', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  // prompt-a inside folder-dev is checked; prompt-root at top level is checked.
+  cycleFolder(h, 'folder-dev');
+  cycleFolder(h, 'folder-dev');
+  await save(h);
+  const text = h.dialog.getBatchText();
+  assert.ok(!text.includes('one'), 'checked child inside an excluded folder is dropped');
+  assert.ok(text.includes('three'), 'prompts outside the folder are unaffected');
+});
+
+test('excluding a folder leaves child checkboxes intact for when it is cleared', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  cycleFolder(h, 'folder-dev');
+  cycleFolder(h, 'folder-dev');
+  await save(h);
+  const dev = h.getState().view.promptLibrary[0];
+  assert.equal(dev.excludeAll, true, 'folder stores the exclude override');
+  assert.equal(
+    dev.children.find((n) => n.id === 'prompt-a').includeInBatch, true,
+    'child checkbox preserved, never rewritten',
+  );
+  // Clearing the override restores the previous batch exactly.
+  cycleFolder(h, 'folder-dev');
+  await save(h);
+  assert.ok(h.dialog.getBatchText().includes('one'), 'child returns to the batch');
+});
+
+test('the nearest folder override wins over an outer one', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  // Include everything under folder-dev, then exclude the nested folder.
+  cycleFolder(h, 'folder-dev');
+  cycleFolder(h, 'folder-inner');
+  cycleFolder(h, 'folder-inner');
+  await save(h);
+  const text = h.dialog.getBatchText();
+  assert.ok(text.includes('one'), 'outer include still applies to its own children');
+  assert.ok(!text.includes('two'), 'inner exclude overrides the outer include');
+});
+
+test('an included folder inside an excluded one copies everything again', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  cycleFolder(h, 'folder-dev');
+  cycleFolder(h, 'folder-dev');
+  cycleFolder(h, 'folder-inner');
+  await save(h);
+  const text = h.dialog.getBatchText();
+  assert.ok(!text.includes('one'), 'outer exclude still applies');
+  assert.ok(text.includes('two'), 'inner include overrides the outer exclude');
+});
+
+test('rows under a non-neutral folder are marked as overridden', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  assert.ok(!h.rowFor('prompt-a').classList.contains('prompt-batch-forced'), 'neutral marks nothing');
+  cycleFolder(h, 'folder-dev');
+  assert.equal(h.rowFor('prompt-a').dataset.batchForced, 'include', 'descendant marked include');
+  assert.equal(h.rowFor('folder-inner').dataset.batchForced, 'include', 'nested folder marked too');
+  assert.equal(h.rowFor('prompt-b').dataset.batchForced, 'include', 'deep descendant marked');
+  assert.ok(!h.rowFor('prompt-root').classList.contains('prompt-batch-forced'), 'siblings unaffected');
+  cycleFolder(h, 'folder-dev');
+  assert.equal(h.rowFor('prompt-a').dataset.batchForced, 'exclude', 'descendant marked exclude');
+});
+
+test('a folder batch cycle is one undo entry', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  cycleFolder(h, 'folder-dev');
+  cycleFolder(h, 'folder-dev');
+  assert.equal(folderBox(h, 'folder-dev').dataset.batchState, 'exclude');
+  blankClick(h);
+  keyOn(h, { key: 'z', ctrlKey: true });
+  assert.equal(folderBox(h, 'folder-dev').dataset.batchState, 'include', 'one undo steps back one state');
+  keyOn(h, { key: 'z', ctrlKey: true });
+  assert.equal(folderBox(h, 'folder-dev').dataset.batchState, 'neutral');
+});
+
+test('the folder context menu offers the two states it is not in', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const row = h.rowFor('folder-dev');
+  row.dispatch('contextmenu', { target: row, clientX: 5, clientY: 5, preventDefault, stopPropagation });
+  const labels = () => h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').map((b) => b.textContent);
+  assert.ok(labels().includes('Include everything inside'));
+  assert.ok(labels().includes('Exclude everything inside'));
+  assert.ok(!labels().includes('Use child selections'), 'neutral folder does not offer neutral');
+});
+
+test('the context menu can put a folder into exclude and back to neutral', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const openMenu = () => {
+    const row = h.rowFor('folder-dev');
+    row.dispatch('contextmenu', { target: row, clientX: 5, clientY: 5, preventDefault, stopPropagation });
+    return h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]');
+  };
+  let item = openMenu().find((b) => b.textContent === 'Exclude everything inside');
+  item.dispatch('click', { target: item, preventDefault, stopPropagation });
+  assert.equal(folderBox(h, 'folder-dev').dataset.batchState, 'exclude');
+  item = openMenu().find((b) => b.textContent === 'Use child selections');
+  assert.ok(item, 'a non-neutral folder offers neutral');
+  item.dispatch('click', { target: item, preventDefault, stopPropagation });
+  await save(h);
+  const dev = h.getState().view.promptLibrary[0];
+  assert.equal(dev.includeAll, false, 'neutral clears include');
+  assert.equal(dev.excludeAll, false, 'neutral also clears exclude, never stranding the folder');
+});
