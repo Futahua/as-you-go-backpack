@@ -4,6 +4,7 @@ import {
   createItemSet,
   normalizeItemSets,
   setsContaining,
+  coveredItemIds,
   isSetless,
   pickedSetId,
   selectAllScope,
@@ -48,13 +49,20 @@ test('normalize prunes members that no longer exist', () => {
   assert.deepEqual(sets[0].memberIds, ['i1', 'i2'], 'deleted items leave no dangling members');
 });
 
-test('normalize refuses nested sets: a member naming a set is dropped', () => {
+test('a member naming a set is dropped: members are items, not sets', () => {
   const sets = normalizeItemSets([
     set('outer', ['i1', 'inner']),
     set('inner', ['i2']),
   ]);
-  assert.deepEqual(sets[0].memberIds, ['i1'], 'sets are flat, never nested');
+  assert.deepEqual(sets[0].memberIds, ['i1'], 'no set-of-sets to traverse');
   assert.deepEqual(sets[1].memberIds, ['i2']);
+});
+
+test('one set fully inside another is just a total overlap', () => {
+  // Visually this reads as nesting; nothing in the model treats it specially.
+  const sets = [set('outer', ['i1', 'i2', 'i3']), set('inner', ['i2'])];
+  assert.deepEqual(setsContaining(sets, 'i2').map((s) => s.id), ['outer', 'inner']);
+  assert.deepEqual(setsContaining(sets, 'i1').map((s) => s.id), ['outer']);
 });
 
 test('an item can belong to several overlapping sets', () => {
@@ -282,4 +290,62 @@ test('droppableItems keeps a mixed drag to the items the region suits', () => {
   assert.deepEqual(droppableItems(sets, ['i1', 'shared'], ['a']), ['i1']);
   // The overlap suits shared but not i1, which does not belong to b.
   assert.deepEqual(droppableItems(sets, ['i1', 'shared'], ['a', 'b']), ['shared']);
+});
+
+// ===========================================================================
+// Folder membership is inherited: G on a folder covers its whole subtree.
+// ===========================================================================
+
+/** Folder tree: f1 contains i1 and f2; f2 contains i2. */
+const ancestors = (id) => ({
+  i1: ['f1'],
+  f2: ['f1'],
+  i2: ['f2', 'f1'],
+}[id] ?? []);
+
+test('an item inside a member folder belongs to that folder set', () => {
+  const sets = [set('a', ['f1'])];
+  assert.deepEqual(setsContaining(sets, 'i1', ancestors).map((s) => s.id), ['a']);
+  assert.equal(isSetless(sets, 'i1', ancestors), false, 'contents are not setless');
+});
+
+test('membership is inherited at any depth', () => {
+  const sets = [set('a', ['f1'])];
+  assert.deepEqual(
+    setsContaining(sets, 'i2', ancestors).map((s) => s.id), ['a'],
+    'a grandchild inherits too',
+  );
+});
+
+test('only the folder is stored, so later additions join automatically', () => {
+  const sets = [set('a', ['f1'])];
+  assert.deepEqual(sets[0].memberIds, ['f1'], 'the subtree is not expanded into storage');
+  // A brand new child of f1 inherits without touching the set.
+  const laterChild = (id) => (id === 'newcomer' ? ['f1'] : ancestors(id));
+  assert.deepEqual(setsContaining(sets, 'newcomer', laterChild).map((s) => s.id), ['a']);
+});
+
+test('coveredItemIds expands a member folder for hit testing', () => {
+  const covered = coveredItemIds(set('a', ['f1']), ['f1', 'i1', 'f2', 'i2', 'outside'], ancestors);
+  assert.deepEqual(covered, ['f1', 'i1', 'f2', 'i2'], 'the whole subtree, and nothing else');
+});
+
+test('Ctrl+A inside a folder set reaches the folder contents', () => {
+  const sets = [set('a', ['f1'])];
+  assert.deepEqual(
+    selectAllScope(sets, ['f1', 'i1', 'i2', 'outside'], 'i1', ancestors),
+    ['f1', 'i1', 'i2'],
+    'selecting inside the set is not limited to the stored folder',
+  );
+});
+
+test('an item inside a member folder cannot be dropped outside the set', () => {
+  const sets = [set('a', ['f1'])];
+  assert.equal(canDropInsideRegions(sets, 'i1', ['a'], ancestors), true, 'its own set is fine');
+  assert.equal(canDropInsideRegions(sets, 'i1', [], ancestors), false, 'it is a member by inheritance');
+});
+
+test('without an ancestor lookup only direct membership counts', () => {
+  const sets = [set('a', ['f1'])];
+  assert.deepEqual(setsContaining(sets, 'i1'), [], 'inheritance is opt-in per call');
 });

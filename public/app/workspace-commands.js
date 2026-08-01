@@ -27,6 +27,7 @@ export function createWorkspaceCommands({
   removeGraphPositions,
   setGraphPositions,
   setItemSets,
+  ancestorFolderIds,
   createWebLink,
   createDroppedShortcuts,
   syncSelection,
@@ -65,16 +66,22 @@ export function createWorkspaceCommands({
     saveWorkspaceView();
   }
 
+  /** Folder chain lookup, so a folder's contents inherit its sets. */
+  function ancestorsOf(itemId) {
+    return ancestorFolderIds ? ancestorFolderIds(store.getSnapshot(), itemId) : [];
+  }
+
   /** Ctrl+A, scoped by sets: with a set picked (from the last clicked item)
    * only its members are selected; with none picked only setless items are,
-   * so select-all outside a set never reaches inside one.
+   * so select-all outside a set never reaches inside one. A member folder
+   * brings its contents, which is why the scope needs the ancestor chain.
    *
    * The anchor is deliberately preserved — it is what picks the set, and
    * clearing it would make a second Ctrl+A silently widen its own scope. */
   function selectAllVisible(visibleItemIds) {
     const session = store.getSession();
     const sets = store.getSnapshot().view?.itemSets ?? [];
-    store.setSelection(selectAllScope(sets, visibleItemIds, session.selectionAnchor));
+    store.setSelection(selectAllScope(sets, visibleItemIds, session.selectionAnchor, ancestorsOf));
     syncSelection();
     saveWorkspaceView();
   }
@@ -122,6 +129,7 @@ export function createWorkspaceCommands({
       visibleItemIds,
       session.selectionAnchor,
       [...session.selected],
+      ancestorsOf,
     );
   }
 

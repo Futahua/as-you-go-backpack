@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   convexHull,
+  clusterMembers,
+  rectGap,
   memberCorners,
   expandFromCentroid,
   centroid,
@@ -157,4 +159,81 @@ test('regionsAt reports every set whose region covers the point', () => {
   assert.deepEqual(regionsAt({ x: 25, y: 10 }, regions), ['b'], 'right only');
   assert.deepEqual(regionsAt({ x: 15, y: 10 }, regions), ['a', 'b'], 'the overlap reports both');
   assert.deepEqual(regionsAt({ x: 50, y: 50 }, regions), [], 'open space reports none');
+});
+
+// ===========================================================================
+// Non-members must stay outside. A convex hull over every member necessarily
+// contains everything between them, so members are clustered first and each
+// cluster gets its own lobe.
+// ===========================================================================
+
+test('rectGap is zero for overlapping rects and grows with distance', () => {
+  assert.equal(rectGap(rect(0, 0), rect(0, 0)), 0);
+  assert.equal(rectGap(rect(0, 0, 100, 60), rect(150, 0, 100, 60)), 50, 'edge to edge, not centre to centre');
+  assert.ok(rectGap(rect(0, 0), rect(1000, 0)) > 500);
+});
+
+test('nearby members share one lobe', () => {
+  assert.equal(clusterMembers([rect(0, 0), rect(120, 0)], 150).length, 1);
+});
+
+test('distant members split into separate lobes', () => {
+  assert.equal(
+    clusterMembers([rect(0, 0), rect(900, 900)], 150).length, 2,
+    'so the space between them is not claimed',
+  );
+});
+
+test('clustering is transitive: a chain of near members is one lobe', () => {
+  const chain = [rect(0, 0), rect(120, 0), rect(240, 0), rect(360, 0)];
+  assert.equal(clusterMembers(chain, 150).length, 1);
+});
+
+test('a non-member sitting between two distant members is not enclosed', () => {
+  const apps = rect(0, 0);
+  const letters = rect(600, 600);
+  const between = { x: 300, y: 300 };
+  const claimed = clusterMembers([apps, letters], 150)
+    .some((cluster) => pointInPolygon(between, convexHull(memberCorners(cluster, 26))));
+  assert.equal(claimed, false, 'the reported bug: an unpicked item swallowed by the outline');
+});
+
+test('the rendered path itself leaves an in-between non-member outside', () => {
+  // Goes through setOutlinePath rather than the pieces, so removing the
+  // clustering step is caught even if the helpers stay correct.
+  const path = setOutlinePath([rect(0, 0), rect(600, 600)], { id: 's', amplitude: 0 });
+  const lobes = path.split('M ').filter(Boolean).length;
+  assert.equal(lobes, 2, 'two separate shapes, not one hull spanning the gap');
+  // A single hull would span roughly x 0..600; two lobes leave the middle open.
+  const numbers = path.match(/-?\d+(\.\d+)?/g).map(Number);
+  const spansMiddle = numbers.some((value) => value > 250 && value < 350);
+  assert.equal(spansMiddle, false, 'no geometry sits in the gap between the members');
+});
+
+test('a member is always inside its own lobe', () => {
+  const apps = rect(0, 0);
+  const letters = rect(600, 600);
+  for (const member of [apps, letters]) {
+    const inside = clusterMembers([apps, letters], 150)
+      .some((cluster) => pointInPolygon({ x: member.x, y: member.y }, convexHull(memberCorners(cluster, 26))));
+    assert.equal(inside, true, 'members are never left outside their own set');
+  }
+});
+
+test('a multi-lobe set is one path with several closed shapes', () => {
+  const path = setOutlinePath([rect(0, 0), rect(900, 900)], { id: 's' });
+  assert.equal((path.match(/M /g) ?? []).length, 2, 'two lobes');
+  assert.equal((path.match(/Z/g) ?? []).length, 2, 'both closed');
+});
+
+test('separate lobes of one set do not breathe in lockstep', () => {
+  const path = setOutlinePath([rect(0, 0), rect(900, 900)], { id: 's', time: 1 });
+  const [first, second] = path.split('M ').filter(Boolean);
+  assert.notEqual(first, second, 'each lobe has its own phase');
+});
+
+test('a bigger reach merges what a smaller one separates', () => {
+  const rects = [rect(0, 0), rect(400, 0)];
+  assert.equal(clusterMembers(rects, 150).length, 2);
+  assert.equal(clusterMembers(rects, 500).length, 1, 'reach is the tunable knob');
 });

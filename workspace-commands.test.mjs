@@ -43,6 +43,16 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     // The real one: sets are the behavior under test, and a stub would let a
     // membership mistake through.
     setItemSets: (s, sets) => ({ ...s, view: { ...s.view, itemSets: sets } }),
+    // Real folder-chain lookup: set membership is inherited through folders.
+    ancestorFolderIds: (s, itemId) => {
+      const chain = [];
+      let parentId = (s.groups ?? []).find((g) => g.id === itemId)?.parentId ?? null;
+      while (parentId && parentId !== 'root') {
+        chain.push(parentId);
+        parentId = (s.groups ?? []).find((g) => g.id === parentId)?.parentId ?? null;
+      }
+      return chain;
+    },
     createWebLink: (s, input) => ({ ...s, webLink: input }),
     createDroppedShortcuts: (s, targets, destination) => ({
       ...s,
@@ -584,5 +594,26 @@ test('the inverse scope outside a set covers setless items only', async () => {
   assert.deepEqual(
     h.commands.inverseSelectionScope(['g1', 'g2', 'g3', 'g4']), ['g2', 'g4'],
     'set members stay out when no set is picked',
+  );
+});
+
+test('a folder set covers its contents, so Ctrl+A reaches inside it', async () => {
+  const h = createHarness({
+    groups: [
+      { id: 'f1', parentId: 'root' },
+      { id: 'child', parentId: 'f1' },
+      { id: 'deep', parentId: 'child' },
+      { id: 'outside', parentId: 'root' },
+    ],
+  });
+  h.store.setSelection(['f1']);
+  await h.commands.groupSelectionIntoSet('A');
+  assert.deepEqual(itemSets(h)[0].memberIds, ['f1'], 'only the folder is stored');
+  // Clicking a nested item picks the folder's set by inheritance.
+  h.commands.selectItem('deep', { shiftKey: false, ctrlKey: false, visibleItemIds: ['deep'] });
+  h.commands.selectAllVisible(['f1', 'child', 'deep', 'outside']);
+  assert.deepEqual(
+    [...h.store.getSession().selected], ['f1', 'child', 'deep'],
+    'the whole subtree is in the set, and nothing outside it is',
   );
 });

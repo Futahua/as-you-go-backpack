@@ -12,9 +12,15 @@
  * intersection — it cannot sit in the part of one set the others do not
  * cover, which is what keeps a Venn overlap meaningful.
  *
- * Sets are deliberately flat: a member id always refers to a workspace item,
- * never to another set, so there is no nesting to traverse and no cycle to
- * guard against. Overlap is how sets relate to each other — not containment.
+ * A member id always refers to a workspace item, never to another set, so
+ * there is no set-of-sets to traverse and no cycle to guard against. One set's
+ * members can still all sit inside another's, which reads as nesting on
+ * screen; that is just a total overlap, and falls out of allowing overlap at
+ * all. Nothing in this module treats it specially.
+ *
+ * Membership is inherited through folders: a folder's contents belong to
+ * whatever the folder belongs to, at any depth. Only the folder is stored, so
+ * items added to it later join its sets automatically.
  *
  * No DOM, host, store, or browser events. */
 
@@ -79,23 +85,44 @@ export function normalizeItemSets(raw, knownItemIds = null) {
   return sets;
 }
 
-/** Every set the item belongs to, in stored order. */
-export function setsContaining(sets, itemId) {
-  return (Array.isArray(sets) ? sets : []).filter((set) => set.memberIds.includes(itemId));
+/** Every set the item belongs to, in stored order.
+ *
+ * Membership is inherited: a folder's contents belong to whatever the folder
+ * belongs to, at any depth. `ancestorsOf` maps an item to its chain of
+ * containing folders — omit it and only direct membership counts. Inheriting
+ * rather than expanding at creation time means items added to a folder later
+ * join its sets automatically, and the folder stays the single member to
+ * edit. */
+export function setsContaining(sets, itemId, ancestorsOf = null) {
+  const list = Array.isArray(sets) ? sets : [];
+  const chain = [itemId, ...(ancestorsOf ? ancestorsOf(itemId) : [])];
+  return list.filter((set) => chain.some((id) => set.memberIds.includes(id)));
+}
+
+/** Every item a set covers on screen: its stored members plus everything
+ * inside any member folder. Used for hit-testing and outlines, never for
+ * storage — the stored member list stays just the folder. */
+export function coveredItemIds(set, candidateIds, ancestorsOf = null) {
+  const members = new Set(set?.memberIds ?? []);
+  return (Array.isArray(candidateIds) ? candidateIds : []).filter((id) => {
+    if (members.has(id)) return true;
+    const ancestors = ancestorsOf ? ancestorsOf(id) : [];
+    return ancestors.some((ancestorId) => members.has(ancestorId));
+  });
 }
 
 /** True when the item belongs to no set at all. */
-export function isSetless(sets, itemId) {
-  return setsContaining(sets, itemId).length === 0;
+export function isSetless(sets, itemId, ancestorsOf = null) {
+  return setsContaining(sets, itemId, ancestorsOf).length === 0;
 }
 
 /** The set a gesture currently acts on, derived from the last clicked item
  * rather than stored separately, so it can never disagree with the view. An
  * item in several sets picks the first it belongs to; a setless item (or no
  * item at all) yields null, meaning "no set is picked". */
-export function pickedSetId(sets, lastClickedItemId) {
+export function pickedSetId(sets, lastClickedItemId, ancestorsOf = null) {
   if (!lastClickedItemId) return null;
-  return setsContaining(sets, lastClickedItemId)[0]?.id ?? null;
+  return setsContaining(sets, lastClickedItemId, ancestorsOf)[0]?.id ?? null;
 }
 
 /** The ids Ctrl+A should select: the picked set's members when a set is
@@ -105,22 +132,24 @@ export function pickedSetId(sets, lastClickedItemId) {
  * containers — Ctrl+A outside a set never reaches inside one. `candidateIds`
  * is the visible universe, so the result never includes something off screen.
  */
-export function selectAllScope(sets, candidateIds, lastClickedItemId) {
+export function selectAllScope(sets, candidateIds, lastClickedItemId, ancestorsOf = null) {
   const candidates = Array.isArray(candidateIds) ? candidateIds : [];
-  const setId = pickedSetId(sets, lastClickedItemId);
+  const setId = pickedSetId(sets, lastClickedItemId, ancestorsOf);
   if (setId == null) {
-    return candidates.filter((id) => isSetless(sets, id));
+    return candidates.filter((id) => isSetless(sets, id, ancestorsOf));
   }
-  const members = new Set(findItemSet(sets, setId)?.memberIds ?? []);
-  return candidates.filter((id) => members.has(id));
+  // Covered, not stored: selecting inside a set reaches the contents of a
+  // member folder, not just the folder itself.
+  const covered = new Set(coveredItemIds(findItemSet(sets, setId), candidates, ancestorsOf));
+  return candidates.filter((id) => covered.has(id));
 }
 
 /** The complement of the current selection within the select-all scope: what
  * Alt+click acts on. Selecting everything, deselecting a few, then acting is
  * the workflow this collapses into one gesture. */
-export function inverseScope(sets, candidateIds, lastClickedItemId, selectedIds) {
+export function inverseScope(sets, candidateIds, lastClickedItemId, selectedIds, ancestorsOf = null) {
   const selected = new Set(Array.isArray(selectedIds) ? selectedIds : []);
-  return selectAllScope(sets, candidateIds, lastClickedItemId)
+  return selectAllScope(sets, candidateIds, lastClickedItemId, ancestorsOf)
     .filter((id) => !selected.has(id));
 }
 
@@ -188,9 +217,9 @@ export function forgetItems(sets, itemIds) {
  *   cannot sit in the part of one set that the other does not cover.
  *
  * Setless items are unconstrained outside sets and blocked inside any. */
-export function canDropInsideRegions(sets, itemId, regionSetIds) {
+export function canDropInsideRegions(sets, itemId, regionSetIds, ancestorsOf = null) {
   const regions = new Set(Array.isArray(regionSetIds) ? regionSetIds : []);
-  const own = setsContaining(sets, itemId).map((set) => set.id);
+  const own = setsContaining(sets, itemId, ancestorsOf).map((set) => set.id);
   // No region may be foreign to the item.
   for (const setId of regions) {
     if (!own.includes(setId)) return false;
@@ -201,7 +230,7 @@ export function canDropInsideRegions(sets, itemId, regionSetIds) {
 
 /** Filters a dragged selection to the items actually allowed at a
  * destination, so one blocked item cannot veto a whole multi-item drag. */
-export function droppableItems(sets, itemIds, regionSetIds) {
+export function droppableItems(sets, itemIds, regionSetIds, ancestorsOf = null) {
   return (Array.isArray(itemIds) ? itemIds : [])
-    .filter((id) => canDropInsideRegions(sets, id, regionSetIds));
+    .filter((id) => canDropInsideRegions(sets, id, regionSetIds, ancestorsOf));
 }

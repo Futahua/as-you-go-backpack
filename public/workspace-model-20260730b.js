@@ -19,6 +19,23 @@ const stringIds = (value) => Array.isArray(value)
  * so nothing ever silently acquires a name it was not given. */
 export const UNTITLED_LABEL = 'Untitled';
 
+/** The chain of folders containing an item, nearest first, stopping at the
+ * root. Sets use this so a folder's contents inherit its membership. Guards
+ * against a malformed parent cycle rather than looping forever. */
+export function ancestorFolderIds(state, itemId) {
+  const chain = [];
+  const seen = new Set();
+  const start = state.groups?.find((candidate) => candidate.id === itemId)
+    ?? findPlacement(state, itemId)?.placement;
+  let parentId = start?.parentId ?? null;
+  while (parentId && parentId !== ROOT_ID && parentId !== 'bin' && !seen.has(parentId)) {
+    seen.add(parentId);
+    chain.push(parentId);
+    parentId = state.groups?.find((candidate) => candidate.id === parentId)?.parentId ?? null;
+  }
+  return chain;
+}
+
 export function displayName(candidate) {
   const name = typeof candidate?.name === 'string' ? candidate.name.trim() : '';
   return name || UNTITLED_LABEL;

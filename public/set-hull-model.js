@@ -146,17 +146,78 @@ function round(value) {
   return Math.round(value * 100) / 100;
 }
 
-/** The whole pipeline: member rectangles in, outline path out. */
-export function setOutlinePath(rects, { id = '', padding = 26, time = 0, amplitude = 4 } = {}) {
-  if (rects.length === 0) return '';
+/** Splits members into clusters that are near enough to share one outline.
+ *
+ * A convex hull over every member necessarily contains everything between
+ * them, so a non-member sitting in the gap gets visually claimed by a set it
+ * does not belong to. Clustering first means distant members produce separate
+ * lobes with open space between, and only genuinely adjacent members are
+ * wrapped together — so a non-member can only be swallowed if it is closer to
+ * two members than they are to each other.
+ *
+ * Single-link clustering: members join a cluster when their padded rectangles
+ * are within `reach` of it. */
+export function clusterMembers(rects, reach) {
+  const remaining = rects.map((rect, index) => ({ rect, index }));
+  const clusters = [];
+  while (remaining.length > 0) {
+    const cluster = [remaining.pop()];
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (let i = remaining.length - 1; i >= 0; i -= 1) {
+        const candidate = remaining[i];
+        if (cluster.some((member) => rectGap(member.rect, candidate.rect) <= reach)) {
+          cluster.push(candidate);
+          remaining.splice(i, 1);
+          grew = true;
+        }
+      }
+    }
+    clusters.push(cluster.map((entry) => entry.rect));
+  }
+  return clusters;
+}
+
+/** Edge-to-edge distance between two rectangles; 0 when they overlap. */
+export function rectGap(a, b) {
+  const dx = Math.max(0, Math.abs(a.x - b.x) - ((a.width ?? 0) + (b.width ?? 0)) / 2);
+  const dy = Math.max(0, Math.abs(a.y - b.y) - ((a.height ?? 0) + (b.height ?? 0)) / 2);
+  return Math.hypot(dx, dy);
+}
+
+/** One closed lobe around a cluster of members. */
+function lobePath(rects, { id, padding, time, amplitude, lobeIndex }) {
   const hull = convexHull(memberCorners(rects, padding));
   // One or two members give a degenerate hull; expanding from the centroid
   // turns that into a real enclosing shape rather than a dot or a line.
-  const rounded = hull.length < 3
-    ? expandFromCentroid(memberCorners(rects, padding), padding * 0.6)
+  const shaped = hull.length < 3
+    ? convexHull(expandFromCentroid(memberCorners(rects, padding), padding * 0.6))
     : hull;
-  const shaped = hull.length < 3 ? convexHull(rounded) : rounded;
-  return closedCurvePath(wobble(shaped, { seed: seedFor(id), time, amplitude }));
+  // Offsetting the seed per lobe stops a set's separate lobes breathing in
+  // lockstep, which would read as one shape blinking.
+  return closedCurvePath(wobble(shaped, {
+    seed: seedFor(`${id}:${lobeIndex}`),
+    time,
+    amplitude,
+  }));
+}
+
+/** The whole pipeline: member rectangles in, outline path out. Distant
+ * members yield several lobes in one path, so the set reads as one thing
+ * without claiming the space between its parts. */
+export function setOutlinePath(rects, {
+  id = '',
+  padding = 26,
+  time = 0,
+  amplitude = 4,
+  reach = 150,
+} = {}) {
+  if (rects.length === 0) return '';
+  return clusterMembers(rects, reach)
+    .map((cluster, lobeIndex) => lobePath(cluster, { id, padding, time, amplitude, lobeIndex }))
+    .filter(Boolean)
+    .join(' ');
 }
 
 /** True when a point lies inside the polygon (ray casting). Used to decide
