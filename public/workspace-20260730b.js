@@ -45,6 +45,7 @@ import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition } from './graph-model-20260730b.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
+import { compressIconFile } from './app/utilities/image-compression.js';
 
 const host = createHostBridge(window);
 
@@ -1409,62 +1410,6 @@ function showIconPreview(source) {
   elements.iconPreview.hidden = false;
   elements.iconPreview.src = source;
   elements.iconFallback.setAttribute('hidden', '');
-}
-
-function readAsDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('That image could not be read.'));
-    reader.onload = () => resolve(String(reader.result));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function canvasBlob(canvas, quality) {
-  return new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', quality));
-}
-
-async function compressIconFile(file) {
-  const maximumDimension = 512;
-  const targetBytes = 500_000;
-  const bitmap = await createImageBitmap(file);
-  try {
-    if (
-      file.size <= targetBytes
-      && bitmap.width <= maximumDimension
-      && bitmap.height <= maximumDimension
-    ) {
-      return readAsDataUrl(file);
-    }
-
-    const initialScale = Math.min(
-      1,
-      maximumDimension / Math.max(bitmap.width, bitmap.height),
-    );
-    let width = Math.max(1, Math.round(bitmap.width * initialScale));
-    let height = Math.max(1, Math.round(bitmap.height * initialScale));
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('Image compression is unavailable.');
-
-    for (let sizeAttempt = 0; sizeAttempt < 5; sizeAttempt += 1) {
-      canvas.width = width;
-      canvas.height = height;
-      context.clearRect(0, 0, width, height);
-      context.drawImage(bitmap, 0, 0, width, height);
-      for (const quality of [0.9, 0.78, 0.65, 0.5]) {
-        const compressed = await canvasBlob(canvas, quality);
-        if (compressed && compressed.size <= targetBytes) {
-          return readAsDataUrl(compressed);
-        }
-      }
-      width = Math.max(32, Math.round(width * 0.75));
-      height = Math.max(32, Math.round(height * 0.75));
-    }
-    throw new Error('That image could not be compressed enough for an icon.');
-  } finally {
-    bitmap.close();
-  }
 }
 
 async function resolveEditorTargetIcon() {
