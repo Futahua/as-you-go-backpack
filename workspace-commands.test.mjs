@@ -270,3 +270,39 @@ test('selectAllVisible selects every visible item and clears the anchor', () => 
   assert.equal(h.effects.sync, 1);
   assert.equal(h.effects.saves, 1);
 });
+
+test('beginMarqueeSelection without preserve clears and returns no base', () => {
+  const h = createHarness();
+  h.store.setSelection(['a', 'b']);
+  const base = h.commands.beginMarqueeSelection({ preserveSelection: false });
+  assert.deepEqual(base, []);
+  assert.equal(h.store.getSession().selected.size, 0);
+  assert.equal(h.store.getSession().selectionAnchor, null);
+  assert.equal(h.effects.sync, 1);
+});
+
+test('beginMarqueeSelection with preserve keeps the selection as the base', () => {
+  const h = createHarness();
+  h.store.setSelection(['a', 'b']);
+  const base = h.commands.beginMarqueeSelection({ preserveSelection: true });
+  assert.deepEqual(base, ['a', 'b']);
+  assert.deepEqual([...h.store.getSession().selected], ['a', 'b']);
+  assert.equal(h.effects.sync, 0);
+});
+
+test('updateMarqueeSelection replaces the transient selection and syncs', () => {
+  const h = createHarness();
+  h.commands.updateMarqueeSelection(['x', 'y']);
+  assert.deepEqual([...h.store.getSession().selected], ['x', 'y']);
+  assert.equal(h.effects.sync, 1);
+  assert.equal(h.effects.saves, 0);
+});
+
+test('finishMarqueeSelection saves only when the gesture moved', () => {
+  const h = createHarness();
+  h.commands.finishMarqueeSelection({ moved: true });
+  assert.equal(h.effects.saves, 1);
+  const h2 = createHarness();
+  h2.commands.finishMarqueeSelection({ moved: false });
+  assert.equal(h2.effects.saves, 0);
+});

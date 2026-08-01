@@ -1,12 +1,11 @@
-/** Owns the drag-marquee selection gesture. It translates pointer events
- * into store session updates and narrow DOM/persistence effects — the store's
- * explicit session operations are the only mutation it performs. */
+/** Owns the drag-marquee selection gesture. It keeps only pointer/drag state,
+ * capture, the movement threshold, rectangle/tile math, the overlay DOM, and
+ * the blank-click-suppression result. All session mutation and persistence
+ * delegate to the marquee commands. */
 export function createMarqueeController({
   elements,
-  store,
+  commands,
   itemsIntersectingMarquee,
-  syncSelection,
-  saveWorkspaceView,
 }) {
   let drag = null;
 
@@ -41,32 +40,26 @@ export function createMarqueeController({
         };
       })
       .filter((tile) => tile.right > tile.left && tile.bottom > tile.top);
-    store.setSelection([
+    commands.updateMarqueeSelection([
       ...drag.baseSelection,
       ...itemsIntersectingMarquee(tiles, bounds),
     ]);
-    syncSelection();
   }
 
   function isActive(pointerId) {
     return drag !== null && drag.pointerId === pointerId;
   }
 
-  /** Begins a marquee gesture on blank workspace space. When Ctrl is held the
-   * current selection is preserved as the base; otherwise it is cleared. */
-  function start({ pointerId, clientX, clientY, ctrlKey }) {
+  /** Begins a marquee gesture on blank workspace space. preserveSelection
+   * comes from Ctrl being held; the command keeps or clears the selection. */
+  function start({ pointerId, clientX, clientY, preserveSelection }) {
     drag = {
       pointerId,
       startX: clientX,
       startY: clientY,
-      baseSelection: ctrlKey ? new Set(store.getSession().selected) : new Set(),
+      baseSelection: commands.beginMarqueeSelection({ preserveSelection }),
       moved: false,
     };
-    if (!ctrlKey) {
-      store.clearSelection();
-      store.setSelectionAnchor(null);
-      syncSelection();
-    }
     elements.grid.setPointerCapture(pointerId);
   }
 
@@ -88,7 +81,7 @@ export function createMarqueeController({
     }
     const moved = drag.moved;
     drag = null;
-    if (moved) saveWorkspaceView();
+    commands.finishMarqueeSelection({ moved });
     elements.marquee.hidden = true;
     return moved;
   }

@@ -94,14 +94,6 @@ const store = createWorkspaceStore({
 });
 const session = store.getSession();
 
-const marquee = createMarqueeController({
-  elements,
-  store,
-  itemsIntersectingMarquee,
-  syncSelection,
-  saveWorkspaceView,
-});
-
 let suppressBlankClick = false;
 let suppressGraphClick = false;
 let zoomTimer = null;
@@ -1204,7 +1196,7 @@ elements.grid.addEventListener('pointerdown', (event) => {
     pointerId: event.pointerId,
     clientX: event.clientX,
     clientY: event.clientY,
-    ctrlKey: event.ctrlKey,
+    preserveSelection: event.ctrlKey,
   });
   event.preventDefault();
 });
@@ -1751,6 +1743,14 @@ const commands = createWorkspaceCommands({
   closeMenu,
   render,
   setStatus,
+});
+
+// Constructed after commands: the controller delegates session mutation and
+// persistence to the marquee commands.
+const marquee = createMarqueeController({
+  elements,
+  commands,
+  itemsIntersectingMarquee,
 });
 
 const editorDialog = createEditorDialog({

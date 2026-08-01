@@ -1,18 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createMarqueeController } from './public/app/interactions/marquee-controller.js';
 
 function createHarness() {
-  let state = { groups: [], shortcuts: [], view: {} };
-  const store = createWorkspaceStore({
-    getState: () => state,
-    setState: (next) => { state = next; },
-    persist: async () => {},
-    normalizeState: (s) => s,
-    setStatus: () => {},
-  });
-  const effects = { sync: 0, saves: 0, captured: 0, released: 0 };
+  const effects = { captured: 0, released: 0 };
+  const commandCalls = [];
   const tiles = [
     { id: 'a', rect: { left: 10, top: 10, right: 60, bottom: 60 } },
     { id: 'b', rect: { left: 100, top: 10, right: 150, bottom: 60 } },
@@ -30,71 +22,77 @@ function createHarness() {
     explorer: { getBoundingClientRect: () => ({ left: 0, top: 0 }) },
     marquee: { hidden: true, style: {} },
   };
+  const commands = {
+    beginMarqueeSelection: ({ preserveSelection }) => {
+      commandCalls.push(['begin', preserveSelection]);
+      return preserveSelection ? ['a'] : [];
+    },
+    updateMarqueeSelection: (ids) => { commandCalls.push(['update', ids]); },
+    finishMarqueeSelection: ({ moved }) => { commandCalls.push(['finish', moved]); },
+  };
   const controller = createMarqueeController({
     elements,
-    store,
+    commands,
     itemsIntersectingMarquee: (items, bounds) =>
       items.filter((t) =>
         t.right >= bounds.left && t.left <= bounds.right
         && t.bottom >= bounds.top && t.top <= bounds.bottom
       ).map((t) => t.id),
-    syncSelection: () => { effects.sync += 1; },
-    saveWorkspaceView: () => { effects.saves += 1; },
   });
-  return { controller, store, effects, elements };
+  return { controller, effects, commandCalls, elements };
 }
 
-test('start without Ctrl clears the selection and captures the pointer', () => {
+test('start without preserve requests a clear via beginMarqueeSelection', () => {
   const h = createHarness();
-  h.store.setSelection(['a']);
-  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, ctrlKey: false });
-  assert.equal(h.store.getSession().selected.size, 0);
-  assert.equal(h.effects.sync, 1);
+  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, preserveSelection: false });
+  assert.deepEqual(h.commandCalls, [['begin', false]]);
   assert.equal(h.effects.captured, 1);
 });
 
-test('start with Ctrl preserves the selection as the marquee base', () => {
+test('start with preserve keeps the selection and captures the pointer', () => {
   const h = createHarness();
-  h.store.setSelection(['a']);
-  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, ctrlKey: true });
-  assert.ok(h.store.getSession().selected.has('a'));
+  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, preserveSelection: true });
+  assert.deepEqual(h.commandCalls, [['begin', true]]);
+  assert.equal(h.effects.captured, 1);
 });
 
-test('move below the threshold does not select', () => {
+test('move below the threshold does not update selection or show the overlay', () => {
   const h = createHarness();
-  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, ctrlKey: false });
+  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, preserveSelection: false });
   h.controller.move({ pointerId: 1, clientX: 51, clientY: 51 });
-  assert.equal(h.store.getSession().selected.size, 0);
   assert.equal(h.elements.marquee.hidden, true);
+  assert.deepEqual(h.commandCalls, [['begin', false]]);
 });
 
-test('move above the threshold selects intersecting tiles', () => {
+test('move above the threshold updates the selection with base plus intersections', () => {
   const h = createHarness();
-  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, ctrlKey: false });
+  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, preserveSelection: true });
   // Bounds (50..55, 50..55) intersect tile a only (b starts at x=100).
   h.controller.move({ pointerId: 1, clientX: 55, clientY: 55 });
-  assert.deepEqual([...h.store.getSession().selected], ['a']);
+  assert.deepEqual(h.commandCalls, [
+    ['begin', true],
+    ['update', ['a', 'a']], // preserved base ['a'] plus intersecting tile 'a'
+  ]);
   assert.equal(h.elements.marquee.hidden, false);
-  assert.equal(h.effects.sync, 2); // start clears + move selects
 });
 
-test('finish releases capture, saves the view, and reports whether it moved', () => {
+test('finish releases capture, finishes the command, and reports whether it moved', () => {
   const h = createHarness();
-  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, ctrlKey: false });
+  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, preserveSelection: false });
   h.controller.move({ pointerId: 1, clientX: 55, clientY: 55 });
   const moved = h.controller.finish(1);
   assert.equal(moved, true);
   assert.equal(h.effects.released, 1);
-  assert.equal(h.effects.saves, 1);
   assert.equal(h.elements.marquee.hidden, true);
+  assert.deepEqual(h.commandCalls.at(-1), ['finish', true]);
   assert.equal(h.controller.isActive(1), false);
 });
 
 test('finish for an unrelated pointer is a no-op', () => {
   const h = createHarness();
-  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, ctrlKey: false });
+  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, preserveSelection: false });
   const moved = h.controller.finish(2);
   assert.equal(moved, null);
   assert.equal(h.effects.released, 0);
-  assert.equal(h.effects.saves, 0);
+  assert.deepEqual(h.commandCalls, [['begin', false]]);
 });

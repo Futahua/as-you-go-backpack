@@ -66,6 +66,27 @@ export function createWorkspaceCommands({
     saveWorkspaceView();
   }
 
+  /** Begins a marquee gesture. With preserveSelection, the current selection
+   * is kept as the base; otherwise it is cleared. Returns the base ids. */
+  function beginMarqueeSelection({ preserveSelection }) {
+    if (preserveSelection) return [...store.getSession().selected];
+    store.clearSelection();
+    store.setSelectionAnchor(null);
+    syncSelection();
+    return [];
+  }
+
+  /** Replaces the transient marquee selection without saving on every move. */
+  function updateMarqueeSelection(ids) {
+    store.setSelection(ids);
+    syncSelection();
+  }
+
+  /** Ends a marquee gesture; saves the view only when it actually moved. */
+  function finishMarqueeSelection({ moved }) {
+    if (moved) saveWorkspaceView();
+  }
+
   function navigateToFolder(folderId) {
     const session = store.getSession();
     if (session.binMode) {
@@ -275,6 +296,9 @@ export function createWorkspaceCommands({
     selectItem,
     clearSelection,
     selectAllVisible,
+    beginMarqueeSelection,
+    updateMarqueeSelection,
+    finishMarqueeSelection,
     activateItem,
     revealSelection,
     activateSelection,
