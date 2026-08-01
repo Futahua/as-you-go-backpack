@@ -16,6 +16,26 @@
   gap: 6px;
   padding: 9px;
 }
+/* Copy confirmation for the icon-only pickup button. Its "Copied" label is
+ * sr-only, so without this a sighted user gets no feedback at all. The
+ * selector is doubled and written for :hover because the pointer is by
+ * definition over the button that was just clicked, and `.quiet-button:hover`
+ * would otherwise repaint straight over the flash. */
+@keyframes pickup-copied-flash {
+  0%, 70% { background: #4c725a; border-color: #4c725a; color: #fffef9; }
+  100% { background: rgba(252, 251, 247, 0.9); border-color: #cec9bd; color: #2c2a25; }
+}
+.quiet-button.pickup-copied,
+.quiet-button.pickup-copied:hover {
+  animation: pickup-copied-flash 900ms ease-out;
+  border-color: #4c725a;
+  background: #4c725a;
+  color: #fffef9;
+}
+@media (prefers-reduced-motion: reduce) {
+  .quiet-button.pickup-copied,
+  .quiet-button.pickup-copied:hover { animation-duration: 1ms; }
+}
 .icon-button svg { width: 18px; height: 18px; flex: none; }
 .icon-button .bin-count { position: static; }
 

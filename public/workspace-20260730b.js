@@ -1263,6 +1263,31 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   saveWorkspaceView();
 });
 
+const PICKUP_COPY_LABEL = 'Copy agent pickup prompt';
+const PICKUP_COPY_FLASH_MS = 1800;
+let pickupCopyTimer = null;
+
+/** Confirms a pickup copy. The button is icon-only and its label is sr-only,
+ * so the visible acknowledgement has to be on the button itself; the label
+ * still changes for screen readers. One timer, so a rapid second copy restarts
+ * the confirmation instead of the first firing partway through and clearing
+ * it early. */
+function confirmPickupCopy() {
+  const button = document.querySelector('#copy-prompt');
+  const label = document.querySelector('.copy-label');
+  if (pickupCopyTimer != null) {
+    clearTimeout(pickupCopyTimer);
+    button?.classList.remove('pickup-copied');
+  }
+  if (label) label.textContent = 'Copied';
+  button?.classList.add('pickup-copied');
+  pickupCopyTimer = setTimeout(() => {
+    pickupCopyTimer = null;
+    button?.classList.remove('pickup-copied');
+    if (label) label.textContent = PICKUP_COPY_LABEL;
+  }, PICKUP_COPY_FLASH_MS);
+}
+
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
     const selectedTargets = [...session.selected]
@@ -1275,10 +1300,7 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
       return;
     }
     await host.copyText(outcome.text);
-    document.querySelector('.copy-label').textContent = 'Copied';
-    setTimeout(() => {
-      document.querySelector('.copy-label').textContent = 'Copy agent pickup prompt';
-    }, 1800);
+    confirmPickupCopy();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   }
