@@ -34,6 +34,7 @@ export function createPromptTreeController({
   let abortController = null;
   let selection = createTreeSelection();
   let drag = null;
+  let suppressClickOnce = false;
 
   function visibleIds() {
     return visibleDepthFirstIds(getTree(), getExpandedFolders());
@@ -78,6 +79,10 @@ export function createPromptTreeController({
   // ------------------------------------------------------------------ clicks
 
   function onRowClick(event) {
+    if (suppressClickOnce) {
+      suppressClickOnce = false;
+      return;
+    }
     if (event.target.closest('.prompt-checkbox')) return;
     if (event.target.closest('.prompt-card-toggle')) {
       const row = event.target.closest('.prompt-tree-row');
@@ -260,16 +265,16 @@ export function createPromptTreeController({
     if (event.target.closest('.prompt-checkbox, .prompt-card-toggle, .prompt-folder-toggle, .prompt-card-title, .prompt-card-text, .prompt-folder-rename')) return;
     const row = event.target.closest('.prompt-tree-row');
     if (!row) return;
-    const id = row.dataset.nodeId;
-    if (!selection.selectedIds.has(id)) {
-      emitSelection(selectOnly(selection, id));
-    }
+    // Record a possible drag candidate only. Ordinary click selection is left
+    // to the click handler so Ctrl/Meta and Shift selection keep their anchors.
     drag = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
+      rowId: row.dataset.nodeId,
+      rowSelected: selection.selectedIds.has(row.dataset.nodeId),
       moved: false,
-      draggedIds: [...selectedRootIds(getTree(), [...selection.selectedIds])],
+      draggedIds: null,
     };
   }
 
@@ -280,6 +285,12 @@ export function createPromptTreeController({
       const dy = event.clientY - drag.startY;
       if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
       drag.moved = true;
+      // Start dragging exactly once: an already-selected row drags the whole
+      // selection; an unselected row is selected first and then dragged.
+      if (!drag.rowSelected) {
+        emitSelection(selectOnly(selection, drag.rowId));
+      }
+      drag.draggedIds = [...selectedRootIds(getTree(), [...selection.selectedIds])];
       setDraggingVisual(drag.draggedIds);
       intents.onDragStart?.(drag.draggedIds);
     }
@@ -347,6 +358,9 @@ export function createPromptTreeController({
     intents.onDragEnd?.(draggedIds);
     if (wasMoved && plan) {
       intents.onMove?.(draggedIds, plan.destinationParentId, plan.beforeId);
+      // A real drag suppresses the synthetic click that follows pointerup so
+      // it cannot also toggle selection.
+      suppressClickOnce = true;
     }
   }
 

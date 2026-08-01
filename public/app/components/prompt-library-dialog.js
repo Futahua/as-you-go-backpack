@@ -350,6 +350,20 @@ export function createPromptLibraryDialog({
     checkbox.setAttribute('aria-label', `Include every prompt inside ${node.title}`);
     checkbox.checked = node.includeAll === true;
 
+    const chevronBtn = document.createElement('button');
+    chevronBtn.type = 'button';
+    chevronBtn.className = 'prompt-folder-toggle';
+    chevronBtn.setAttribute('aria-expanded', String(expanded));
+    const chevronSpan = document.createElement('span');
+    chevronSpan.className = 'prompt-folder-chevron';
+    chevronSpan.append(icon('chevron'));
+    chevronBtn.append(chevronSpan);
+
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'prompt-folder-icon';
+    iconSpan.setAttribute('aria-hidden', 'true');
+    iconSpan.append(icon('folder'));
+
     let titleControl;
     if (renaming) {
       titleControl = document.createElement('input');
@@ -357,23 +371,12 @@ export function createPromptLibraryDialog({
       titleControl.setAttribute('aria-label', 'Folder title');
       titleControl.value = node.title;
     } else {
-      titleControl = document.createElement('button');
-      titleControl.type = 'button';
-      titleControl.className = 'prompt-folder-toggle';
-      titleControl.setAttribute('aria-expanded', String(expanded));
-      const chevronSpan = document.createElement('span');
-      chevronSpan.className = 'prompt-folder-chevron';
-      chevronSpan.append(icon('chevron'));
-      const folderIconSpan = document.createElement('span');
-      folderIconSpan.className = 'prompt-folder-icon';
-      folderIconSpan.append(icon('folder'));
-      const titleSpan = document.createElement('span');
-      titleSpan.className = 'prompt-folder-title';
-      titleSpan.textContent = node.title;
-      titleControl.append(chevronSpan, folderIconSpan, titleSpan);
+      titleControl = document.createElement('span');
+      titleControl.className = 'prompt-folder-title';
+      titleControl.textContent = node.title;
     }
 
-    row.append(checkbox, titleControl);
+    row.append(checkbox, chevronBtn, iconSpan, titleControl);
     fragment.append(row);
 
     if (expanded) {

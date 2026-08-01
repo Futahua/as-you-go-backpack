@@ -315,6 +315,52 @@ test('left-click selects one row and ctrl-click toggles without clearing', () =>
   assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'false', 'ctrl toggles off');
 });
 
+test('pointerdown without movement never mutates selection', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  const row = h.rowFor('prompt-root');
+  row.dispatch('pointerdown', { pointerId: 3, button: 0, clientX: 50, clientY: 50, target: row });
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'true', 'selection untouched by pointerdown');
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'false');
+});
+
+test('drag threshold selects an unselected drag source once and suppresses the following click', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  const src = h.rowFor('prompt-root');
+  const target = h.rowFor('folder-dev');
+  const data = { pointerId: 4 };
+  src.dispatch('pointerdown', { ...data, button: 0, clientX: 50, clientY: 50, target: src });
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'false', 'still unselected before threshold');
+  target.dispatch('pointermove', { ...data, clientX: 200, clientY: 200, target, preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'true', 'selected once at threshold');
+  target.dispatch('pointermove', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
+  target.dispatch('pointerup', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
+  const selectedBeforeClick = h.rowFor('prompt-root').getAttribute('aria-selected');
+  target.dispatch('click', { target, preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), selectedBeforeClick, 'post-drag synthetic click suppressed');
+});
+
+test('folder title single-click selects without expanding', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const title = h.rowFor('folder-inner').querySelector('.prompt-folder-title');
+  title.dispatch('click', { target: title, preventDefault, stopPropagation });
+  assert.equal(h.rowFor('folder-inner').getAttribute('aria-selected'), 'true', 'title selects the folder');
+  assert.equal(h.rowFor('prompt-b'), undefined, 'title does not expand');
+});
+
+test('folder chevron expands without selecting', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const chevron = h.rowFor('folder-inner').querySelector('.prompt-folder-toggle');
+  chevron.dispatch('click', { target: chevron, preventDefault, stopPropagation });
+  assert.ok(h.rowFor('prompt-b'), 'chevron expands the folder');
+  assert.equal(h.rowFor('folder-inner').getAttribute('aria-selected'), 'false', 'chevron leaves selection untouched');
+});
+
 test('shift-click selects the visible range', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
