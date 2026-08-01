@@ -99,49 +99,6 @@ test('afterCommit runs after the new state is installed', async () => {
   assert.deepEqual(h.afterCommits, [{ items: ['a'], prepared: true }]);
 });
 
-test('save queue serializes saves in order despite varying latencies', async () => {
-  const order = [];
-  let state = {};
-  const store = createWorkspaceStore({
-    getState: () => state,
-    setState: (next) => { state = next; },
-    persist: async (snapshot) => {
-      await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 12)));
-      order.push(JSON.parse(snapshot).tag);
-    },
-    normalizeState: (s) => s,
-    setStatus: () => {},
-  });
-  await Promise.all([
-    store.save({ tag: 'a' }),
-    store.save({ tag: 'b' }),
-    store.save({ tag: 'c' }),
-  ]);
-  assert.deepEqual(order, ['a', 'b', 'c']);
-});
-
-test('save queue recovers after a failed save so later saves still run', async () => {
-  const order = [];
-  let state = {};
-  let shouldFail = true;
-  const store = createWorkspaceStore({
-    getState: () => state,
-    setState: (next) => { state = next; },
-    persist: async (snapshot) => {
-      if (shouldFail) {
-        shouldFail = false;
-        throw new Error('disk full');
-      }
-      order.push(JSON.parse(snapshot).tag);
-    },
-    normalizeState: (s) => s,
-    setStatus: () => {},
-  });
-  await assert.rejects(store.save({ tag: 'a' }), /disk full/);
-  await store.save({ tag: 'b' });
-  await store.save({ tag: 'c' });
-  assert.deepEqual(order, ['b', 'c']);
-});
 
 test('commit clears session selection and passes the session to prepare', async () => {
   let state = { items: ['root'] };
@@ -175,4 +132,84 @@ test('updateSession merges changes into the session object', () => {
   });
   store.updateSession({ selectionAnchor: 'x' });
   assert.equal(store.getSession().selectionAnchor, 'x');
+});
+
+test('a throwing normalizeState leaves the current selection untouched', async () => {
+  let state = { items: ['root'] };
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => {},
+    normalizeState: () => { throw new Error('bad state'); },
+    setStatus: () => {},
+  });
+  const session = store.getSession();
+  session.selected.add('keep-me');
+  await assert.rejects(
+    async () => store.commit({ items: ['broken'] }, {}),
+    /bad state/,
+  );
+  // Selection survived the failed commit: it was cleared only after the
+  // initial normalization succeeded.
+  assert.ok(session.selected.has('keep-me'));
+});
+
+test('save queue waits for an in-flight save before starting the next one', async () => {
+  const order = [];
+  let state = {};
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  let firstStarted = false;
+  let secondStarted = false;
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async (snapshot) => {
+      if (!firstStarted) {
+        firstStarted = true;
+        order.push('a');
+        await firstGate;
+        return;
+      }
+      if (!secondStarted) {
+        secondStarted = true;
+        order.push('b');
+      }
+    },
+    normalizeState: (s) => s,
+    setStatus: () => {},
+  });
+  const first = store.save({ tag: 'a' });
+  const second = store.save({ tag: 'b' });
+  await Promise.resolve();
+  assert.equal(secondStarted, false, 'save B must not start before save A resolves');
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(order, ['a', 'b']);
+});
+
+test('save queue runs a queued save even after the previous save rejects', async () => {
+  const order = [];
+  let state = {};
+  let shouldFail = true;
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async (snapshot) => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error('disk full');
+      }
+      order.push(JSON.parse(snapshot).tag);
+    },
+    normalizeState: (s) => s,
+    setStatus: () => {},
+  });
+  // Queue save B before save A rejects, so recovery is exercised through the
+  // queue rather than a fresh call.
+  const first = store.save({ tag: 'a' });
+  const second = store.save({ tag: 'b' });
+  await assert.rejects(first, /disk full/);
+  await second;
+  assert.deepEqual(order, ['b']);
 });

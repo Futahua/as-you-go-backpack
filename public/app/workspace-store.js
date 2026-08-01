@@ -44,8 +44,11 @@ export function createWorkspaceStore({
       undoStack.push(previous);
       redoStack.length = 0;
     }
-    session.selected.clear();
     let final = normalizeState(nextState);
+    // Selection is cleared only after the initial normalization succeeds, so
+    // a malformed state that makes normalizeState throw does not destroy the
+    // current selection.
+    session.selected.clear();
     if (prepare) final = normalizeState(prepare(final, session) ?? final);
     setState(final);
     afterCommit?.();
