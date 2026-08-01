@@ -525,6 +525,8 @@ button { color: inherit; }
 }
 .editor-error { min-height: 17px; margin: 10px 0 0; color: #963d30; font-size: 12px; }
 .confirm-card p { margin: 0 0 18px; color: #675f54; line-height: 1.55; }
+#confirm-restore { background: #d7e7d9; border-color: #4c725a; color: #4c725a; }
+#confirm-restore:hover { background: #c3dbcb; }
 
 .sr-only {
   position: absolute;
