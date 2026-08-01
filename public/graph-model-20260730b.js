@@ -196,11 +196,27 @@ export function allUniquePositions(nodes) {
   return keys.size === nodes.length;
 }
 
-/** Minimum hue separation in degrees that counts as "visibly different". */
-export const MIN_HUE_DISTANCE = 15;
-
 /** A folder is "near" another when they are within this many canvas pixels. */
 const FOLDER_DISTANCE = 220;
+
+/** Hues closer than this to a near folder keep getting pushed apart. */
+const MIN_HUE_SEPARATION = 30;
+
+/** Repulsion step size per pass; < 1 keeps the relaxation stable. */
+const REPULSION_STEP = 0.35;
+
+/** How hard a hue is pulled toward its position-derived base each pass. */
+const BASE_PULL = 0.06;
+
+/** Relaxation passes per call. Positions only change a little per frame, so a
+ * handful of passes per rendered frame keeps colors converged during drags. */
+const RELAXATION_PASSES = 8;
+
+/** A folder this far from the canvas center gets the full radius hue shift. */
+const RADIUS_SPAN = 500;
+
+/** Degrees of hue added to the base at the radius span. */
+const RADIUS_WEIGHT = 120;
 
 /** Angular distance between two hues on the 0..360 circle, in degrees. */
 export function hueDistance(a, b) {
@@ -208,61 +224,66 @@ export function hueDistance(a, b) {
   return Math.min(d, 360 - d);
 }
 
-/** Midpoint of the largest gap between the given hues on the color wheel. */
-function largestGapMidpoint(hues) {
-  const sorted = [...hues].sort((a, b) => a - b);
-  let gapStart = sorted[0];
-  let largestGap = -1;
-  for (let i = 0; i < sorted.length; i += 1) {
-    // The wrap-around gap adds a full turn after the last sorted hue, so a
-    // single neighbor still leaves the whole 360° circle available.
-    const next = sorted[(i + 1) % sorted.length] + (i === sorted.length - 1 ? 360 : 0);
-    const gap = next - sorted[i];
-    if (gap > largestGap) {
-      largestGap = gap;
-      gapStart = sorted[i];
-    }
-  }
-  return (gapStart + largestGap / 2) % 360;
+function wrapDeg(degrees) {
+  return ((degrees % 360) + 360) % 360;
+}
+
+/** Shortest signed angle from `from` to `to`, in (-180, 180]. */
+function signedAngle(from, to) {
+  const d = wrapDeg(to - from);
+  return d > 180 ? d - 360 : d;
 }
 
 /**
- * Assigns every folder a hue on the full color wheel from its current absolute
- * position on the canvas, so colors follow the layout and shift as folders are
- * dragged around. Folders within FOLDER_DISTANCE of each other never share the
- * exact same hue: a folder keeps its position-derived hue (the angle of the
- * folder around `center`) unless a near folder is too close, in which case it
- * is placed at the midpoint of the largest gap between its near folders' hues,
- * maximizing separation. Re-calling this as positions change updates colors to
- * match the new relative distances.
+ * Continuously re-derives every folder's hue from its current absolute
+ * position on the canvas, so colors are never static: a folder's hue relaxes
+ * toward a position base (the angle of its position around `center` plus a
+ * radius term, so any drag direction re-colors it) while any folder within
+ * FOLDER_DISTANCE pushes it away, harder the closer they are. Dragging a
+ * folder therefore re-colors it and its near neighbors as their relative
+ * distances change, and near folders never collapse onto the same hue.
  *
  * `folders` is an array of { id, x, y }; `colors` is the id -> hue map that is
- * mutated in place.
+ * mutated in place (it carries the relaxation state between calls).
  */
 export function assignSpatialFolderHues(folders, colors, center) {
-  const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-  const angle = (x, y) => ((Math.atan2(y - center.cy, x - center.cx) * 180) / Math.PI + 360) % 360;
-  const sorted = [...folders].sort((a, b) => a.id.localeCompare(b.id));
+  const positionBase = (x, y) => {
+    const angle = wrapDeg((Math.atan2(y - center.cy, x - center.cx) * 180) / Math.PI);
+    const radius = Math.hypot(x - center.cx, y - center.cy);
+    return wrapDeg(angle + (radius / RADIUS_SPAN) * RADIUS_WEIGHT);
+  };
+  const list = [...folders].sort((a, b) => a.id.localeCompare(b.id));
 
-  for (const folder of sorted) {
-    const near = sorted.filter(
-      (other) => other.id !== folder.id && distance(folder, other) < FOLDER_DISTANCE,
-    );
-    const baseHue = angle(folder.x, folder.y);
-    const neighborHues = near
-      .map((other) => colors.get(other.id))
-      .filter((hue) => typeof hue === 'number');
-
-    let target;
-    if (
-      neighborHues.length === 0
-      || neighborHues.every((hue) => hueDistance(baseHue, hue) >= MIN_HUE_DISTANCE)
-    ) {
-      target = baseHue;
-    } else {
-      target = largestGapMidpoint(neighborHues);
+  for (const folder of list) {
+    if (typeof colors.get(folder.id) !== 'number') {
+      colors.set(folder.id, positionBase(folder.x, folder.y));
     }
-    colors.set(folder.id, Math.round(target));
+  }
+
+  for (let pass = 0; pass < RELAXATION_PASSES; pass += 1) {
+    for (const folder of list) {
+      const hue = colors.get(folder.id);
+      let adjustment = 0;
+      for (const other of list) {
+        if (other.id === folder.id) continue;
+        const dist = Math.hypot(other.x - folder.x, other.y - folder.y);
+        if (dist >= FOLDER_DISTANCE) continue;
+        const otherHue = colors.get(other.id);
+        if (typeof otherHue !== 'number') continue;
+        const separation = Math.abs(signedAngle(hue, otherHue));
+        const needed = MIN_HUE_SEPARATION - separation;
+        if (needed <= 0) continue;
+        const closeness = 1 - dist / FOLDER_DISTANCE;
+        adjustment += -Math.sign(signedAngle(hue, otherHue) || 1) * needed * closeness * REPULSION_STEP;
+      }
+      // Pull the hue back toward its position-derived base so a folder whose
+      // neighbors move away re-colors to match its new spot on the canvas.
+      adjustment += -signedAngle(hue, positionBase(folder.x, folder.y)) * BASE_PULL;
+      colors.set(
+        folder.id,
+        Math.round(wrapDeg(hue + Math.max(-60, Math.min(60, adjustment)))),
+      );
+    }
   }
   return colors;
 }

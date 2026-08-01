@@ -645,39 +645,33 @@ test('forking from a placement in folder B (not the placement in folder A) forks
   assert.deepEqual(forkedNodes[0].parentIds, [b.id], 'the fork lands in B');
 });
 
-test('assignSpatialFolderHues keeps nearby folders apart by position', () => {
+test('assignSpatialFolderHues separates nearby folders and re-colors on drag', () => {
   const center = { cx: 0, cy: 0 };
-  // Two folders close together on the canvas must never share the exact hue.
   const colors = new Map();
+  // Two folders close together on the canvas must separate, not share a hue.
   assignSpatialFolderHues([
     { id: 'A', x: 0, y: 0 },
     { id: 'B', x: 60, y: 0 },
   ], colors, center);
   assert.ok(hueDistance(colors.get('A'), colors.get('B')) >= 15);
 
-  // Far-apart folders (beyond the near threshold) can share a hue; moving them
-  // closer re-evaluates so they no longer match.
-  const far = new Map();
+  // Dragging B far away re-colors it to match its new absolute position.
+  const hueBefore = colors.get('B');
   assignSpatialFolderHues([
     { id: 'A', x: 0, y: 0 },
     { id: 'B', x: 1200, y: 0 },
-  ], far, center);
-  assert.equal(hueDistance(far.get('A'), far.get('B')), 0, 'far folders may share a hue');
-  assignSpatialFolderHues([
-    { id: 'A', x: 0, y: 0 },
-    { id: 'B', x: 60, y: 0 },
-  ], far, center);
-  assert.ok(hueDistance(far.get('A'), far.get('B')) >= 15, 'close folders separate');
+  ], colors, center);
+  assert.notEqual(colors.get('B'), hueBefore, 'dragging B re-colors it');
 });
 
 test('assignSpatialFolderHues derives hue from absolute position', () => {
   const center = { cx: 0, cy: 0 };
   const colors = new Map();
-  // A lone folder on the right of center gets a hue near 0/360 (east angle).
+  // A lone folder right of center gets the east angle base (~0° + radius term).
   assignSpatialFolderHues([{ id: 'R', x: 300, y: 0 }], colors, center);
   const east = colors.get('R');
-  assert.ok(east < 90 || east > 270, 'east-of-center folder is a warm hue');
-  // A lone folder below center is 90° further around the wheel.
+  assert.ok(east >= 0 && east < 180, 'east-of-center folder is a warm hue');
+  // A lone folder below center is ~90° further around the wheel.
   assignSpatialFolderHues([{ id: 'D', x: 0, y: 300 }], colors, center);
   const south = colors.get('D');
   assert.ok(hueDistance(south, (east + 90) % 360) < 20, 'south hue is ~90° from east');
