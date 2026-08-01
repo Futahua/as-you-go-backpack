@@ -5,9 +5,9 @@
  * keep its existing references while every write funnels through the store.
  *
  * prepare() (when provided) runs before installing a committed state — the
- * entry uses it to clear the selection and fold the current navigation
- * session into the saved view. afterCommit() runs after the new state is
- * installed but before persisting. */
+ * entry uses it to fold the current navigation session into the saved view.
+ * The store clears the session selection directly before invoking prepare().
+ * afterCommit() runs after the new state is installed but before persisting. */
 export function createWorkspaceStore({
   getState,
   setState,

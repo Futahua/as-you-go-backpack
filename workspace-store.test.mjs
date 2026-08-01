@@ -114,8 +114,7 @@ test('commit clears session selection and passes the session to prepare', async 
       return next;
     },
   });
-  store.getSession().selected.add('a');
-  store.getSession().selected.add('b');
+  store.setSelection(['a', 'b']);
   await store.commit({ items: ['next'] }, {});
   assert.equal(store.getSession().selected.size, 0);
   assert.equal(preparedSession, store.getSession());
