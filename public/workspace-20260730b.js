@@ -44,6 +44,9 @@ import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition } from './graph-model-20260730b.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
+import { createHostBridge } from './app/host/host-bridge.js';
+
+const host = createHostBridge(window);
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
 
@@ -96,7 +99,6 @@ binButton: document.querySelector('#bin-button'),
   linkEditLayer: document.querySelector('#link-edit-layer'),
 };
 
-const pending = new Map();
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
 let undoStack = [];
@@ -161,12 +163,6 @@ function removeGraphShiftListeners() {
     window.removeEventListener('keyup', graphShiftKeyup, { capture: true });
     graphShiftKeyup = null;
   }
-}
-
-function request(type, detail = {}) {
-  const requestId = crypto.randomUUID();
-  window.parent.postMessage({ type, requestId, ...detail }, '*');
-  return new Promise((resolve, reject) => pending.set(requestId, { resolve, reject }));
 }
 
 function setStatus(text = '') {
@@ -1053,8 +1049,8 @@ async function hydrateIcons() {
   await hydrateIconsScoped(
     document,
     iconCache,
-    (detail) => request('papers:project:as-you-go-shortcut-icon', detail),
-    (url) => request('papers:project:resolve-web-link-icon', { url }),
+    (detail) => host.shortcutIcon(detail),
+    (url) => host.resolveWebIcon(url),
   );
 }
 
@@ -1063,8 +1059,8 @@ function hydrateNodeIcons(shell) {
   hydrateIconsScoped(
     shell,
     iconCache,
-    (detail) => request('papers:project:as-you-go-shortcut-icon', detail),
-    (url) => request('papers:project:resolve-web-link-icon', { url }),
+    (detail) => host.shortcutIcon(detail),
+    (url) => host.resolveWebIcon(url),
   );
 }
 
@@ -1072,7 +1068,7 @@ async function persist(nextState = state) {
   const snapshot = JSON.stringify(nextState);
   const operation = saveQueue
     .catch(() => undefined)
-    .then(() => request('papers:project:as-you-go-save', { state: snapshot }));
+    .then(() => host.saveWorkspace(snapshot));
   saveQueue = operation;
   await operation;
 }
@@ -1277,9 +1273,9 @@ async function activate(itemId) {
     try {
       const chosen = shortcut(itemId);
       if (isWebLink(chosen)) {
-        await request('papers:project:open-web-link', { url: chosen.target });
+        await host.openWebLink(chosen.target);
       } else {
-        await request('papers:project:as-you-go-launch', { actionId: itemId });
+        await host.launchShortcut(itemId);
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -1304,7 +1300,7 @@ async function revealSelection() {
     if (seenDirectories.has(directory)) continue;
     seenDirectories.add(directory);
     try {
-      await request('papers:project:as-you-go-reveal', { actionId: target.id });
+      await host.revealShortcut(target.id);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -1320,9 +1316,9 @@ async function activateSelection() {
   await Promise.all(shortcuts.map(async (chosen) => {
     try {
       if (isWebLink(chosen)) {
-        await request('papers:project:open-web-link', { url: chosen.target });
+        await host.openWebLink(chosen.target);
       } else {
-        await request('papers:project:as-you-go-launch', { actionId: chosen.id });
+        await host.launchShortcut(chosen.id);
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -1483,7 +1479,7 @@ async function resolveEditorTargetIcon() {
   }
   if (editorMode?.kind === 'shortcut' && editorMode.item?.id) {
     try {
-      editorTargetIcon = await request('papers:project:as-you-go-shortcut-icon', {
+      editorTargetIcon = await host.shortcutIcon({
         actionId: editorMode.item.id,
       });
     } catch {
@@ -1538,7 +1534,7 @@ function hideEditor() {
 
 async function chooseTarget(kind) {
   try {
-    const result = await request('papers:project:as-you-go-pick-target', { kind });
+    const result = await host.pickTarget(kind);
     if (!result) return;
     if (typeof result === 'string') {
       elements.target.value = result;
@@ -2043,7 +2039,7 @@ elements.grid.addEventListener('dblclick', (event) => {
   const chosen = shortcut(id);
   if (chosen && !isWebLink(chosen) && isDirectoryTarget(chosen.target)) {
     closeMenu();
-    request('papers:project:as-you-go-reveal', { actionId: id }).catch((error) =>
+    host.revealShortcut(id).catch((error) =>
       setStatus(error instanceof Error ? error.message : String(error)));
     return;
   }
@@ -2301,7 +2297,7 @@ elements.grid.addEventListener('drop', async (event) => {
       let name = nameForDroppedUrl(url);
       let icon = null;
       try {
-        const resolved = await request('papers:project:resolve-web-link-icon', { url });
+        const resolved = await host.resolveWebIcon(url);
         if (resolved?.title) name = resolved.title;
         if (resolved?.icon) icon = resolved.icon;
       } catch {
@@ -2325,7 +2321,7 @@ elements.grid.addEventListener('drop', async (event) => {
 
   event.preventDefault();
   try {
-    const targets = await request('papers:project:resolve-dropped-targets', {
+    const targets = await host.resolveDroppedTargets({
       files: droppedFiles,
     });
     const next = createDroppedShortcuts(state, targets, destination);
@@ -2501,7 +2497,7 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
       .filter(Boolean)
       .map((candidate) => candidate.target);
     const text = selectedTargets.length > 0 ? selectedTargets.join('\n') : PICKUP_PROMPT;
-    await request('papers:project:copy-text', { text });
+    await host.copyText(text);
     document.querySelector('.copy-label').textContent = 'Copied';
     setTimeout(() => {
       document.querySelector('.copy-label').textContent = 'Copy agent pickup prompt';
@@ -2509,37 +2505,6 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   }
-});
-
-window.addEventListener('message', (event) => {
-  if (event.source !== window.parent || event.data?.type !== 'papers:host:result') return;
-  const task = pending.get(event.data.requestId);
-  if (!task) return;
-  pending.delete(event.data.requestId);
-  if (!event.data.ok) {
-    task.reject(new Error(event.data.error || 'The request could not be completed.'));
-    return;
-  }
-  if ('target' in event.data && 'icon' in event.data) {
-    task.resolve({ target: event.data.target, icon: event.data.icon });
-    return;
-  }
-  if ('finalOrigin' in event.data) {
-    task.resolve({
-      icon: event.data.icon,
-      mime: event.data.mime,
-      finalOrigin: event.data.finalOrigin,
-      title: event.data.title ?? null,
-    });
-    return;
-  }
-  task.resolve(
-    event.data.state
-    ?? event.data.icon
-    ?? event.data.target
-    ?? event.data.targets
-    ?? undefined,
-  );
 });
 
 /** A dragged pill's saved x/y are offsets from whichever edge (left/right,
@@ -2711,7 +2676,7 @@ function setupToolbarDragging() {
 
 (async () => {
   try {
-    const loaded = await request('papers:project:as-you-go-load');
+    const loaded = await host.loadWorkspace();
     state = normalizeState(typeof loaded === 'string' ? JSON.parse(loaded) : loaded);
     restoreWorkspaceView();
     restoreToolbarPositions();
