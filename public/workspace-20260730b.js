@@ -75,7 +75,6 @@ const elements = getWorkspaceElements(document);
 
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
-let graphExpanded = new Set();
 let clipboard = null;
 
 const store = createWorkspaceStore({
@@ -243,7 +242,7 @@ function isAvailableItem(itemId) {
 function captureWorkspaceViewFrom(currentState, currentSession) {
   return updateWorkspaceView(currentState, {
     currentGroupId: currentSession.currentId,
-    graphExpandedGroupIds: [...graphExpanded],
+    graphExpandedGroupIds: [...currentSession.graphExpanded],
     selectedItemIds: [...currentSession.selected],
     binMode: currentSession.binMode,
   });
@@ -259,7 +258,7 @@ function restoreWorkspaceView() {
     requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
       ? requestedCurrent
       : ROOT_ID;
-  graphExpanded = new Set(
+  session.graphExpanded = new Set(
     (state.view.graphExpandedGroupIds ?? []).filter((groupId) =>
       Boolean(group(groupId))),
   );
@@ -606,7 +605,7 @@ function createGraphController() {
     if (!iconItem) return;
     const isGhost = candidate.kind === 'bin-origin';
     const canExpand = candidate.kind === 'group';
-    const isExpanded = canExpand && graphExpanded.has(candidate.id);
+    const isExpanded = canExpand && session.graphExpanded.has(candidate.id);
     const isSelected = !isGhost && session.selected.has(candidate.id);
     iconItem.dataset.kind = candidate.kind;
     iconItem.dataset.parent = candidate.parentId ?? (session.binMode ? 'bin' : session.currentId);
@@ -646,7 +645,7 @@ function createGraphController() {
     const isGhost = candidate.kind === 'bin-origin';
     const isSelected = !isGhost && session.selected.has(candidate.id);
     const canExpand = candidate.kind === 'group';
-    const isExpanded = canExpand && graphExpanded.has(candidate.id);
+    const isExpanded = canExpand && session.graphExpanded.has(candidate.id);
 
     const shell = document.createElement('div');
     shell.className = `graph-node-shell${isGhost ? ' bin-origin-ghost' : ''}`;
@@ -878,7 +877,7 @@ function createGraphController() {
       return;
     }
     updatePending = false;
-    const visible = visibleGraphItems(state, session.currentId, graphExpanded, session.binMode, session.binCurrentId);
+    const visible = visibleGraphItems(state, session.currentId, session.graphExpanded, session.binMode, session.binCurrentId);
     if (visible.length === 0) {
       nodes.forEach((_, id) => removeNode(id));
       syncEdges([]);
@@ -1362,7 +1361,7 @@ elements.grid.addEventListener('click', (event) => {
   const expandButton = event.target.closest('[data-expand]');
   if (expandButton) {
     const folderId = expandButton.dataset.expand;
-    const targetSet = graphExpanded;
+    const targetSet = session.graphExpanded;
     if (targetSet.has(folderId)) targetSet.delete(folderId);
     else targetSet.add(folderId);
     closeMenu();
@@ -1739,7 +1738,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
   if (tile && tile.classList.contains('bin-origin-ghost')) return;
   if (tile) {
     if (event.shiftKey && tile.dataset.kind === 'group') {
-      const targetSet = graphExpanded;
+      const targetSet = session.graphExpanded;
       const id = tile.dataset.id;
       const folderIds = session.selected.has(id)
         ? [...session.selected].filter((selectedId) => group(selectedId))
