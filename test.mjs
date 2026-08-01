@@ -88,3 +88,17 @@ test('the local project owns its exact interface, pickup prompt and prepared act
   assert.match(allJs, /Backpack interfaces, behavior, and implementation belong outside Papers/);
   assert.match(allJs, /My request:\r?\n\[Describe what you want to experience\.\]/);
 });
+
+test('the entry composes the command layer after its graph and closeMenu consts', async () => {
+  const script = await read('public/workspace-20260730b.js');
+  const commandsIndex = script.indexOf('const commands = createWorkspaceCommands');
+  const graphIndex = script.indexOf('const graph = createGraphController');
+  const closeMenuIndex = script.indexOf('const closeMenu = () => menu.closeMenu()');
+  assert.ok(graphIndex >= 0, 'graph controller declaration present');
+  assert.ok(closeMenuIndex >= 0, 'closeMenu shim present');
+  // createWorkspaceCommands evaluates graph and closeMenu as argument values,
+  // so constructing it before those consts are initialized would throw a
+  // temporal-dead-zone error at module load. Guard the init ordering.
+  assert.ok(commandsIndex > graphIndex, 'commands constructed after graph');
+  assert.ok(commandsIndex > closeMenuIndex, 'commands constructed after closeMenu');
+});

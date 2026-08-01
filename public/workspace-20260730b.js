@@ -92,31 +92,6 @@ const store = createWorkspaceStore({
 });
 const session = store.getSession();
 
-const commands = createWorkspaceCommands({
-  store,
-  group,
-  shortcut,
-  item,
-  isWebLink,
-  host,
-  graph,
-  resolveBinTargets,
-  visiblePlacementIdFor,
-  visibleParentCountFor,
-  allActivePlacementIds,
-  anyActivePlacementId,
-  moveSelection,
-  copySelection,
-  collapsePlacements,
-  binSelection,
-  graphContextId,
-  removeGraphPositions,
-  syncSelection,
-  saveWorkspaceView,
-  closeMenu,
-  render,
-  setStatus,
-});
 let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
@@ -1866,6 +1841,35 @@ const menu = createContextMenu({
 // while the context menu's real implementation lives in the module above.
 const closeMenu = () => menu.closeMenu();
 const openMenu = (...args) => menu.openMenu(...args);
+
+// Constructed after graph and closeMenu are initialized (both are consts
+// declared later in the file); evaluating graph/closeMenu as argument
+// values any earlier would hit the temporal dead zone.
+const commands = createWorkspaceCommands({
+  store,
+  group,
+  shortcut,
+  item,
+  isWebLink,
+  host,
+  graph,
+  resolveBinTargets,
+  visiblePlacementIdFor,
+  visibleParentCountFor,
+  allActivePlacementIds,
+  anyActivePlacementId,
+  moveSelection,
+  copySelection,
+  collapsePlacements,
+  binSelection,
+  graphContextId,
+  removeGraphPositions,
+  syncSelection,
+  saveWorkspaceView,
+  closeMenu,
+  render,
+  setStatus,
+});
 
 const editorDialog = createEditorDialog({
   elements,
