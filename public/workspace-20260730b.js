@@ -1269,7 +1269,7 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
       .map((selectedId) => shortcutByRecordOrPlacementId(selectedId))
       .filter(Boolean)
       .map((candidate) => candidate.target);
-    const outcome = resolveCopierAction(selectedTargets, promptLibrary.getSnapshotCards());
+    const outcome = resolveCopierAction(selectedTargets, promptLibrary.getSnapshotLibrary());
     if (outcome.kind === 'open') {
       promptLibrary.open({ message: 'Select at least one prompt for batch copying.' });
       return;

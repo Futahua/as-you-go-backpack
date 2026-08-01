@@ -30,7 +30,7 @@ import {
   setGraphPositions,
   removeGraphPositions,
   normalizeGraphPositions,
-  setPromptCards,
+  setPromptLibrary,
 } from './model.mjs';
 
 import {
@@ -312,46 +312,70 @@ test('the local project preserves its explorer working position', () => {
     layout: 'explorer',
     graphPositions: {},
     toolbarPositions: {},
-    promptCards: [],
+    promptLibrary: [],
   });
 });
 
-test('emptyState contains an empty prompt card list', () => {
-  assert.deepEqual(emptyState().view.promptCards, []);
+test('emptyState contains an empty prompt library', () => {
+  assert.deepEqual(emptyState().view.promptLibrary, []);
 });
 
-test('a legacy pickupPrompt migrates to a checked card on normalize', () => {
+test('a legacy pickupPrompt migrates to a root prompt node on normalize', () => {
   const state = normalizeState({
     schemaVersion: 1,
     groups: [],
     shortcuts: [],
     view: { pickupPrompt: 'legacy prompt' },
   });
-  assert.deepEqual(state.view.promptCards, [
-    { id: state.view.promptCards[0].id, title: 'Agent pickup prompt', text: 'legacy prompt', includeInBatch: true },
+  assert.deepEqual(state.view.promptLibrary, [
+    {
+      id: state.view.promptLibrary[0].id,
+      type: 'prompt',
+      title: 'Agent pickup prompt',
+      text: 'legacy prompt',
+      includeInBatch: true,
+    },
   ]);
 });
 
-test('promptCards round-trip through normalization and stay on other view updates', () => {
-  let state = emptyState();
-  const cards = [
-    { id: 'prompt-a', title: 'One', text: 'first', includeInBatch: true },
-    { id: 'prompt-b', title: 'Two', text: 'second', includeInBatch: false },
-  ];
-  state = setPromptCards(state, cards);
-  assert.deepEqual(state.view.promptCards, cards);
-  const restored = normalizeState(JSON.parse(JSON.stringify(state)));
-  assert.deepEqual(restored.view.promptCards, cards);
-  const resized = updateWorkspaceView(state, { iconSize: 64 });
-  assert.deepEqual(resized.view.promptCards, cards);
-  assert.deepEqual(updateWorkspaceView(state, { promptCards: [] }).view.promptCards, []);
+test('flat legacy promptCards migrate to root prompt nodes on normalize', () => {
+  const state = normalizeState({
+    schemaVersion: 1,
+    groups: [],
+    shortcuts: [],
+    view: { promptCards: [{ id: 'prompt-a', title: 'One', text: 'first', includeInBatch: true }] },
+  });
+  assert.deepEqual(state.view.promptLibrary, [
+    { id: 'prompt-a', type: 'prompt', title: 'One', text: 'first', includeInBatch: true },
+  ]);
 });
 
-test('setPromptCards does not mutate its input', () => {
+test('promptLibrary round-trips through normalization and stays on other view updates', () => {
+  let state = emptyState();
+  const library = [
+    {
+      id: 'folder-dev',
+      type: 'folder',
+      title: 'Dev',
+      children: [
+        { id: 'prompt-a', type: 'prompt', title: 'One', text: 'first', includeInBatch: true },
+      ],
+    },
+  ];
+  state = setPromptLibrary(state, library);
+  assert.deepEqual(state.view.promptLibrary, library);
+  const restored = normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(restored.view.promptLibrary, library);
+  const resized = updateWorkspaceView(state, { iconSize: 64 });
+  assert.deepEqual(resized.view.promptLibrary, library);
+  assert.deepEqual(updateWorkspaceView(state, { promptLibrary: [] }).view.promptLibrary, []);
+});
+
+test('setPromptLibrary does not mutate its input', () => {
   const state = emptyState();
-  const cards = [{ id: 'prompt-x', title: 'X', text: 'body', includeInBatch: true }];
-  setPromptCards(state, cards);
-  assert.deepEqual(state.view.promptCards, []);
+  const library = [{ id: 'prompt-x', type: 'prompt', title: 'X', text: 'body', includeInBatch: true }];
+  setPromptLibrary(state, library);
+  assert.deepEqual(state.view.promptLibrary, []);
 });
 
 test('the explorer view mode defaults to explorer and persists as graph', () => {

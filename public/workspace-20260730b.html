@@ -106,10 +106,23 @@
         <div class="confirm-card prompt-library" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
           <header class="prompt-library-header">
             <h2 id="prompt-title">Copy prompts</h2>
-            <button id="prompt-add" type="button">Add prompt</button>
+            <div class="prompt-add-wrap">
+              <button id="prompt-add" class="paper-button" type="button" aria-haspopup="menu" aria-expanded="false">
+                Add <span aria-hidden="true">▾</span>
+              </button>
+              <div id="prompt-add-menu" class="prompt-add-menu" role="menu" hidden>
+                <button type="button" role="menuitem" data-prompt-add="prompt">Prompt</button>
+                <button type="button" role="menuitem" data-prompt-add="folder">Folder</button>
+              </div>
+            </div>
           </header>
           <p class="prompt-library-help">Checked prompts are copied together from top to bottom.</p>
-          <div id="prompt-card-list" class="prompt-card-list"></div>
+          <div id="prompt-delete-confirm" class="prompt-delete-confirm" hidden>
+            <span id="prompt-delete-message"></span>
+            <button id="prompt-delete-ok" class="paper-button danger" type="button">Delete</button>
+            <button id="prompt-delete-cancel" class="paper-button" type="button">Cancel</button>
+          </div>
+          <div id="prompt-card-list" class="prompt-tree-list"></div>
           <p id="prompt-error" class="editor-error" role="alert"></p>
           <div class="editor-actions editor-submit">
             <button id="prompt-cancel" class="paper-button" type="button">Cancel</button>

@@ -3,19 +3,37 @@ import test from 'node:test';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createPromptLibraryDialog } from './public/app/components/prompt-library-dialog.js';
 
-function matchSimple(node, selector) {
-  if (!node) return false;
-  if (selector.startsWith('#')) return node.attributes.id === selector.slice(1);
-  if (selector.startsWith('.')) return node.classList.contains(selector.slice(1));
-  if (selector.startsWith('[')) {
-    const m = selector.match(/^\[([\w-]+)(?:="([^"]*)")?\]$/);
-    if (!m) return false;
-    const attr = m[1];
-    const value = m[2];
-    if (value !== undefined) return node.dataset[attr] === value || node.attributes[attr] === value;
-    return attr in node.dataset || node.attributes[attr] !== undefined;
+function simpleParts(token) {
+  const parts = [];
+  const re = /([.#][\w-]+|\[[^\]]+\]|[\w-]+)/g;
+  let match;
+  while ((match = re.exec(token)) !== null) parts.push(match[0]);
+  return parts;
+}
+
+function matchToken(node, token) {
+  for (const part of simpleParts(token)) {
+    if (part.startsWith('.')) {
+      if (!node.classList.contains(part.slice(1))) return false;
+    } else if (part.startsWith('#')) {
+      if (node.attributes.id !== part.slice(1)) return false;
+    } else if (part.startsWith('[')) {
+      const m = part.match(/^\[([\w-]+)(?:="([^"]*)")?\]$/);
+      if (!m) return false;
+      const attr = m[1];
+      const value = m[2];
+      const got = node.dataset[attr] ?? node.attributes[attr];
+      if (value !== undefined) { if (got !== value) return false; }
+      else if (got === undefined) return false;
+    } else if (node.tagName !== part.toUpperCase()) {
+      return false;
+    }
   }
-  return node.tagName === selector.toUpperCase();
+  return true;
+}
+
+function matchSimple(node, selector) {
+  return matchToken(node, selector);
 }
 
 function matchDescendant(node, parts, index) {
@@ -31,13 +49,17 @@ function matchDescendant(node, parts, index) {
 }
 
 function matches(node, selector) {
-  const parts = selector.trim().split(/\s+/);
-  return matchDescendant(node, parts, parts.length - 1);
+  for (const group of selector.split(',')) {
+    const parts = group.trim().split(/\s+/);
+    if (matchDescendant(node, parts, parts.length - 1)) return true;
+  }
+  return false;
 }
 
 function makeNode(tag) {
   const node = {
     tagName: String(tag).toUpperCase(),
+    isFragment: false,
     children: [],
     parentNode: null,
     attributes: {},
@@ -45,6 +67,7 @@ function makeNode(tag) {
     dataset: {},
     value: '',
     checked: false,
+    indeterminate: false,
     disabled: false,
     hidden: false,
     draggable: false,
@@ -52,11 +75,15 @@ function makeNode(tag) {
     maxLength: 0,
     type: '',
     title: '',
+    _style: {},
     appendChild(child) {
-      if (typeof child !== 'string') {
-        node.children.push(child);
-        child.parentNode = node;
+      if (typeof child === 'string') return child;
+      if (child.isFragment) {
+        for (const grandchild of [...child.children]) node.appendChild(grandchild);
+        return child;
       }
+      node.children.push(child);
+      child.parentNode = node;
       return child;
     },
     append(...children) {
@@ -119,6 +146,11 @@ function makeNode(tag) {
     getBoundingClientRect() {
       return { top: 0, left: 0, width: 100, height: 100, right: 100, bottom: 100 };
     },
+    style: {
+      setProperty(name, value) {
+        node._style[name] = value;
+      },
+    },
   };
   const classes = new Set();
   Object.defineProperty(node, 'className', {
@@ -166,12 +198,30 @@ function makeNode(tag) {
   return node;
 }
 
-function createHarness({ storedCards = null, legacyPrompt = null } = {}) {
-  let state = {
-    groups: [],
-    shortcuts: [],
-    view: { promptCards: storedCards ?? [], pickupPrompt: legacyPrompt },
-  };
+const treeFixture = () => ({
+  groups: [],
+  shortcuts: [],
+  view: { promptLibrary: [
+    {
+      id: 'folder-dev', type: 'folder', title: 'Dev',
+      children: [
+        { id: 'prompt-a', type: 'prompt', title: 'Alpha', text: 'one', includeInBatch: true },
+        {
+          id: 'folder-inner', type: 'folder', title: 'Inner',
+          children: [
+            { id: 'prompt-b', type: 'prompt', title: 'Beta', text: 'two', includeInBatch: false },
+          ],
+        },
+      ],
+    },
+    { id: 'prompt-root', type: 'prompt', title: 'Root', text: 'three', includeInBatch: true },
+  ] },
+});
+
+function createHarness({ initialView = null } = {}) {
+  let state = initialView
+    ? { groups: [], shortcuts: [], view: initialView }
+    : { groups: [], shortcuts: [], view: { promptLibrary: [] } };
   const store = createWorkspaceStore({
     getState: () => state,
     setState: (next) => { state = next; },
@@ -180,12 +230,23 @@ function createHarness({ storedCards = null, legacyPrompt = null } = {}) {
     setStatus: () => {},
   });
   const topIds = [
-    'prompt-layer', 'prompt-add', 'prompt-card-list',
+    'prompt-layer', 'prompt-add', 'prompt-add-menu', 'prompt-card-list',
     'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
+    'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   nodes['prompt-layer'].hidden = true;
-  const documentMock = { querySelector: (sel) => nodes[sel.slice(1)] ?? null, createElement: (tag) => makeNode(tag) };
+  const promptItem = makeNode('button');
+  promptItem.dataset.promptAdd = 'prompt';
+  const folderItem = makeNode('button');
+  folderItem.dataset.promptAdd = 'folder';
+  nodes['prompt-add-menu'].append(promptItem, folderItem);
+  const documentMock = {
+    querySelector: (sel) => nodes[sel.slice(1)] ?? null,
+    createElement: (tag) => makeNode(tag),
+    createElementNS: (ns, tag) => makeNode(tag),
+    createDocumentFragment: () => { const f = makeNode('fragment'); f.isFragment = true; return f; },
+  };
   const copied = [];
   const statuses = [];
   const dialog = createPromptLibraryDialog({
@@ -199,267 +260,312 @@ function createHarness({ storedCards = null, legacyPrompt = null } = {}) {
   return {
     dialog, store, nodes, copied, statuses,
     getState: () => state,
-    cards: () => nodes['prompt-card-list'].querySelectorAll('.prompt-card'),
-    cardTitle: (article) => article.querySelector('.prompt-card-title'),
-    cardText: (article) => article.querySelector('.prompt-card-text'),
-    cardCheckbox: (article) => article.querySelector('.prompt-batch-toggle input'),
-    cardHandle: (article) => article.querySelector('.prompt-card-handle'),
+    rows: () => nodes['prompt-card-list'].querySelectorAll('.prompt-tree-row'),
+    rowFor: (id) => nodes['prompt-card-list'].querySelectorAll('.prompt-tree-row').find((r) => r.dataset.nodeId === id),
+    promptRows: () => nodes['prompt-card-list'].querySelectorAll('.prompt-tree-row.prompt-prompt-row'),
+    folderRows: () => nodes['prompt-card-list'].querySelectorAll('.prompt-tree-row.prompt-folder-row'),
+    textareaFor: (id) => nodes['prompt-card-list'].querySelectorAll('.prompt-card-details').find((d) => d.dataset.nodeId === id)?.querySelector('.prompt-card-text') ?? null,
   };
 }
 
 const preventDefault = () => {};
 const stopPropagation = () => {};
-const open = (h, options) => h.dialog.open(options);
-const summaryOf = (h, i) => h.cards()[i].querySelector('.prompt-card-summary');
-const detailsOf = (h, i) => h.cards()[i].querySelector('.prompt-card-details');
-const summaryTitleOf = (h, i) => h.cards()[i].querySelector('.prompt-card-summary-title');
-const toggleExpand = (h, i) => summaryOf(h, i).dispatch('click', { target: summaryOf(h, i), preventDefault, stopPropagation });
-const setTitle = (h, i, value) => {
-  const input = h.cardTitle(h.cards()[i]);
-  input.value = value;
-  input.dispatch('input', { target: input });
-};
-const setText = (h, i, value) => {
-  const input = h.cardText(h.cards()[i]);
-  input.value = value;
-  input.dispatch('input', { target: input });
-};
+const open = (h, o) => h.dialog.open(o);
+const pillIn = (row, action) => row.querySelectorAll('[data-prompt-action]').find((b) => b.dataset.promptAction === action);
 
-test('right-clicking the copy button opens the card library collapsed', () => {
-  const h = createHarness();
-  assert.equal(h.nodes['prompt-layer'].hidden, true);
-  h.nodes['copy-prompt'].dispatch('contextmenu', { preventDefault });
-  assert.equal(h.nodes['prompt-layer'].hidden, false);
-  assert.equal(h.cards().length, 1);
-  assert.equal(detailsOf(h, 0).hidden, true, 'default card starts collapsed');
-  assert.equal(summaryTitleOf(h, 0).textContent, 'Agent pickup prompt');
-  assert.equal(h.cardCheckbox(h.cards()[0]).checked, true);
-});
-
-test('opening with several saved cards shows every card collapsed', () => {
-  const h = createHarness({
-    storedCards: [
-      { id: 'prompt-a', title: 'One', text: 'first', includeInBatch: true },
-      { id: 'prompt-b', title: 'Two', text: 'second', includeInBatch: false },
-    ],
-  });
-  open(h);
-  assert.equal(h.cards().length, 2);
-  assert.ok(h.cards().every((article) => detailsOf(h, 0).hidden && detailsOf(h, 1).hidden));
-});
-
-test('clicking a summary expands that card and clicking again collapses it', () => {
-  const h = createHarness();
-  open(h);
-  toggleExpand(h, 0);
-  assert.equal(detailsOf(h, 0).hidden, false);
-  assert.ok(h.cards()[0].classList.contains('prompt-card-expanded'));
-  assert.equal(summaryOf(h, 0).getAttribute('aria-expanded'), 'true');
-  toggleExpand(h, 0);
-  assert.equal(detailsOf(h, 0).hidden, true);
-  assert.equal(summaryOf(h, 0).getAttribute('aria-expanded'), 'false');
-});
-
-test('expanding one card closes the other', () => {
-  const h = createHarness({
-    storedCards: [
-      { id: 'prompt-a', title: 'One', text: 'first', includeInBatch: true },
-      { id: 'prompt-b', title: 'Two', text: 'second', includeInBatch: false },
-    ],
-  });
-  open(h);
-  toggleExpand(h, 0);
-  toggleExpand(h, 1);
-  assert.equal(detailsOf(h, 0).hidden, true, 'first card closed');
-  assert.equal(detailsOf(h, 1).hidden, false, 'second card open');
-});
-
-test('checkbox, Copy, Delete, and drag handle do not toggle expansion', () => {
-  const h = createHarness({
-    storedCards: [
-      { id: 'prompt-a', title: 'One', text: 'first', includeInBatch: true },
-      { id: 'prompt-b', title: 'Two', text: 'second', includeInBatch: false },
-    ],
-  });
-  open(h);
-  toggleExpand(h, 0);
-  const article = h.cards()[0];
-  h.cardCheckbox(article).dispatch('click', { target: h.cardCheckbox(article), preventDefault, stopPropagation });
-  assert.equal(detailsOf(h, 0).hidden, false, 'checkbox keeps the card expanded');
-  const copyButton = article.querySelector('[data-prompt-action="copy"]');
-  copyButton.dispatch('click', { target: copyButton, preventDefault, stopPropagation });
-  assert.equal(detailsOf(h, 0).hidden, false, 'Copy keeps the card expanded');
-  h.cardHandle(article).dispatch('click', { target: h.cardHandle(article), preventDefault, stopPropagation });
-  assert.equal(detailsOf(h, 0).hidden, false, 'drag handle keeps the card expanded');
-  const deleteButton = h.cards()[1].querySelector('[data-prompt-action="delete"]');
-  deleteButton.dispatch('click', { target: deleteButton, preventDefault, stopPropagation });
-  assert.equal(detailsOf(h, 0).hidden, false, 'deleting another card keeps this one expanded');
-  assert.equal(h.cards().length, 1);
-});
-
-test('Add creates an unchecked card and expands it immediately', () => {
-  const h = createHarness();
-  open(h);
-  h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  assert.equal(h.cards().length, 2);
-  assert.equal(detailsOf(h, 0).hidden, true, 'previous card collapsed');
-  assert.equal(detailsOf(h, 1).hidden, false, 'new card expanded');
-  assert.equal(h.cardTitle(h.cards()[1]).value, 'New prompt');
-  assert.equal(h.cardText(h.cards()[1]).value, '');
-  assert.equal(h.cardCheckbox(h.cards()[1]).checked, false);
-});
-
-test('editing the title updates the draft and the collapsed summary title', () => {
-  const h = createHarness();
-  open(h);
-  toggleExpand(h, 0);
-  setTitle(h, 0, 'Renamed');
-  assert.equal(summaryTitleOf(h, 0).textContent, 'Renamed');
-  assert.equal(h.dialog.getSnapshotCards()[0].title, 'Agent pickup prompt', 'saved snapshot untouched');
-});
-
-test('checkbox state saves', async () => {
-  const h = createHarness();
-  open(h);
-  toggleExpand(h, 0);
-  setText(h, 0, 'Checked body');
-  h.cardCheckbox(h.cards()[0]).checked = true;
-  h.cardCheckbox(h.cards()[0]).dispatch('change', { target: h.cardCheckbox(h.cards()[0]) });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  assert.deepEqual(h.getState().view.promptCards[0], {
-    id: h.getState().view.promptCards[0].id,
-    title: 'Agent pickup prompt',
-    text: 'Checked body',
-    includeInBatch: true,
-  });
-});
-
-test('drag drop changes the saved array order', async () => {
-  const h = createHarness();
-  open(h);
-  h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  setTitle(h, 0, 'First');
-  setText(h, 0, 'one');
-  setTitle(h, 1, 'Second');
-  setText(h, 1, 'two');
-
-  const second = h.cards()[1];
-  const handle = h.cardHandle(second);
+function drag(h, sourceId, targetRow, clientY) {
+  const source = h.rowFor(sourceId);
+  const handle = source.querySelector('.prompt-tree-handle');
   const dataTransfer = { effectAllowed: '', dropEffect: '', setData() {} };
   handle.dispatch('dragstart', { target: handle, dataTransfer, preventDefault, stopPropagation });
-  const first = h.cards()[0];
-  first.dispatch('dragover', { target: first, clientY: 10, dataTransfer, preventDefault, stopPropagation });
-  first.dispatch('drop', { target: first, dataTransfer, preventDefault, stopPropagation });
-  first.dispatch('dragend', { target: first, preventDefault, stopPropagation });
+  targetRow.dispatch('dragover', { target: targetRow, clientY, dataTransfer, preventDefault, stopPropagation });
+  targetRow.dispatch('drop', { target: targetRow, dataTransfer, preventDefault, stopPropagation });
+  targetRow.dispatch('dragend', { target: targetRow, preventDefault, stopPropagation });
+}
 
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  assert.deepEqual(
-    h.getState().view.promptCards.map((c) => c.title),
-    ['Second', 'First'],
-    'the second card moved before the first',
-  );
+test('right-clicking the copy button opens the library', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  h.nodes['copy-prompt'].dispatch('contextmenu', { preventDefault });
+  assert.equal(h.nodes['prompt-layer'].hidden, false);
+  assert.equal(h.rows().length > 0, true);
 });
 
-test('keyboard reorder works via Alt+ArrowUp', async () => {
+test('nested rows receive the correct depth', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  assert.equal(h.rowFor('folder-dev')._style['--prompt-depth'], '0');
+  assert.equal(h.rowFor('prompt-a')._style['--prompt-depth'], '1');
+  assert.equal(h.rowFor('folder-inner')._style['--prompt-depth'], '1');
+  assert.equal(h.rowFor('prompt-root')._style['--prompt-depth'], '0');
+  assert.equal(h.rowFor('prompt-b'), undefined, 'children of a collapsed deep folder are hidden');
+});
+
+test('a folder chevron expands and collapses its descendants', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  assert.ok(h.rowFor('prompt-a'), 'top-level folder expanded by default');
+  assert.equal(h.rowFor('prompt-b'), undefined, 'deep folder children hidden while collapsed');
+  h.rowFor('folder-dev').querySelector('.prompt-folder-toggle').dispatch('click', { target: h.rowFor('folder-dev').querySelector('.prompt-folder-toggle'), preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-a'), undefined, 'collapse hides the subtree');
+  assert.equal(h.rowFor('folder-inner'), undefined);
+  h.rowFor('folder-dev').querySelector('.prompt-folder-toggle').dispatch('click', { target: h.rowFor('folder-dev').querySelector('.prompt-folder-toggle'), preventDefault, stopPropagation });
+  assert.ok(h.rowFor('prompt-a'), 're-expanding shows the subtree again');
+  assert.equal(h.rowFor('prompt-b'), undefined, 'deep folder is still collapsed');
+});
+
+test('multiple folders can remain expanded', () => {
+  const view = {
+    promptLibrary: [
+      { id: 'folder-a', type: 'folder', title: 'A', children: [{ id: 'p1', type: 'prompt', title: 'P', text: 'x', includeInBatch: true }] },
+      { id: 'folder-b', type: 'folder', title: 'B', children: [{ id: 'p2', type: 'prompt', title: 'Q', text: 'y', includeInBatch: true }] },
+    ],
+  };
+  const h = createHarness({ initialView: view });
+  open(h);
+  assert.ok(h.rowFor('p1') && h.rowFor('p2'), 'both folders open by default');
+  h.rowFor('folder-a').querySelector('.prompt-folder-toggle').dispatch('click', { target: h.rowFor('folder-a').querySelector('.prompt-folder-toggle'), preventDefault, stopPropagation });
+  assert.equal(h.rowFor('p1'), undefined, 'closing one folder hides only its subtree');
+  assert.ok(h.rowFor('p2'), 'the other folder stays expanded');
+});
+
+test('only one prompt editor opens at a time', () => {
+  const view = {
+    promptLibrary: [
+      { id: 'folder-dev', type: 'folder', title: 'Dev', children: [{ id: 'prompt-a', type: 'prompt', title: 'A', text: 'one', includeInBatch: true }] },
+      { id: 'prompt-b', type: 'prompt', title: 'B', text: 'two', includeInBatch: true },
+    ],
+  };
+  const h = createHarness({ initialView: view });
+  open(h);
+  const openPrompt = (id) => {
+    const row = h.rowFor(id);
+    const btn = row.querySelector('.prompt-prompt-open');
+    btn.dispatch('click', { target: btn, preventDefault, stopPropagation });
+  };
+  openPrompt('prompt-a');
+  openPrompt('prompt-b');
+  assert.ok(h.rowFor('prompt-b').querySelector('.prompt-card-title'), 'second prompt editor open');
+  assert.equal(h.rowFor('prompt-a').querySelector('.prompt-card-title'), null, 'first editor closed');
+});
+
+test('folder checkbox becomes indeterminate', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const checkbox = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
+  assert.equal(checkbox.indeterminate, true, 'mixed descendants are indeterminate');
+});
+
+test('checking a folder checks every descendant prompt on Save', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const checkbox = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
+  checkbox.dispatch('change', { target: checkbox });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const saved = h.getState().view.promptLibrary;
+  const a = saved[0].children.find((n) => n.id === 'prompt-a');
+  const b = saved[0].children.find((n) => n.id === 'folder-inner').children[0];
+  const root = saved.find((n) => n.id === 'prompt-root');
+  assert.equal(a.includeInBatch, true);
+  assert.equal(b.includeInBatch, true);
+  assert.equal(root.includeInBatch, true, 'root prompt outside the folder is untouched');
+});
+
+test('Add menu adds a root prompt and a root folder', () => {
   const h = createHarness();
   open(h);
   h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  setTitle(h, 1, 'Moved');
-  setText(h, 1, 'moved body');
-  h.cardHandle(h.cards()[1]).dispatch('keydown', {
-    target: h.cardHandle(h.cards()[1]),
-    altKey: true,
-    key: 'ArrowUp',
-    preventDefault,
-    stopPropagation,
-  });
+  assert.equal(h.nodes['prompt-add-menu'].hidden, false);
+  const promptItem = h.nodes['prompt-add-menu'].querySelector('[data-prompt-add="prompt"]');
+  promptItem.dispatch('click', { target: promptItem, preventDefault, stopPropagation });
+  assert.equal(h.promptRows().length, 2, 'default + added prompt');
+  assert.ok(h.promptRows()[1].querySelector('.prompt-card-title'), 'added prompt editor opens');
+});
+
+test('add prompt inside a folder nests and expands ancestors', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const addInside = pillIn(h.rowFor('folder-dev'), 'add-prompt-inside');
+  addInside.dispatch('click', { target: addInside, preventDefault, stopPropagation });
+  const added = h.promptRows().find((row) => row.dataset.parentId === 'folder-dev' && row.querySelector('.prompt-card-title'));
+  assert.ok(added, 'new prompt nested under folder-dev and opened');
+  added.querySelector('.prompt-card-title').value = 'Added';
+  added.querySelector('.prompt-card-title').dispatch('input', { target: added.querySelector('.prompt-card-title') });
+  const addedText = h.textareaFor(added.dataset.nodeId);
+  addedText.value = 'new body';
+  addedText.dispatch('input', { target: addedText });
   await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  const titles = h.getState().view.promptCards.map((c) => c.title);
-  assert.equal(titles[0], 'Moved', 'second card moved above the default card');
+  const saved = h.getState().view.promptLibrary[0].children;
+  assert.equal(saved[saved.length - 1].type, 'prompt');
+  assert.equal(saved[saved.length - 1].title, 'Added');
 });
 
-test('expanded state follows the card ID after reorder', () => {
-  const h = createHarness();
+test('add folder inside a folder enters inline rename', () => {
+  const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  h.cardHandle(h.cards()[1]).dispatch('keydown', {
-    target: h.cardHandle(h.cards()[1]),
-    altKey: true,
-    key: 'ArrowUp',
-    preventDefault,
-    stopPropagation,
-  });
-  assert.ok(h.cards()[0].classList.contains('prompt-card-expanded'), 'the moved card stays expanded');
-  assert.equal(h.cards()[1].classList.contains('prompt-card-expanded'), false);
+  const addFolder = pillIn(h.rowFor('folder-dev'), 'add-folder-inside');
+  addFolder.dispatch('click', { target: addFolder, preventDefault, stopPropagation });
+  const newFolder = h.folderRows().find((row) => row.dataset.parentId === 'folder-dev' && row.querySelector('.prompt-folder-rename'));
+  assert.ok(newFolder, 'new folder nested and in rename mode');
+  assert.equal(newFolder.querySelector('.prompt-folder-rename').value, 'New folder');
 });
 
-test('individual Copy works while collapsed and copies the current draft text', () => {
-  const h = createHarness();
+test('inline folder rename commits on Enter', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  toggleExpand(h, 0);
-  setText(h, 0, 'draft body');
-  toggleExpand(h, 0);
-  const copyButton = h.cards()[0].querySelector('[data-prompt-action="copy"]');
-  copyButton.dispatch('click', { target: copyButton, preventDefault, stopPropagation });
+  const title = h.rowFor('folder-dev').querySelector('.prompt-folder-title');
+  title.dispatch('dblclick', { target: title, preventDefault, stopPropagation });
+  const input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
+  assert.ok(input, 'rename input replaces the title');
+  input.value = 'Development';
+  input.dispatch('keydown', { target: input, key: 'Enter', preventDefault, stopPropagation });
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Development');
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  assert.equal(h.getState().view.promptLibrary[0].title, 'Development');
+});
+
+test('Escape restores the prior folder title', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const title = h.rowFor('folder-dev').querySelector('.prompt-folder-title');
+  title.dispatch('dblclick', { target: title, preventDefault, stopPropagation });
+  const input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
+  input.value = 'Discarded';
+  input.dispatch('keydown', { target: input, key: 'Escape', preventDefault, stopPropagation });
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Dev');
+});
+
+test('dragging a prompt inside a folder moves it there', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  drag(h, 'prompt-root', h.rowFor('folder-dev'), 50);
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const saved = h.getState().view.promptLibrary[0].children;
+  assert.deepEqual(saved.map((n) => n.id), ['prompt-a', 'folder-inner', 'prompt-root']);
+  assert.equal(h.getState().view.promptLibrary.some((n) => n.id === 'prompt-root'), false);
+});
+
+test('dragging a folder inside another folder moves its subtree', async () => {
+  const view = {
+    promptLibrary: [
+      { id: 'folder-a', type: 'folder', title: 'A', children: [{ id: 'p1', type: 'prompt', title: 'P', text: 'x', includeInBatch: true }] },
+      { id: 'folder-b', type: 'folder', title: 'B', children: [] },
+    ],
+  };
+  const h = createHarness({ initialView: view });
+  open(h);
+  drag(h, 'folder-a', h.rowFor('folder-b'), 50);
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const saved = h.getState().view.promptLibrary;
+  assert.equal(saved.length, 1);
+  assert.deepEqual(saved[0].children.map((n) => n.id), ['folder-a']);
+  assert.deepEqual(saved[0].children[0].children.map((n) => n.id), ['p1'], 'subtree preserved');
+});
+
+test('a cycle drop into a descendant is rejected', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  // expand the deep folder so its row is present
+  h.rowFor('folder-inner').querySelector('.prompt-folder-toggle').dispatch('click', { target: h.rowFor('folder-inner').querySelector('.prompt-folder-toggle'), preventDefault, stopPropagation });
+  drag(h, 'folder-dev', h.rowFor('folder-inner'), 50);
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const saved = h.getState().view.promptLibrary;
+  assert.equal(saved[0].id, 'folder-dev', 'folder stayed at root');
+  assert.equal(saved.length, 2);
+});
+
+test('keyboard reorder and nesting move nodes', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const handle = h.rowFor('prompt-root').querySelector('.prompt-tree-handle');
+  handle.dispatch('keydown', { target: handle, altKey: true, key: 'ArrowUp', preventDefault, stopPropagation });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const saved = h.getState().view.promptLibrary;
+  assert.equal(saved[0].id, 'prompt-root', 'moved above folder-dev');
+});
+
+test('individual Copy copies the current draft text of that prompt', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const copyPill = pillIn(h.rowFor('prompt-root'), 'copy');
+  copyPill.dispatch('click', { target: copyPill, preventDefault, stopPropagation });
   return Promise.resolve().then(() => {
-    assert.deepEqual(h.copied, ['draft body']);
+    assert.deepEqual(h.copied, ['three']);
   });
 });
 
-test('edits survive collapsing, expanding another card, and reordering', async () => {
-  const h = createHarness();
+test('draft survives collapsing, editing, and reordering', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  toggleExpand(h, 0);
-  setTitle(h, 0, 'Renamed');
-  setText(h, 0, 'edited body');
-  h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  setTitle(h, 1, 'Second');
-  setText(h, 1, 'second body');
-  h.cardHandle(h.cards()[1]).dispatch('keydown', {
-    target: h.cardHandle(h.cards()[1]),
-    altKey: true,
-    key: 'ArrowUp',
-    preventDefault,
-    stopPropagation,
-  });
+  const openBtn = h.rowFor('prompt-root').querySelector('.prompt-prompt-open');
+  openBtn.dispatch('click', { target: openBtn, preventDefault, stopPropagation });
+  const titleInput = h.rowFor('prompt-root').querySelector('.prompt-card-title');
+  titleInput.value = 'Renamed root';
+  titleInput.dispatch('input', { target: titleInput });
+  const textarea = h.textareaFor('prompt-root');
+  textarea.value = 'edited body';
+  textarea.dispatch('input', { target: textarea });
+  // collapse it, then reorder it
+  const toggle = h.rowFor('prompt-root').querySelector('.prompt-card-toggle');
+  toggle.dispatch('click', { target: toggle, preventDefault, stopPropagation });
+  const handle = h.rowFor('prompt-root').querySelector('.prompt-tree-handle');
+  handle.dispatch('keydown', { target: handle, altKey: true, key: 'ArrowUp', preventDefault, stopPropagation });
   await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  assert.deepEqual(
-    h.getState().view.promptCards.map((c) => [c.title, c.text]),
-    [['Second', 'second body'], ['Renamed', 'edited body']],
-  );
+  const saved = h.getState().view.promptLibrary[0];
+  assert.equal(saved.id, 'prompt-root');
+  assert.equal(saved.title, 'Renamed root');
+  assert.equal(saved.text, 'edited body');
 });
 
-test('Cancel discards every draft change', async () => {
-  const h = createHarness();
+test('Cancel discards all draft edits', () => {
+  const h = createHarness({ initialView: treeFixture().view });
   open(h);
-  toggleExpand(h, 0);
-  setText(h, 0, 'Draft body');
-  h.nodes['prompt-add'].dispatch('click', { preventDefault });
+  const openBtn = h.rowFor('prompt-root').querySelector('.prompt-prompt-open');
+  openBtn.dispatch('click', { target: openBtn, preventDefault, stopPropagation });
+  const textarea = h.textareaFor('prompt-root');
+  textarea.value = 'draft';
+  textarea.dispatch('input', { target: textarea });
   h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
   assert.equal(h.nodes['prompt-layer'].hidden, true);
-  assert.equal(h.getState().view.promptCards.length, 0, 'nothing was persisted');
-  assert.equal(h.dialog.getBatchText(), 'FALLBACK PROMPT', 'snapshot unchanged');
+  assert.equal(h.getState().view.promptLibrary[1].text, 'three', 'saved data untouched');
 });
 
-test('Save persists all cards once', async () => {
+test('SVG-only controls retain accessible labels and no visible words', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const copyPill = pillIn(h.rowFor('prompt-root'), 'copy');
+  assert.equal(copyPill.getAttribute('aria-label'), 'Copy prompt');
+  assert.equal(copyPill.textContent, '');
+  assert.ok(copyPill.querySelector('svg'), 'copy control is an SVG pill');
+  const deletePill = pillIn(h.rowFor('prompt-root'), 'delete');
+  assert.equal(deletePill.getAttribute('aria-label'), 'Delete prompt');
+  assert.equal(deletePill.textContent, '');
+  assert.ok(deletePill.querySelector('svg'));
+});
+
+test('deleting the final remaining prompt is blocked', () => {
   const h = createHarness();
   open(h);
-  toggleExpand(h, 0);
-  setTitle(h, 0, 'One');
-  setText(h, 0, 'one');
-  h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  setTitle(h, 1, 'Two');
-  setText(h, 1, 'two');
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  assert.equal(h.nodes['prompt-layer'].hidden, true);
-  assert.deepEqual(
-    h.getState().view.promptCards.map((c) => [c.title, c.text]),
-    [['One', 'one'], ['Two', 'two']],
-  );
+  const deletePill = pillIn(h.promptRows()[0], 'delete');
+  deletePill.dispatch('click', { target: deletePill, preventDefault, stopPropagation });
+  assert.equal(h.promptRows().length, 1);
+  assert.ok(h.nodes['prompt-error'].textContent.includes('at least one'));
+});
+
+test('deleting a non-empty folder requires confirmation', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const deletePill = pillIn(h.rowFor('folder-dev'), 'delete');
+  deletePill.dispatch('click', { target: deletePill, preventDefault, stopPropagation });
+  assert.equal(h.nodes['prompt-delete-confirm'].hidden, false);
+  assert.ok(h.nodes['prompt-delete-message'].textContent.includes('2 contained prompts'));
+  h.nodes['prompt-delete-ok'].dispatch('click', { preventDefault });
+  assert.equal(h.nodes['prompt-delete-confirm'].hidden, true);
+  assert.equal(h.rowFor('folder-dev'), undefined, 'folder and subtree removed');
+  assert.ok(h.rowFor('prompt-root'));
 });
 
 test('persistence failure leaves the dialog open', async () => {
-  let state = { groups: [], shortcuts: [], view: { promptCards: [] } };
+  let state = { groups: [], shortcuts: [], view: { promptLibrary: [{ id: 'prompt-x', type: 'prompt', title: 'X', text: 'body', includeInBatch: true }] } };
   const store = createWorkspaceStore({
     getState: () => state,
     setState: (next) => { state = next; },
@@ -468,12 +574,18 @@ test('persistence failure leaves the dialog open', async () => {
     setStatus: () => {},
   });
   const topIds = [
-    'prompt-layer', 'prompt-add', 'prompt-card-list',
+    'prompt-layer', 'prompt-add', 'prompt-add-menu', 'prompt-card-list',
     'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
+    'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   nodes['prompt-layer'].hidden = true;
-  const documentMock = { querySelector: (sel) => nodes[sel.slice(1)] ?? null, createElement: (tag) => makeNode(tag) };
+  const documentMock = {
+    querySelector: (sel) => nodes[sel.slice(1)] ?? null,
+    createElement: (tag) => makeNode(tag),
+    createElementNS: (ns, tag) => makeNode(tag),
+    createDocumentFragment: () => { const f = makeNode('fragment'); f.isFragment = true; return f; },
+  };
   const dialog = createPromptLibraryDialog({
     document: documentMock,
     store,
@@ -483,22 +595,10 @@ test('persistence failure leaves the dialog open', async () => {
   });
   dialog.mount();
   dialog.open();
-  const article = nodes['prompt-card-list'].querySelector('.prompt-card');
-  article.querySelector('.prompt-card-summary').dispatch('click', { target: article.querySelector('.prompt-card-summary'), preventDefault, stopPropagation });
-  article.querySelector('.prompt-card-text').value = 'body';
   await nodes['prompt-save'].dispatch('click', { preventDefault });
   assert.equal(nodes['prompt-layer'].hidden, false, 'dialog stays open');
   assert.ok(nodes['prompt-error'].textContent.includes('disk full'));
   assert.equal(nodes['prompt-save'].disabled, false, 'save re-enabled');
-});
-
-test('deleting the last card is blocked', () => {
-  const h = createHarness();
-  open(h);
-  const deleteButton = h.cards()[0].querySelector('[data-prompt-action="delete"]');
-  deleteButton.dispatch('click', { target: deleteButton, preventDefault, stopPropagation });
-  assert.equal(h.cards().length, 1, 'final card cannot be deleted');
-  assert.ok(h.nodes['prompt-error'].textContent.includes('at least one'));
 });
 
 test('destroy removes all listeners', () => {
