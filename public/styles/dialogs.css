@@ -110,6 +110,7 @@
   line-height: 1.5;
 }
 .prompt-add-wrap { position: relative; }
+.prompt-add-chevron { width: 14px; height: 14px; vertical-align: -2px; }
 .prompt-add-menu {
   position: absolute;
   z-index: 10;

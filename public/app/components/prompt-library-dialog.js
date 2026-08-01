@@ -7,7 +7,6 @@ import {
   removePromptNode,
   movePromptNode,
   descendantPromptIds,
-  countPromptNodes,
   folderBatchState,
   setFolderBatchIncluded,
   buildBatchPromptText,
@@ -185,6 +184,7 @@ export function createPromptLibraryDialog({
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'prompt-checkbox';
+    checkbox.setAttribute('aria-label', `Include ${node.title} in batch`);
     checkbox.checked = node.includeInBatch === true;
 
     if (expanded) {
@@ -242,6 +242,7 @@ export function createPromptLibraryDialog({
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'prompt-checkbox';
+    checkbox.setAttribute('aria-label', `Include every prompt inside ${node.title}`);
     const folderState = folderBatchState(draftLibrary, node.id);
     checkbox.checked = folderState === 'checked';
     checkbox.indeterminate = folderState === 'indeterminate';
@@ -352,10 +353,20 @@ export function createPromptLibraryDialog({
 
   // --------------------------------------------------------------- events
 
+  /** Resolves the owning prompt node id for a focused control. The prompt
+   * textarea lives in the details element, which is a sibling of the row, so it
+   * is resolved through .prompt-card-details[data-node-id] before falling back
+   * to the row. */
+  function ownerNodeId(target) {
+    const details = target.closest('.prompt-card-details');
+    if (details?.dataset.nodeId) return details.dataset.nodeId;
+    const row = target.closest('.prompt-tree-row');
+    return row?.dataset.nodeId ?? null;
+  }
+
   function onTreeInput(event) {
-    const row = event.target.closest('.prompt-tree-row');
-    if (!row) return;
-    const id = row.dataset.nodeId;
+    if (event.target.classList.contains('prompt-folder-rename')) return;
+    const id = ownerNodeId(event.target);
     if (!id) return;
     if (event.target.classList.contains('prompt-card-title')) {
       draftLibrary = updatePromptNode(draftLibrary, id, (node) => ({ ...node, title: event.target.value }));
@@ -432,12 +443,29 @@ export function createPromptLibraryDialog({
     }
   }
 
-  function deleteNode(id, type) {
-    if (type === 'prompt') {
-      if (countPromptNodes(draftLibrary) <= 1) {
-        error.textContent = 'Keep at least one prompt.';
-        return;
+  /** Number of prompts that would remain after removing the given roots (each
+   * removing its whole subtree). Used to block operations that would leave the
+   * library with zero prompts. */
+  function countPromptsAfterRemoving(ids) {
+    const removed = new Set(ids);
+    let count = 0;
+    const walk = (list) => {
+      for (const node of list) {
+        if (removed.has(node.id)) continue;
+        if (node.type === 'prompt') count += 1;
+        else walk(node.children);
       }
+    };
+    walk(draftLibrary);
+    return count;
+  }
+
+  function deleteNode(id, type) {
+    if (countPromptsAfterRemoving([id]) === 0) {
+      error.textContent = 'Keep at least one prompt.';
+      return;
+    }
+    if (type === 'prompt') {
       draftLibrary = removePromptNode(draftLibrary, id);
       if (expandedPromptId === id) expandedPromptId = null;
       render();
@@ -455,6 +483,12 @@ export function createPromptLibraryDialog({
 
   function onDeleteOk() {
     if (!confirmingDeleteId) return;
+    if (countPromptsAfterRemoving([confirmingDeleteId]) === 0) {
+      confirmingDeleteId = null;
+      error.textContent = 'Keep at least one prompt.';
+      render();
+      return;
+    }
     draftLibrary = removePromptNode(draftLibrary, confirmingDeleteId);
     expandedFolderIds.delete(confirmingDeleteId);
     confirmingDeleteId = null;
@@ -550,7 +584,7 @@ export function createPromptLibraryDialog({
     }
   }
 
-  function onRenameBlur(event) {
+  function onRenameFocusout(event) {
     const input = event.target.closest('.prompt-folder-rename');
     if (!input) return;
     const id = input.closest('.prompt-tree-row')?.dataset.nodeId;
@@ -590,10 +624,14 @@ export function createPromptLibraryDialog({
 
   function clearDropIndicators() {
     for (const row of rows()) {
-      row.classList.remove('prompt-drop-before', 'prompt-drop-inside', 'prompt-drop-after', 'prompt-dragging');
+      row.classList.remove('prompt-drop-before', 'prompt-drop-inside', 'prompt-drop-after');
       delete row.dataset.dropParent;
       delete row.dataset.dropBefore;
     }
+  }
+
+  function clearDragVisuals() {
+    for (const row of rows()) row.classList.remove('prompt-dragging');
   }
 
   function onDragOver(event) {
@@ -604,6 +642,7 @@ export function createPromptLibraryDialog({
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
     const rect = row.getBoundingClientRect();
     const plan = resolveDropPlan(dragState.nodeId, row, event.clientY - rect.top, rect.height);
+    // Only drop indicators are cleared; the dragged row's styling must persist.
     clearDropIndicators();
     if (!plan) {
       row.dataset.dropParent = '';
@@ -635,6 +674,7 @@ export function createPromptLibraryDialog({
       });
     }
     clearDropIndicators();
+    clearDragVisuals();
     dragState = null;
     if (next !== draftLibrary) {
       draftLibrary = next;
@@ -648,6 +688,7 @@ export function createPromptLibraryDialog({
   function onDragEnd(event) {
     event.stopPropagation();
     clearDropIndicators();
+    clearDragVisuals();
     dragState = null;
   }
 
@@ -754,7 +795,7 @@ export function createPromptLibraryDialog({
     cardList.addEventListener('dblclick', onDblClick, { signal });
     cardList.addEventListener('keydown', onKeyDown, { signal });
     cardList.addEventListener('keydown', onRenameKeydown, { signal });
-    cardList.addEventListener('blur', onRenameBlur, { signal });
+    cardList.addEventListener('focusout', onRenameFocusout, { signal });
     cardList.addEventListener('dragstart', onDragStart, { signal });
     cardList.addEventListener('dragover', onDragOver, { signal });
     cardList.addEventListener('drop', onDrop, { signal });

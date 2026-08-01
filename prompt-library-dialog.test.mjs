@@ -601,6 +601,72 @@ test('persistence failure leaves the dialog open', async () => {
   assert.equal(nodes['prompt-save'].disabled, false, 'save re-enabled');
 });
 
+test('typing in the prompt textarea updates the draft immediately', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const openBtn = h.rowFor('prompt-root').querySelector('.prompt-prompt-open');
+  openBtn.dispatch('click', { target: openBtn, preventDefault, stopPropagation });
+  const textarea = h.textareaFor('prompt-root');
+  textarea.value = 'typed unsaved text';
+  textarea.dispatch('input', { target: textarea });
+  const copyPill = pillIn(h.rowFor('prompt-root'), 'copy');
+  copyPill.dispatch('click', { target: copyPill, preventDefault, stopPropagation });
+  return Promise.resolve().then(() => {
+    assert.deepEqual(h.copied, ['typed unsaved text']);
+  });
+});
+
+test('folder rename commits on focusout', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const title = h.rowFor('folder-dev').querySelector('.prompt-folder-title');
+  title.dispatch('dblclick', { target: title, preventDefault, stopPropagation });
+  const input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
+  input.value = 'Blurred';
+  input.dispatch('focusout', { target: input, preventDefault, stopPropagation });
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Blurred');
+});
+
+test('checkboxes carry explicit accessible labels', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  assert.equal(
+    h.rowFor('prompt-a').querySelector('.prompt-checkbox').getAttribute('aria-label'),
+    'Include Alpha in batch',
+  );
+  assert.equal(
+    h.rowFor('folder-dev').querySelector('.prompt-checkbox').getAttribute('aria-label'),
+    'Include every prompt inside Dev',
+  );
+});
+
+test('the final prompt cannot be removed through folder deletion', () => {
+  const view = { promptLibrary: [
+    { id: 'folder-x', type: 'folder', title: 'X', children: [{ id: 'prompt-p', type: 'prompt', title: 'P', text: 'body', includeInBatch: true }] },
+  ] };
+  const h = createHarness({ initialView: view });
+  open(h);
+  const deletePill = pillIn(h.rowFor('folder-x'), 'delete');
+  deletePill.dispatch('click', { target: deletePill, preventDefault, stopPropagation });
+  assert.equal(h.nodes['prompt-delete-confirm'].hidden, true, 'impossible delete is never confirmed');
+  assert.ok(h.nodes['prompt-error'].textContent.includes('at least one'));
+  assert.ok(h.rowFor('folder-x'), 'folder stays intact');
+});
+
+test('the dragged row keeps its styling during dragover', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const source = h.rowFor('prompt-root');
+  const handle = source.querySelector('.prompt-tree-handle');
+  const dataTransfer = { effectAllowed: '', dropEffect: '', setData() {} };
+  handle.dispatch('dragstart', { target: handle, dataTransfer, preventDefault, stopPropagation });
+  assert.ok(source.classList.contains('prompt-dragging'));
+  const target = h.rowFor('folder-dev');
+  target.dispatch('dragover', { target, clientY: 50, dataTransfer, preventDefault, stopPropagation });
+  assert.ok(source.classList.contains('prompt-dragging'), 'dragging class survives dragover cleanup');
+  assert.ok(target.classList.contains('prompt-drop-inside'));
+});
+
 test('destroy removes all listeners', () => {
   const h = createHarness();
   const before = h.nodes['copy-prompt'].listeners.contextmenu?.length ?? 0;
