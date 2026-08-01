@@ -70,7 +70,7 @@
 .graph-edge {
   fill: none;
   stroke: #b9b3a6;
-  stroke-width: 1.5;
+  stroke-width: 2.25;
   transition: opacity 180ms ease, stroke 180ms ease;
 }
 .graph-edge.bin-origin-edge {

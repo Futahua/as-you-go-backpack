@@ -330,7 +330,9 @@ function createGraphController() {
 
   function folderColor(id) {
     const hue = folderColors.get(id);
-    return typeof hue === 'number' ? `hsl(${hue} 65% 50%)` : null;
+    // OKLCH spacing tracks perceived difference better than HSL; 68% lightness
+    // and 0.18 chroma read clearly on the warm paper background.
+    return typeof hue === 'number' ? `oklch(68% 0.18 ${hue}deg)` : null;
   }
 
   function createGraphView() {

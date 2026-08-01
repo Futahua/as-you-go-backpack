@@ -42,8 +42,9 @@
   overflow: hidden;
 }
 .icon-item.folder-colored .item-icon {
-  border: 2px solid var(--folder-color);
+  border: 3px solid var(--folder-color);
   border-radius: 12px;
+  background: color-mix(in oklch, var(--folder-color) 18%, white);
 }
 .item-icon img {
   max-width: 100%;

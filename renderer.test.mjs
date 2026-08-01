@@ -42,6 +42,7 @@ import {
   allUniquePositions,
   assignSpatialFolderHues,
   hueDistance,
+  MIN_HUE_SEPARATION,
 } from './public/graph-model-20260730b.js';
 
 function makeFixtureState() {
@@ -654,8 +655,8 @@ function assertPairInvariant(colors, folders) {
       const b = folders[j];
       if (Math.hypot(a.x - b.x, a.y - b.y) >= 220) continue;
       assert.ok(
-        hueDistance(colors.get(a.id), colors.get(b.id)) >= 30 - 1e-6,
-        `near pair ${a.id}/${b.id} is at least 30° apart`,
+        hueDistance(colors.get(a.id), colors.get(b.id)) >= MIN_HUE_SEPARATION - 1e-6,
+        `near pair ${a.id}/${b.id} is at least ${MIN_HUE_SEPARATION}° apart`,
       );
     }
   }
@@ -699,8 +700,9 @@ test('assignSpatialFolderHues responds to a small drag (no rounding dead zone)',
   assert.ok(Math.abs(after - before) > 0, 'nonzero floating-point change');
 });
 
-test('assignSpatialFolderHues enforces the 30° invariant for clusters', () => {
-  for (const n of [3, 6, 12]) {
+test('assignSpatialFolderHues enforces the invariant for clusters', () => {
+  // 8 folders is exactly feasible: 360 / 8 = 45° per slot.
+  for (const n of [3, 6, 8]) {
     const folders = cluster(n);
     const colors = new Map();
     for (let frame = 0; frame < 10; frame += 1) {
@@ -785,7 +787,7 @@ test('assignSpatialFolderHues falls back for infeasibly dense neighborhoods', ()
     }
   }
   assert.ok(minSeparation >= 360 / 13 - 1e-6, 'falls back to the 360/13 slot gap');
-  assert.ok(minSeparation < 30, '13 near folders cannot keep 30°');
+  assert.ok(minSeparation < MIN_HUE_SEPARATION, '13 near folders cannot keep 45°');
 });
 
 test('assignSpatialFolderHues produces a valid hue for every folder', () => {

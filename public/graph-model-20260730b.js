@@ -199,8 +199,9 @@ export function allUniquePositions(nodes) {
 /** A folder is "near" another when they are within this many canvas pixels. */
 const FOLDER_DISTANCE = 220;
 
-/** Hard minimum hue separation in degrees for nearby folders (12 slots). */
-const MIN_HUE_SEPARATION = 30;
+/** Hard minimum hue separation in degrees for nearby folders (8 slots at 45°).
+ * 45° is a perceptual, not just numeric, step apart on the color wheel. */
+export const MIN_HUE_SEPARATION = 45;
 
 /** Bounded fraction each hue moves toward its position base per call. */
 const BASE_MOVE = 0.15;
@@ -366,9 +367,9 @@ function slotColorComponent(componentIds, folderById, colors, center) {
  * than MIN_HUE_SEPARATION. Pair traversal alternates forward/reverse between
  * passes to reduce solver-order bias; ties use a deterministic direction.
  * Hues stay floating-point (CSS hsl() accepts fractional degrees). When a
- * dense neighborhood cannot keep 30° (its proximity graph needs more than
- * twelve colors), the affected component is re-colored with the fewest slots
- * that work, for an effective minimum separation of 360 / slotCount.
+ * dense neighborhood cannot keep MIN_HUE_SEPARATION (its proximity graph needs
+ * more than eight colors), the affected component is re-colored with the fewest
+ * slots that work, for an effective minimum separation of 360 / slotCount.
  *
  * `folders` is an array of { id, x, y }; `colors` is the id -> hue map that is
  * mutated in place (it carries the warm-start state between calls).
@@ -419,7 +420,7 @@ export function assignSpatialFolderHues(folders, colors, center) {
   }
 
   // Infeasible dense neighborhoods: deterministically slot-color the maximal
-  // components that still violate the 30° invariant.
+  // components that still violate the MIN_HUE_SEPARATION invariant.
   const violatedIds = new Set();
   for (const [a, b] of nearPairs) {
     const hueA = colors.get(a.id);
