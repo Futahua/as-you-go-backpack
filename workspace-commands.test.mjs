@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createWorkspaceCommands } from './public/app/workspace-commands.js';
 
-function createHarness({ groups = [], shortcuts = [] } = {}) {
+function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
   let state = { groups, shortcuts, view: { currentGroupId: 'root' } };
   const store = createWorkspaceStore({
     getState: () => state,
@@ -16,24 +16,45 @@ function createHarness({ groups = [], shortcuts = [] } = {}) {
     sync: 0, saves: 0, close: 0, render: 0, destroyGraph: 0,
     launch: [], openWeb: [], reveal: [], status: [],
   };
-  const commands = createWorkspaceCommands({
-    store,
+  const base = {
     group: (id) => groups.find((candidate) => candidate.id === id) ?? null,
     shortcut: (id) => shortcuts.find((candidate) => candidate.id === id) ?? null,
+    item: (id) => (
+      groups.find((candidate) => candidate.id === id)
+      ?? shortcuts.find((candidate) => candidate.id === id)
+      ?? null
+    ),
     isWebLink: (candidate) => candidate?.target?.startsWith('https://'),
+    visiblePlacementIdFor: (id) => `p-${id}`,
+    visibleParentCountFor: () => 1,
+    allActivePlacementIds: (id) => [`p-${id}`],
+    anyActivePlacementId: (id) => `p-${id}`,
+    moveSelection: (s, ids, parentId) => ({ ...s, moved: [...ids, parentId] }),
+    copySelection: (s, ids, parentId) => ({
+      ...s,
+      pastes: [...(s.pastes ?? []), { ids, parentId }],
+    }),
+    collapsePlacements: (s, id, parentId) => ({ ...s, collapsed: [id, parentId] }),
+    binSelection: (s, ids) => ({ ...s, binned: ids }),
+    resolveBinTargets: (ids) => ids,
+  };
+  Object.assign(base, model);
+  const commands = createWorkspaceCommands({
+    store,
     host: {
       launchShortcut: async (id) => { effects.launch.push(id); },
       openWebLink: async (url) => { effects.openWeb.push(url); },
       revealShortcut: async (id) => { effects.reveal.push(id); },
     },
     graph: { destroyGraphView: () => { effects.destroyGraph += 1; } },
+    ...base,
     syncSelection: () => { effects.sync += 1; },
     saveWorkspaceView: () => { effects.saves += 1; },
     closeMenu: () => { effects.close += 1; },
     render: () => { effects.render += 1; },
     setStatus: (text) => { effects.status.push(text); },
   });
-  return { store, commands, effects };
+  return { store, commands, effects, base };
 }
 
 test('selectItem without modifiers selects just the item and sets the anchor', () => {
@@ -139,4 +160,66 @@ test('activateSelection launches every selected shortcut', async () => {
   await h.commands.activateSelection();
   assert.deepEqual(h.effects.launch, ['a']);
   assert.deepEqual(h.effects.openWeb, ['https://example.com']);
+});
+
+test('copySelection stores a copy clipboard with ids and placement ids', () => {
+  const h = createHarness({ shortcuts: [{ id: 's1', name: 'S', target: 'C:\\s.exe' }] });
+  h.store.setSelection(['s1']);
+  h.commands.copySelection();
+  const clipboard = h.store.getSession().clipboard;
+  assert.equal(clipboard.mode, 'copy');
+  assert.deepEqual(clipboard.ids, ['s1']);
+  assert.equal(clipboard.placementIds.get('s1'), 'p-s1');
+  assert.equal(h.effects.close, 1);
+});
+
+test('cutSelection marks a linked shortcut for whole collapse', () => {
+  const h = createHarness({
+    shortcuts: [{ id: 's1', name: 'S', target: 'C:\\s.exe' }],
+    model: { visibleParentCountFor: () => 2 },
+  });
+  h.store.setSelection(['s1']);
+  h.commands.cutSelection();
+  assert.equal(h.store.getSession().clipboard.mode, 'cut');
+  assert.ok(h.store.getSession().clipboard.collapseWhole.has('s1'));
+});
+
+test('pasteInto copy links into each destination and keeps the clipboard', async () => {
+  const h = createHarness();
+  h.store.setClipboard({ mode: 'copy', ids: ['s1'], placementIds: new Map([['s1', 'p-s1']]), collapseWhole: new Set() });
+  await h.commands.pasteInto(['g1', 'g2']);
+  assert.deepEqual(h.store.getSnapshot().pastes, [
+    { ids: ['p-s1'], parentId: 'g1' },
+    { ids: ['p-s1'], parentId: 'g2' },
+  ]);
+  assert.ok(h.store.getSession().clipboard);
+});
+
+test('pasteInto cut moves to the first destination and clears the clipboard', async () => {
+  const h = createHarness();
+  h.store.setClipboard({ mode: 'cut', ids: ['s1'], placementIds: new Map([['s1', 'p-s1']]), collapseWhole: new Set() });
+  await h.commands.pasteInto(['g1', 'g2']);
+  assert.deepEqual(h.store.getSnapshot().moved, ['p-s1', 'g1']);
+  assert.equal(h.store.getSession().clipboard, null);
+});
+
+test('moveSelectionToBin bins the resolved targets and commits', async () => {
+  const h = createHarness({
+    model: {
+      resolveBinTargets: (ids) => ids.flatMap((id) => (id === 's1' ? ['p-s1', 'p-s1b'] : [id])),
+    },
+  });
+  h.store.setSelection(['g1', 's1']);
+  await h.commands.moveSelectionToBin();
+  assert.deepEqual(h.store.getSnapshot().binned, ['g1', 'p-s1', 'p-s1b']);
+  assert.equal(h.store.getSession().selected.size, 0);
+});
+
+test('selectedPasteDestinations uses selected folders or the current folder', () => {
+  const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'G' }] });
+  h.store.setSelection(['g1', 's1']);
+  assert.deepEqual(h.commands.selectedPasteDestinations(), ['g1']);
+  h.store.setSelection(['s1']);
+  h.store.setNavigation({ currentId: 'root' });
+  assert.deepEqual(h.commands.selectedPasteDestinations(), ['root']);
 });

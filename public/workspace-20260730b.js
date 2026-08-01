@@ -96,9 +96,19 @@ const commands = createWorkspaceCommands({
   store,
   group,
   shortcut,
+  item,
   isWebLink,
   host,
   graph,
+  resolveBinTargets,
+  visiblePlacementIdFor,
+  visibleParentCountFor,
+  allActivePlacementIds,
+  anyActivePlacementId,
+  moveSelection,
+  copySelection,
+  collapsePlacements,
+  binSelection,
   syncSelection,
   saveWorkspaceView,
   closeMenu,
@@ -1125,85 +1135,8 @@ function currentSelectionParent() {
   return first?.parentId ?? session.currentId;
 }
 
-function selectedPasteDestinations() {
-  const folders = [...session.selected].map((itemId) => group(itemId)).filter(Boolean);
-  return folders.length > 0 ? folders.map((folder) => folder.id) : [session.currentId];
-}
 
 
-async function copyOrCut(mode) {
-  if (session.selected.size === 0) return;
-
-  // Capture right now, at the moment of Ctrl+C/Ctrl+X, both which specific
-  // placement each selected shortcut represents and (for a cut) whether it
-  // currently shows more than one edge on screen — both decide behavior at
-  // paste time and must not drift if selection or graph visibility changes
-  // before the user pastes.
-  const collapseWhole = new Set();
-  const placementIds = new Map();
-
-  for (const selectedId of session.selected) {
-    if (group(selectedId)) continue;
-
-    const placementId = visiblePlacementIdFor(selectedId);
-    if (placementId) placementIds.set(selectedId, placementId);
-
-    if (mode === 'cut' && visibleParentCountFor(selectedId) > 1) {
-      collapseWhole.add(selectedId);
-    }
-  }
-
-  store.setClipboard({
-    mode,
-    ids: [...session.selected],
-    collapseWhole,
-    placementIds,
-  });
-
-  setStatus('');
-  closeMenu();
-}
-
-async function pasteInto(parentIds) {
-  const destinations = Array.isArray(parentIds) ? parentIds : [parentIds];
-  if (!session.clipboard || destinations.length === 0 || destinations.includes('bin')) return;
-  try {
-    const wasCut = session.clipboard.mode === 'cut';
-    let next = state;
-    if (wasCut) {
-      // A cut item can only move to one place, so multi-folder selection is
-      // ignored here — only the first destination applies.
-      const parentId = destinations[0];
-      const groupIds = session.clipboard.ids.filter((selectedId) => group(selectedId));
-      const wholeShortcutIds = session.clipboard.ids.filter((selectedId) => session.clipboard.collapseWhole.has(selectedId));
-      const singlePlacementIds = session.clipboard.ids
-        .filter((selectedId) => !group(selectedId) && !session.clipboard.collapseWhole.has(selectedId))
-        .map((selectedId) => session.clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
-        .filter(Boolean);
-      if (groupIds.length > 0 || singlePlacementIds.length > 0) {
-        next = moveSelection(next, [...groupIds, ...singlePlacementIds], parentId);
-      }
-      for (const shortcutId of wholeShortcutIds) {
-        next = collapsePlacements(next, shortcutId, parentId);
-      }
-    } else {
-      const ids = session.clipboard.ids
-        .map((selectedId) => group(selectedId)
-          ? selectedId
-          : session.clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
-        .filter(Boolean);
-      // Copying always links; pasting into multiple selected folders at once
-      // links a new placement into each one.
-      for (const parentId of destinations) {
-        next = copySelection(next, ids, parentId);
-      }
-    }
-    if (wasCut) store.setClipboard(null);
-    await commit(next, wasCut ? 'Moved.' : 'Copied.');
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error));
-  }
-}
 
 /** Resolves a set of graph item ids (groups or shared shortcut identities)
  * to the exact Bin-context ids binSelection() needs — a linked shortcut
@@ -1220,26 +1153,22 @@ function resolveBinTargets(itemIds) {
   });
 }
 
-async function moveToBin() {
-  if (session.selected.size === 0) return;
-  await commit(binSelection(state, resolveBinTargets([...session.selected])), 'Moved to Bin.');
-}
 
 async function runMenuAction(action) {
   const onlyId = session.selected.size === 1 ? [...session.selected][0] : null;
   if (action === 'new-folder') return editorDialog.showEditor('group', null, elements.menu.dataset.parent);
   if (action === 'new-shortcut') return editorDialog.showEditor('shortcut', null, elements.menu.dataset.parent);
   if (action === 'new-web-link') return editorDialog.showEditor('web', null, elements.menu.dataset.parent);
-  if (action === 'paste') return pasteInto(elements.menu.dataset.parent);
+  if (action === 'paste') return commands.pasteInto(elements.menu.dataset.parent);
   if (action === 'open' && onlyId) return commands.activateItem(onlyId);
   if (action === 'edit' && onlyId) {
     const chosen = shortcut(onlyId);
     return editorDialog.showEditor(isWebLink(chosen) ? 'web' : 'shortcut', chosen);
   }
   if (action === 'rename' && onlyId) return editorDialog.showEditor('group', group(onlyId));
-  if (action === 'copy') return copyOrCut('copy');
-  if (action === 'cut') return copyOrCut('cut');
-  if (action === 'bin') return moveToBin();
+  if (action === 'copy') return commands.copySelection();
+  if (action === 'cut') return commands.cutSelection();
+  if (action === 'bin') return commands.moveSelectionToBin();
   if (action === 'restore') return confirmDialog.askRestoreConfirm([...session.selected]);
   if (action === 'delete-forever') return confirmDialog.askPermanentDelete();
   if (action === 'reset-graph-position') {
@@ -1728,15 +1657,15 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.ctrlKey && event.key.toLowerCase() === 'c') {
     event.preventDefault();
-    copyOrCut('copy');
+    commands.copySelection();
   }
   if (event.ctrlKey && event.key.toLowerCase() === 'x') {
     event.preventDefault();
-    copyOrCut('cut');
+    commands.cutSelection();
   }
   if (event.ctrlKey && event.key.toLowerCase() === 'v') {
     event.preventDefault();
-    pasteInto(selectedPasteDestinations());
+    commands.pasteInto(commands.selectedPasteDestinations());
   }
   if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
@@ -1749,7 +1678,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Delete' && session.selected.size > 0) {
     event.preventDefault();
     if (session.binMode) confirmDialog.askPermanentDelete();
-    else moveToBin();
+    else commands.moveSelectionToBin();
   }
   if (event.key === 'Enter' && event.ctrlKey && session.selected.size > 0 && !session.binMode) {
     event.preventDefault();
@@ -1989,7 +1918,7 @@ const binControls = createBinControls({
   clearSelection: () => { store.clearSelection(); },
   resetDrillDown: () => store.setNavigation({ binCurrentId: 'bin' }),
   binnedItems,
-  moveToBin,
+  moveToBin: () => commands.moveSelectionToBin(),
   confirmDialog,
   closeMenu,
   render,
