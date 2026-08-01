@@ -2233,9 +2233,7 @@ elements.grid.addEventListener('drop', async (event) => {
 
   event.preventDefault();
   try {
-    const targets = await host.resolveDroppedTargets({
-      files: droppedFiles,
-    });
+    const targets = await host.resolveDroppedTargets(droppedFiles);
     const next = createDroppedShortcuts(state, targets, destination);
     if (next.shortcuts.length === state.shortcuts.length) {
       setStatus('Those shortcuts already exist here.');

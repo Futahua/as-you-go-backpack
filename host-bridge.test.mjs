@@ -84,6 +84,34 @@ test('host bridge unwraps the target+icon shape used by target picking', async (
   });
 });
 
+test('host bridge sends dropped files flat and unwraps the returned targets array', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+
+  const droppedFiles = [{ name: 'a.txt' }, { name: 'b.png' }];
+  const promise = host.resolveDroppedTargets(droppedFiles);
+  const sent = mock.parent.messages[0].message;
+
+  // Regression: the outbound payload must be { files: droppedFiles }, never
+  // { files: { files: droppedFiles } }.
+  assert.equal(sent.type, 'papers:project:resolve-dropped-targets');
+  assert.deepEqual(sent.files, droppedFiles);
+
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: sent.requestId,
+    ok: true,
+    targets: [
+      { kind: 'file', target: 'D:\\a.txt', name: 'a' },
+      { kind: 'web', target: 'https://example.com', name: 'example' },
+    ],
+  });
+  assert.deepEqual(await promise, [
+    { kind: 'file', target: 'D:\\a.txt', name: 'a' },
+    { kind: 'web', target: 'https://example.com', name: 'example' },
+  ]);
+});
+
 test('host bridge unwraps the finalOrigin shape used for dropped images', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);
