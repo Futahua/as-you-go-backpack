@@ -102,3 +102,29 @@ test('the entry composes the command layer after its graph and closeMenu consts'
   assert.ok(commandsIndex > graphIndex, 'commands constructed after graph');
   assert.ok(commandsIndex > closeMenuIndex, 'commands constructed after closeMenu');
 });
+
+test('the stylesheet entry aggregates local files in a stable order', async () => {
+  const entry = await read('public/workspace-20260730b.css');
+  const imports = [...entry.matchAll(/@import url\('\.\/styles\/([^']+)\.css'\);/g)]
+    .map((match) => match[1]);
+  const expected = [
+    'tokens', 'base', 'workspace', 'toolbar', 'items', 'graph',
+    'context-menu', 'dialogs', 'utilities', 'responsive',
+  ];
+  assert.deepEqual(imports, expected, 'entry @imports must list every style file in order');
+
+  // Every imported file must exist locally (no remote or missing stylesheets).
+  const concatenated = (await Promise.all(
+    imports.map((name) => read(`public/styles/${name}.css`)),
+  )).join('\n');
+
+  // Required interaction selectors must survive the split unchanged.
+  for (const selector of [
+    '.graph-dragging', '.graph-drop-target', '.will-pin', '.will-release',
+    '.icon-item.selected', '.drop-inside', '.bin-canvas', '.bin-button',
+    '.editor-layer', '.confirm-layer', '.context-menu', '.toolbar-float',
+    '.selection-marquee', '.selection-status', '.breadcrumbs',
+  ]) {
+    assert.ok(concatenated.includes(selector), `missing interaction selector: ${selector}`);
+  }
+});

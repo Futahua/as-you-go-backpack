@@ -48,7 +48,8 @@ function createHarness({ binMode = false } = {}) {
   const grid = fakeNode();
   grid.setPointerCapture = () => {};
   grid.hasPointerCapture = () => true;
-  grid.releasePointerCapture = () => {};
+  let released = 0;
+  grid.releasePointerCapture = () => { released += 1; };
   grid.querySelector = () => null;
   let shells = [];
   grid.querySelectorAll = () => shells;
@@ -110,6 +111,7 @@ function createHarness({ binMode = false } = {}) {
     getShells: () => shells,
     setShells: (value) => { shells = value; },
     setElementAtPoint: (value) => { elementAtPoint = value; },
+    getReleased: () => released,
   };
 }
 
@@ -288,4 +290,5 @@ test('pointercancel restores node positions and cleans up', () => {
   assert.equal(n.fy, null);
   assert.equal(n.shell.classList.contains('graph-dragging'), false);
   assert.ok(h.effects.reheat.includes(0.2));
+  assert.equal(h.getReleased(), 1);
 });

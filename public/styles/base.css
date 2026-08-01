@@ -1,0 +1,20 @@
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    linear-gradient(rgba(92, 88, 76, 0.075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(92, 88, 76, 0.075) 1px, transparent 1px),
+    #f3f1ea;
+  background-size: 56px 56px;
+}
+
+button, input, textarea, select { font: inherit; }
+button { color: inherit; }

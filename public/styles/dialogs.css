@@ -1,0 +1,91 @@
+
+.editor-layer,
+.confirm-layer {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  overflow: auto;
+  background: rgba(54, 51, 44, 0.28);
+  backdrop-filter: blur(4px);
+  place-items: center;
+  padding: 24px;
+}
+.editor,
+.confirm-card {
+  width: min(570px, 100%);
+  border: 1px solid #d2ccc0;
+  border-radius: 16px;
+  background: #fffef9;
+  box-shadow: 0 24px 70px rgba(55, 50, 41, 0.2);
+  padding: 22px;
+}
+.editor h2,
+.confirm-card h2 {
+  margin: 0 0 16px;
+  font: 400 27px/1.2 Georgia, serif;
+}
+.editor label {
+  display: block;
+  margin: 11px 0;
+  color: #665f54;
+  font-size: 11px;
+  font-weight: 600;
+}
+.editor label span { color: #999185; font-weight: 400; }
+.editor input:not([type="file"]),
+.editor textarea {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  border: 1px solid #cbc5b9;
+  border-radius: 8px;
+  background: #fff;
+  padding: 9px 10px;
+  color: #2c2a25;
+}
+.editor textarea { resize: vertical; }
+.editor-actions { gap: 8px; flex-wrap: wrap; }
+.editor-submit { justify-content: flex-end; margin-top: 18px; }
+.paper-button.primary { border-color: #4c725a; background: #4c725a; color: white; }
+.paper-button.danger { border-color: #9d4939; background: #9d4939; color: white; }
+.file-button { display: inline-flex !important; margin: 0 !important; font-weight: 400 !important; }
+.file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.icon-choice {
+  margin: 16px 0 0;
+  border: 1px solid #d8d2c6;
+  border-radius: 10px;
+  padding: 12px;
+}
+.icon-choice legend { padding: 0 6px; color: #665f54; font-size: 11px; font-weight: 600; }
+.icon-preview-shell {
+  display: grid;
+  width: 76px;
+  height: 76px;
+  margin-bottom: 10px;
+  border: 1px solid #ddd7cc;
+  border-radius: 12px;
+  background: #f5f2ea;
+  place-items: center;
+  overflow: hidden;
+}
+.icon-choice.drag-over {
+  border-color: var(--green);
+  background: var(--green-soft);
+  box-shadow: 0 0 0 2px var(--green);
+}
+.icon-preview { max-width: 68px; max-height: 68px; object-fit: contain; }
+#icon-fallback {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  border-radius: 11px;
+  background: var(--green-soft);
+  color: #356648;
+  place-items: center;
+  font-size: 23px;
+}
+.editor-error { min-height: 17px; margin: 10px 0 0; color: #963d30; font-size: 12px; }
+.confirm-card p { margin: 0 0 18px; color: #675f54; line-height: 1.55; }
+#confirm-restore { background: #d7e7d9; border-color: #4c725a; color: #4c725a; }
+#confirm-restore:hover { background: #c3dbcb; }

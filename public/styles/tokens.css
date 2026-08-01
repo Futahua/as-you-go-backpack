@@ -1,0 +1,13 @@
+:root {
+  color: #292822;
+  background: #f3f1ea;
+  font-family: "Segoe UI", Arial, sans-serif;
+  --paper: rgba(252, 251, 247, 0.94);
+  --line: #d9d5ca;
+  --ink-soft: #746f64;
+  --green: #4c725a;
+  --green-soft: #e3eee7;
+  --danger: #a34635;
+  --selection: #dfeadf;
+  --icon-size: 96px;
+}
