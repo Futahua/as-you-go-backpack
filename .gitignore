@@ -1,3 +1,5 @@
 /state.json
 /state.json.before-*
 /node_modules/
+
+/state.json.repair-backup-*
