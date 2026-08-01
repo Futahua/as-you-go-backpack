@@ -51,6 +51,7 @@ import { createToolbarController } from './app/components/toolbar-controller.js'
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
 import { createEditorDialog } from './app/components/editor-dialog.js';
+import { createBinControls } from './app/components/bin-controls.js';
 
 const host = createHostBridge(window);
 
@@ -2012,33 +2013,6 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   saveWorkspaceView();
 });
 
-elements.binButton.addEventListener('click', () => {
-  if (!binMode && selected.size > 0) {
-    moveToBin();
-    return;
-  }
-  binMode = !binMode;
-  if (!binMode) binCurrentId = 'bin';
-  selected.clear();
-  closeMenu();
-  render();
-  saveWorkspaceView();
-});
-elements.deleteAllBin.addEventListener('click', () => {
-  if (selected.size > 0) {
-    confirmDialog.askPermanentDelete([...selected], false);
-    return;
-  }
-  confirmDialog.askPermanentDelete(binnedItems(state).map((candidate) => candidate.id), true);
-});
-elements.restoreAllBin.addEventListener('click', () => {
-  if (selected.size > 0) {
-    confirmDialog.askRestoreConfirm([...selected], false);
-    return;
-  }
-  confirmDialog.askRestoreConfirm(binnedItems(state).map((candidate) => candidate.id), true);
-});
-
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
     const selectedTargets = [...selected]
@@ -2119,6 +2093,22 @@ const editorDialog = createEditorDialog({
 });
 const showEditor = (...args) => editorDialog.showEditor(...args);
 
+const binControls = createBinControls({
+  elements,
+  getState: () => state,
+  getBinMode: () => binMode,
+  setBinMode: (next) => { binMode = next; },
+  getSelectedIds: () => [...selected],
+  clearSelection: () => { selected.clear(); },
+  resetDrillDown: () => { binCurrentId = 'bin'; },
+  binnedItems,
+  moveToBin,
+  confirmDialog,
+  closeMenu,
+  render,
+  saveWorkspaceView,
+});
+
 (async () => {
   try {
     const loaded = await host.loadWorkspace();
@@ -2128,6 +2118,7 @@ const showEditor = (...args) => editorDialog.showEditor(...args);
     confirmDialog.mount();
     menu.mount();
     editorDialog.mount();
+    binControls.mount();
     render();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
