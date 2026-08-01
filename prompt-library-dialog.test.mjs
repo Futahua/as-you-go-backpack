@@ -1905,3 +1905,39 @@ test('a failed copy reports the error and does not flash success', async () => {
   assert.ok(!h.nodes['prompt-copy-selected'].classList.contains('prompt-copied-flash'), 'no flash');
   assert.ok(h.nodes['prompt-error'].textContent.includes('clipboard blocked'), 'the failure is surfaced');
 });
+
+test('a copy confirmation renders as a notification, other statuses do not', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  copySelected(h);
+  await Promise.resolve();
+  assert.equal(h.nodes['prompt-status'].textContent, 'Copied 1 prompt.');
+  assert.ok(
+    h.nodes['prompt-status'].classList.contains('prompt-status-copied'),
+    'the copy confirmation is emphasized',
+  );
+  // An ordinary status must drop the notification treatment.
+  keyOn(h, { key: 'c', ctrlKey: true });
+  assert.ok(
+    !h.nodes['prompt-status'].classList.contains('prompt-status-copied'),
+    'a later plain status clears the emphasis',
+  );
+});
+
+test('reopening the dialog clears a previous copy notification', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  copySelected(h);
+  await Promise.resolve();
+  assert.ok(h.nodes['prompt-status'].classList.contains('prompt-status-copied'));
+  h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
+  assert.ok(
+    !h.nodes['prompt-status'].classList.contains('prompt-status-copied'),
+    'closing clears it',
+  );
+  open(h);
+  assert.equal(h.nodes['prompt-status'].textContent, '', 'reopens clean');
+  assert.ok(!h.nodes['prompt-status'].classList.contains('prompt-status-copied'));
+});

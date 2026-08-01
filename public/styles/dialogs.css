@@ -121,6 +121,42 @@
   color: #356648;
   font-size: 12px;
 }
+/* A copy confirmation is the one status the user is actively waiting for, so
+ * it reads as a notification rather than the usual quiet line. */
+.prompt-library-status.prompt-status-copied {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  margin: 0 0 8px;
+  border: 1px solid #b8d0be;
+  border-radius: 8px;
+  background: #e8f2ea;
+  padding: 5px 10px;
+  color: #2f5c40;
+  font-size: 13px;
+  font-weight: 600;
+  animation: prompt-status-copied-in 180ms ease-out;
+}
+.prompt-library-status.prompt-status-copied::before {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #4c725a;
+  color: #fffef9;
+  content: "✓";
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+@keyframes prompt-status-copied-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .prompt-library-status.prompt-status-copied { animation-duration: 1ms; }
+}
 .prompt-delete-confirm {
   display: flex;
   align-items: center;
@@ -346,17 +382,28 @@
 .prompt-row-expanded.prompt-selected { background: rgba(200, 214, 201, 0.62); }
 .prompt-cut { opacity: 0.45; }
 /* Copy confirmation: the button flashes green so the click is visibly
- * acknowledged even when the copied text is off screen. */
+ * acknowledged even when the copied text is off screen.
+ *
+ * The end frame names the button's real base colours rather than `inherit`,
+ * which in a keyframe resolves against the parent, not the element's own
+ * rule. The selector is doubled and also written for :hover so it outranks
+ * `.paper-button:hover` — the pointer is by definition over the button that
+ * was just clicked, and hover would otherwise repaint straight over the
+ * flash. */
 @keyframes prompt-copied-flash {
-  0% { background: #4c725a; border-color: #4c725a; color: #fffef9; }
-  70% { background: #4c725a; border-color: #4c725a; color: #fffef9; }
-  100% { background: inherit; border-color: inherit; color: inherit; }
+  0%, 70% { background: #4c725a; border-color: #4c725a; color: #fffef9; }
+  100% { background: rgba(252, 251, 247, 0.9); border-color: #cec9bd; color: #2c2a25; }
 }
-.prompt-copied-flash {
+.paper-button.prompt-copied-flash,
+.paper-button.prompt-copied-flash:hover {
   animation: prompt-copied-flash 640ms ease-out;
+  border-color: #4c725a;
+  background: #4c725a;
+  color: #fffef9;
 }
 @media (prefers-reduced-motion: reduce) {
-  .prompt-copied-flash { animation-duration: 1ms; }
+  .paper-button.prompt-copied-flash,
+  .paper-button.prompt-copied-flash:hover { animation-duration: 1ms; }
 }
 .prompt-checkbox { accent-color: #4c725a; }
 /* Folder exclude-all. A native checkbox has no excluded state, so the box is

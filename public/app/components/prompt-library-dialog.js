@@ -278,7 +278,7 @@ export function createPromptLibraryDialog({
 
   function copyToClipboard(text, confirmation = null) {
     void copyText(text).then(() => {
-      statusMessage(confirmation ? `${confirmation}.` : 'Prompt copied.');
+      statusMessage(confirmation ? `${confirmation}.` : 'Prompt copied.', { copied: true });
       if (confirmation) flashCopied(confirmation);
     }).catch((caught) => {
       error.textContent = caught instanceof Error ? caught.message : String(caught);
@@ -304,8 +304,12 @@ export function createPromptLibraryDialog({
   }
 
   /** Prompt-library-local live feedback, always inside the modal. */
-  function statusMessage(message) {
+  /** Prompt-library-local live feedback. `copied` renders the message as a
+   * confirmation notification instead of the usual quiet line; every other
+   * message clears that treatment, so a stale confirmation cannot linger. */
+  function statusMessage(message, { copied = false } = {}) {
     status.textContent = message;
+    status.classList.toggle('prompt-status-copied', copied && message !== '');
   }
 
   /** Copy selected is only meaningful with a selection, so it stays disabled until
@@ -1192,7 +1196,7 @@ export function createPromptLibraryDialog({
     controller.setSelection(createTreeSelection());
     refreshCopySelected();
     error.textContent = options.message || '';
-    status.textContent = '';
+    statusMessage('');
     render();
     layer.hidden = false;
     // Never leave focus on document.body: with nothing selected, root is the
@@ -1206,7 +1210,7 @@ export function createPromptLibraryDialog({
     treeClipboard = null;
     cutIds.clear();
     activeEditSession = null;
-    status.textContent = '';
+    statusMessage('');
     layer.hidden = true;
     error.textContent = '';
   }
