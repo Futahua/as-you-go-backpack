@@ -396,10 +396,10 @@
 }
 .paper-button.prompt-copied-flash,
 .paper-button.prompt-copied-flash:hover {
-  animation: prompt-copied-flash 640ms ease-out;
-  border-color: #4c725a;
-  background: #4c725a;
-  color: #fffef9;
+  /* `forwards` holds the end frame until the class is removed. Do not also
+   * set the green statically here: the static colour would repaint after the
+   * animation finishes, reading as a second flash. */
+  animation: prompt-copied-flash 640ms ease-out forwards;
 }
 @media (prefers-reduced-motion: reduce) {
   .paper-button.prompt-copied-flash,

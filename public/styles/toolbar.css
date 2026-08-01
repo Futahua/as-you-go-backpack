@@ -27,10 +27,10 @@
 }
 .quiet-button.pickup-copied,
 .quiet-button.pickup-copied:hover {
-  animation: pickup-copied-flash 900ms ease-out;
-  border-color: #4c725a;
-  background: #4c725a;
-  color: #fffef9;
+  /* `forwards` holds the end frame until the class is removed. Do not also
+   * set the green statically here: the static colour would repaint after the
+   * animation finishes, reading as a second flash. */
+  animation: pickup-copied-flash 900ms ease-out forwards;
 }
 @media (prefers-reduced-motion: reduce) {
   .quiet-button.pickup-copied,
@@ -86,3 +86,29 @@
   font-size: 12px;
 }
 .status:empty { display: none; }
+/* The status line is otherwise an error line (red). A copy confirmation is a
+ * success, so it gets its own green panel rather than reading as a fault. */
+.status.status-copied {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #b8d0be;
+  border-radius: 8px;
+  background: #e8f2ea;
+  padding: 5px 12px;
+  color: #2f5c40;
+  font-size: 13px;
+  font-weight: 600;
+}
+.status.status-copied::before {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #4c725a;
+  color: #fffef9;
+  content: "✓";
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}

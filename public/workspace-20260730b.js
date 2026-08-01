@@ -104,6 +104,9 @@ let zoomTimer = null;
 
 function setStatus(text = '') {
   elements.status.textContent = text;
+  // Any ordinary status drops the copy emphasis; confirmPickupCopy re-adds it
+  // immediately after its own call, so a stale confirmation cannot linger.
+  elements.status.classList.remove('status-copied');
 }
 
 function escapeHtml(value) {
@@ -1272,7 +1275,7 @@ let pickupCopyTimer = null;
  * still changes for screen readers. One timer, so a rapid second copy restarts
  * the confirmation instead of the first firing partway through and clearing
  * it early. */
-function confirmPickupCopy() {
+function confirmPickupCopy(message) {
   const button = document.querySelector('#copy-prompt');
   const label = document.querySelector('.copy-label');
   if (pickupCopyTimer != null) {
@@ -1281,9 +1284,12 @@ function confirmPickupCopy() {
   }
   if (label) label.textContent = 'Copied';
   button?.classList.add('pickup-copied');
+  setStatus(message);
+  elements.status.classList.add('status-copied');
   pickupCopyTimer = setTimeout(() => {
     pickupCopyTimer = null;
     button?.classList.remove('pickup-copied');
+    elements.status.classList.remove('status-copied');
     if (label) label.textContent = PICKUP_COPY_LABEL;
   }, PICKUP_COPY_FLASH_MS);
 }
@@ -1300,7 +1306,8 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
       return;
     }
     await host.copyText(outcome.text);
-    confirmPickupCopy();
+    const count = outcome.text.split('\n\n').filter((part) => part.trim() !== '').length;
+    confirmPickupCopy(`Copied ${count} ${count === 1 ? 'prompt' : 'prompts'}.`);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   }
