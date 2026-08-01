@@ -287,7 +287,7 @@ export function createPromptLibraryDialog({
     status.textContent = message;
   }
 
-  /** Copy all is only meaningful with a selection, so it stays disabled until
+  /** Copy selected is only meaningful with a selection, so it stays disabled until
    * there is one. Kept in sync from the single selection-change path. */
   function refreshCopySelected() {
     const count = controller.getSelection().selectedIds.size;

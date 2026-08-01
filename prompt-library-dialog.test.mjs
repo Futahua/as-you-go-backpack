@@ -1694,14 +1694,14 @@ test('the context menu can put a folder into exclude and back to neutral', async
 });
 
 // ===========================================================================
-// Copy all: copies the highlighted rows, independent of the batch checkboxes.
+// Copy selected: copies the highlighted rows, independent of the batch checkboxes.
 // The checkboxes drive the quick copy from outside the dialog; this button
 // copies what is selected in the tree.
 // ===========================================================================
 
 const copySelected = (h) => h.nodes['prompt-copy-selected'].dispatch('click', { preventDefault, stopPropagation });
 
-test('Copy all is disabled until rows are selected', () => {
+test('Copy selected is disabled until rows are selected', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   assert.equal(h.nodes['prompt-copy-selected'].disabled, true, 'disabled with no selection');
@@ -1711,7 +1711,7 @@ test('Copy all is disabled until rows are selected', () => {
   assert.equal(h.nodes['prompt-copy-selected'].disabled, true, 'disabled again when selection clears');
 });
 
-test('Copy all copies a selected prompt regardless of its checkbox', () => {
+test('Copy selected copies a selected prompt regardless of its checkbox', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   expandInner(h);
@@ -1721,7 +1721,7 @@ test('Copy all copies a selected prompt regardless of its checkbox', () => {
   assert.deepEqual(h.copied, ['two'], 'unchecked prompt still copied when selected');
 });
 
-test('Copy all copies every prompt inside a selected folder, children unselected', () => {
+test('Copy selected copies every prompt inside a selected folder, children unselected', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   // folder-dev is neutral and prompt-b inside it is unchecked; selecting the
@@ -1731,7 +1731,7 @@ test('Copy all copies every prompt inside a selected folder, children unselected
   assert.deepEqual(h.copied, ['one\n\ntwo'], 'whole folder subtree copied in visual order');
 });
 
-test('Copy all does not duplicate a prompt selected under a selected folder', () => {
+test('Copy selected does not duplicate a prompt selected under a selected folder', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   expandInner(h);
@@ -1741,7 +1741,7 @@ test('Copy all does not duplicate a prompt selected under a selected folder', ()
   assert.deepEqual(h.copied, ['one\n\ntwo'], 'root reduction stops the double copy');
 });
 
-test('Copy all joins multiple selected roots in visual order', () => {
+test('Copy selected joins multiple selected roots in visual order', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   clickRow(h, 'prompt-root');
@@ -1750,7 +1750,7 @@ test('Copy all joins multiple selected roots in visual order', () => {
   assert.deepEqual(h.copied, ['one\n\ntwo\n\nthree'], 'depth-first visual order, not click order');
 });
 
-test('Copy all ignores folder exclude-all overrides', () => {
+test('Copy selected ignores folder exclude-all overrides', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   const box = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
@@ -1762,7 +1762,7 @@ test('Copy all ignores folder exclude-all overrides', () => {
   assert.deepEqual(h.copied, ['one\n\ntwo'], 'an explicit selection copies even an excluded folder');
 });
 
-test('Copy all reports when the selection has no prompt text', () => {
+test('Copy selected reports when the selection has no prompt text', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   h.nodes['prompt-add-folder'].dispatch('click', { preventDefault });
@@ -1774,7 +1774,7 @@ test('Copy all reports when the selection has no prompt text', () => {
   assert.ok(h.nodes['prompt-status'].textContent.includes('Nothing to copy'));
 });
 
-test('Copy all does not touch the draft, history, or the workspace store', () => {
+test('Copy selected does not touch the draft, history, or the workspace store', () => {
   const h = createHarness({ initialView: treeFixture().view });
   const before = JSON.parse(JSON.stringify(h.getState()));
   open(h);
