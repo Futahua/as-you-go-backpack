@@ -54,5 +54,8 @@ record to establish or change that binding.
 Before changing this project, read the canonical Papers repository's `AGENTS.md` and
 `HERMES.md` completely. A change here applies only to “As you Go.”
 
+Read `ARCHITECTURE.md` before editing code: it maps each change type to the module that owns
+it and lists the interaction behavior, store and compatibility rules that must be preserved.
+
 Run `npm test` here after a change. The test is self-contained and does not launch any
 prepared action or modify Papers data.
