@@ -1,4 +1,4 @@
-import { normalizePromptCards } from './prompt-library-model.js';
+import { normalizePromptLibrary } from './prompt-library-model.js';
 
 export const ROOT_ID = 'root';
 export const DEFAULT_ICON_SIZE = 96;
@@ -24,7 +24,7 @@ export function emptyState() {
       selectedItemIds: [],
       binMode: false,
       layout: 'explorer',
-      promptCards: [],
+      promptLibrary: [],
       graphPositions: {},
       toolbarPositions: {},
     },
@@ -332,9 +332,14 @@ export function normalizeState(raw) {
       layout: raw?.view?.layout === 'graph' ? 'graph' : 'explorer',
       graphPositions: normalizeGraphPositions(raw?.view?.graphPositions),
       toolbarPositions: normalizeFlatPositions(raw?.view?.toolbarPositions),
-      // promptCards replaces pickupPrompt: legacy values are read here purely
-      // for migration (normalizePromptCards) and never written again.
-      promptCards: normalizePromptCards(raw?.view?.promptCards, raw?.view?.pickupPrompt),
+      // promptLibrary replaces promptCards/pickupPrompt: the older shapes are
+      // read here purely for migration (normalizePromptLibrary) and never
+      // written again.
+      promptLibrary: normalizePromptLibrary(
+        raw?.view?.promptLibrary,
+        raw?.view?.promptCards,
+        raw?.view?.pickupPrompt,
+      ),
     },
   };
 
@@ -876,15 +881,15 @@ export function updateWorkspaceView(state, changes) {
       toolbarPositions: has('toolbarPositions')
         ? normalizeFlatPositions(changes.toolbarPositions)
         : (state.view?.toolbarPositions ?? {}),
-      promptCards: has('promptCards')
-        ? normalizePromptCards(changes.promptCards)
-        : (state.view?.promptCards ?? []),
+      promptLibrary: has('promptLibrary')
+        ? normalizePromptLibrary(changes.promptLibrary)
+        : (state.view?.promptLibrary ?? []),
     },
   };
 }
 
-export function setPromptCards(state, cards) {
-  return updateWorkspaceView(state, { promptCards: normalizePromptCards(cards) });
+export function setPromptLibrary(state, nodes) {
+  return updateWorkspaceView(state, { promptLibrary: normalizePromptLibrary(nodes) });
 }
 
 export function graphContextId(currentGroupId, binMode) {

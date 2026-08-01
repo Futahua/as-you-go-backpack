@@ -104,6 +104,9 @@ let zoomTimer = null;
 
 function setStatus(text = '') {
   elements.status.textContent = text;
+  // Any ordinary status drops the copy emphasis; confirmPickupCopy re-adds it
+  // immediately after its own call, so a stale confirmation cannot linger.
+  elements.status.classList.remove('status-copied');
 }
 
 function escapeHtml(value) {
@@ -1263,22 +1266,50 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   saveWorkspaceView();
 });
 
+const PICKUP_COPY_LABEL = 'Copy agent pickup prompt';
+const PICKUP_COPY_FLASH_MS = 1800;
+let pickupCopyTimer = null;
+
+/** Confirms a pickup copy. The button is icon-only and its label is sr-only,
+ * so the visible acknowledgement has to be on the button itself; the label
+ * still changes for screen readers. One timer, so a rapid second copy restarts
+ * the confirmation instead of the first firing partway through and clearing
+ * it early. */
+function confirmPickupCopy(message) {
+  const button = document.querySelector('#copy-prompt');
+  const label = document.querySelector('.copy-label');
+  if (pickupCopyTimer != null) {
+    clearTimeout(pickupCopyTimer);
+    button?.classList.remove('pickup-copied');
+  }
+  if (label) label.textContent = 'Copied';
+  button?.classList.add('pickup-copied');
+  setStatus(message);
+  elements.status.classList.add('status-copied');
+  pickupCopyTimer = setTimeout(() => {
+    pickupCopyTimer = null;
+    button?.classList.remove('pickup-copied');
+    if (label) label.textContent = PICKUP_COPY_LABEL;
+    // Clear the text as well as the emphasis. Dropping only the class would
+    // leave the confirmation behind in the red error styling.
+    if (elements.status.textContent === message) setStatus('');
+  }, PICKUP_COPY_FLASH_MS);
+}
+
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
     const selectedTargets = [...session.selected]
       .map((selectedId) => shortcutByRecordOrPlacementId(selectedId))
       .filter(Boolean)
       .map((candidate) => candidate.target);
-    const outcome = resolveCopierAction(selectedTargets, promptLibrary.getSnapshotCards());
+    const outcome = resolveCopierAction(selectedTargets, promptLibrary.getSnapshotLibrary());
     if (outcome.kind === 'open') {
       promptLibrary.open({ message: 'Select at least one prompt for batch copying.' });
       return;
     }
     await host.copyText(outcome.text);
-    document.querySelector('.copy-label').textContent = 'Copied';
-    setTimeout(() => {
-      document.querySelector('.copy-label').textContent = 'Copy agent pickup prompt';
-    }, 1800);
+    const noun = outcome.copied === 'paths' ? 'path' : 'prompt';
+    confirmPickupCopy(`Copied ${outcome.count} ${outcome.count === 1 ? noun : `${noun}s`}.`);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   }

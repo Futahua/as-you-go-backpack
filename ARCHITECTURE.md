@@ -23,6 +23,110 @@ clear responsibility lives in a module.
 | Styling | the matching file under `public/styles/` |
 | Compatibility composition | `public/workspace-20260730b.js` |
 
+## Prompt library (copy button)
+
+The prompt library is a nested tree of prompts and folders persisted in
+`view.promptLibrary`. It is split across four modules plus one pure model:
+
+| Responsibility | Module |
+|---|---|
+| Pure tree data (normalize/migrate, create/find/update/remove, single and atomic multi-node move, batch inclusion via folder `includeAll`, explicit Copy Selected, validation) | `public/prompt-library-model.js` |
+| Pure temporary row-selection logic (select/toggle/range/visible order/collapse repair; no DOM/store/host) | `public/app/components/prompt-tree-selection.js` |
+| Pure dialog-local undo/redo (past/present/future, edit transactions, limit; no DOM/store/host) | `public/app/components/prompt-library-history.js` |
+| Tree DOM interaction → plain intents (clicks, keyboard, drag, context-menu requests; selection state; no host/persistence) | `public/app/components/prompt-tree-controller.js` |
+| Prompt-tree context menu (rendering, keyboard nav, dismissal, action intents) | `public/app/components/prompt-tree-context-menu.js` |
+| Panel composition root (open/close, draft tree, expansion/editor/rename/delete-confirm, rendering, auto-save) | `public/app/components/prompt-library-dialog.js` |
+
+Rules: the dialog clones the saved library into a `draftLibrary` and owns
+persistence via `setPromptLibrary` + `store.replace/save`; the controller and
+context menu never call the host or persist state; the toolbar copier keeps
+selected-shortcut precedence and reads the saved snapshot through
+`getSnapshotLibrary()`/`getBatchText()`. Folder checkboxes persist an explicit
+override (never a derived tri-state) and setting one never rewrites descendant
+prompt checkboxes.
+
+A folder's override is one of three states, stored as two booleans so libraries
+saved before exclude-all existed migrate untouched:
+
+| state | stored | meaning |
+| --- | --- | --- |
+| neutral | both false | each descendant's own checkbox decides |
+| include | `includeAll` | everything inside is copied |
+| exclude | `excludeAll` | nothing inside is copied, even a checked prompt |
+
+The **nearest** override wins, so an excluded folder inside an included one
+copies nothing and an included folder inside an excluded one copies everything.
+Clicking a folder checkbox cycles neutral → include → exclude → neutral; the
+context menu offers whichever two states the folder is not currently in, and
+"Use child selections" clears both flags so a folder is never stranded in
+exclude. Exclude renders as a red box with a white minus (a native checkbox has
+no excluded state), and rows under a non-neutral folder take that override's
+colour — green for include, struck-through red for exclude — because their own
+checkbox no longer decides anything.
+
+Batch checkboxes support two bulk gestures, each one undo entry, and neither
+ever changes row selection (the tree controller ignores `.prompt-checkbox`
+clicks entirely, so they cannot collide with Shift+click row ranges):
+
+- Clicking the checkbox of a row **inside** a multi-row selection forces every
+  selected row to the clicked value — checking and unchecking alike. Clicking a
+  row outside the selection touches only that row and leaves the selection
+  intact.
+- **Shift+click** applies the clicked box's resulting state to the visible range
+  between the last-clicked checkbox and this one. `change` does not carry
+  `shiftKey`, so the modifier is captured on the preceding `click`.
+
+While `#prompt-layer` is open, the workspace keyboard controller is inert; the
+prompt-tree controller owns tree shortcuts (Ctrl/C/X/V are dialog-local
+copy/cut/paste via `treeClipboard` — never the OS clipboard or `copyText`,
+which is reserved for prompt double-click and "Copy prompt text"). Feedback
+for modal actions uses the local `#prompt-status`, not the workspace status.
+New prompt / New folder are permanent header buttons; New prompt inserts
+inside the selected folder only when exactly one folder row is selected,
+otherwise at root. Ctrl/Meta+Z/Y/Shift+Z drive a dialog-local undo/redo on the
+draft (never the workspace store history); each completed data mutation is one
+entry, a focused editing session is one transaction, and editable controls keep
+native text editing. The tree root is a first-class paste destination: blank
+tree space (or the root context menu) targets the root while the internal
+clipboard is preserved, and dragging below the last top-level row moves nodes
+to root.
+
+Three invariants keep the tree usable in a real browser, each covered by tests
+that dispatch bubbling events from the actually-focused element:
+
+- **Keyboard scope is the modal, not the row list.** The controller takes a
+  `keyboardTarget` (`#prompt-layer`) for `keydown` while pointer listeners stay
+  on the viewport. Tree shortcuts therefore work from New prompt/New folder,
+  Close and the status line — anywhere non-editable. `isEditableTarget()`
+  still excludes inputs, textareas and contenteditable, which never get
+  `preventDefault()`, so native text undo/redo survives.
+- **Focus is explicit.** Setting `tabindex` does not move focus, so selection
+  calls `row.focus({ preventScroll: true })` and root targeting focuses
+  `#prompt-tree-viewport`. Opening the dialog focuses the root surface rather
+  than leaving `document.body` active.
+- **One destination, never a drift-prone boolean.** `activeDestination` is
+  `{ type: 'root' | 'node', nodeId }`, updated from a single
+  `controller.setSelection()` path that always notifies `onSelectionChange` —
+  pointer-driven and programmatic alike. `resolvePasteDestination()` reads it
+  and falls back to root when the node no longer exists, so paste can never
+  target a row that undo or delete removed.
+
+`#prompt-tree-viewport` owns scrolling and the blank `.prompt-root-surface`
+below the last row, so clicking, right-clicking, or dropping in empty space is
+a real root gesture. There is no persisted root node.
+
+The dialog auto-saves; there is no Save step and no discard. Every structural
+change persists from the shared `afterHistoryTreeChange()` tail, so mutations,
+undo and redo all reach the store the same way. Text editing persists once per
+session when its transaction commits, not once per keystroke, which is also
+what Close flushes before hiding the layer. `autoSave()` installs the draft
+with `store.replace()` synchronously — so the next edit reads it — and hands
+the write to the store's existing save queue rather than adding a second queue
+on top; layering one caused an edit landing mid-save to be silently dropped. An
+invalid draft (the last prompt removed) is reported in `#prompt-error` and left
+unsaved, so the persisted library never goes empty. Ctrl+Z is the only way
+back, which is why the local history covers every tree operation.
+
 ## Interaction controllers
 
 Controllers live in `public/app/interactions/` and own browser events for one gesture
