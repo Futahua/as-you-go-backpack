@@ -2024,6 +2024,14 @@ elements.grid.addEventListener('pointerup', (event) => {
   }
 });
 
+function isDirectoryTarget(target) {
+  if (!target) return false;
+  const normalized = target.replace(/\\/g, '/');
+  const lastSlash = normalized.lastIndexOf('/');
+  const basename = lastSlash === -1 ? normalized : normalized.slice(lastSlash + 1);
+  return !basename.includes('.');
+}
+
 elements.grid.addEventListener('dblclick', (event) => {
   if (suppressGraphClick) {
     suppressGraphClick = false;
@@ -2031,7 +2039,15 @@ elements.grid.addEventListener('dblclick', (event) => {
   }
   const tile = event.target.closest('.icon-item');
   if (!tile) return;
-  activate(tile.dataset.id);
+  const id = tile.dataset.id;
+  const chosen = shortcut(id);
+  if (chosen && !isWebLink(chosen) && isDirectoryTarget(chosen.target)) {
+    closeMenu();
+    request('papers:project:as-you-go-reveal', { actionId: id }).catch((error) =>
+      setStatus(error instanceof Error ? error.message : String(error)));
+    return;
+  }
+  activate(id);
 });
 
 elements.grid.addEventListener('pointercancel', (event) => {
