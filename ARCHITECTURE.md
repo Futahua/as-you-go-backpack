@@ -35,7 +35,7 @@ The prompt library is a nested tree of prompts and folders persisted in
 | Pure dialog-local undo/redo (past/present/future, edit transactions, limit; no DOM/store/host) | `public/app/components/prompt-library-history.js` |
 | Tree DOM interaction → plain intents (clicks, keyboard, drag, context-menu requests; selection state; no host/persistence) | `public/app/components/prompt-tree-controller.js` |
 | Prompt-tree context menu (rendering, keyboard nav, dismissal, action intents) | `public/app/components/prompt-tree-context-menu.js` |
-| Panel composition root (open/close, draft tree, expansion/editor/rename/delete-confirm, rendering, Save/Cancel) | `public/app/components/prompt-library-dialog.js` |
+| Panel composition root (open/close, draft tree, expansion/editor/rename/delete-confirm, rendering, auto-save) | `public/app/components/prompt-library-dialog.js` |
 
 Rules: the dialog clones the saved library into a `draftLibrary` and owns
 persistence via `setPromptLibrary` + `store.replace/save`; the controller and
@@ -97,7 +97,7 @@ that dispatch bubbling events from the actually-focused element:
 - **Keyboard scope is the modal, not the row list.** The controller takes a
   `keyboardTarget` (`#prompt-layer`) for `keydown` while pointer listeners stay
   on the viewport. Tree shortcuts therefore work from New prompt/New folder,
-  Save/Cancel and the status line — anywhere non-editable. `isEditableTarget()`
+  Close and the status line — anywhere non-editable. `isEditableTarget()`
   still excludes inputs, textareas and contenteditable, which never get
   `preventDefault()`, so native text undo/redo survives.
 - **Focus is explicit.** Setting `tabindex` does not move focus, so selection
@@ -114,6 +114,18 @@ that dispatch bubbling events from the actually-focused element:
 `#prompt-tree-viewport` owns scrolling and the blank `.prompt-root-surface`
 below the last row, so clicking, right-clicking, or dropping in empty space is
 a real root gesture. There is no persisted root node.
+
+The dialog auto-saves; there is no Save step and no discard. Every structural
+change persists from the shared `afterHistoryTreeChange()` tail, so mutations,
+undo and redo all reach the store the same way. Text editing persists once per
+session when its transaction commits, not once per keystroke, which is also
+what Close flushes before hiding the layer. `autoSave()` installs the draft
+with `store.replace()` synchronously — so the next edit reads it — and hands
+the write to the store's existing save queue rather than adding a second queue
+on top; layering one caused an edit landing mid-save to be silently dropped. An
+invalid draft (the last prompt removed) is reported in `#prompt-error` and left
+unsaved, so the persisted library never goes empty. Ctrl+Z is the only way
+back, which is why the local history covers every tree operation.
 
 ## Interaction controllers
 

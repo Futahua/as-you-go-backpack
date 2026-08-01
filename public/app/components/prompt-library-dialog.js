@@ -106,7 +106,6 @@ export function createPromptLibraryDialog({
    * Derived from selection changes so it can never drift from what is visible;
    * validated against the live tree when a paste resolves. */
   let activeDestination = { type: 'root', nodeId: null };
-  let saving = false;
 
   const icon = (name) => createSvg(document, ICONS[name]);
 
@@ -120,7 +119,6 @@ export function createPromptLibraryDialog({
   const error = document.querySelector('#prompt-error');
   const cancelButton = document.querySelector('#prompt-cancel');
   const copySelectedButton = document.querySelector('#prompt-copy-selected');
-  const saveButton = document.querySelector('#prompt-save');
   const copyButton = document.querySelector('#copy-prompt');
   const status = document.querySelector('#prompt-status');
   const deleteConfirm = document.querySelector('#prompt-delete-confirm');
@@ -385,6 +383,11 @@ export function createPromptLibraryDialog({
   function commitActiveEditTransaction() {
     if (history.transaction) {
       history = commitPromptLibraryTransaction(history, history.present);
+      activeEditSession = null;
+      draftLibrary = history.present;
+      // Persist once per editing session, not once per keystroke.
+      autoSave();
+      return;
     }
     activeEditSession = null;
     draftLibrary = history.present;
@@ -422,6 +425,9 @@ export function createPromptLibraryDialog({
       controller.setSelection(repairSelectionAfterTreeChange(controller.getSelection(), visible));
     }
     render();
+    // Shared tail for every structural draft change — mutations, undo and
+    // redo alike — so each one persists without a Save step.
+    autoSave();
   }
 
   /** Routes a completed draft-data mutation through the local history: commits
@@ -983,13 +989,16 @@ export function createPromptLibraryDialog({
     } else if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      if (history.transaction) {
+      const reverted = history.transaction != null;
+      if (reverted) {
         history = cancelPromptLibraryTransaction(history);
       }
       editingFolderId = null;
       activeEditSession = null;
       draftLibrary = history.present;
       render();
+      // Escape rolls the rename back, which is itself a change to persist.
+      if (reverted) autoSave();
     }
   }
 
@@ -1184,30 +1193,36 @@ export function createPromptLibraryDialog({
 
   // ------------------------------------------------------------------- save
 
-  async function onSave() {
-    if (saving) return;
-    commitActiveEditTransaction();
+  /** Persists the current draft. Every completed tree mutation and every ended
+   * editing transaction calls this, so the dialog has no Save step and Close
+   * never has anything left to flush.
+   *
+   * Saves are serialized through a single in-flight promise: an edit that
+   * lands mid-save queues one follow-up rather than racing the store. An
+   * invalid draft (the last prompt removed) is reported and left unsaved, so
+   * the persisted library never goes empty. */
+  function autoSave() {
     const validationError = validatePromptLibrary(history.present);
     if (validationError) {
       error.textContent = validationError;
       return;
     }
-    saving = true;
-    saveButton.disabled = true;
-    try {
-      const next = setPromptLibrary(store.getSnapshot(), history.present);
-      store.replace(next);
-      await store.save(next);
-      close();
-    } catch (caught) {
+    error.textContent = '';
+    // Install the new draft synchronously so the next edit reads it, then let
+    // the store's own save queue serialize the write. Do not add a second
+    // queue on top: an edit that lands mid-save must still reach disk.
+    const next = setPromptLibrary(store.getSnapshot(), history.present);
+    store.replace(next);
+    void store.save(next).catch((caught) => {
       error.textContent = caught instanceof Error ? caught.message : String(caught);
-    } finally {
-      saving = false;
-      saveButton.disabled = false;
-    }
+    });
   }
 
+  /** Close. Edits are already persisted; this only flushes an in-progress
+   * editing session (a title or body still being typed) so nothing typed
+   * right before closing is lost. */
   function onCancel() {
+    commitActiveEditTransaction();
     close();
   }
 
@@ -1228,7 +1243,6 @@ export function createPromptLibraryDialog({
     deleteCancel.addEventListener('click', onDeleteCancel, { signal });
     copySelectedButton.addEventListener('click', copySelectedPromptText, { signal });
     cancelButton.addEventListener('click', onCancel, { signal });
-    saveButton.addEventListener('click', () => onSave(), { signal });
     cardList.addEventListener('input', onTreeInput, { signal });
     // click runs before change and is the only place shiftKey is visible.
     cardList.addEventListener('click', onCheckboxClick, { signal });

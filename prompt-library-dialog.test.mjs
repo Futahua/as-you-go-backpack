@@ -232,7 +232,7 @@ function buildPromptLayerTree(nodes) {
   nodes['prompt-tree-viewport'].appendChild(nodes['prompt-root-surface']);
   for (const id of [
     'prompt-add-prompt', 'prompt-add-folder', 'prompt-status', 'prompt-delete-confirm',
-    'prompt-tree-viewport', 'prompt-tree-menu', 'prompt-error', 'prompt-cancel', 'prompt-save',
+    'prompt-tree-viewport', 'prompt-tree-menu', 'prompt-error', 'prompt-cancel',
     'prompt-copy-selected',
   ]) {
     card.appendChild(nodes[id]);
@@ -275,7 +275,7 @@ function createHarness({ initialView = null } = {}) {
   const topIds = [
     'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-tree-viewport', 'prompt-card-list',
     'prompt-root-surface', 'prompt-tree-menu', 'prompt-status',
-    'prompt-error', 'prompt-cancel', 'prompt-save', 'prompt-copy-selected', 'copy-prompt',
+    'prompt-error', 'prompt-cancel', 'prompt-copy-selected', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
@@ -353,7 +353,17 @@ const openPrompt = (h, id) => {
   chevron.dispatch('click', { target: chevron, preventDefault, stopPropagation });
 };
 const chevronOf = (h, id) => h.rowFor(id).querySelector('.prompt-card-toggle');
-const save = async (h) => { await h.nodes['prompt-save'].dispatch('click', { preventDefault }); };
+/** Edits auto-save, so there is no Save button to click. Committing any open
+ * editing session and letting the queued save settle is what "the change has
+ * been persisted" now means. */
+const save = async (h) => {
+  // Commit an open editing session without closing the dialog: clicking a row
+  // is what a user does to leave a title/body field.
+  const row = h.rows()[0];
+  if (row) row.dispatch('click', { target: row, preventDefault, stopPropagation });
+  await Promise.resolve();
+  await Promise.resolve();
+};
 /** Clicks the real blank surface below the last row, which bubbles to the
  * viewport — the live "target the top level" gesture. */
 const blankClick = (h) => {
@@ -696,7 +706,7 @@ test('title and text survive collapse and re-render', async () => {
   openPrompt(h, 'prompt-root');
   assert.equal(h.rowFor('prompt-root').querySelector('.prompt-card-title').value, 'Renamed');
   assert.equal(h.textareaFor('prompt-root').value, 'edited body');
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   assert.equal(h.getState().view.promptLibrary[1].title, 'Renamed');
   assert.equal(h.getState().view.promptLibrary[1].text, 'edited body');
 });
@@ -720,7 +730,7 @@ test('folder F2 rename commits on Enter and cancels on Escape', async () => {
   input.dispatch('input', { target: input });
   input.dispatch('keydown', { target: input, key: 'Escape', preventDefault, stopPropagation });
   assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Development');
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   assert.equal(h.getState().view.promptLibrary[0].title, 'Development');
 });
 
@@ -770,7 +780,7 @@ test('folder includeAll never rewrites descendant prompt checkboxes', async () =
   const folderCheckbox = h.rowFor('folder-dev').querySelector('.prompt-checkbox');
   folderCheckbox.checked = true;
   folderCheckbox.dispatch('change', { target: folderCheckbox });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   const saved = h.getState().view.promptLibrary[0];
   assert.equal(saved.includeAll, true);
   assert.equal(saved.children[0].includeInBatch, true);
@@ -843,7 +853,7 @@ test('Delete key deletes the selected roots once', async () => {
   h.nodes['prompt-delete-ok'].dispatch('click', { preventDefault });
   assert.equal(h.rowFor('prompt-a'), undefined);
   assert.equal(h.rowFor('prompt-root'), undefined);
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   assert.equal(h.getState().view.promptLibrary[0].children[0].children[0].id, 'prompt-b', 'remaining prompts preserved');
 });
 
@@ -880,7 +890,7 @@ test('dragging a selected row moves the complete selection atomically in order',
   target.dispatch('pointermove', { ...data, clientX: 200, clientY: 200, target, preventDefault, stopPropagation });
   target.dispatch('pointermove', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
   target.dispatch('pointerup', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   const inner = h.getState().view.promptLibrary[0].children[0];
   assert.deepEqual(inner.children.map((n) => n.id), ['prompt-b', 'prompt-a', 'prompt-root'], 'selection appended inside in order');
   assert.equal(inner.children.length, 3);
@@ -898,7 +908,7 @@ test('pointer drag of an unselected row selects it first, then moves it inside a
   target.dispatch('pointermove', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
   assert.ok(src.classList.contains('prompt-dragging'), 'dragged styling persists during dragover');
   target.dispatch('pointerup', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   const saved = h.getState().view.promptLibrary[0].children;
   assert.deepEqual(saved.map((n) => n.id), ['prompt-a', 'folder-inner', 'prompt-root'], 'moved inside folder');
   assert.equal(h.getState().view.promptLibrary.some((n) => n.id === 'prompt-root'), false);
@@ -916,7 +926,7 @@ test('a folder cannot be dragged into its own descendant', async () => {
   target.dispatch('pointermove', { ...data, clientX: 200, clientY: 200, target, preventDefault, stopPropagation });
   target.dispatch('pointermove', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
   target.dispatch('pointerup', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   assert.equal(h.getState().view.promptLibrary[0].id, 'folder-dev', 'cycle rejected');
   assert.equal(h.getState().view.promptLibrary.length, 2, 'no nodes lost');
 });
@@ -929,26 +939,38 @@ test('Enter opens the focused prompt editor', () => {
   assert.ok(h.rowFor('prompt-root').querySelector('.prompt-card-title'), 'editor opened');
 });
 
-test('Save persists and Cancel discards all draft changes', async () => {
+test('edits persist without a Save step and Close only shuts the dialog', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
+  // A structural change is persisted as soon as it is committed.
+  h.nodes['prompt-add-folder'].dispatch('click', { preventDefault });
+  await Promise.resolve();
+  assert.equal(h.getState().view.promptLibrary.length, 3, 'added folder already saved');
+
+  // A typing session persists when it ends, not per keystroke.
   openPrompt(h, 'prompt-root');
   const textarea = h.textareaFor('prompt-root');
-  textarea.value = 'draft';
+  textarea.value = 'typed';
   textarea.dispatch('input', { target: textarea });
+  assert.equal(h.getState().view.promptLibrary[1].text, 'three', 'not yet flushed mid-session');
   h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
-  assert.equal(h.getState().view.promptLibrary[1].text, 'three', 'cancel discards');
-  open(h);
-  openPrompt(h, 'prompt-root');
-  const t2 = h.textareaFor('prompt-root');
-  t2.value = 'saved';
-  t2.dispatch('input', { target: t2 });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
-  assert.equal(h.getState().view.promptLibrary[1].text, 'saved');
-  assert.equal(h.nodes['prompt-layer'].hidden, true);
+  await Promise.resolve();
+  assert.equal(h.getState().view.promptLibrary[1].text, 'typed', 'Close flushes the open session');
+  assert.equal(h.nodes['prompt-layer'].hidden, true, 'Close shuts the dialog');
 });
 
-test('persistence failure leaves the dialog open and re-enables Save', async () => {
+test('reopening shows the auto-saved library, with no discard', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  keyOn(h, { key: 'Delete' });
+  await Promise.resolve();
+  h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
+  open(h);
+  assert.equal(h.rowFor('prompt-root'), undefined, 'the delete survived closing and reopening');
+});
+
+test('a failed auto-save is surfaced and leaves the dialog open', async () => {
   let state = { groups: [], shortcuts: [], view: { promptLibrary: [{ id: 'prompt-x', type: 'prompt', title: 'X', text: 'body', includeInBatch: true }] } };
   const store = createWorkspaceStore({
     getState: () => state,
@@ -960,7 +982,7 @@ test('persistence failure leaves the dialog open and re-enables Save', async () 
   const topIds = [
     'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-tree-viewport', 'prompt-card-list',
     'prompt-root-surface', 'prompt-tree-menu', 'prompt-status',
-    'prompt-error', 'prompt-cancel', 'prompt-save', 'prompt-copy-selected', 'copy-prompt',
+    'prompt-error', 'prompt-cancel', 'prompt-copy-selected', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
@@ -1001,10 +1023,12 @@ test('persistence failure leaves the dialog open and re-enables Save', async () 
   });
   dialog.mount();
   dialog.open();
-  await nodes['prompt-save'].dispatch('click', { preventDefault });
+  // Adding a folder triggers an auto-save that rejects.
+  nodes['prompt-add-folder'].dispatch('click', { preventDefault });
+  // Let the store queue settle and the rejection propagate.
+  for (let i = 0; i < 6; i += 1) await Promise.resolve();
   assert.equal(nodes['prompt-layer'].hidden, false, 'dialog stays open');
-  assert.ok(nodes['prompt-error'].textContent.includes('disk full'));
-  assert.equal(nodes['prompt-save'].disabled, false);
+  assert.ok(nodes['prompt-error'].textContent.includes('disk full'), 'the failure is surfaced in the dialog');
 });
 
 test('Ctrl+C stores nodes internally without calling copyText', () => {
@@ -1024,7 +1048,7 @@ test('Ctrl+V duplicates copied nodes with recursively unique ids', async () => {
   clickRow(h, 'prompt-root', { ctrlKey: true });
   keyOn(h, { key: 'c', ctrlKey: true });
   keyOn(h, { key: 'v', ctrlKey: true });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   const saved = h.getState().view.promptLibrary;
   const ids = new Set();
   const walk = (list) => list.forEach((n) => { ids.add(n.id); if (n.type === 'folder') walk(n.children); });
@@ -1044,7 +1068,7 @@ test('Ctrl+X marks cut roots and Ctrl+V moves them atomically into a selected fo
   clickRow(h, 'folder-dev');
   keyOn(h, { key: 'v', ctrlKey: true });
   assert.ok(h.nodes['prompt-status'].textContent.includes('1 item pasted'));
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   const children = h.getState().view.promptLibrary[0].children;
   assert.ok(children.some((n) => n.id === 'prompt-root'), 'cut prompt moved inside folder-dev');
   assert.equal(h.getState().view.promptLibrary.some((n) => n.id === 'prompt-root'), false);
@@ -1060,7 +1084,7 @@ test('pasting a folder into its own descendant is rejected', async () => {
   clickRow(h, 'prompt-b');
   keyOn(h, { key: 'v', ctrlKey: true });
   assert.ok(h.nodes['prompt-status'].textContent.includes('cannot be moved inside itself'));
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   assert.equal(h.getState().view.promptLibrary[0].id, 'folder-dev', 'folder stayed at root');
 });
 
@@ -1078,7 +1102,7 @@ test('New prompt respects the exactly-one-selected-folder rule', async () => {
   open(h);
   clickRow(h, 'folder-inner');
   h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
-  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h);
   const inner = h.getState().view.promptLibrary[0].children[1];
   assert.equal(inner.children[inner.children.length - 1].type, 'prompt', 'added inside the selected folder');
 
@@ -1087,7 +1111,7 @@ test('New prompt respects the exactly-one-selected-folder rule', async () => {
   clickRow(h2, 'prompt-a');
   clickRow(h2, 'prompt-root', { ctrlKey: true });
   h2.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
-  await h2.nodes['prompt-save'].dispatch('click', { preventDefault });
+  await save(h2);
   const saved = h2.getState().view.promptLibrary;
   assert.equal(saved[saved.length - 1].type, 'prompt', 'multi-selection adds at root');
 });
@@ -1201,7 +1225,7 @@ test('Ctrl+Z reaches local history from the Save and Cancel buttons', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
-  keyFrom(h.nodes['prompt-save'], { key: 'z', ctrlKey: true });
+  keyFrom(h.nodes['prompt-copy-selected'], { key: 'z', ctrlKey: true });
   assert.equal(h.promptRows().length, 2, 'undo works from Save');
   keyFrom(h.nodes['prompt-cancel'], { key: 'z', ctrlKey: true, shiftKey: true });
   assert.equal(h.promptRows().length, 3, 'Ctrl+Shift+Z redo works from Cancel');
@@ -1585,7 +1609,9 @@ test('excluding a folder drops its checked prompts from the batch', async () => 
   cycleFolder(h, 'folder-dev');
   cycleFolder(h, 'folder-dev');
   await save(h);
+  console.log('STORE:', JSON.stringify(h.getState().view.promptLibrary[0]));
   const text = h.dialog.getBatchText();
+  console.log('TEXT:', JSON.stringify(text));
   assert.ok(!text.includes('one'), 'checked child inside an excluded folder is dropped');
   assert.ok(text.includes('three'), 'prompts outside the folder are unaffected');
 });
