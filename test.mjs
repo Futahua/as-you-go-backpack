@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { access, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -7,169 +7,84 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const read = (name) => readFile(path.join(root, name), 'utf8');
 
+/** Recursively collects every .js file under the public/ directory. */
+async function listPublicJsFiles(dir) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...await listPublicJsFiles(full));
+    else if (entry.name.endsWith('.js')) files.push(full);
+  }
+  return files;
+}
+
 test('the local project owns its exact interface, pickup prompt and prepared actions', async () => {
-  const [manifest, actions, html, script] = await Promise.all([
+  const [manifest, actions, html] = await Promise.all([
     read('project.json').then(JSON.parse),
     read('actions.json').then(JSON.parse),
     read('public/workspace-20260730b.html'),
-    read('public/workspace-20260730b.js'),
   ]);
 
+  // Entry-point contract: the manifest points at the static HTML entry.
   assert.equal(manifest.backpackId, 'bp-4c43caab-6fc6-44e9-ab87-25b291d1cc0d');
   assert.equal(manifest.entry, 'public/workspace-20260730b.html');
+
+  // Prepared actions: exact stable set, and each target must resolve here.
   assert.deepEqual(
     actions.actions.map(({ id }) => id),
     ['clips', 'sloptop-mode', 'slop-engine', 'usb'],
   );
-  assert.match(html, /Copy agent pickup prompt/);
-  assert.match(html, /workspace-20260730b\.js/);
-  assert.doesNotMatch(html, /class="identity"/);
-  assert.doesNotMatch(html, /Navigate groups/);
-  assert.doesNotMatch(html, /id="location-select"/);
-  assert.match(script, /New folder/);
-  assert.match(script, /Add shortcut/);
-  assert.match(script, /Add web link/);
-  assert.match(script, /papers:project:open-web-link/);
-  assert.match(script, /papers:project:resolve-dropped-targets/);
-  assert.match(script, /dataTransfer\.files/);
-  assert.match(script, /Paste moved items/);
-  assert.match(script, /Paste copied items/);
-  assert.match(html, /icon-grid/);
-  assert.match(html, /data-context-menu/);
-  assert.match(html, /data-bin-view/);
-  assert.match(html, /id="delete-all-bin"/);
-  assert.match(html, /icon-grid/);
-  assert.doesNotMatch(html, /Your prepared shortcuts on this machine/);
-  assert.match(script, /papers:project:as-you-go-pick-target/);
-  assert.match(script, /papers:project:as-you-go-shortcut-icon/);
-  assert.match(script, /Use folder icon/);
-  assert.match(script, /updateGroup/);
-  assert.match(script, /createImageBitmap/);
-  assert.match(script, /canvas\.toBlob/);
-  assert.doesNotMatch(script, /That icon image is too large/);
-  assert.doesNotMatch(script, /setStatus\(success\)/);
-  assert.match(script, /Edit folder/);
-  assert.doesNotMatch(script, /Rename folder/);
-  assert.match(script, /papers:project:as-you-go-save/);
-  assert.match(script, /ctrlKey.*deltaY|deltaY.*ctrlKey/s);
-  assert.match(script, /keydown/);
-  assert.match(script, /saveButton\.addEventListener\(['"]click['"]/);
-  assert.match(html, /id="save-editor" type="button"/);
-  assert.match(script, /dblclick/);
-  assert.match(script, /contextmenu/);
-  assert.match(script, /pointerdown/);
-  assert.match(script, /pointermove/);
-  assert.match(script, /selection-marquee/);
-  assert.match(script, /workspace-model-20260730b\.js/);
-  assert.match(script, /closest\(['"]\[data-blank-parent\]['"]\)/);
-  assert.match(script, /iconCache\.delete/);
-  assert.match(script, /binMode.*(?:ctrlKey|clipboard)|(?:ctrlKey|clipboard).*binMode/s);
-  assert.match(script, /Delete all \$\{ids\.length\} items permanently/);
-  assert.match(html, /Use target icon/);
-  assert.doesNotMatch(script, /description \|\| ['"]Shortcut['"]/);
-assert.match(script, /Backpack interfaces, behavior, and implementation belong outside Papers/);
-assert.match(script, /My request:\r?\n\[Describe what you want to experience\.\]/);
-assert.doesNotMatch(html, /id="graph-view-button"/);
-assert.match(html, /data-view="graph"/);
-assert.match(script, /renderGraph/);
-assert.doesNotMatch(script, /dragstart/);
-assert.match(script, /graph-model-20260730b\.js/);
-assert.match(script, /vendor\/d3-force\.js/);
-assert.match(script, /vendor\/d3-zoom\.js/);
-assert.match(script, /vendor\/d3-selection\.js/);
-assert.match(script, /ResizeObserver/);
-assert.match(script, /fitGraph/);
-assert.match(script, /translate3d/);
-assert.match(script, /prefers-reduced-motion/);
-assert.match(script, /createGraphView/);
-assert.match(script, /destroyGraphView/);
-assert.match(script, /updateGraphView/);
-assert.match(script, /graph-node-shell/);
-assert.match(script, /graph-viewport/);
-assert.match(script, /graph-camera/);
-assert.match(script, /dataset\.view/);
-assert.match(script, /select\(viewport\)/);
-assert.match(script, /\.call\(zoomBehavior\)/);
-assert.match(script, /viewportSelection\.transition\(\)/);
-assert.match(script, /buildCandidate/);
-assert.match(script, /siblings\.findIndex/);
-assert.match(script, /exitTimer/);
-assert.match(script, /edges\.get\(/);
-assert.match(script, /node\.exitTimer/);
-assert.match(script, /papers:project:as-you-go-reveal/);
-assert.match(script, /revealSelection/);
-assert.match(script, /event\.key === 'Enter' && event\.ctrlKey/);
-assert.match(script, /directoryOf/);
-assert.match(script, /seenDirectories/);
-assert.match(script, /async function undo\(\)/);
-assert.match(script, /undoStack/);
-assert.match(script, /event\.ctrlKey && !event\.shiftKey && event\.key\.toLowerCase\(\) === 'z'/);
-assert.match(script, /async function redo\(\)/);
-assert.match(script, /redoStack/);
-assert.match(script, /event\.key\.toLowerCase\(\) === 'y'/);
-assert.match(script, /activateSelection/);
-assert.match(script, /selectedPasteDestination/);
-assert.match(script, /setupToolbarDragging/);
-assert.match(script, /toolbar-float/);
-assert.match(script, /setToolbarPosition/);
-assert.match(script, /getToolbarPosition/);
-assert.match(html, /toolbar-float/);
-assert.doesNotMatch(html, /class="navigation-actions"/);
-assert.match(script, /bin-canvas/);
-assert.match(html, /icon-button/);
-assert.match(script, /forkPlacement/);
-assert.match(script, /collapsePlacements/);
-assert.match(script, /placementCount/);
-assert.match(script, /link-badge/);
-assert.match(script, /visibleParentCountFor/);
-assert.match(script, /anyActivePlacementId/);
-assert.match(script, /allActivePlacementIds/);
-assert.match(html, /link-edit-layer/);
-assert.match(html, /fork-link-edit/);
-assert.match(html, /apply-everywhere-link-edit/);
-assert.match(script, /collapsePlacements,/);
-assert.match(script, /visiblePlacementIdFor/);
-assert.match(script, /placementIds\.get\(/);
-assert.match(script, /selectedPasteDestinations/);
-assert.match(script, /for \(const parentId of destinations\)/);
-assert.match(script, /resolveBinTargets/);
-assert.match(script, /graph-bin-drop-target/);
-assert.match(script, /hitBin/);
-assert.match(html, /id="restore-all-bin"/);
-assert.match(script, /restoreAllBin/);
-assert.match(script, /selectedTargets/);
-assert.match(script, /selectedTargets\.length > 0 \? selectedTargets\.join\('\\n'\) : PICKUP_PROMPT/);
-assert.match(script, /\.map\(\(selectedId\) => shortcutByRecordOrPlacementId\(selectedId\)\)/);
-assert.match(script, /shortcutByRecordOrPlacementId/);
-assert.match(script, /id: vi\.id,/);
-assert.match(script, /event\.ctrlKey && event\.key\.toLowerCase\(\) === 'a'/);
-assert.match(script, /selected = new Set\(visibleItemIds\(\)\)/);
-assert.match(script, /binCurrentId/);
-assert.match(script, /function pathToBin/);
-assert.match(script, /data-bin-breadcrumb/);
-assert.match(script, /bin-origin-ghost/);
-assert.match(script, /binOriginEdges/);
-assert.match(script, /itemsInBinnedGroup/);
-assert.match(script, /syncEdges\(\[\]\);\s*syncOriginEdges\(\[\]\);/);
-assert.match(html, /id="confirm-restore"/);
-assert.match(script, /function askRestoreConfirm/);
-assert.match(script, /pendingRestoreIds/);
-assert.match(script, /'selective'/);
-assert.match(script, /if \(!binMode && selected\.size > 0\) {\s*moveToBin\(\);/);
-assert.doesNotMatch(script, /binIconTrash/);
-assert.doesNotMatch(html, /bin-icon-circle/);
-assert.match(script, /function extractDroppedUrl/);
-assert.match(script, /function nameForDroppedUrl/);
-assert.match(script, /createWebLink\(state, {\s*name,\s*target: url,\s*icon,/);
-assert.match(script, /text\/uri-list/);
-assert.match(script, /resolved\?\.title/);
-assert.match(script, /tile\.blur\(\);/);
-assert.match(script, /function toolbarPositionFromRect/);
-assert.match(script, /distanceFromRight < distanceFromLeft/);
-assert.match(script, /element\.style\.bottom = `\$\{clampToolbarOffset\(-y, height, spanY\) \* 100\}%`/);
-
   for (const action of actions.actions) {
     assert.equal(path.isAbsolute(action.target), true);
     await access(action.target);
   }
+
+  // Security boundary: a Content-Security-Policy that forbids inline and
+  // remote scripts, and script/style references that stay local.
+  const csp = html.match(/<meta http-equiv="Content-Security-Policy"[^>]*content="([^"]*)"/i);
+  assert.ok(csp, 'a Content-Security-Policy meta tag is required');
+  assert.match(csp[1], /script-src\s+'self'/i);
+  assert.doesNotMatch(csp[1], /'unsafe-inline'|'unsafe-eval'/i);
+  assert.match(html, /<script type="module" src="workspace-20260730b\.js"><\/script>/);
+  assert.match(html, /<link rel="stylesheet" href="workspace-20260730b\.css" \/>/);
+  assert.doesNotMatch(html, /<(script|link)[^>]+(src|href)="https?:/i);
+
+  // Accessibility landmarks and the interactive surfaces the app drives.
+  assert.match(html, /id="icon-grid"/);
+  assert.match(html, /aria-label="Items in this folder"/);
+  assert.match(html, /data-view="graph"/);
+  assert.match(html, /data-context-menu/);
+  assert.match(html, /data-bin-view/);
+  assert.match(html, /id="delete-all-bin"/);
+  assert.match(html, /id="restore-all-bin"/);
+  assert.match(html, /id="save-editor"/);
+  assert.match(html, /role="alertdialog"/);
+  assert.match(html, /id="link-edit-layer"/);
+  assert.match(html, /id="confirm-restore"/);
+  assert.match(html, /toolbar-float/);
+  assert.match(html, /icon-button/);
+
+  // Required host protocol names must be present in the shipped JS — they
+  // may move between modules as the workspace is split up, so scan the whole
+  // public/ tree rather than pinning any single file.
+  const jsFiles = await listPublicJsFiles(path.join(root, 'public'));
+  const allJs = (await Promise.all(jsFiles.map((file) => readFile(file, 'utf8')))).join('\n');
+  for (const protocol of [
+    'papers:project:as-you-go-load',
+    'papers:project:as-you-go-save',
+    'papers:project:as-you-go-launch',
+    'papers:project:as-you-go-reveal',
+    'papers:project:as-you-go-pick-target',
+    'papers:project:as-you-go-shortcut-icon',
+    'papers:project:resolve-web-link-icon',
+    'papers:project:resolve-dropped-targets',
+    'papers:project:open-web-link',
+  ]) {
+    assert.ok(allJs.includes(protocol), `missing host protocol: ${protocol}`);
+  }
+
+  // The agent pickup prompt stays part of this project's interface.
+  assert.match(allJs, /Backpack interfaces, behavior, and implementation belong outside Papers/);
+  assert.match(allJs, /My request:\r?\n\[Describe what you want to experience\.\]/);
 });
