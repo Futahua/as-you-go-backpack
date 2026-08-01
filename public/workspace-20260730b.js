@@ -42,7 +42,7 @@ import {
 } from './vendor/d3-force.js';
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
-import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition } from './graph-model-20260730b.js';
+import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignDistinctFolderColors } from './graph-model-20260730b.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -322,6 +322,18 @@ function createGraphController() {
   let pendingInitialFit = false;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
+  // Distinct, paper-friendly folder colors. Kept in a session map keyed by
+  // folder id so a folder keeps its color across renders and navigation.
+  const FOLDER_PALETTE = [
+    '#4c725a', '#b05a4a', '#4a6fa5', '#8a5fa8',
+    '#c0873a', '#3f7d8c', '#a8547c', '#6b8f3f',
+  ];
+  const folderColors = new Map();
+
+  function folderColor(id) {
+    return folderColors.get(id) ?? null;
+  }
+
   function createGraphView() {
     if (attached) return;
     viewport = document.createElement('div');
@@ -501,6 +513,7 @@ function createGraphController() {
       byParent.get(key).push(vi);
     }
     const ctxId = graphContextId(session.currentId, session.binMode);
+    assignDistinctFolderColors(visibleItems, folderColors, FOLDER_PALETTE);
     for (const vi of visibleItems) {
       const parentIds = vi.parentIds ?? [vi.parentId];
       let node = nodes.get(vi.id);
@@ -557,12 +570,20 @@ function createGraphController() {
     }
   }
 
+  /** Outlines a folder tile with its assigned color; non-folders stay plain. */
+  function applyFolderColor(iconItem, candidate) {
+    const color = candidate.kind === 'group' ? folderColor(candidate.id) : null;
+    iconItem.style.borderColor = color ?? '';
+    iconItem.style.borderWidth = color ? '2px' : '';
+  }
+
   function refreshNodeContent(node) {
     if (!node.shell) return;
     const candidate = node.candidate;
     if (!candidate) return;
     const iconItem = node.shell.querySelector('.icon-item');
     if (!iconItem) return;
+    applyFolderColor(iconItem, candidate);
     const isGhost = candidate.kind === 'bin-origin';
     const canExpand = candidate.kind === 'group';
     const isExpanded = canExpand && session.graphExpanded.has(candidate.id);
@@ -614,6 +635,7 @@ function createGraphController() {
 
     const iconItem = document.createElement('div');
     iconItem.className = `icon-item${isSelected ? ' selected' : ''}${isGhost ? ' bin-origin-ghost' : ''}`;
+    applyFolderColor(iconItem, candidate);
     iconItem.dataset.id = candidate.id;
     iconItem.dataset.kind = candidate.kind;
     iconItem.dataset.parent = candidate.parentId ?? (session.binMode ? 'bin' : session.currentId);
@@ -706,13 +728,21 @@ function createGraphController() {
       const source = nodes.get(info.sourceId);
       const target = nodes.get(info.targetId);
       if (!source || !target) continue;
+      // Edges out of a folder take that folder's color; the rest keep the
+      // default gray from CSS.
+      const color = source.candidate?.kind === 'group' ? folderColor(source.candidate.id) : null;
       if (!edge) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'graph-edge');
         path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+        if (color) path.setAttribute('stroke', color);
         edgeLayer.append(path);
         edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
         edges.set(key, edge);
+      } else if (color) {
+        edge.path.setAttribute('stroke', color);
+      } else {
+        edge.path.removeAttribute('stroke');
       }
     }
   }

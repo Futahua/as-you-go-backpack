@@ -195,3 +195,38 @@ export function allUniquePositions(nodes) {
   const keys = new Set(nodes.map((n) => `${n.x}|${n.y}`));
   return keys.size === nodes.length;
 }
+
+/**
+ * Gives every visible folder a color from `palette` that differs from the
+ * folders near it (its parent folder and its sibling folders), so adjacent
+ * folders are easy to tell apart. `colors` is the persistent id -> color map
+ * (a folder keeps its color across renders). An existing assignment is kept
+ * unless it now conflicts with a neighbor's color.
+ */
+export function assignDistinctFolderColors(visibleItems, colors, palette) {
+  const isFolder = (vi) => vi.kind === 'group';
+  const byParent = new Map();
+  for (const vi of visibleItems) {
+    const key = vi.parentId ?? ROOT_ID;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(vi);
+  }
+  const folderById = new Map(visibleItems.filter(isFolder).map((vi) => [vi.id, vi]));
+  const folderIds = [...folderById.keys()].sort();
+  for (const id of folderIds) {
+    const vi = folderById.get(id);
+    const neighbors = new Set();
+    const parentId = vi.parentId;
+    if (parentId && parentId !== ROOT_ID && parentId !== 'bin' && folderById.has(parentId)) {
+      neighbors.add(parentId);
+    }
+    for (const sibling of byParent.get(parentId ?? ROOT_ID) ?? []) {
+      if (sibling.id !== id && isFolder(sibling)) neighbors.add(sibling.id);
+    }
+    const used = new Set([...neighbors].map((nid) => colors.get(nid)).filter(Boolean));
+    const current = colors.get(id);
+    if (current && !used.has(current)) continue;
+    colors.set(id, palette.find((color) => !used.has(color)) ?? palette[0]);
+  }
+  return colors;
+}

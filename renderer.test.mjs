@@ -40,6 +40,7 @@ import {
   seedPosition,
   allFinite,
   allUniquePositions,
+  assignDistinctFolderColors,
 } from './public/graph-model-20260730b.js';
 
 function makeFixtureState() {
@@ -641,4 +642,47 @@ test('forking from a placement in folder B (not the placement in folder A) forks
   const forkedNodes = items.filter((i) => i.id === forked.id);
   assert.equal(forkedNodes.length, 1);
   assert.deepEqual(forkedNodes[0].parentIds, [b.id], 'the fork lands in B');
+});test('assignDistinctFolderColors gives nearby folders different colors', () => {
+  const palette = ['#aa0000', '#00aa00', '#0000aa', '#aa00aa'];
+  const visibleItems = [
+    { id: 'A', kind: 'group', parentId: ROOT_ID },
+    { id: 'B', kind: 'group', parentId: ROOT_ID },
+    { id: 'C', kind: 'group', parentId: ROOT_ID },
+    { id: 's1', kind: 'shortcut', parentId: 'A' },
+    { id: 'A1', kind: 'group', parentId: 'A' },
+  ];
+  const colors = new Map();
+  assignDistinctFolderColors(visibleItems, colors, palette);
+  // Sibling root folders A, B, C must all differ from each other.
+  assert.notEqual(colors.get('A'), colors.get('B'));
+  assert.notEqual(colors.get('A'), colors.get('C'));
+  assert.notEqual(colors.get('B'), colors.get('C'));
+  // Child A1 differs from its parent A.
+  assert.notEqual(colors.get('A1'), colors.get('A'));
+  // Every folder got a color from the palette.
+  for (const id of ['A', 'B', 'C', 'A1']) assert.ok(palette.includes(colors.get(id)));
+});
+
+test('assignDistinctFolderColors keeps an existing stable color', () => {
+  const palette = ['#aa0000', '#00aa00', '#0000aa'];
+  const colors = new Map([['A', '#00aa00']]);
+  assignDistinctFolderColors([{ id: 'A', kind: 'group', parentId: ROOT_ID }], colors, palette);
+  assert.equal(colors.get('A'), '#00aa00');
+});
+
+test('assignDistinctFolderColors recolors a conflicting folder', () => {
+  const palette = ['#aa0000', '#00aa00', '#0000aa'];
+  const colors = new Map([
+    ['A', '#aa0000'],
+    ['B', '#aa0000'], // conflict with new sibling A
+  ]);
+  assignDistinctFolderColors(
+    [
+      { id: 'A', kind: 'group', parentId: ROOT_ID },
+      { id: 'B', kind: 'group', parentId: ROOT_ID },
+    ],
+    colors,
+    palette,
+  );
+  assert.notEqual(colors.get('A'), colors.get('B'));
 });
