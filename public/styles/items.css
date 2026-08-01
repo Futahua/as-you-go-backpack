@@ -41,6 +41,10 @@
   margin-bottom: 7px;
   overflow: hidden;
 }
+.icon-item.folder-colored .item-icon {
+  border: 2px solid var(--folder-color);
+  border-radius: 12px;
+}
 .item-icon img {
   max-width: 100%;
   max-height: 100%;

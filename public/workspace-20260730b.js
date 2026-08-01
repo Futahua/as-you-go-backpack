@@ -570,11 +570,14 @@ function createGraphController() {
     }
   }
 
-  /** Outlines a folder tile with its assigned color; non-folders stay plain. */
+  /** Frames a folder's icon square with its assigned color; non-folders are
+   * left plain. The color is exposed as --folder-color and styled in CSS so
+   * it wraps only the icon graphic, not the tile's text. */
   function applyFolderColor(iconItem, candidate) {
     const color = candidate.kind === 'group' ? folderColor(candidate.id) : null;
-    iconItem.style.borderColor = color ?? '';
-    iconItem.style.borderWidth = color ? '2px' : '';
+    iconItem.classList.toggle('folder-colored', Boolean(color));
+    if (color) iconItem.style.setProperty('--folder-color', color);
+    else iconItem.style.removeProperty('--folder-color');
   }
 
   function refreshNodeContent(node) {
@@ -729,20 +732,20 @@ function createGraphController() {
       const target = nodes.get(info.targetId);
       if (!source || !target) continue;
       // Edges out of a folder take that folder's color; the rest keep the
-      // default gray from CSS.
+      // default gray from CSS. Inline style overrides the .graph-edge stroke.
       const color = source.candidate?.kind === 'group' ? folderColor(source.candidate.id) : null;
       if (!edge) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'graph-edge');
         path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
-        if (color) path.setAttribute('stroke', color);
+        if (color) path.style.stroke = color;
         edgeLayer.append(path);
         edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
         edges.set(key, edge);
       } else if (color) {
-        edge.path.setAttribute('stroke', color);
+        edge.path.style.stroke = color;
       } else {
-        edge.path.removeAttribute('stroke');
+        edge.path.style.stroke = '';
       }
     }
   }
