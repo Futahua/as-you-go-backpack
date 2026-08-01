@@ -253,21 +253,23 @@ function captureWorkspaceView() {
 
 function restoreWorkspaceView() {
   const requestedCurrent = state.view.currentGroupId;
-  session.currentId =
-    requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
-      ? requestedCurrent
-      : ROOT_ID;
-  session.graphExpanded = new Set(
+  store.setNavigation({
+    currentId:
+      requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
+        ? requestedCurrent
+        : ROOT_ID,
+    binMode: state.view.binMode,
+  });
+  store.setGraphExpanded(
     (state.view.graphExpandedGroupIds ?? []).filter((groupId) =>
       Boolean(group(groupId))),
   );
-  session.binMode = state.view.binMode;
   const binnedIds = new Set(binnedItems(state).map((candidate) => candidate.id));
-  session.selected = new Set(
+  store.setSelection(
     state.view.selectedItemIds.filter((itemId) =>
-      session.binMode ? binnedIds.has(itemId) : isAvailableItem(itemId)),
+      store.getSession().binMode ? binnedIds.has(itemId) : isAvailableItem(itemId)),
   );
-  session.selectionAnchor = [...session.selected].at(-1) ?? null;
+  store.setSelectionAnchor([...store.getSession().selected].at(-1) ?? null);
   state = store.replace(captureWorkspaceView());
 }
 
@@ -958,7 +960,7 @@ function render() {
     // us (e.g. via the top-level Bin list or "Delete all") — fall back to
     // the top of the Bin rather than rendering a dangling, nonexistent
     // breadcrumb segment.
-    session.binCurrentId = 'bin';
+    store.setNavigation({ binCurrentId: 'bin' });
   }
   const iconSize = state.view.iconSize;
   document.documentElement.style.setProperty('--icon-size', `${iconSize}px`);
@@ -1068,17 +1070,17 @@ function selectItem(itemId, event) {
     const from = ids.indexOf(session.selectionAnchor);
     const to = ids.indexOf(itemId);
     if (from >= 0 && to >= 0) {
-      if (!event.ctrlKey) session.selected.clear();
+      if (!event.ctrlKey) store.clearSelection();
       const [start, end] = from < to ? [from, to] : [to, from];
-      ids.slice(start, end + 1).forEach((id) => session.selected.add(id));
+      ids.slice(start, end + 1).forEach((id) => store.addToSelection(id));
     }
   } else if (event.ctrlKey) {
-    if (session.selected.has(itemId)) session.selected.delete(itemId);
-    else session.selected.add(itemId);
-    session.selectionAnchor = itemId;
+    if (session.selected.has(itemId)) store.removeFromSelection(itemId);
+    else store.addToSelection(itemId);
+    store.setSelectionAnchor(itemId);
   } else {
-    session.selected = new Set([itemId]);
-    session.selectionAnchor = itemId;
+    store.setSelection([itemId]);
+    store.setSelectionAnchor(itemId);
   }
   syncSelection();
   saveWorkspaceView();
@@ -1115,7 +1117,7 @@ function updateMarqueeSelection(bounds) {
       };
     })
     .filter((tile) => tile.right > tile.left && tile.bottom > tile.top);
-  session.selected = new Set([
+  store.setSelection([
     ...marqueeDrag.baseSelection,
     ...itemsIntersectingMarquee(tiles, bounds),
   ]);
@@ -1150,16 +1152,16 @@ async function activate(itemId) {
       // Drilling into a binned folder stays inside the Bin — it must never
       // jump to the real explorer, since the folder (and everything under
       // it) is still hidden there and would just show up empty.
-      session.binCurrentId = folder.id;
-      session.selected.clear();
+      store.setNavigation({ binCurrentId: folder.id });
+      store.clearSelection();
       graph.destroyGraphView();
       closeMenu();
       render();
       saveWorkspaceView();
       return;
     }
-    session.currentId = folder.id;
-    session.selected.clear();
+    store.setNavigation({ currentId: folder.id });
+    store.clearSelection();
     graph.destroyGraphView();
     closeMenu();
     render();
@@ -1246,12 +1248,12 @@ async function copyOrCut(mode) {
     }
   }
 
-  session.clipboard = {
+  store.setClipboard({
     mode,
     ids: [...session.selected],
     collapseWhole,
     placementIds,
-  };
+  });
 
   setStatus('');
   closeMenu();
@@ -1291,7 +1293,7 @@ async function pasteInto(parentIds) {
         next = copySelection(next, ids, parentId);
       }
     }
-    if (wasCut) session.clipboard = null;
+    if (wasCut) store.setClipboard(null);
     await commit(next, wasCut ? 'Moved.' : 'Copied.');
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
@@ -1360,9 +1362,7 @@ elements.grid.addEventListener('click', (event) => {
   const expandButton = event.target.closest('[data-expand]');
   if (expandButton) {
     const folderId = expandButton.dataset.expand;
-    const targetSet = session.graphExpanded;
-    if (targetSet.has(folderId)) targetSet.delete(folderId);
-    else targetSet.add(folderId);
+    store.toggleGraphExpanded(folderId);
     closeMenu();
     render();
     saveWorkspaceView();
@@ -1388,8 +1388,8 @@ elements.grid.addEventListener('click', (event) => {
       suppressGraphClick = false;
       return;
     }
-    session.selected.clear();
-    session.selectionAnchor = null;
+    store.clearSelection();
+    store.setSelectionAnchor(null);
     syncSelection();
     closeMenu();
     saveWorkspaceView();
@@ -1405,8 +1405,8 @@ elements.grid.addEventListener('pointerdown', (event) => {
     if (shell && event.pointerType !== 'touch' && !tile.classList.contains('bin-origin-ghost')) {
       const itemId = tile.dataset.id;
       if (!session.selected.has(itemId)) {
-        session.selected = new Set([itemId]);
-        session.selectionAnchor = itemId;
+        store.setSelection([itemId]);
+        store.setSelectionAnchor(itemId);
         syncSelection();
         saveWorkspaceView();
       }
@@ -1450,8 +1450,8 @@ elements.grid.addEventListener('pointerdown', (event) => {
     moved: false,
   };
   if (!event.ctrlKey) {
-    session.selected.clear();
-    session.selectionAnchor = null;
+    store.clearSelection();
+    store.setSelectionAnchor(null);
     syncSelection();
   }
   elements.grid.setPointerCapture(event.pointerId);
@@ -1737,15 +1737,14 @@ elements.grid.addEventListener('contextmenu', (event) => {
   if (tile && tile.classList.contains('bin-origin-ghost')) return;
   if (tile) {
     if (event.shiftKey && tile.dataset.kind === 'group') {
-      const targetSet = session.graphExpanded;
       const id = tile.dataset.id;
       const folderIds = session.selected.has(id)
         ? [...session.selected].filter((selectedId) => group(selectedId))
         : [id];
-      const shouldExpand = !targetSet.has(id);
+      const shouldExpand = !session.graphExpanded.has(id);
       for (const folderId of folderIds) {
-        if (shouldExpand) targetSet.add(folderId);
-        else targetSet.delete(folderId);
+        if (shouldExpand) store.addToGraphExpanded(folderId);
+        else store.removeFromGraphExpanded(folderId);
       }
       closeMenu();
       // Right-clicking a tile moves DOM focus onto it (standard mousedown
@@ -1761,8 +1760,8 @@ elements.grid.addEventListener('contextmenu', (event) => {
       return;
     }
     if (!session.selected.has(tile.dataset.id)) {
-      session.selected = new Set([tile.dataset.id]);
-      session.selectionAnchor = tile.dataset.id;
+      store.setSelection([tile.dataset.id]);
+      store.setSelectionAnchor(tile.dataset.id);
       syncSelection();
       saveWorkspaceView();
     }
@@ -1804,7 +1803,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Escape') {
-    session.selected.clear();
+    store.clearSelection();
     closeMenu();
     syncSelection();
     saveWorkspaceView();
@@ -1812,8 +1811,8 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.ctrlKey && event.key.toLowerCase() === 'a') {
     event.preventDefault();
-    session.selected = new Set(visibleItemIds());
-    session.selectionAnchor = null;
+    store.setSelection(visibleItemIds());
+    store.setSelectionAnchor(null);
     syncSelection();
     saveWorkspaceView();
     return;
@@ -1976,8 +1975,8 @@ elements.grid.addEventListener('drop', async (event) => {
 elements.breadcrumbs.addEventListener('click', (event) => {
   const binCrumb = event.target.closest('[data-bin-breadcrumb]');
   if (binCrumb) {
-    session.binCurrentId = binCrumb.dataset.binBreadcrumb;
-    session.selected.clear();
+    store.setNavigation({ binCurrentId: binCrumb.dataset.binBreadcrumb });
+    store.clearSelection();
     graph.destroyGraphView();
     render();
     saveWorkspaceView();
@@ -1985,8 +1984,8 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   }
   const crumb = event.target.closest('[data-breadcrumb]');
   if (!crumb) return;
-  session.currentId = crumb.dataset.breadcrumb;
-  session.selected.clear();
+  store.setNavigation({ currentId: crumb.dataset.breadcrumb });
+  store.clearSelection();
   graph.destroyGraphView();
   render();
   saveWorkspaceView();
@@ -2076,10 +2075,10 @@ const binControls = createBinControls({
   elements,
   getState: () => state,
   getBinMode: () => session.binMode,
-  setBinMode: (next) => { session.binMode = next; },
+  setBinMode: (next) => store.setNavigation({ binMode: next }),
   getSelectedIds: () => [...session.selected],
-  clearSelection: () => { session.selected.clear(); },
-  resetDrillDown: () => { session.binCurrentId = 'bin'; },
+  clearSelection: () => { store.clearSelection(); },
+  resetDrillDown: () => store.setNavigation({ binCurrentId: 'bin' }),
   binnedItems,
   moveToBin,
   confirmDialog,

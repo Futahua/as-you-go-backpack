@@ -85,7 +85,24 @@ export function createWorkspaceStore({
   return {
     getSnapshot: getState,
     getSession: () => session,
-    updateSession: (changes) => Object.assign(session, changes),
+    setSelection: (ids) => { session.selected = new Set(ids); },
+    addToSelection: (id) => { session.selected.add(id); },
+    removeFromSelection: (id) => { session.selected.delete(id); },
+    clearSelection: () => { session.selected.clear(); },
+    setSelectionAnchor: (anchor) => { session.selectionAnchor = anchor; },
+    setNavigation: ({ currentId, binCurrentId, binMode } = {}) => {
+      if (currentId !== undefined) session.currentId = currentId;
+      if (binCurrentId !== undefined) session.binCurrentId = binCurrentId;
+      if (binMode !== undefined) session.binMode = binMode;
+    },
+    setGraphExpanded: (ids) => { session.graphExpanded = new Set(ids); },
+    toggleGraphExpanded: (id) => {
+      if (session.graphExpanded.has(id)) session.graphExpanded.delete(id);
+      else session.graphExpanded.add(id);
+    },
+    addToGraphExpanded: (id) => { session.graphExpanded.add(id); },
+    removeFromGraphExpanded: (id) => { session.graphExpanded.delete(id); },
+    setClipboard: (clipboard) => { session.clipboard = clipboard; },
     canUndo: () => undoStack.length > 0,
     canRedo: () => redoStack.length > 0,
     install(nextState) {

@@ -121,7 +121,7 @@ test('commit clears session selection and passes the session to prepare', async 
   assert.equal(preparedSession, store.getSession());
 });
 
-test('updateSession merges changes into the session object', () => {
+test('explicit session operations drive selection and clipboard', () => {
   let state = {};
   const store = createWorkspaceStore({
     getState: () => state,
@@ -130,8 +130,39 @@ test('updateSession merges changes into the session object', () => {
     normalizeState: (s) => s,
     setStatus: () => {},
   });
-  store.updateSession({ selectionAnchor: 'x' });
-  assert.equal(store.getSession().selectionAnchor, 'x');
+  store.setSelection(['a', 'b']);
+  assert.deepEqual([...store.getSession().selected], ['a', 'b']);
+  store.addToSelection('c');
+  assert.ok(store.getSession().selected.has('c'));
+  store.removeFromSelection('a');
+  assert.ok(!store.getSession().selected.has('a'));
+  store.clearSelection();
+  assert.equal(store.getSession().selected.size, 0);
+  store.setSelectionAnchor('z');
+  assert.equal(store.getSession().selectionAnchor, 'z');
+  store.setClipboard({ mode: 'copy', ids: ['a'] });
+  assert.equal(store.getSession().clipboard.mode, 'copy');
+});
+
+test('setNavigation and graph expansion operations update the session', () => {
+  let state = {};
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => {},
+    normalizeState: (s) => s,
+    setStatus: () => {},
+  });
+  store.setNavigation({ currentId: 'folder-1', binMode: true });
+  assert.equal(store.getSession().currentId, 'folder-1');
+  assert.equal(store.getSession().binMode, true);
+
+  store.setGraphExpanded(['g1']);
+  assert.deepEqual([...store.getSession().graphExpanded], ['g1']);
+  store.toggleGraphExpanded('g2');
+  assert.ok(store.getSession().graphExpanded.has('g2'));
+  store.toggleGraphExpanded('g1');
+  assert.ok(!store.getSession().graphExpanded.has('g1'));
 });
 
 test('initialSession seeds navigation and bin session state', () => {
