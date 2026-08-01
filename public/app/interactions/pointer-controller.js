@@ -106,7 +106,11 @@ export function createPointerController({
     if (event.button !== 0) return;
     const session = store.getSession();
 
-    if (!event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
+    // Alt is excluded alongside Ctrl: Alt+click batch-expands relative to the
+    // current selection, so it must not select the tile or start a drag —
+    // that would destroy the selection the gesture depends on.
+    if (!event.target.closest('[data-expand]') && !event.target.closest('button')
+      && !event.ctrlKey && !event.altKey) {
       const tile = event.target.closest('.icon-item');
       const shell = tile?.closest('.graph-node-shell');
       if (shell && event.pointerType !== 'touch' && !tile.classList.contains('bin-origin-ghost')) {

@@ -1145,6 +1145,22 @@ elements.grid.addEventListener('click', (event) => {
       return;
     }
     if (tile.classList.contains('bin-origin-ghost')) return;
+    // Alt+click batch-expands everything the selection leaves out: the
+    // select-all scope minus what is selected. Selection is untouched, so it
+    // replaces "select all, deselect a few, Shift+right-click".
+    if (event.altKey && tile.dataset.kind === 'group') {
+      event.preventDefault();
+      const folderIds = commands.inverseSelectionScope(visibleItemIds())
+        .filter((itemId) => group(itemId));
+      if (folderIds.length > 0) {
+        applyBatchExpansion(tile.dataset.id, folderIds);
+        closeMenu();
+        tile.blur();
+        render();
+        saveWorkspaceView();
+      }
+      return;
+    }
     commands.selectItem(tile.dataset.id, {
       shiftKey: event.shiftKey,
       ctrlKey: event.ctrlKey,
@@ -1171,6 +1187,18 @@ elements.grid.addEventListener('click', (event) => {
 });
 
 
+/** Expands or collapses several folders at once, taking the direction from
+ * `pivotId` so they all land in the same state rather than each toggling.
+ * Shared by Shift+right-click (acts on the selection) and Alt+click (acts on
+ * its inverse). */
+function applyBatchExpansion(pivotId, folderIds) {
+  const shouldExpand = !store.getSession().graphExpanded.has(pivotId);
+  for (const folderId of folderIds) {
+    if (shouldExpand) store.addToGraphExpanded(folderId);
+    else store.removeFromGraphExpanded(folderId);
+  }
+}
+
 elements.grid.addEventListener('contextmenu', (event) => {
   event.preventDefault();
   event.stopPropagation();
@@ -1188,11 +1216,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
       const folderIds = session.selected.has(id)
         ? [...session.selected].filter((selectedId) => group(selectedId))
         : [id];
-      const shouldExpand = !session.graphExpanded.has(id);
-      for (const folderId of folderIds) {
-        if (shouldExpand) store.addToGraphExpanded(folderId);
-        else store.removeFromGraphExpanded(folderId);
-      }
+      applyBatchExpansion(id, folderIds);
       closeMenu();
       // Right-clicking a tile moves DOM focus onto it (standard mousedown
       // behavior) even though it's only tabindex="-1" — the plain

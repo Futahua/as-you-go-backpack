@@ -30,12 +30,13 @@ function createHarness({ binMode = false, initialState = null } = {}) {
     setStatus: () => {},
     initialSession: { binMode },
   });
-  const called = { close: 0, permanentDelete: 0 };
+  const called = { close: 0, permanentDelete: 0, membershipEdit: 0 };
   const commandSpies = {};
   for (const name of [
     'clearSelection', 'selectAllVisible', 'copySelection', 'cutSelection',
     'pasteInto', 'undo', 'redo', 'moveSelectionToBin', 'revealSelection',
     'activateItem', 'activateSelection', 'selectedPasteDestinations',
+    'groupSelectionIntoSet',
   ]) {
     commandSpies[`${name}:calls`] = 0;
     commandSpies[`${name}:args`] = [];
@@ -53,14 +54,26 @@ function createHarness({ binMode = false, initialState = null } = {}) {
     closeMenu: () => { called.close += 1; },
     getVisibleItemIds: () => ['a', 'b', 'c'],
     confirmDialog: { askPermanentDelete: () => { called.permanentDelete += 1; } },
+    beginSetMembershipEdit: () => { called.membershipEdit += 1; },
   });
   controller.mount();
   return { controller, store, elements, commandSpies, called, listeners };
 }
 
 function key(event) {
-  return { key: event.key ?? '', ctrlKey: event.ctrlKey ?? false, shiftKey: event.shiftKey ?? false, preventDefault() {} };
+  return {
+    key: event.key ?? '',
+    ctrlKey: event.ctrlKey ?? false,
+    shiftKey: event.shiftKey ?? false,
+    metaKey: event.metaKey ?? false,
+    target: event.target ?? null,
+    preventDefault() {},
+  };
 }
+
+/** A fake text field, for checking that bare-letter shortcuts do not fire
+ * while typing. */
+const typingTarget = () => ({ closest: (selector) => (selector.includes('input') ? {} : null) });
 
 test('Escape clears the selection and closes the menu', () => {
   const h = createHarness();
@@ -203,4 +216,40 @@ test('Ctrl+V passes the selected paste destinations to pasteInto', () => {
   const h = createHarness();
   h.listeners[0].handler(key({ key: 'v', ctrlKey: true }));
   assert.deepEqual(h.commandSpies['pasteInto:args'][0], [['dest']]);
+});
+
+test('G groups the selection into a set', () => {
+  const h = createHarness();
+  h.listeners[0].handler(key({ key: 'g' }));
+  assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 1);
+  assert.equal(h.called.membershipEdit, 0, 'plain G does not open the membership editor');
+});
+
+test('Ctrl+G opens the set membership editor instead of grouping', () => {
+  const h = createHarness();
+  h.listeners[0].handler(key({ key: 'g', ctrlKey: true }));
+  assert.equal(h.called.membershipEdit, 1);
+  assert.equal(
+    h.commandSpies['groupSelectionIntoSet:calls'], 0,
+    'the Ctrl form is never mistaken for the plain one',
+  );
+});
+
+test('Meta+G also opens the membership editor', () => {
+  const h = createHarness();
+  h.listeners[0].handler(key({ key: 'g', metaKey: true }));
+  assert.equal(h.called.membershipEdit, 1);
+});
+
+test('G while typing in a field does not group', () => {
+  const h = createHarness();
+  h.listeners[0].handler(key({ key: 'g', target: typingTarget() }));
+  assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 0, 'the keystroke belongs to the field');
+});
+
+test('G does nothing while a modal layer is open', () => {
+  const h = createHarness();
+  h.elements.promptLayer.hidden = false;
+  h.listeners[0].handler(key({ key: 'g' }));
+  assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 0);
 });

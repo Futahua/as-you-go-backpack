@@ -321,3 +321,28 @@ test('pointercancel restores node positions and cleans up', () => {
   assert.ok(h.effects.reheat.includes(0.2));
   assert.equal(h.getReleased(), 1);
 });
+
+test('Alt+pointerdown on a tile neither selects nor starts a drag', () => {
+  const h = createHarness();
+  const tile = fakeNode();
+  tile.dataset = { id: 'g1', kind: 'group' };
+  const shell = fakeNode();
+  tile.closest = (sel) => (sel === '.icon-item' ? tile : sel === '.graph-node-shell' ? shell : null);
+  h.graphNodes.set('g1', node('g1'));
+  h.grid._dispatch('pointerdown', pointerEvent(1, 10, 10, { target: tile, altKey: true }));
+  assert.equal(
+    h.commandCalls.length, 0,
+    'Alt+click batch-expands relative to the selection, so the selection must survive pointerdown',
+  );
+});
+
+test('a plain pointerdown on the same tile still selects, proving Alt is the difference', () => {
+  const h = createHarness();
+  const tile = fakeNode();
+  tile.dataset = { id: 'g1', kind: 'group' };
+  const shell = fakeNode();
+  tile.closest = (sel) => (sel === '.icon-item' ? tile : sel === '.graph-node-shell' ? shell : null);
+  h.graphNodes.set('g1', node('g1'));
+  h.grid._dispatch('pointerdown', pointerEvent(1, 10, 10, { target: tile }));
+  assert.equal(h.commandCalls[0][0], 'select');
+});

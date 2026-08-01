@@ -1,6 +1,12 @@
 /** Translates keyboard events into plain command inputs. The controller only
  * reads session state and DOM, then delegates session/persistence/host work
  * to the command layer — it never mutates document or session state itself. */
+/** True when the event came from a text field, where a bare letter shortcut
+ * must not steal the keystroke. */
+function isTypingTarget(target) {
+  return Boolean(target?.closest?.('input, textarea, [contenteditable="true"]'));
+}
+
 export function createKeyboardController({
   document,
   elements,
@@ -9,6 +15,7 @@ export function createKeyboardController({
   closeMenu,
   getVisibleItemIds,
   confirmDialog,
+  beginSetMembershipEdit,
 }) {
   let abortController = null;
 
@@ -33,6 +40,16 @@ export function createKeyboardController({
         // original handler's sequence.
         closeMenu();
         commands.clearSelection();
+        return;
+      }
+      // Ctrl+G edits which sets the selection belongs to; G alone groups it
+      // into a new set. Both are checked before the bare-key shortcuts below
+      // so the Ctrl form is never mistaken for the plain one.
+      if (key === 'g') {
+        if (isTypingTarget(event.target)) return;
+        event.preventDefault();
+        if (event.ctrlKey || event.metaKey) beginSetMembershipEdit?.();
+        else void commands.groupSelectionIntoSet();
         return;
       }
       if (event.ctrlKey && key === 'a') {
