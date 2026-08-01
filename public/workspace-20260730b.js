@@ -76,12 +76,24 @@ const elements = getWorkspaceElements(document);
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
 let currentId = ROOT_ID;
-let selected = new Set();
-let selectionAnchor = null;
 let graphExpanded = new Set();
 let clipboard = null;
 let binMode = false;
 let binCurrentId = 'bin';
+
+const store = createWorkspaceStore({
+  getState: () => state,
+  setState: (next) => { state = next; },
+  normalizeState,
+  persist: (snapshot) => host.saveWorkspace(snapshot),
+  setStatus,
+  prepare: (next, session) => captureWorkspaceViewFrom(next, session),
+  afterCommit: () => {
+    closeMenu();
+    render();
+  },
+});
+const session = store.getSession();
 let marqueeDrag = null;
 let suppressBlankClick = false;
 let suppressGraphClick = false;
@@ -230,17 +242,17 @@ function isAvailableItem(itemId) {
   return true;
 }
 
-function captureWorkspaceViewFrom(currentState) {
+function captureWorkspaceViewFrom(currentState, currentSession) {
   return updateWorkspaceView(currentState, {
     currentGroupId: currentId,
     graphExpandedGroupIds: [...graphExpanded],
-    selectedItemIds: [...selected],
+    selectedItemIds: [...currentSession.selected],
     binMode,
   });
 }
 
 function captureWorkspaceView() {
-  return captureWorkspaceViewFrom(state);
+  return captureWorkspaceViewFrom(state, session);
 }
 
 function restoreWorkspaceView() {
@@ -255,11 +267,11 @@ function restoreWorkspaceView() {
   );
   binMode = state.view.binMode;
   const binnedIds = new Set(binnedItems(state).map((candidate) => candidate.id));
-  selected = new Set(
+  session.selected = new Set(
     state.view.selectedItemIds.filter((itemId) =>
       binMode ? binnedIds.has(itemId) : isAvailableItem(itemId)),
   );
-  selectionAnchor = [...selected].at(-1) ?? null;
+  session.selectionAnchor = [...session.selected].at(-1) ?? null;
   state = store.replace(captureWorkspaceView());
 }
 
@@ -597,7 +609,7 @@ function createGraphController() {
     const isGhost = candidate.kind === 'bin-origin';
     const canExpand = candidate.kind === 'group';
     const isExpanded = canExpand && graphExpanded.has(candidate.id);
-    const isSelected = !isGhost && selected.has(candidate.id);
+    const isSelected = !isGhost && session.selected.has(candidate.id);
     iconItem.dataset.kind = candidate.kind;
     iconItem.dataset.parent = candidate.parentId ?? (binMode ? 'bin' : currentId);
     iconItem.setAttribute('draggable', 'false');
@@ -634,7 +646,7 @@ function createGraphController() {
     const candidate = node.candidate;
     if (!candidate) return;
     const isGhost = candidate.kind === 'bin-origin';
-    const isSelected = !isGhost && selected.has(candidate.id);
+    const isSelected = !isGhost && session.selected.has(candidate.id);
     const canExpand = candidate.kind === 'group';
     const isExpanded = canExpand && graphExpanded.has(candidate.id);
 
@@ -907,7 +919,7 @@ function createGraphController() {
       if (!node.shell) return;
       const iconItem = node.shell.querySelector('.icon-item');
       if (!iconItem) return;
-      const isSelected = selected.has(node.id);
+      const isSelected = session.selected.has(node.id);
       iconItem.classList.toggle('selected', isSelected);
       iconItem.setAttribute('aria-selected', String(isSelected));
     });
@@ -988,7 +1000,7 @@ function render() {
   elements.binButton.setAttribute('aria-pressed', String(binMode));
   elements.binLabel.textContent = binMode ? 'Close Bin' : 'Bin';
   elements.binButton.title = binMode ? 'Close Bin' : 'Bin';
-  const hasSelection = binMode && selected.size > 0;
+  const hasSelection = binMode && session.selected.size > 0;
   elements.deleteAllBin.hidden = !binMode || binCount === 0;
   elements.restoreAllBin.hidden = !binMode || binCount === 0;
   elements.deleteAllBin.classList.toggle('selective', hasSelection);
@@ -1004,15 +1016,15 @@ function syncSelection() {
     graph.refreshSelection();
   } else {
     document.querySelectorAll('.icon-item').forEach((tile) => {
-      const isSelected = selected.has(tile.dataset.id);
+      const isSelected = session.selected.has(tile.dataset.id);
       tile.classList.toggle('selected', isSelected);
       tile.setAttribute('aria-selected', String(isSelected));
     });
   }
-  elements.selectionStatus.hidden = selected.size === 0;
-  elements.selectionStatus.textContent = selected.size === 1
+  elements.selectionStatus.hidden = session.selected.size === 0;
+  elements.selectionStatus.textContent = session.selected.size === 1
     ? '1 item selected'
-    : `${selected.size} items selected`;
+    : `${session.selected.size} items selected`;
 }
 
 async function hydrateIcons() {
@@ -1055,22 +1067,22 @@ function visibleItemIds() {
 }
 
 function selectItem(itemId, event) {
-  if (event.shiftKey && selectionAnchor) {
+  if (event.shiftKey && session.selectionAnchor) {
     const ids = visibleItemIds();
-    const from = ids.indexOf(selectionAnchor);
+    const from = ids.indexOf(session.selectionAnchor);
     const to = ids.indexOf(itemId);
     if (from >= 0 && to >= 0) {
-      if (!event.ctrlKey) selected.clear();
+      if (!event.ctrlKey) session.selected.clear();
       const [start, end] = from < to ? [from, to] : [to, from];
-      ids.slice(start, end + 1).forEach((id) => selected.add(id));
+      ids.slice(start, end + 1).forEach((id) => session.selected.add(id));
     }
   } else if (event.ctrlKey) {
-    if (selected.has(itemId)) selected.delete(itemId);
-    else selected.add(itemId);
-    selectionAnchor = itemId;
+    if (session.selected.has(itemId)) session.selected.delete(itemId);
+    else session.selected.add(itemId);
+    session.selectionAnchor = itemId;
   } else {
-    selected = new Set([itemId]);
-    selectionAnchor = itemId;
+    session.selected = new Set([itemId]);
+    session.selectionAnchor = itemId;
   }
   syncSelection();
   saveWorkspaceView();
@@ -1107,7 +1119,7 @@ function updateMarqueeSelection(bounds) {
       };
     })
     .filter((tile) => tile.right > tile.left && tile.bottom > tile.top);
-  selected = new Set([
+  session.selected = new Set([
     ...marqueeDrag.baseSelection,
     ...itemsIntersectingMarquee(tiles, bounds),
   ]);
@@ -1126,12 +1138,12 @@ function finishMarquee(event) {
 }
 
 function currentSelectionParent() {
-  const first = item([...selected][0]);
+  const first = item([...session.selected][0]);
   return first?.parentId ?? currentId;
 }
 
 function selectedPasteDestinations() {
-  const folders = [...selected].map((itemId) => group(itemId)).filter(Boolean);
+  const folders = [...session.selected].map((itemId) => group(itemId)).filter(Boolean);
   return folders.length > 0 ? folders.map((folder) => folder.id) : [currentId];
 }
 
@@ -1143,7 +1155,7 @@ async function activate(itemId) {
       // jump to the real explorer, since the folder (and everything under
       // it) is still hidden there and would just show up empty.
       binCurrentId = folder.id;
-      selected.clear();
+      session.selected.clear();
       graph.destroyGraphView();
       closeMenu();
       render();
@@ -1151,7 +1163,7 @@ async function activate(itemId) {
       return;
     }
     currentId = folder.id;
-    selected.clear();
+    session.selected.clear();
     graph.destroyGraphView();
     closeMenu();
     render();
@@ -1180,7 +1192,7 @@ function directoryOf(target) {
 }
 
 async function revealSelection() {
-  const targets = [...selected]
+  const targets = [...session.selected]
     .map((itemId) => shortcut(itemId))
     .filter((candidate) => candidate && !isWebLink(candidate));
   if (targets.length === 0) return;
@@ -1198,7 +1210,7 @@ async function revealSelection() {
 }
 
 async function activateSelection() {
-  const shortcuts = [...selected]
+  const shortcuts = [...session.selected]
     .map((itemId) => shortcut(itemId))
     .filter(Boolean);
   if (shortcuts.length === 0) return;
@@ -1217,7 +1229,7 @@ async function activateSelection() {
 }
 
 async function copyOrCut(mode) {
-  if (selected.size === 0) return;
+  if (session.selected.size === 0) return;
 
   // Capture right now, at the moment of Ctrl+C/Ctrl+X, both which specific
   // placement each selected shortcut represents and (for a cut) whether it
@@ -1227,7 +1239,7 @@ async function copyOrCut(mode) {
   const collapseWhole = new Set();
   const placementIds = new Map();
 
-  for (const selectedId of selected) {
+  for (const selectedId of session.selected) {
     if (group(selectedId)) continue;
 
     const placementId = visiblePlacementIdFor(selectedId);
@@ -1240,7 +1252,7 @@ async function copyOrCut(mode) {
 
   clipboard = {
     mode,
-    ids: [...selected],
+    ids: [...session.selected],
     collapseWhole,
     placementIds,
   };
@@ -1306,12 +1318,12 @@ function resolveBinTargets(itemIds) {
 }
 
 async function moveToBin() {
-  if (selected.size === 0) return;
-  await commit(binSelection(state, resolveBinTargets([...selected])), 'Moved to Bin.');
+  if (session.selected.size === 0) return;
+  await commit(binSelection(state, resolveBinTargets([...session.selected])), 'Moved to Bin.');
 }
 
 async function runMenuAction(action) {
-  const onlyId = selected.size === 1 ? [...selected][0] : null;
+  const onlyId = session.selected.size === 1 ? [...session.selected][0] : null;
   if (action === 'new-folder') return editorDialog.showEditor('group', null, elements.menu.dataset.parent);
   if (action === 'new-shortcut') return editorDialog.showEditor('shortcut', null, elements.menu.dataset.parent);
   if (action === 'new-web-link') return editorDialog.showEditor('web', null, elements.menu.dataset.parent);
@@ -1325,12 +1337,12 @@ async function runMenuAction(action) {
   if (action === 'copy') return copyOrCut('copy');
   if (action === 'cut') return copyOrCut('cut');
   if (action === 'bin') return moveToBin();
-  if (action === 'restore') return confirmDialog.askRestoreConfirm([...selected]);
+  if (action === 'restore') return confirmDialog.askRestoreConfirm([...session.selected]);
   if (action === 'delete-forever') return confirmDialog.askPermanentDelete();
   if (action === 'reset-graph-position') {
     const ctxId = graphContextId(currentId, binMode);
-    state = store.replace(removeGraphPositions(state, ctxId, [...selected]));
-    for (const id of selected) {
+    state = store.replace(removeGraphPositions(state, ctxId, [...session.selected]));
+    for (const id of session.selected) {
       const node = graph._getNode(id);
       if (node) {
         node.fx = null;
@@ -1380,8 +1392,8 @@ elements.grid.addEventListener('click', (event) => {
       suppressGraphClick = false;
       return;
     }
-    selected.clear();
-    selectionAnchor = null;
+    session.selected.clear();
+    session.selectionAnchor = null;
     syncSelection();
     closeMenu();
     saveWorkspaceView();
@@ -1396,21 +1408,21 @@ elements.grid.addEventListener('pointerdown', (event) => {
     const shell = tile?.closest('.graph-node-shell');
     if (shell && event.pointerType !== 'touch' && !tile.classList.contains('bin-origin-ghost')) {
       const itemId = tile.dataset.id;
-      if (!selected.has(itemId)) {
-        selected = new Set([itemId]);
-        selectionAnchor = itemId;
+      if (!session.selected.has(itemId)) {
+        session.selected = new Set([itemId]);
+        session.selectionAnchor = itemId;
         syncSelection();
         saveWorkspaceView();
       }
       const dragPlacementIds = new Map();
-      for (const id of selected) {
+      for (const id of session.selected) {
         if (group(id)) continue;
         const placementId = visiblePlacementIdFor(id);
         if (placementId) dragPlacementIds.set(id, placementId);
       }
       graphDrag = {
         pointerId: event.pointerId,
-        itemIds: [...selected],
+        itemIds: [...session.selected],
         placementIds: dragPlacementIds,
         primaryNodeId: itemId,
         startClientX: event.clientX,
@@ -1438,12 +1450,12 @@ elements.grid.addEventListener('pointerdown', (event) => {
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
-    baseSelection: event.ctrlKey ? new Set(selected) : new Set(),
+    baseSelection: event.ctrlKey ? new Set(session.selected) : new Set(),
     moved: false,
   };
   if (!event.ctrlKey) {
-    selected.clear();
-    selectionAnchor = null;
+    session.selected.clear();
+    session.selectionAnchor = null;
     syncSelection();
   }
   elements.grid.setPointerCapture(event.pointerId);
@@ -1731,8 +1743,8 @@ elements.grid.addEventListener('contextmenu', (event) => {
     if (event.shiftKey && tile.dataset.kind === 'group') {
       const targetSet = graphExpanded;
       const id = tile.dataset.id;
-      const folderIds = selected.has(id)
-        ? [...selected].filter((selectedId) => group(selectedId))
+      const folderIds = session.selected.has(id)
+        ? [...session.selected].filter((selectedId) => group(selectedId))
         : [id];
       const shouldExpand = !targetSet.has(id);
       for (const folderId of folderIds) {
@@ -1752,9 +1764,9 @@ elements.grid.addEventListener('contextmenu', (event) => {
       saveWorkspaceView();
       return;
     }
-    if (!selected.has(tile.dataset.id)) {
-      selected = new Set([tile.dataset.id]);
-      selectionAnchor = tile.dataset.id;
+    if (!session.selected.has(tile.dataset.id)) {
+      session.selected = new Set([tile.dataset.id]);
+      session.selectionAnchor = tile.dataset.id;
       syncSelection();
       saveWorkspaceView();
     }
@@ -1764,10 +1776,10 @@ elements.grid.addEventListener('contextmenu', (event) => {
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
   if (!blank) return;
   if (binMode) {
-    if (selected.size > 0) openMenu(event.clientX, event.clientY);
+    if (session.selected.size > 0) openMenu(event.clientX, event.clientY);
     return;
   }
-  if (selected.size > 0) {
+  if (session.selected.size > 0) {
     openMenu(event.clientX, event.clientY);
     return;
   }
@@ -1796,7 +1808,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Escape') {
-    selected.clear();
+    session.selected.clear();
     closeMenu();
     syncSelection();
     saveWorkspaceView();
@@ -1804,8 +1816,8 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.ctrlKey && event.key.toLowerCase() === 'a') {
     event.preventDefault();
-    selected = new Set(visibleItemIds());
-    selectionAnchor = null;
+    session.selected = new Set(visibleItemIds());
+    session.selectionAnchor = null;
     syncSelection();
     saveWorkspaceView();
     return;
@@ -1830,21 +1842,21 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     redo();
   }
-  if (event.key === 'Delete' && selected.size > 0) {
+  if (event.key === 'Delete' && session.selected.size > 0) {
     event.preventDefault();
     if (binMode) confirmDialog.askPermanentDelete();
     else moveToBin();
   }
-  if (event.key === 'Enter' && event.ctrlKey && selected.size > 0 && !binMode) {
+  if (event.key === 'Enter' && event.ctrlKey && session.selected.size > 0 && !binMode) {
     event.preventDefault();
     revealSelection();
     return;
   }
-  if (event.key === 'Enter' && selected.size === 1 && !binMode) {
+  if (event.key === 'Enter' && session.selected.size === 1 && !binMode) {
     event.preventDefault();
-    activate([...selected][0]);
+    activate([...session.selected][0]);
   }
-  if (event.key === 'Enter' && selected.size > 1 && !binMode) {
+  if (event.key === 'Enter' && session.selected.size > 1 && !binMode) {
     event.preventDefault();
     activateSelection();
   }
@@ -1969,7 +1981,7 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   const binCrumb = event.target.closest('[data-bin-breadcrumb]');
   if (binCrumb) {
     binCurrentId = binCrumb.dataset.binBreadcrumb;
-    selected.clear();
+    session.selected.clear();
     graph.destroyGraphView();
     render();
     saveWorkspaceView();
@@ -1978,7 +1990,7 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   const crumb = event.target.closest('[data-breadcrumb]');
   if (!crumb) return;
   currentId = crumb.dataset.breadcrumb;
-  selected.clear();
+  session.selected.clear();
   graph.destroyGraphView();
   render();
   saveWorkspaceView();
@@ -1986,7 +1998,7 @@ elements.breadcrumbs.addEventListener('click', (event) => {
 
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
-    const selectedTargets = [...selected]
+    const selectedTargets = [...session.selected]
       .map((selectedId) => shortcutByRecordOrPlacementId(selectedId))
       .filter(Boolean)
       .map((candidate) => candidate.target);
@@ -1999,22 +2011,6 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   }
-});
-
-const store = createWorkspaceStore({
-  getState: () => state,
-  setState: (next) => { state = next; },
-  normalizeState,
-  persist: (snapshot) => host.saveWorkspace(snapshot),
-  setStatus,
-  prepare: (next) => {
-    selected.clear();
-    return captureWorkspaceViewFrom(next);
-  },
-  afterCommit: () => {
-    closeMenu();
-    render();
-  },
 });
 
 const toolbar = createToolbarController({
@@ -2031,7 +2027,7 @@ const toolbar = createToolbarController({
 const confirmDialog = createConfirmationDialog({
   elements,
   getState: () => state,
-  getSelectedIds: () => [...selected],
+  getSelectedIds: () => [...session.selected],
   binItemName,
   permanentlyDelete,
   restoreSelection,
@@ -2044,7 +2040,7 @@ const menu = createContextMenu({
   getCurrentId: () => currentId,
   getBinMode: () => binMode,
   getClipboard: () => clipboard,
-  getSelectedItems: () => [...selected].map(item).filter(Boolean),
+  getSelectedItems: () => [...session.selected].map(item).filter(Boolean),
   isWebLink,
   onAction: runMenuAction,
 });
@@ -2085,8 +2081,8 @@ const binControls = createBinControls({
   getState: () => state,
   getBinMode: () => binMode,
   setBinMode: (next) => { binMode = next; },
-  getSelectedIds: () => [...selected],
-  clearSelection: () => { selected.clear(); },
+  getSelectedIds: () => [...session.selected],
+  clearSelection: () => { session.selected.clear(); },
   resetDrillDown: () => { binCurrentId = 'bin'; },
   binnedItems,
   moveToBin,

@@ -142,3 +142,37 @@ test('save queue recovers after a failed save so later saves still run', async (
   await store.save({ tag: 'c' });
   assert.deepEqual(order, ['b', 'c']);
 });
+
+test('commit clears session selection and passes the session to prepare', async () => {
+  let state = { items: ['root'] };
+  let preparedSession = null;
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => {},
+    normalizeState: (s) => s,
+    setStatus: () => {},
+    prepare: (next, session) => {
+      preparedSession = session;
+      return next;
+    },
+  });
+  store.getSession().selected.add('a');
+  store.getSession().selected.add('b');
+  await store.commit({ items: ['next'] }, {});
+  assert.equal(store.getSession().selected.size, 0);
+  assert.equal(preparedSession, store.getSession());
+});
+
+test('updateSession merges changes into the session object', () => {
+  let state = {};
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => {},
+    normalizeState: (s) => s,
+    setStatus: () => {},
+  });
+  store.updateSession({ selectionAnchor: 'x' });
+  assert.equal(store.getSession().selectionAnchor, 'x');
+});

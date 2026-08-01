@@ -20,6 +20,10 @@ export function createWorkspaceStore({
   let undoStack = [];
   let redoStack = [];
   let saveQueue = Promise.resolve();
+  const session = {
+    selected: new Set(),
+    selectionAnchor: null,
+  };
 
   function save(nextState = getState()) {
     const snapshot = JSON.stringify(nextState);
@@ -40,8 +44,9 @@ export function createWorkspaceStore({
       undoStack.push(previous);
       redoStack.length = 0;
     }
+    session.selected.clear();
     let final = normalizeState(nextState);
-    if (prepare) final = normalizeState(prepare(final) ?? final);
+    if (prepare) final = normalizeState(prepare(final, session) ?? final);
     setState(final);
     afterCommit?.();
     return save(final)
@@ -69,6 +74,8 @@ export function createWorkspaceStore({
 
   return {
     getSnapshot: getState,
+    getSession: () => session,
+    updateSession: (changes) => Object.assign(session, changes),
     canUndo: () => undoStack.length > 0,
     canRedo: () => redoStack.length > 0,
     install(nextState) {
