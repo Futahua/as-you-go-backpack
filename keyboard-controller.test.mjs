@@ -38,8 +38,13 @@ function createHarness({ binMode = false } = {}) {
     'activateItem', 'activateSelection', 'selectedPasteDestinations',
   ]) {
     commandSpies[`${name}:calls`] = 0;
-    commandSpies[name] = (...args) => { commandSpies[`${name}:calls`] += 1; };
+    commandSpies[`${name}:args`] = [];
+    commandSpies[name] = (...args) => {
+      commandSpies[`${name}:calls`] += 1;
+      commandSpies[`${name}:args`].push(args);
+    };
   }
+  commandSpies.selectedPasteDestinations = () => ['dest'];
   const controller = createKeyboardController({
     document: documentMock,
     elements,
@@ -50,7 +55,7 @@ function createHarness({ binMode = false } = {}) {
     confirmDialog: { askPermanentDelete: () => { called.permanentDelete += 1; } },
   });
   controller.mount();
-  return { controller, store, commandSpies, called, listeners };
+  return { controller, store, elements, commandSpies, called, listeners };
 }
 
 function key(event) {
@@ -125,4 +130,29 @@ test('Bin mode suppresses copy/cut/paste and destroys the listener', () => {
   assert.ok(h.listeners.length > 0);
   h.controller.destroy();
   assert.equal(h.listeners.length, 0);
+});
+
+test('a visible dialog layer suppresses all workspace shortcuts', () => {
+  const h = createHarness();
+  h.elements.editorLayer.hidden = false;
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'Delete' }));
+  h.listeners[0].handler(key({ key: 'c', ctrlKey: true }));
+  h.listeners[0].handler(key({ key: 'Escape' }));
+  assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0);
+  assert.equal(h.commandSpies['copySelection:calls'], 0);
+  assert.equal(h.commandSpies['clearSelection:calls'], 0);
+});
+
+test('Ctrl+Shift+Z routes only to redo', () => {
+  const h = createHarness();
+  h.listeners[0].handler(key({ key: 'z', ctrlKey: true, shiftKey: true }));
+  assert.equal(h.commandSpies['redo:calls'], 1);
+  assert.equal(h.commandSpies['undo:calls'], 0);
+});
+
+test('Ctrl+V passes the selected paste destinations to pasteInto', () => {
+  const h = createHarness();
+  h.listeners[0].handler(key({ key: 'v', ctrlKey: true }));
+  assert.deepEqual(h.commandSpies['pasteInto:args'][0], [['dest']]);
 });

@@ -25,8 +25,10 @@ export function createKeyboardController({
         return;
       }
       if (event.key === 'Escape') {
-        commands.clearSelection();
+        // Close the menu before clearing/syncing/saving, matching the
+        // original handler's sequence.
         closeMenu();
+        commands.clearSelection();
         return;
       }
       if (event.ctrlKey && key === 'a') {
