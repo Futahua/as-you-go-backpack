@@ -1,0 +1,253 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  toolbarPositionFromRect,
+  createToolbarController,
+} from './public/app/components/toolbar-controller.js';
+
+const workspaceRect = { left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800 };
+
+test('toolbarPositionFromRect anchors to the nearer edge as a fraction', () => {
+  // Near the left edge -> positive x fraction of width.
+  const left = toolbarPositionFromRect({ left: 20, right: 120, top: 30, bottom: 80 }, workspaceRect);
+  assert.ok(Math.abs(left.x - 20 / 1000) < 1e-9);
+  assert.ok(Math.abs(left.y - 30 / 800) < 1e-9);
+
+  // Near the right edge -> negative x fraction (distance from right edge).
+  const right = toolbarPositionFromRect({ left: 880, right: 980, top: 30, bottom: 80 }, workspaceRect);
+  assert.ok(Math.abs(right.x - (-20 / 1000)) < 1e-9);
+
+  // Near the bottom edge -> negative y fraction.
+  const bottom = toolbarPositionFromRect({ left: 20, right: 120, top: 720, bottom: 790 }, workspaceRect);
+  assert.ok(Math.abs(bottom.y - (-10 / 800)) < 1e-9);
+});
+
+test('toolbarPositionFromRect stays finite on degenerate empty rects', () => {
+  const result = toolbarPositionFromRect({ left: 0, right: 0, top: 0, bottom: 0 }, workspaceRect);
+  assert.ok(Number.isFinite(result.x));
+  assert.ok(Number.isFinite(result.y));
+});
+
+/** Builds a mock window/document/element environment plus a ready controller,
+ * recording state writes, persists, and listener lifecycle. */
+function createHarness(savedPositions = {}) {
+  const stateWrites = [];
+  const persists = [];
+  const statuses = [];
+  const windowListeners = [];
+  const elements = [];
+
+  const workspaceEl = {
+    getBoundingClientRect: () => workspaceRect,
+    offsetWidth: 1000,
+    offsetHeight: 800,
+  };
+
+  const windowMock = {
+    innerWidth: 1000,
+    innerHeight: 800,
+    addEventListener(type, handler, options) {
+      const entry = { type, handler, options };
+      windowListeners.push(entry);
+      if (options?.signal) {
+        options.signal.addEventListener('abort', () => {
+          const index = windowListeners.indexOf(entry);
+          if (index >= 0) windowListeners.splice(index, 1);
+        });
+      }
+    },
+  };
+
+  const documentMock = {
+    querySelectorAll(selector) {
+      return selector === '.toolbar-float[data-toolbar-key]' ? elements : [];
+    },
+    querySelector(selector) {
+      return selector === '.workspace' ? workspaceEl : null;
+    },
+  };
+
+  function makeElement(key) {
+    const elementListeners = [];
+    const classSet = new Set();
+    const element = {
+      dataset: { toolbarKey: key },
+      style: {},
+      offsetWidth: 100,
+      offsetHeight: 60,
+      setPointerCapture() {},
+      releasePointerCapture() {},
+      hasPointerCapture() { return false; },
+      closest() { return null; },
+      classList: {
+        add: (name) => classSet.add(name),
+        remove: (name) => classSet.delete(name),
+        contains: (name) => classSet.has(name),
+      },
+      addEventListener(type, handler, options) {
+        const entry = { type, handler, options };
+        elementListeners.push(entry);
+        if (options?.signal) {
+          options.signal.addEventListener('abort', () => {
+            const index = elementListeners.indexOf(entry);
+            if (index >= 0) elementListeners.splice(index, 1);
+          });
+        }
+      },
+      _listeners: elementListeners,
+      _dispatch(type, event) {
+        for (const entry of [...elementListeners]) {
+          if (entry.type === type) entry.handler(event);
+        }
+      },
+    };
+    // getBoundingClientRect reflects the inline left/top the controller sets,
+    // so a drag actually moves the element in the harness.
+    element.getBoundingClientRect = () => {
+      const left = element.style.left?.endsWith('px')
+        ? Number.parseFloat(element.style.left)
+        : 100;
+      const top = element.style.top?.endsWith('px')
+        ? Number.parseFloat(element.style.top)
+        : 100;
+      return { left, top, right: left + 100, bottom: top + 60, width: 100, height: 60 };
+    };
+    elements.push(element);
+    return element;
+  }
+
+  let state = { view: { toolbarPositions: savedPositions } };
+  const model = {
+    getToolbarPosition(s, key) {
+      return s.view?.toolbarPositions?.[key] ?? null;
+    },
+    setToolbarPosition(s, key, pos) {
+      return {
+        ...s,
+        view: {
+          ...s.view,
+          toolbarPositions: { ...(s.view?.toolbarPositions ?? {}), [key]: pos },
+        },
+      };
+    },
+  };
+
+  const controller = createToolbarController({
+    window: windowMock,
+    document: documentMock,
+    getState: () => state,
+    setState: (next) => { state = next; stateWrites.push(next); },
+    setToolbarPosition: model.setToolbarPosition,
+    getToolbarPosition: model.getToolbarPosition,
+    persist: async (next) => { persists.push(next); },
+    setStatus: (text) => statuses.push(text),
+  });
+
+  return {
+    controller,
+    makeElement,
+    elements,
+    workspaceEl,
+    windowListeners,
+    stateWrites,
+    persists,
+    statuses,
+    getState: () => state,
+    dispatchWindow(type, event) {
+      for (const entry of [...windowListeners]) {
+        if (entry.type === type) entry.handler(event);
+      }
+    },
+  };
+}
+
+function pointerEvent(pointerId, x, y, element) {
+  return { button: 0, pointerId, clientX: x, clientY: y, target: element };
+}
+
+test('toolbar mount restores saved positions as percentage offsets', () => {
+  const h = createHarness({
+    'bin-button': { x: 0.5, y: 0.25 },
+    'delete-all-bin': { x: -0.2, y: 0.1 },
+  });
+  const bin = h.makeElement('bin-button');
+  const del = h.makeElement('delete-all-bin');
+
+  h.controller.mount();
+
+  // x >= 0 anchors left as a percentage of workspace width.
+  assert.equal(bin.style.left, '50%');
+  assert.equal(bin.style.right, 'auto');
+  assert.equal(bin.style.top, '25%');
+  // x < 0 anchors right as a percentage of workspace width.
+  assert.equal(del.style.right, '20%');
+  assert.equal(del.style.left, 'auto');
+});
+
+test('toolbar drag clamps within the workspace and persists the new position', async () => {
+  const h = createHarness({});
+  const el = h.makeElement('bin-button');
+  h.controller.mount();
+
+  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el));
+  // Move well past the 4px threshold to a near-right-edge position.
+  el._dispatch('pointermove', pointerEvent(1, 950, 150, el));
+  el._dispatch('pointerup', pointerEvent(1, 950, 150, el));
+
+  assert.equal(h.persists.length, 1);
+  assert.equal(h.stateWrites.length, 1);
+  // Dropped near the right edge -> stored as a negative fraction.
+  const saved = h.getState().view.toolbarPositions['bin-button'];
+  assert.ok(saved.x < 0, `expected negative right-edge offset, got ${saved.x}`);
+  assert.ok(Math.abs(saved.x) <= 1);
+});
+
+test('toolbar drag below the threshold does not persist a position', () => {
+  const h = createHarness({});
+  const el = h.makeElement('bin-button');
+  h.controller.mount();
+
+  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el));
+  el._dispatch('pointermove', pointerEvent(1, 152, 152, el));
+  el._dispatch('pointerup', pointerEvent(1, 152, 152, el));
+
+  assert.equal(h.persists.length, 0);
+  assert.equal(h.stateWrites.length, 0);
+});
+
+test('toolbar resize re-applies saved positions after the debounce', async () => {
+  const h = createHarness({ 'bin-button': { x: 0.5, y: 0.25 } });
+  const el = h.makeElement('bin-button');
+  h.controller.mount();
+
+  // Clear the mounted position so the resize handler has work to redo.
+  el.style.left = 'auto';
+  el.style.top = 'auto';
+  h.dispatchWindow('resize', {});
+  await new Promise((resolve) => setTimeout(resolve, 120));
+
+  assert.equal(el.style.left, '50%');
+  assert.equal(el.style.top, '25%');
+});
+
+test('toolbar destroy removes listeners and clears a pending resize timer', async () => {
+  const h = createHarness({ 'bin-button': { x: 0.5, y: 0.25 } });
+  const el = h.makeElement('bin-button');
+  h.controller.mount();
+
+  const windowListenerCount = h.windowListeners.length;
+  const elementListenerCount = el._listeners.length;
+  assert.ok(windowListenerCount > 0);
+  assert.ok(elementListenerCount > 0);
+
+  h.controller.destroy();
+
+  // AbortController signal removal drops the registered listeners.
+  assert.equal(h.windowListeners.length, 0);
+  assert.equal(el._listeners.length, 0);
+
+  // A resize fired after destroy schedules nothing that would write state.
+  h.dispatchWindow('resize', {});
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(h.stateWrites.length, 0);
+});

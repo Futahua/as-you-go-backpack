@@ -1,0 +1,121 @@
+
+.graph-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.graph-camera {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.graph-edges-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+.graph-node-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+}
+.graph-node-shell {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: max-content;
+  height: max-content;
+  will-change: transform;
+  transition: opacity 200ms ease, scale 200ms ease;
+}
+.graph-node-shell.exiting {
+  pointer-events: none;
+  transition: transform 200ms ease, opacity 200ms ease, scale 200ms ease;
+}
+.graph-node-shell.graph-dragging {
+  z-index: 3;
+  opacity: 0.88;
+}
+.graph-node-shell.graph-dragging .icon-item {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  outline: 2px solid rgba(76, 114, 90, 0.65);
+}
+.graph-node-shell.will-pin .icon-item {
+  outline-color: rgba(76, 114, 90, 0.9);
+  outline-width: 2.5px;
+}
+.graph-node-shell.will-release .icon-item {
+  outline-color: rgba(120, 120, 120, 0.55);
+  outline-style: dashed;
+  outline-width: 2px;
+}
+.graph-node-shell.graph-drop-target .icon-item {
+  border-color: #4c725a;
+  background: #d7e7d9;
+  box-shadow: 0 0 0 3px rgba(76, 114, 90, 0.16);
+}
+.bin-button.graph-bin-drop-target {
+  border-color: #a23b3b;
+  background: #f2d7d7;
+  box-shadow: 0 0 0 3px rgba(162, 59, 59, 0.22);
+}
+.graph-edge {
+  fill: none;
+  stroke: #b9b3a6;
+  stroke-width: 1.5;
+  transition: opacity 180ms ease, stroke 180ms ease;
+}
+.graph-edge.bin-origin-edge {
+  stroke: #b23b3b;
+  stroke-dasharray: 4 3;
+}
+.graph-node-shell.bin-origin-ghost {
+  pointer-events: none;
+}
+.icon-item.bin-origin-ghost {
+  opacity: 0.55;
+  border-style: dashed;
+  cursor: default;
+}
+.icon-item.bin-origin-ghost:hover {
+  background: transparent;
+}
+.empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  color: #888276;
+  place-items: center;
+  padding: 40px;
+  text-align: center;
+  pointer-events: none;
+}
+.selection-marquee {
+  position: absolute;
+  z-index: 10;
+  border: 1px solid rgba(76, 114, 90, 0.72);
+  background: rgba(137, 174, 145, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.34);
+  pointer-events: none;
+}
+.selection-status {
+  position: fixed;
+  right: 20px;
+  bottom: 18px;
+  z-index: 15;
+  border: 1px solid #c8c2b5;
+  border-radius: 999px;
+  background: rgba(250, 248, 241, 0.96);
+  padding: 7px 12px;
+  box-shadow: 0 8px 22px rgba(59, 53, 43, 0.12);
+  color: #5f5a50;
+  font-size: 11px;
+}

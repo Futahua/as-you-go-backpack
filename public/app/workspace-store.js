@@ -1,0 +1,121 @@
+/** Single owner of workspace history and persistence. All state mutations
+ * route through this store: history-bearing edits go through commit(), and
+ * non-historical view/position changes go through replace(). The document
+ * state itself lives in the injected getState/setState pair so the entry can
+ * keep its existing references while every write funnels through the store.
+ *
+ * prepare() (when provided) runs before installing a committed state — the
+ * entry uses it to fold the current navigation session into the saved view.
+ * The store clears the session selection directly before invoking prepare().
+ * afterCommit() runs after the new state is installed but before persisting. */
+export function createWorkspaceStore({
+  getState,
+  setState,
+  persist,
+  normalizeState,
+  prepare,
+  afterCommit,
+  setStatus,
+  initialSession = {},
+}) {
+  let undoStack = [];
+  let redoStack = [];
+  let saveQueue = Promise.resolve();
+  const session = {
+    selected: new Set(),
+    selectionAnchor: null,
+    currentId: null,
+    binCurrentId: 'bin',
+    binMode: false,
+    graphExpanded: new Set(),
+    clipboard: null,
+    ...initialSession,
+  };
+
+  function save(nextState = getState()) {
+    const snapshot = JSON.stringify(nextState);
+    const operation = saveQueue
+      .catch(() => undefined)
+      .then(() => persist(snapshot));
+    saveQueue = operation;
+    return operation;
+  }
+
+  function commit(nextState, { isUndo = false, isRedo = false } = {}) {
+    const previous = getState();
+    if (isUndo) {
+      redoStack.push(previous);
+    } else if (isRedo) {
+      undoStack.push(previous);
+    } else {
+      undoStack.push(previous);
+      redoStack.length = 0;
+    }
+    let final = normalizeState(nextState);
+    // Selection is cleared only after the initial normalization succeeds, so
+    // a malformed state that makes normalizeState throw does not destroy the
+    // current selection.
+    session.selected.clear();
+    if (prepare) final = normalizeState(prepare(final, session) ?? final);
+    setState(final);
+    afterCommit?.();
+    return save(final)
+      .then(() => {
+        setStatus?.('');
+        return true;
+      })
+      .catch((error) => {
+        setStatus?.(error instanceof Error ? error.message : String(error));
+        return false;
+      });
+  }
+
+  async function undo() {
+    if (undoStack.length === 0) return;
+    const previous = undoStack.pop();
+    return commit(previous, { isUndo: true });
+  }
+
+  async function redo() {
+    if (redoStack.length === 0) return;
+    const next = redoStack.pop();
+    return commit(next, { isRedo: true });
+  }
+
+  return {
+    getSnapshot: getState,
+    getSession: () => session,
+    setSelection: (ids) => { session.selected = new Set(ids); },
+    addToSelection: (id) => { session.selected.add(id); },
+    removeFromSelection: (id) => { session.selected.delete(id); },
+    clearSelection: () => { session.selected.clear(); },
+    setSelectionAnchor: (anchor) => { session.selectionAnchor = anchor; },
+    setNavigation: ({ currentId, binCurrentId, binMode } = {}) => {
+      if (currentId !== undefined) session.currentId = currentId;
+      if (binCurrentId !== undefined) session.binCurrentId = binCurrentId;
+      if (binMode !== undefined) session.binMode = binMode;
+    },
+    setGraphExpanded: (ids) => { session.graphExpanded = new Set(ids); },
+    toggleGraphExpanded: (id) => {
+      if (session.graphExpanded.has(id)) session.graphExpanded.delete(id);
+      else session.graphExpanded.add(id);
+    },
+    addToGraphExpanded: (id) => { session.graphExpanded.add(id); },
+    removeFromGraphExpanded: (id) => { session.graphExpanded.delete(id); },
+    setClipboard: (clipboard) => { session.clipboard = clipboard; },
+    canUndo: () => undoStack.length > 0,
+    canRedo: () => redoStack.length > 0,
+    install(nextState) {
+      setState(normalizeState(nextState));
+      return getState();
+    },
+    replace(nextState) {
+      setState(nextState);
+      return getState();
+    },
+    save,
+    commit,
+    undo,
+    redo,
+  };
+}

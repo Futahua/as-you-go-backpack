@@ -1,0 +1,43 @@
+
+.workspace {
+  position: relative;
+  min-height: 100vh;
+}
+
+.navigation {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+}
+.quiet-button,
+.paper-button {
+  border: 1px solid #cec9bd;
+  border-radius: 9px;
+  background: rgba(252, 251, 247, 0.9);
+  padding: 8px 11px;
+  cursor: pointer;
+}
+.quiet-button:hover,
+.paper-button:hover { border-color: #aaa397; background: #fff; }
+.quiet-button:focus-visible,
+.paper-button:focus-visible,
+.icon-item:focus-visible,
+.folder-expander:focus-visible { outline: 2px solid #6a8d74; outline-offset: 2px; }
+.bin-button[aria-pressed="true"] { background: #eee6d8; }
+.bin-count {
+  min-width: 18px;
+  margin-left: 5px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #5b695c;
+  color: white;
+  font-size: 10px;
+}
