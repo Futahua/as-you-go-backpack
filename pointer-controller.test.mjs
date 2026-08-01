@@ -50,7 +50,8 @@ function createHarness({ binMode = false } = {}) {
   grid.hasPointerCapture = () => true;
   grid.releasePointerCapture = () => {};
   grid.querySelector = () => null;
-  grid.querySelectorAll = () => [];
+  let shells = [];
+  grid.querySelectorAll = () => shells;
   const binButton = fakeNode();
   binButton.contains = () => false;
   const elements = { grid, binButton };
@@ -64,7 +65,8 @@ function createHarness({ binMode = false } = {}) {
       if (index >= 0) windowListeners.splice(index, 1);
     },
   };
-  const documentMock = { querySelectorAll: () => [], elementFromPoint: () => null };
+  let elementAtPoint = null;
+  const documentMock = { querySelectorAll: () => shells, elementFromPoint: () => elementAtPoint };
   const commandCalls = [];
   const commands = {
     selectItem: (id, opts) => { commandCalls.push(['select', id, opts]); },
@@ -105,11 +107,15 @@ function createHarness({ binMode = false } = {}) {
   controller.mount();
   return {
     controller, grid, binButton, store, commands, commandCalls, graphNodes, effects, windowListeners, marquee,
+    getShells: () => shells,
+    setShells: (value) => { shells = value; },
+    setElementAtPoint: (value) => { elementAtPoint = value; },
   };
 }
 
 function node(id, x = 0, y = 0) {
   const shell = fakeNode();
+  shell.dataset = { graphNodeId: id };
   return { id, x, y, fx: null, fy: null, positioned: false, shell };
 }
 
@@ -236,4 +242,50 @@ test('destroy removes the pointer listeners', () => {
   assert.ok(h.grid._listeners.length > 0);
   h.controller.destroy();
   assert.equal(h.grid._listeners.length, 0);
+});
+
+function startDrag(h, overrides = {}) {
+  const tile = fakeNode();
+  tile.dataset = { id: 's1', kind: 'shortcut' };
+  tile.closest = (sel) => (sel === '.icon-item' ? tile : sel === '.graph-node-shell' ? tile : null);
+  const n = node('s1', 100, 100);
+  h.graphNodes.set('s1', n);
+  h.store.setSelection(['s1']);
+  h.setShells([n.shell]);
+  h.grid._dispatch('pointerdown', pointerEvent(1, 10, 10, { target: tile }));
+  h.grid._dispatch('pointermove', pointerEvent(1, 20, 15, overrides));
+  return n;
+}
+
+test('pointerup over a non-dragged group routes dragDropToFolder', () => {
+  const h = createHarness();
+  const n = startDrag(h);
+  // Destination folder shell is a non-dragged group at the pointer.
+  const folderShell = fakeNode();
+  folderShell.dataset = { graphNodeId: 'g1' };
+  folderShell.querySelector = () => ({ dataset: { kind: 'group', id: 'g1' } });
+  folderShell.closest = (sel) => (sel === '.graph-node-shell' ? folderShell : null);
+  h.setShells([n.shell, folderShell]);
+  h.setElementAtPoint(folderShell);
+  h.grid._dispatch('pointerup', pointerEvent(1, 20, 15));
+  const folderCall = h.commandCalls.find(([name]) => name === 'folder');
+  assert.ok(folderCall, 'dragDropToFolder should be invoked');
+  assert.deepEqual(folderCall[1].itemIds, ['s1']);
+  assert.equal(folderCall[1].folderId, 'g1');
+  assert.ok(folderCall[1].placementIds instanceof Map);
+});
+
+test('pointercancel restores node positions and cleans up', () => {
+  const h = createHarness();
+  const n = startDrag(h);
+  const movedX = n.fx;
+  const movedY = n.fy;
+  assert.notEqual(movedX, 100);
+  h.grid._dispatch('pointercancel', pointerEvent(1, 20, 15));
+  assert.equal(n.x, 100);
+  assert.equal(n.y, 100);
+  assert.equal(n.fx, null);
+  assert.equal(n.fy, null);
+  assert.equal(n.shell.classList.contains('graph-dragging'), false);
+  assert.ok(h.effects.reheat.includes(0.2));
 });

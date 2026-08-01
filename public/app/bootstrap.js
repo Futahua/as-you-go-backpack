@@ -1,9 +1,10 @@
 /** Orchestrates workspace startup. Behavior-only components (context menu,
- * editor, confirmation dialog, Bin controls, keyboard controller) mount
- * synchronously so their listeners are attached regardless of whether host
- * state loading succeeds — the rendered fallback interface stays interactive
- * even when loading fails. The toolbar mounts only after state is restored,
- * since it immediately re-applies saved positions. */
+ * editor, confirmation dialog, Bin controls, keyboard, drop, and pointer
+ * controllers) mount synchronously so their listeners are attached
+ * regardless of whether host state loading succeeds — the rendered fallback
+ * interface stays interactive even when loading fails. The toolbar mounts
+ * only after state is restored, since it immediately re-applies saved
+ * positions. */
 export function bootstrapWorkspace({
   loadState,
   setState,

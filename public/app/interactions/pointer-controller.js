@@ -227,21 +227,27 @@ export function createPointerController({
     const session = store.getSession();
     const hitBin = !session.binMode && elements.binButton?.contains(document.elementFromPoint(event.clientX, event.clientY));
     const shells = [...elements.grid.querySelectorAll('.graph-node-shell')];
-    shells.forEach((s) => { s.style.pointerEvents = ''; });
     let hitFolderId = null;
     if (!hitBin) {
-      shells.forEach((s) => {
-        if (!drag.itemIds.includes(s.dataset.graphNodeId)) {
-          s.style.pointerEvents = 'none';
+      // Disable the dragged shells so the non-dragged destination folder
+      // remains hit-testable under the pointer.
+      const draggedShells = shells.filter((shell) =>
+        drag.itemIds.includes(shell.dataset.graphNodeId));
+      try {
+        for (const shell of draggedShells) {
+          shell.style.pointerEvents = 'none';
         }
-      });
-      const elAtPoint = document.elementFromPoint(event.clientX, event.clientY);
-      const hitShell = elAtPoint?.closest('.graph-node-shell');
-      shells.forEach((s) => { s.style.pointerEvents = ''; });
-      if (hitShell && !drag.itemIds.includes(hitShell.dataset.graphNodeId)) {
-        const hitItem = hitShell.querySelector('.icon-item');
-        if (hitItem?.dataset.kind === 'group') {
-          hitFolderId = hitItem.dataset.id;
+        const elementAtPoint = document.elementFromPoint(event.clientX, event.clientY);
+        const hitShell = elementAtPoint?.closest('.graph-node-shell');
+        if (hitShell && !drag.itemIds.includes(hitShell.dataset.graphNodeId)) {
+          const hitItem = hitShell.querySelector('.icon-item');
+          if (hitItem?.dataset.kind === 'group') {
+            hitFolderId = hitItem.dataset.id;
+          }
+        }
+      } finally {
+        for (const shell of draggedShells) {
+          shell.style.pointerEvents = '';
         }
       }
     }
