@@ -345,6 +345,19 @@
 }
 .prompt-row-expanded.prompt-selected { background: rgba(200, 214, 201, 0.62); }
 .prompt-cut { opacity: 0.45; }
+/* Copy confirmation: the button flashes green so the click is visibly
+ * acknowledged even when the copied text is off screen. */
+@keyframes prompt-copied-flash {
+  0% { background: #4c725a; border-color: #4c725a; color: #fffef9; }
+  70% { background: #4c725a; border-color: #4c725a; color: #fffef9; }
+  100% { background: inherit; border-color: inherit; color: inherit; }
+}
+.prompt-copied-flash {
+  animation: prompt-copied-flash 640ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prompt-copied-flash { animation-duration: 1ms; }
+}
 .prompt-checkbox { accent-color: #4c725a; }
 /* Folder exclude-all. A native checkbox has no excluded state, so the box is
  * drawn explicitly: red fill with a white minus, clearly distinct from the

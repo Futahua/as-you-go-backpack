@@ -43,6 +43,9 @@ import { setPromptLibrary } from '../../workspace-model-20260730b.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+const COPY_SELECTED_LABEL = 'Copy selected';
+const COPY_FLASH_MS = 1400;
+
 /** Small local SVG icon set for the prompt tree. */
 const ICONS = {
   chevron: [{ d: 'M6 8l4 4 4-4' }],
@@ -106,6 +109,7 @@ export function createPromptLibraryDialog({
    * Derived from selection changes so it can never drift from what is visible;
    * validated against the live tree when a paste resolves. */
   let activeDestination = { type: 'root', nodeId: null };
+  let copyFlashTimer = null;
 
   const icon = (name) => createSvg(document, ICONS[name]);
 
@@ -272,12 +276,31 @@ export function createPromptLibraryDialog({
     intents,
   });
 
-  function copyToClipboard(text) {
+  function copyToClipboard(text, confirmation = null) {
     void copyText(text).then(() => {
-      statusMessage('Prompt copied.');
+      statusMessage(confirmation ? `${confirmation}.` : 'Prompt copied.');
+      if (confirmation) flashCopied(confirmation);
     }).catch((caught) => {
       error.textContent = caught instanceof Error ? caught.message : String(caught);
     });
+  }
+
+  /** Confirms a copy on the button itself: flashes green and shows what was
+   * copied, then restores the label. Overlapping copies reuse one timer so a
+   * fast second click cannot strand the temporary label. */
+  function flashCopied(label) {
+    if (!copySelectedButton) return;
+    if (copyFlashTimer != null) {
+      clearTimeout(copyFlashTimer);
+      copySelectedButton.classList.remove('prompt-copied-flash');
+    }
+    copySelectedButton.textContent = label;
+    copySelectedButton.classList.add('prompt-copied-flash');
+    copyFlashTimer = setTimeout(() => {
+      copyFlashTimer = null;
+      copySelectedButton.classList.remove('prompt-copied-flash');
+      copySelectedButton.textContent = COPY_SELECTED_LABEL;
+    }, COPY_FLASH_MS);
   }
 
   /** Prompt-library-local live feedback, always inside the modal. */
@@ -307,7 +330,10 @@ export function createPromptLibraryDialog({
       statusMessage('Nothing to copy: the selected rows have no prompt text.');
       return;
     }
-    copyToClipboard(text);
+    // Count the prompts actually copied, not the rows selected: a single
+    // selected folder can contribute many.
+    const count = text.split('\n\n').length;
+    copyToClipboard(text, `Copied ${count} ${count === 1 ? 'prompt' : 'prompts'}`);
   }
 
   function copyNodes(ids) {
@@ -1176,12 +1202,23 @@ export function createPromptLibraryDialog({
 
   function close() {
     contextMenu.close();
+    clearCopyFlash();
     treeClipboard = null;
     cutIds.clear();
     activeEditSession = null;
     status.textContent = '';
     layer.hidden = true;
     error.textContent = '';
+  }
+
+  /** Cancels a pending confirmation so it cannot fire against a closed dialog
+   * and leave the button stuck on the temporary label. */
+  function clearCopyFlash() {
+    if (copyFlashTimer == null) return;
+    clearTimeout(copyFlashTimer);
+    copyFlashTimer = null;
+    copySelectedButton.classList.remove('prompt-copied-flash');
+    copySelectedButton.textContent = COPY_SELECTED_LABEL;
   }
 
   // ------------------------------------------------------------------- save
@@ -1247,6 +1284,7 @@ export function createPromptLibraryDialog({
   function destroy() {
     abortController?.abort();
     abortController = null;
+    clearCopyFlash();
     controller.destroy();
     contextMenu.destroy();
   }

@@ -228,6 +228,8 @@ function buildPromptLayerTree(nodes) {
   nodes['prompt-card-list'].className = 'prompt-tree-list';
   nodes['prompt-root-surface'].className = 'prompt-root-surface';
   nodes['prompt-tree-menu'].setAttribute('role', 'menu');
+  // The real markup carries this label; the dialog only ever restores it.
+  nodes['prompt-copy-selected'].textContent = 'Copy selected';
   nodes['prompt-tree-viewport'].appendChild(nodes['prompt-card-list']);
   nodes['prompt-tree-viewport'].appendChild(nodes['prompt-root-surface']);
   for (const id of [
@@ -261,7 +263,7 @@ const treeFixture = () => ({
   ] },
 });
 
-function createHarness({ initialView = null } = {}) {
+function createHarness({ initialView = null, copyFails = false } = {}) {
   let state = initialView
     ? { groups: [], shortcuts: [], view: initialView }
     : { groups: [], shortcuts: [], view: { promptLibrary: [] } };
@@ -314,7 +316,11 @@ function createHarness({ initialView = null } = {}) {
     document: documentMock,
     store,
     fallbackPrompt: 'FALLBACK PROMPT',
-    copyText: (text) => { copied.push(text); return Promise.resolve(); },
+    copyText: (text) => {
+      if (copyFails) return Promise.reject(new Error('clipboard blocked'));
+      copied.push(text);
+      return Promise.resolve();
+    },
     setStatus: (message) => statuses.push(message),
   });
   dialog.mount();
@@ -1809,4 +1815,93 @@ test('Copy selected does not touch the draft, history, or the workspace store', 
   keyOn(h, { key: 'z', ctrlKey: true });
   assert.ok(h.nodes['prompt-status'].textContent.includes('Nothing to undo'), 'copying is not an undoable edit');
   assert.deepEqual(h.getState(), before, 'workspace store untouched');
+});
+
+// ===========================================================================
+// Copy confirmation: the button flashes green and names what was copied.
+// ===========================================================================
+
+test('copying flashes the button and annotates what was copied', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  copySelected(h);
+  await Promise.resolve();
+  assert.deepEqual(h.copied, ['three'], 'text reached the clipboard');
+  assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copied 1 prompt', 'singular annotation');
+  assert.ok(
+    h.nodes['prompt-copy-selected'].classList.contains('prompt-copied-flash'),
+    'the button flashes',
+  );
+});
+
+test('the annotation counts prompts copied, not rows selected', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  // One selected folder contributes two prompts.
+  clickRow(h, 'folder-dev');
+  copySelected(h);
+  await Promise.resolve();
+  assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copied 2 prompts', 'plural, counted from the text');
+});
+
+test('the confirmation restores the button label', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  copySelected(h);
+  await Promise.resolve();
+  assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copied 1 prompt');
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copy selected', 'label restored');
+  assert.ok(
+    !h.nodes['prompt-copy-selected'].classList.contains('prompt-copied-flash'),
+    'flash class removed',
+  );
+});
+
+test('a second copy restarts the confirmation instead of stranding the label', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  copySelected(h);
+  await Promise.resolve();
+  // Second copy lands most of the way through the first confirmation. If the
+  // first timer is not cancelled it fires mid-second-confirmation and clears
+  // the label early.
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  clickRow(h, 'folder-dev');
+  copySelected(h);
+  await Promise.resolve();
+  assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copied 2 prompts', 'second copy wins');
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(
+    h.nodes['prompt-copy-selected'].textContent, 'Copied 2 prompts',
+    'the first timer must not cut the second confirmation short',
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copy selected', 'restored once');
+});
+
+test('closing during a confirmation restores the label immediately', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  copySelected(h);
+  await Promise.resolve();
+  h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
+  assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copy selected', 'not left on the confirmation');
+  assert.ok(!h.nodes['prompt-copy-selected'].classList.contains('prompt-copied-flash'));
+});
+
+test('a failed copy reports the error and does not flash success', async () => {
+  const h = createHarness({ initialView: treeFixture().view, copyFails: true });
+  open(h);
+  clickRow(h, 'prompt-root');
+  copySelected(h);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copy selected', 'no success annotation');
+  assert.ok(!h.nodes['prompt-copy-selected'].classList.contains('prompt-copied-flash'), 'no flash');
+  assert.ok(h.nodes['prompt-error'].textContent.includes('clipboard blocked'), 'the failure is surfaced');
 });
