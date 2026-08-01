@@ -45,6 +45,7 @@ import {
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
+import { setOutlinePath } from './set-hull-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -318,6 +319,9 @@ function createGraphController() {
   let viewport = null;
   let camera = null;
   let edgeLayer = null;
+  let setLayer = null;
+  const setShapes = new Map();
+  let setAnimationId = 0;
   let nodeLayer = null;
   let svg = null;
   let resizeObserver = null;
@@ -355,8 +359,12 @@ function createGraphController() {
     svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'graph-edges-svg');
     svg.setAttribute('aria-hidden', 'true');
+    // Set outlines sit behind the edges so tiles and links stay readable on
+    // top of them.
+    setLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    setLayer.setAttribute('class', 'graph-set-layer');
     edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    svg.append(edgeLayer);
+    svg.append(setLayer, edgeLayer);
 
     nodeLayer = document.createElement('div');
     nodeLayer.className = 'graph-node-layer';
@@ -386,6 +394,9 @@ function createGraphController() {
       viewport = null;
       camera = null;
       edgeLayer = null;
+      setLayer = null;
+      stopSetAnimation();
+      setShapes.clear();
       nodeLayer = null;
       svg = null;
       throw error;
@@ -444,12 +455,96 @@ function createGraphController() {
     });
   }
 
+  /** Creates and removes one path per set that has members on screen. The
+   * shape itself is recomputed every frame in drawFrame, since it is derived
+   * from live node positions. */
+  function syncSetShapes() {
+    if (!setLayer) return;
+    const wanted = new Map();
+    for (const itemSet of (state.view?.itemSets ?? [])) {
+      const members = itemSet.memberIds.filter((memberId) => {
+        const node = nodes.get(memberId);
+        return node && !node.exiting;
+      });
+      // A set with nothing on screen has no outline to draw; it still exists
+      // in the data and reappears when its members do.
+      if (members.length > 0) wanted.set(itemSet.id, members);
+    }
+    for (const [setId, shape] of setShapes) {
+      if (!wanted.has(setId)) {
+        shape.path?.remove();
+        setShapes.delete(setId);
+      }
+    }
+    for (const [setId, members] of wanted) {
+      let shape = setShapes.get(setId);
+      if (!shape) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-set-outline');
+        path.dataset.setId = setId;
+        setLayer.append(path);
+        shape = { setId, path };
+        setShapes.set(setId, shape);
+      }
+      shape.memberIds = members;
+    }
+    if (setShapes.size === 0) stopSetAnimation();
+    else ensureSetAnimation();
+  }
+
+  /** Keeps the outlines breathing after the force simulation settles.
+   *
+   * drawFrame otherwise only runs on a simulation tick, so once the graph
+   * comes to rest the wobble would freeze mid-cycle. The loop exists only
+   * while at least one set is on screen, so a workspace with no sets does no
+   * extra work at all. */
+  function ensureSetAnimation() {
+    if (setShapes.size === 0 || setAnimationId) return;
+    const step = () => {
+      if (setShapes.size === 0) {
+        setAnimationId = 0;
+        return;
+      }
+      drawSetShapes();
+      setAnimationId = requestAnimationFrame(step);
+    };
+    setAnimationId = requestAnimationFrame(step);
+  }
+
+  function stopSetAnimation() {
+    if (!setAnimationId) return;
+    cancelAnimationFrame(setAnimationId);
+    setAnimationId = 0;
+  }
+
+  /** Recomputes every outline from where its members are right now. */
+  function drawSetShapes() {
+    if (setShapes.size === 0) return;
+    const time = (performance.now() ?? 0) / 1000;
+    const chosen = new Set(setMembershipMode.chosenSetIds());
+    const picking = setMembershipMode.isActive();
+    for (const shape of setShapes.values()) {
+      const rects = (shape.memberIds ?? [])
+        .map((memberId) => nodes.get(memberId))
+        .filter(Boolean)
+        .map((node) => ({ x: node.x, y: node.y, width: node.width, height: node.height }));
+      if (rects.length === 0) {
+        shape.path.setAttribute('d', '');
+        continue;
+      }
+      shape.path.setAttribute('d', setOutlinePath(rects, { id: shape.setId, time }));
+      shape.path.classList.toggle('set-picking', picking);
+      shape.path.classList.toggle('set-chosen', picking && chosen.has(shape.setId));
+    }
+  }
+
   function drawFrame() {
     nodes.forEach((node) => {
       if (node.exiting || !node.shell) return;
       node.shell.style.transform =
         `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
     });
+    drawSetShapes();
     syncFolderColors();
     edges.forEach((edge) => {
       const source = nodes.get(edge.sourceId);
@@ -911,6 +1006,7 @@ function createGraphController() {
       nodes.forEach((_, id) => removeNode(id));
       syncEdges([]);
       syncOriginEdges([]);
+      syncSetShapes();
       return;
     }
     const originEdges = session.binMode ? binOriginEdges(visible) : [];
@@ -927,6 +1023,7 @@ function createGraphController() {
     syncNodes([...visible, ...ghostItems]);
     syncEdges(visible);
     syncOriginEdges(originEdges);
+    syncSetShapes();
     syncSimulation();
     reheat(initialFit ? 0.7 : 0.35);
     if (initialFit && !initialized) {

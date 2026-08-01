@@ -84,6 +84,30 @@
   background: #f2d7d7;
   box-shadow: 0 0 0 3px rgba(162, 59, 59, 0.22);
 }
+/* Set outlines. The shape itself is recomputed every frame from member
+ * positions, so there is no CSS transition on the path — only on the colours,
+ * which change when the membership picker opens. */
+.graph-set-layer { pointer-events: none; }
+.graph-set-outline {
+  fill: rgba(122, 148, 128, 0.09);
+  stroke: rgba(92, 122, 100, 0.45);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  transition: fill 180ms ease, stroke 180ms ease, stroke-width 180ms ease;
+}
+/* While Ctrl+G is picking, unchosen sets recede and chosen ones light up, so
+ * the canvas itself is the picker. */
+.graph-set-outline.set-picking {
+  fill: rgba(122, 148, 128, 0.04);
+  stroke: rgba(92, 122, 100, 0.22);
+  stroke-dasharray: 6 5;
+}
+.graph-set-outline.set-picking.set-chosen {
+  fill: rgba(76, 114, 90, 0.16);
+  stroke: #4c725a;
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
 .graph-edge {
   fill: none;
   stroke: #b9b3a6;
