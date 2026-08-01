@@ -1390,3 +1390,156 @@ test('the root surface stays a clickable target with only a few rows', () => {
   surface.dispatch('click', { target: surface, preventDefault, stopPropagation });
   assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'false', 'clicking below the last row targets root');
 });
+
+// ===========================================================================
+// Batch checkbox gestures: selection-driven bulk apply and Shift+click ranges.
+// ===========================================================================
+
+/** Clicks a row checkbox the way a browser does: click (carrying modifiers)
+ * then change, with the new checked value already applied. */
+const clickCheckbox = (h, id, { shiftKey = false } = {}) => {
+  const box = h.rowFor(id).querySelector('.prompt-checkbox');
+  box.checked = !box.checked;
+  box.dispatch('click', { target: box, shiftKey, preventDefault, stopPropagation });
+  box.dispatch('change', { target: box, shiftKey, preventDefault, stopPropagation });
+  return box;
+};
+const checkedOf = (h, id) => h.rowFor(id).querySelector('.prompt-checkbox').checked;
+
+test('checkbox click on a row inside the selection applies to every selected row', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  // Uncheck prompt-a first so the selection is genuinely mixed:
+  // prompt-a false, prompt-b false, prompt-root true.
+  clickCheckbox(h, 'prompt-a');
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-b', { ctrlKey: true });
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  // Checking prompt-b must force the entire mixed selection to checked.
+  clickCheckbox(h, 'prompt-b');
+  await save(h);
+  const roots = h.getState().view.promptLibrary;
+  const a = roots[0].children.find((n) => n.id === 'prompt-a');
+  const b = roots[0].children.find((n) => n.id === 'folder-inner').children[0];
+  const rootPrompt = roots.find((n) => n.id === 'prompt-root');
+  assert.equal(b.includeInBatch, true, 'clicked row checked');
+  assert.equal(a.includeInBatch, true, 'whole selection forced to the clicked value');
+  assert.equal(rootPrompt.includeInBatch, true, 'whole selection forced to the clicked value');
+});
+
+test('unchecking inside a selection unchecks every selected row', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  // Both start included; unchecking one clears the whole selection.
+  clickCheckbox(h, 'prompt-a');
+  await save(h);
+  const roots = h.getState().view.promptLibrary;
+  assert.equal(roots[0].children.find((n) => n.id === 'prompt-a').includeInBatch, false);
+  assert.equal(roots.find((n) => n.id === 'prompt-root').includeInBatch, false);
+});
+
+test('a bulk checkbox change is a single undo entry', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  clickCheckbox(h, 'prompt-a');
+  assert.equal(checkedOf(h, 'prompt-a'), false);
+  assert.equal(checkedOf(h, 'prompt-root'), false);
+  clickRow(h, 'prompt-a');
+  keyOn(h, { key: 'z', ctrlKey: true });
+  assert.equal(checkedOf(h, 'prompt-a'), true, 'one undo restored both');
+  assert.equal(checkedOf(h, 'prompt-root'), true, 'one undo restored both');
+});
+
+test('checkbox click outside the selection touches only that row', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  // prompt-b is not selected: clicking its box must not touch the selection.
+  clickCheckbox(h, 'prompt-b');
+  await save(h);
+  const roots = h.getState().view.promptLibrary;
+  const b = roots[0].children.find((n) => n.id === 'folder-inner').children[0];
+  assert.equal(b.includeInBatch, true, 'clicked row changed');
+  assert.equal(roots[0].children.find((n) => n.id === 'prompt-a').includeInBatch, true, 'unchanged');
+  assert.equal(roots.find((n) => n.id === 'prompt-root').includeInBatch, true, 'unchanged');
+});
+
+test('checkbox clicks never change row selection', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  clickCheckbox(h, 'prompt-root');
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'true', 'selection preserved');
+  assert.equal(h.rowFor('prompt-root').getAttribute('aria-selected'), 'false', 'clicked box did not select');
+});
+
+test('Shift+click a checkbox applies its resulting state across the range', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  // Anchor on prompt-b (excluded -> checking it), then Shift+click folder-inner.
+  // Visible order is folder-dev, prompt-a, folder-inner, prompt-b, prompt-root,
+  // so the range is folder-inner..prompt-b and both take the CHECKED state the
+  // shift-clicked box resolves to. Both start false, so only a working range
+  // turns them true.
+  clickCheckbox(h, 'prompt-b');
+  assert.equal(checkedOf(h, 'prompt-b'), true);
+  // Shift+click folder-dev, three rows above the anchor. The range is
+  // folder-dev..prompt-b, so folder-dev AND folder-inner (neither previously
+  // touched, both starting false) must become checked. Without a working
+  // range only folder-dev would change.
+  clickCheckbox(h, 'folder-dev', { shiftKey: true });
+  await save(h);
+  const roots = h.getState().view.promptLibrary;
+  const dev = roots[0];
+  const inner = dev.children.find((n) => n.id === 'folder-inner');
+  assert.equal(dev.includeAll, true, 'shift-clicked row checked');
+  assert.equal(inner.includeAll, true, 'range covered the intermediate folder');
+  assert.equal(dev.children.find((n) => n.id === 'prompt-a').includeInBatch, true, 'range covered the intermediate prompt');
+  assert.equal(inner.children[0].includeInBatch, true, 'anchor end of the range stayed checked');
+  assert.equal(roots.find((n) => n.id === 'prompt-root').includeInBatch, true, 'below the range, untouched');
+});
+
+test('a Shift+click checkbox range is a single undo entry', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  clickCheckbox(h, 'prompt-b');
+  clickCheckbox(h, 'folder-dev', { shiftKey: true });
+  assert.equal(checkedOf(h, 'folder-inner'), true, 'range checked the intermediate folder');
+  assert.equal(checkedOf(h, 'folder-dev'), true, 'range checked the far end');
+  blankClick(h);
+  keyOn(h, { key: 'z', ctrlKey: true });
+  assert.equal(checkedOf(h, 'folder-inner'), false, 'one undo reversed the whole range');
+  assert.equal(checkedOf(h, 'folder-dev'), false, 'one undo reversed the whole range');
+  assert.equal(checkedOf(h, 'prompt-b'), true, 'only the range step was undone');
+});
+
+test('Shift+click checkbox range does not select rows', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  clickCheckbox(h, 'prompt-b');
+  clickCheckbox(h, 'folder-dev', { shiftKey: true });
+  for (const id of ['prompt-a', 'prompt-b', 'prompt-root']) {
+    assert.equal(h.rowFor(id).getAttribute('aria-selected'), 'false', id + ' not selected by a checkbox range');
+  }
+});
+
+test('Shift+click without a prior checkbox anchor toggles only that row', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  clickCheckbox(h, 'prompt-root', { shiftKey: true });
+  await save(h);
+  const roots = h.getState().view.promptLibrary;
+  assert.equal(roots.find((n) => n.id === 'prompt-root').includeInBatch, false, 'clicked row toggled');
+  assert.equal(roots[0].children.find((n) => n.id === 'prompt-a').includeInBatch, true, 'nothing else touched');
+});

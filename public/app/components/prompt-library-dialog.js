@@ -715,22 +715,67 @@ export function createPromptLibraryDialog({
     }
   }
 
+  /** Anchor for Shift+click checkbox ranges, and the modifier state captured
+   * on click — `change` events do not carry shiftKey. */
+  let checkboxAnchorId = null;
+  let pendingCheckboxShift = false;
+
+  function onCheckboxClick(event) {
+    const checkbox = event.target.closest('.prompt-checkbox');
+    if (!checkbox) return;
+    pendingCheckboxShift = event.shiftKey === true;
+  }
+
+  /** Applies one checked value to many rows as a single undo entry. Prompts get
+   * `includeInBatch`, folders get the `includeAll` override. */
+  function setCheckedFor(ids, checked) {
+    if (ids.length === 0) return;
+    const next = ids.reduce(
+      (tree, id) => updatePromptNode(tree, id, (node) => (
+        node.type === 'folder'
+          ? { ...node, includeAll: checked }
+          : { ...node, includeInBatch: checked }
+      )),
+      history.present,
+    );
+    commitTreeMutation(next, checked ? 'include' : 'exclude');
+  }
+
   function onCheckboxChange(event) {
     const row = event.target.closest('.prompt-tree-row');
     if (!row) return;
     const id = row.dataset.nodeId;
     if (!id) return;
-    if (row.dataset.nodeType === 'folder') {
-      commitTreeMutation(
-        updatePromptNode(history.present, id, (node) => ({ ...node, includeAll: event.target.checked })),
-        'include',
-      );
-    } else {
-      commitTreeMutation(
-        updatePromptNode(history.present, id, (node) => ({ ...node, includeInBatch: event.target.checked })),
-        event.target.checked ? 'include' : 'exclude',
-      );
+    const checked = event.target.checked;
+    const shift = pendingCheckboxShift;
+    pendingCheckboxShift = false;
+
+    // Shift+click a checkbox: apply this box's resulting state to the whole
+    // visible range between the last-clicked checkbox and this one. Checkbox
+    // clicks never alter row selection, so this cannot collide with the
+    // Shift+click row-range gesture.
+    if (shift && checkboxAnchorId && checkboxAnchorId !== id) {
+      const visible = visibleDepthFirstIds(draftLibrary, expandedFolderIds);
+      const from = visible.indexOf(checkboxAnchorId);
+      const to = visible.indexOf(id);
+      if (from !== -1 && to !== -1) {
+        const range = visible.slice(Math.min(from, to), Math.max(from, to) + 1);
+        setCheckedFor(range, checked);
+        checkboxAnchorId = id;
+        return;
+      }
     }
+    checkboxAnchorId = id;
+
+    // Clicking the checkbox of a row inside a multi-row selection applies the
+    // clicked value to every selected row. Clicking a row outside the selection
+    // touches only that row and leaves the selection alone.
+    const selected = [...controller.getSelection().selectedIds];
+    if (selected.length > 1 && selected.includes(id)) {
+      setCheckedFor(selected, checked);
+      return;
+    }
+    setCheckedFor([id], checked);
   }
 
   // ------------------------------------------------------------- delete
@@ -1084,6 +1129,8 @@ export function createPromptLibraryDialog({
     cancelButton.addEventListener('click', onCancel, { signal });
     saveButton.addEventListener('click', () => onSave(), { signal });
     cardList.addEventListener('input', onTreeInput, { signal });
+    // click runs before change and is the only place shiftKey is visible.
+    cardList.addEventListener('click', onCheckboxClick, { signal });
     cardList.addEventListener('change', onCheckboxChange, { signal });
     cardList.addEventListener('keydown', onRenameKeydown, { signal });
     cardList.addEventListener('focusout', onRenameFocusout, { signal });

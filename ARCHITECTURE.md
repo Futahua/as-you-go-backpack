@@ -45,6 +45,18 @@ selected-shortcut precedence and reads the saved snapshot through
 `includeAll` override (never a derived tri-state) and checking a folder never
 rewrites descendant prompt checkboxes.
 
+Batch checkboxes support two bulk gestures, each one undo entry, and neither
+ever changes row selection (the tree controller ignores `.prompt-checkbox`
+clicks entirely, so they cannot collide with Shift+click row ranges):
+
+- Clicking the checkbox of a row **inside** a multi-row selection forces every
+  selected row to the clicked value — checking and unchecking alike. Clicking a
+  row outside the selection touches only that row and leaves the selection
+  intact.
+- **Shift+click** applies the clicked box's resulting state to the visible range
+  between the last-clicked checkbox and this one. `change` does not carry
+  `shiftKey`, so the modifier is captured on the preceding `click`.
+
 While `#prompt-layer` is open, the workspace keyboard controller is inert; the
 prompt-tree controller owns tree shortcuts (Ctrl/C/X/V are dialog-local
 copy/cut/paste via `treeClipboard` — never the OS clipboard or `copyText`,
