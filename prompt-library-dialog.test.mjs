@@ -576,6 +576,25 @@ test('confirmation message counts contained prompts', () => {
   assert.ok(h.nodes['prompt-delete-message'].textContent.includes('2 contained prompts'));
 });
 
+test('dragging a selected row moves the complete selection atomically in order', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  const src = h.rowFor('prompt-a');
+  const target = h.rowFor('folder-inner');
+  const data = { pointerId: 8 };
+  src.dispatch('pointerdown', { ...data, button: 0, clientX: 50, clientY: 50, target: src });
+  target.dispatch('pointermove', { ...data, clientX: 200, clientY: 200, target, preventDefault, stopPropagation });
+  target.dispatch('pointermove', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
+  target.dispatch('pointerup', { ...data, clientX: 200, clientY: 50, target, preventDefault, stopPropagation });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  const inner = h.getState().view.promptLibrary[0].children[0];
+  assert.deepEqual(inner.children.map((n) => n.id), ['prompt-b', 'prompt-a', 'prompt-root'], 'selection appended inside in order');
+  assert.equal(inner.children.length, 3);
+  assert.equal(h.getState().view.promptLibrary[0].children.length, 1, 'prompt-a left its original parent');
+});
+
 test('pointer drag of an unselected row selects it first, then moves it inside a folder', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
