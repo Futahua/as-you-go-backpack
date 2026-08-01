@@ -94,8 +94,16 @@ const session = store.getSession();
 
 const commands = createWorkspaceCommands({
   store,
+  group,
+  shortcut,
+  isWebLink,
+  host,
+  graph,
   syncSelection,
   saveWorkspaceView,
+  closeMenu,
+  render,
+  setStatus,
 });
 let marqueeDrag = null;
 let suppressBlankClick = false;
@@ -1122,86 +1130,6 @@ function selectedPasteDestinations() {
   return folders.length > 0 ? folders.map((folder) => folder.id) : [session.currentId];
 }
 
-async function activate(itemId) {
-  const folder = group(itemId);
-  if (folder) {
-    if (session.binMode) {
-      // Drilling into a binned folder stays inside the Bin — it must never
-      // jump to the real explorer, since the folder (and everything under
-      // it) is still hidden there and would just show up empty.
-      store.setNavigation({ binCurrentId: folder.id });
-      store.clearSelection();
-      graph.destroyGraphView();
-      closeMenu();
-      render();
-      saveWorkspaceView();
-      return;
-    }
-    store.setNavigation({ currentId: folder.id });
-    store.clearSelection();
-    graph.destroyGraphView();
-    closeMenu();
-    render();
-    saveWorkspaceView();
-    return;
-  }
-  if (shortcut(itemId)) {
-    closeMenu();
-    try {
-      const chosen = shortcut(itemId);
-      if (isWebLink(chosen)) {
-        await host.openWebLink(chosen.target);
-      } else {
-        await host.launchShortcut(itemId);
-      }
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    }
-  }
-}
-
-function directoryOf(target) {
-  const normalized = target.replace(/\\/g, '/');
-  const lastSlash = normalized.lastIndexOf('/');
-  return lastSlash === -1 ? normalized : normalized.slice(0, lastSlash).toLocaleLowerCase();
-}
-
-async function revealSelection() {
-  const targets = [...session.selected]
-    .map((itemId) => shortcut(itemId))
-    .filter((candidate) => candidate && !isWebLink(candidate));
-  if (targets.length === 0) return;
-  const seenDirectories = new Set();
-  for (const target of targets) {
-    const directory = directoryOf(target.target);
-    if (seenDirectories.has(directory)) continue;
-    seenDirectories.add(directory);
-    try {
-      await host.revealShortcut(target.id);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    }
-  }
-}
-
-async function activateSelection() {
-  const shortcuts = [...session.selected]
-    .map((itemId) => shortcut(itemId))
-    .filter(Boolean);
-  if (shortcuts.length === 0) return;
-  closeMenu();
-  await Promise.all(shortcuts.map(async (chosen) => {
-    try {
-      if (isWebLink(chosen)) {
-        await host.openWebLink(chosen.target);
-      } else {
-        await host.launchShortcut(chosen.id);
-      }
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    }
-  }));
-}
 
 async function copyOrCut(mode) {
   if (session.selected.size === 0) return;
@@ -1303,7 +1231,7 @@ async function runMenuAction(action) {
   if (action === 'new-shortcut') return editorDialog.showEditor('shortcut', null, elements.menu.dataset.parent);
   if (action === 'new-web-link') return editorDialog.showEditor('web', null, elements.menu.dataset.parent);
   if (action === 'paste') return pasteInto(elements.menu.dataset.parent);
-  if (action === 'open' && onlyId) return activate(onlyId);
+  if (action === 'open' && onlyId) return commands.activateItem(onlyId);
   if (action === 'edit' && onlyId) {
     const chosen = shortcut(onlyId);
     return editorDialog.showEditor(isWebLink(chosen) ? 'web' : 'shortcut', chosen);
@@ -1667,7 +1595,7 @@ elements.grid.addEventListener('dblclick', (event) => {
       setStatus(error instanceof Error ? error.message : String(error)));
     return;
   }
-  activate(id);
+  commands.activateItem(id);
 });
 
 elements.grid.addEventListener('pointercancel', (event) => {
@@ -1825,16 +1753,16 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.key === 'Enter' && event.ctrlKey && session.selected.size > 0 && !session.binMode) {
     event.preventDefault();
-    revealSelection();
+    commands.revealSelection();
     return;
   }
   if (event.key === 'Enter' && session.selected.size === 1 && !session.binMode) {
     event.preventDefault();
-    activate([...session.selected][0]);
+    commands.activateItem([...session.selected][0]);
   }
   if (event.key === 'Enter' && session.selected.size > 1 && !session.binMode) {
     event.preventDefault();
-    activateSelection();
+    commands.activateSelection();
   }
 });
 

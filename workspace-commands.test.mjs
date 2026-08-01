@@ -3,8 +3,8 @@ import test from 'node:test';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createWorkspaceCommands } from './public/app/workspace-commands.js';
 
-function createHarness() {
-  let state = { groups: [], shortcuts: [], view: { currentGroupId: 'root' } };
+function createHarness({ groups = [], shortcuts = [] } = {}) {
+  let state = { groups, shortcuts, view: { currentGroupId: 'root' } };
   const store = createWorkspaceStore({
     getState: () => state,
     setState: (next) => { state = next; },
@@ -12,11 +12,26 @@ function createHarness() {
     normalizeState: (s) => s,
     setStatus: () => {},
   });
-  const effects = { sync: 0, saves: 0 };
+  const effects = {
+    sync: 0, saves: 0, close: 0, render: 0, destroyGraph: 0,
+    launch: [], openWeb: [], reveal: [], status: [],
+  };
   const commands = createWorkspaceCommands({
     store,
+    group: (id) => groups.find((candidate) => candidate.id === id) ?? null,
+    shortcut: (id) => shortcuts.find((candidate) => candidate.id === id) ?? null,
+    isWebLink: (candidate) => candidate?.target?.startsWith('https://'),
+    host: {
+      launchShortcut: async (id) => { effects.launch.push(id); },
+      openWebLink: async (url) => { effects.openWeb.push(url); },
+      revealShortcut: async (id) => { effects.reveal.push(id); },
+    },
+    graph: { destroyGraphView: () => { effects.destroyGraph += 1; } },
     syncSelection: () => { effects.sync += 1; },
     saveWorkspaceView: () => { effects.saves += 1; },
+    closeMenu: () => { effects.close += 1; },
+    render: () => { effects.render += 1; },
+    setStatus: (text) => { effects.status.push(text); },
   });
   return { store, commands, effects };
 }
@@ -65,4 +80,63 @@ test('undo and redo run through the store history', async () => {
   assert.equal(h.store.getSnapshot().view.currentGroupId, 'g1');
   await h.commands.redo();
   assert.equal(h.store.getSnapshot().view.currentGroupId, 'g2');
+});
+
+test('activateItem navigates into an explorer folder', () => {
+  const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'Things' }] });
+  h.store.setSelection(['g1']);
+  h.commands.activateItem('g1');
+  assert.equal(h.store.getSession().currentId, 'g1');
+  assert.equal(h.store.getSession().selected.size, 0);
+  assert.equal(h.effects.destroyGraph, 1);
+  assert.equal(h.effects.close, 1);
+  assert.equal(h.effects.render, 1);
+  assert.equal(h.effects.saves, 1);
+});
+
+test('activateItem on a folder in Bin mode drills within the Bin', () => {
+  const h = createHarness({ groups: [{ id: 'bin-folder', parentId: 'root', name: 'Nested', bin: true }] });
+  h.store.setNavigation({ binMode: true });
+  h.commands.activateItem('bin-folder');
+  assert.equal(h.store.getSession().binCurrentId, 'bin-folder');
+  assert.equal(h.store.getSession().currentId, null);
+});
+
+test('activateItem launches a shortcut and opens a web link', async () => {
+  const h = createHarness({
+    shortcuts: [
+      { id: 's1', name: 'App', target: 'C:\\app.exe' },
+      { id: 's2', name: 'Site', target: 'https://example.com' },
+    ],
+  });
+  await h.commands.activateItem('s1');
+  assert.deepEqual(h.effects.launch, ['s1']);
+  await h.commands.activateItem('s2');
+  assert.deepEqual(h.effects.openWeb, ['https://example.com']);
+});
+
+test('revealSelection reveals each unique directory once', async () => {
+  const h = createHarness({
+    shortcuts: [
+      { id: 'a', name: 'A', target: 'D:\\work\\a.txt' },
+      { id: 'b', name: 'B', target: 'D:\\work\\b.txt' },
+      { id: 'c', name: 'C', target: 'D:\\other\\c.txt' },
+    ],
+  });
+  h.store.setSelection(['a', 'b', 'c']);
+  await h.commands.revealSelection();
+  assert.deepEqual(h.effects.reveal, ['a', 'c']);
+});
+
+test('activateSelection launches every selected shortcut', async () => {
+  const h = createHarness({
+    shortcuts: [
+      { id: 'a', name: 'A', target: 'C:\\a.exe' },
+      { id: 'b', name: 'B', target: 'https://example.com' },
+    ],
+  });
+  h.store.setSelection(['a', 'b']);
+  await h.commands.activateSelection();
+  assert.deepEqual(h.effects.launch, ['a']);
+  assert.deepEqual(h.effects.openWeb, ['https://example.com']);
 });
