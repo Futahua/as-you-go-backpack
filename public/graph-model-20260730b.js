@@ -199,18 +199,17 @@ export function allUniquePositions(nodes) {
 /** A folder is "near" another when they are within this many canvas pixels. */
 const FOLDER_DISTANCE = 220;
 
-/** Hues closer than this to a near folder keep getting pushed apart. */
+/** Hard minimum hue separation in degrees for nearby folders (12 slots). */
 const MIN_HUE_SEPARATION = 30;
 
-/** Repulsion step size per pass; < 1 keeps the relaxation stable. */
-const REPULSION_STEP = 0.35;
+/** Bounded fraction each hue moves toward its position base per call. */
+const BASE_MOVE = 0.15;
 
-/** How hard a hue is pulled toward its position-derived base each pass. */
-const BASE_PULL = 0.06;
+/** Projection treats separations within this of MIN_HUE_SEPARATION as done. */
+const PROJECTION_EPSILON = 1e-6;
 
-/** Relaxation passes per call. Positions only change a little per frame, so a
- * handful of passes per rendered frame keeps colors converged during drags. */
-const RELAXATION_PASSES = 8;
+/** Max projection passes over the near-pair list per call. */
+const MAX_PROJECTION_PASSES = 20;
 
 /** A folder this far from the canvas center gets the full radius hue shift. */
 const RADIUS_SPAN = 500;
@@ -234,56 +233,208 @@ function signedAngle(from, to) {
   return d > 180 ? d - 360 : d;
 }
 
+/** Position-derived base hue: the angle around `center` plus a radius term, so
+ * any drag direction changes the base. */
+function positionBase(x, y, center) {
+  const angle = wrapDeg((Math.atan2(y - center.cy, x - center.cx) * 180) / Math.PI);
+  const radius = Math.hypot(x - center.cx, y - center.cy);
+  return wrapDeg(angle + (radius / RADIUS_SPAN) * RADIUS_WEIGHT);
+}
+
+/** Deterministic hue-space direction for a pair whose hues are identical:
+ * derives from relative canvas position, falling back to ID order. */
+function tieBreakDirection(a, b) {
+  const dy = b.y - a.y;
+  if (Math.abs(dy) > PROJECTION_EPSILON) return Math.sign(dy);
+  const dx = b.x - a.x;
+  if (Math.abs(dx) > PROJECTION_EPSILON) return Math.sign(dx);
+  return a.id < b.id ? 1 : -1;
+}
+
+/** Connected components of the near-pair graph that contain a violated pair,
+ * as arrays of folder ids. A component is maximal, so recoloring it cannot
+ * disturb folders outside it (there are no near pairs across components). */
+function componentsNearViolations(nearPairs, violatedIds) {
+  const adjacency = new Map();
+  for (const [a, b] of nearPairs) {
+    if (!adjacency.has(a.id)) adjacency.set(a.id, []);
+    if (!adjacency.has(b.id)) adjacency.set(b.id, []);
+    adjacency.get(a.id).push(b.id);
+    adjacency.get(b.id).push(a.id);
+  }
+  const seen = new Set();
+  const components = [];
+  for (const startId of violatedIds) {
+    if (seen.has(startId)) continue;
+    const stack = [startId];
+    const component = [];
+    seen.add(startId);
+    while (stack.length > 0) {
+      const id = stack.pop();
+      component.push(id);
+      for (const neighbor of adjacency.get(id) ?? []) {
+        if (!seen.has(neighbor)) {
+          seen.add(neighbor);
+          stack.push(neighbor);
+        }
+      }
+    }
+    components.push(component);
+  }
+  return components;
+}
+
+/** Greedy slot coloring (largest-degree first, ID tie-break). Returns a
+ * Map(id -> slot) or null when k colors are not enough in this order. */
+function greedySlotColoring(nodes, adjacency, k) {
+  const order = [...nodes].sort((a, b) => {
+    const degreeA = adjacency.get(a.id)?.length ?? 0;
+    const degreeB = adjacency.get(b.id)?.length ?? 0;
+    if (degreeA !== degreeB) return degreeB - degreeA;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  const slots = new Map();
+  for (const node of order) {
+    const used = new Set();
+    for (const other of order) {
+      if (other === node || !slots.has(other.id)) continue;
+      if (adjacency.get(node.id)?.includes(other.id)) used.add(slots.get(other.id));
+    }
+    let chosen = -1;
+    for (let slot = 0; slot < k; slot += 1) {
+      if (!used.has(slot)) { chosen = slot; break; }
+    }
+    if (chosen === -1) return null;
+    slots.set(node.id, chosen);
+  }
+  return slots;
+}
+
+/** Deterministic fallback for an infeasible dense neighborhood: color the
+ * component with the fewest slots that work (largest-first greedy) and pick
+ * the slot rotation that best matches the folders' position bases, so the
+ * effective minimum separation is 360 / slotCount rather than oscillating. */
+function slotColorComponent(componentIds, folderById, colors, center) {
+  const ids = [...componentIds].sort();
+  const nodes = ids.map((id) => folderById.get(id));
+  const adjacency = new Map(ids.map((id) => [id, []]));
+  for (const [a, b] of [...ids.map((id, i) => ids.slice(i + 1).map((other) => [id, other]))].flat()) {
+    const fa = folderById.get(a);
+    const fb = folderById.get(b);
+    if (Math.hypot(fa.x - fb.x, fa.y - fb.y) < FOLDER_DISTANCE) {
+      adjacency.get(a).push(b);
+      adjacency.get(b).push(a);
+    }
+  }
+  let slotCount = 1;
+  let slots = null;
+  for (; slotCount <= ids.length; slotCount += 1) {
+    slots = greedySlotColoring(nodes, adjacency, slotCount);
+    if (slots) break;
+  }
+  const gap = 360 / slotCount;
+  let bestRotation = 0;
+  let bestCost = Infinity;
+  for (const candidate of ids) {
+    const rotation = wrapDeg(
+      positionBase(folderById.get(candidate).x, folderById.get(candidate).y, center)
+      - slots.get(candidate) * gap,
+    );
+    let cost = 0;
+    for (const id of ids) {
+      const hue = wrapDeg(rotation + slots.get(id) * gap);
+      const base = positionBase(folderById.get(id).x, folderById.get(id).y, center);
+      cost += Math.abs(signedAngle(base, hue));
+    }
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestRotation = rotation;
+    }
+  }
+  for (const id of ids) {
+    colors.set(id, wrapDeg(bestRotation + slots.get(id) * gap));
+  }
+}
+
 /**
- * Continuously re-derives every folder's hue from its current absolute
- * position on the canvas, so colors are never static: a folder's hue relaxes
- * toward a position base (the angle of its position around `center` plus a
- * radius term, so any drag direction re-colors it) while any folder within
- * FOLDER_DISTANCE pushes it away, harder the closer they are. Dragging a
- * folder therefore re-colors it and its near neighbors as their relative
- * distances change, and near folders never collapse onto the same hue.
+ * Re-derives every folder's hue from its current absolute position on the
+ * canvas as a warm-started constraint solver, so colors are never static:
+ * position is an objective, minimum separation is a constraint. Each call
+ * moves every hue a bounded amount toward its position base (angle around
+ * `center` plus a radius term, so any drag direction re-colors it), then
+ * projects every pair within FOLDER_DISTANCE apart until no pair is closer
+ * than MIN_HUE_SEPARATION. Pair traversal alternates forward/reverse between
+ * passes to reduce solver-order bias; ties use a deterministic direction.
+ * Hues stay floating-point (CSS hsl() accepts fractional degrees). When a
+ * dense neighborhood cannot keep 30° (its proximity graph needs more than
+ * twelve colors), the affected component is re-colored with the fewest slots
+ * that work, for an effective minimum separation of 360 / slotCount.
  *
  * `folders` is an array of { id, x, y }; `colors` is the id -> hue map that is
- * mutated in place (it carries the relaxation state between calls).
+ * mutated in place (it carries the warm-start state between calls).
  */
 export function assignSpatialFolderHues(folders, colors, center) {
-  const positionBase = (x, y) => {
-    const angle = wrapDeg((Math.atan2(y - center.cy, x - center.cx) * 180) / Math.PI);
-    const radius = Math.hypot(x - center.cx, y - center.cy);
-    return wrapDeg(angle + (radius / RADIUS_SPAN) * RADIUS_WEIGHT);
-  };
   const list = [...folders].sort((a, b) => a.id.localeCompare(b.id));
+  const folderById = new Map(list.map((folder) => [folder.id, folder]));
+  const nearPairs = [];
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      const a = list[i];
+      const b = list[j];
+      if (Math.hypot(a.x - b.x, a.y - b.y) < FOLDER_DISTANCE) nearPairs.push([a, b]);
+    }
+  }
 
+  // Warm start missing hues, then move every hue a bounded amount toward its
+  // position-derived base so isolated folders track their canvas position.
   for (const folder of list) {
-    if (typeof colors.get(folder.id) !== 'number') {
-      colors.set(folder.id, positionBase(folder.x, folder.y));
+    const base = positionBase(folder.x, folder.y, center);
+    const current = colors.get(folder.id);
+    if (typeof current !== 'number') {
+      colors.set(folder.id, base);
+      continue;
+    }
+    colors.set(folder.id, wrapDeg(current + signedAngle(current, base) * BASE_MOVE));
+  }
+
+  // Hard projection: fully resolve every violating pair (never damped).
+  for (let pass = 0; pass < MAX_PROJECTION_PASSES; pass += 1) {
+    let violated = false;
+    const order = pass % 2 === 0 ? nearPairs : [...nearPairs].reverse();
+    for (const [a, b] of order) {
+      const hueA = colors.get(a.id);
+      const hueB = colors.get(b.id);
+      if (typeof hueA !== 'number' || typeof hueB !== 'number') continue;
+      const delta = signedAngle(hueA, hueB);
+      const separation = Math.abs(delta);
+      if (separation < MIN_HUE_SEPARATION) {
+        const direction = separation > PROJECTION_EPSILON ? Math.sign(delta) : tieBreakDirection(a, b);
+        const correction = (MIN_HUE_SEPARATION - separation) / 2;
+        colors.set(a.id, wrapDeg(hueA - direction * correction));
+        colors.set(b.id, wrapDeg(hueB + direction * correction));
+        violated = true;
+      }
+    }
+    if (!violated) break;
+  }
+
+  // Infeasible dense neighborhoods: deterministically slot-color the maximal
+  // components that still violate the 30° invariant.
+  const violatedIds = new Set();
+  for (const [a, b] of nearPairs) {
+    const hueA = colors.get(a.id);
+    const hueB = colors.get(b.id);
+    if (typeof hueA === 'number' && typeof hueB === 'number'
+      && Math.abs(signedAngle(hueA, hueB)) < MIN_HUE_SEPARATION - PROJECTION_EPSILON) {
+      violatedIds.add(a.id);
+      violatedIds.add(b.id);
+    }
+  }
+  if (violatedIds.size > 0) {
+    for (const component of componentsNearViolations(nearPairs, [...violatedIds])) {
+      slotColorComponent(component, folderById, colors, center);
     }
   }
 
-  for (let pass = 0; pass < RELAXATION_PASSES; pass += 1) {
-    for (const folder of list) {
-      const hue = colors.get(folder.id);
-      let adjustment = 0;
-      for (const other of list) {
-        if (other.id === folder.id) continue;
-        const dist = Math.hypot(other.x - folder.x, other.y - folder.y);
-        if (dist >= FOLDER_DISTANCE) continue;
-        const otherHue = colors.get(other.id);
-        if (typeof otherHue !== 'number') continue;
-        const separation = Math.abs(signedAngle(hue, otherHue));
-        const needed = MIN_HUE_SEPARATION - separation;
-        if (needed <= 0) continue;
-        const closeness = 1 - dist / FOLDER_DISTANCE;
-        adjustment += -Math.sign(signedAngle(hue, otherHue) || 1) * needed * closeness * REPULSION_STEP;
-      }
-      // Pull the hue back toward its position-derived base so a folder whose
-      // neighbors move away re-colors to match its new spot on the canvas.
-      adjustment += -signedAngle(hue, positionBase(folder.x, folder.y)) * BASE_PULL;
-      colors.set(
-        folder.id,
-        Math.round(wrapDeg(hue + Math.max(-60, Math.min(60, adjustment)))),
-      );
-    }
-  }
   return colors;
 }

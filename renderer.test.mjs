@@ -645,36 +645,147 @@ test('forking from a placement in folder B (not the placement in folder A) forks
   assert.deepEqual(forkedNodes[0].parentIds, [b.id], 'the fork lands in B');
 });
 
-test('assignSpatialFolderHues separates nearby folders and re-colors on drag', () => {
-  const center = { cx: 0, cy: 0 };
-  const colors = new Map();
-  // Two folders close together on the canvas must separate, not share a hue.
-  assignSpatialFolderHues([
-    { id: 'A', x: 0, y: 0 },
-    { id: 'B', x: 60, y: 0 },
-  ], colors, center);
-  assert.ok(hueDistance(colors.get('A'), colors.get('B')) >= 15);
+const folderCenter = { cx: 0, cy: 0 };
 
-  // Dragging B far away re-colors it to match its new absolute position.
-  const hueBefore = colors.get('B');
-  assignSpatialFolderHues([
-    { id: 'A', x: 0, y: 0 },
-    { id: 'B', x: 1200, y: 0 },
-  ], colors, center);
-  assert.notEqual(colors.get('B'), hueBefore, 'dragging B re-colors it');
+function assertPairInvariant(colors, folders) {
+  for (let i = 0; i < folders.length; i += 1) {
+    for (let j = i + 1; j < folders.length; j += 1) {
+      const a = folders[i];
+      const b = folders[j];
+      if (Math.hypot(a.x - b.x, a.y - b.y) >= 220) continue;
+      assert.ok(
+        hueDistance(colors.get(a.id), colors.get(b.id)) >= 30 - 1e-6,
+        `near pair ${a.id}/${b.id} is at least 30° apart`,
+      );
+    }
+  }
+}
+
+function cluster(n, radius = 40) {
+  const folders = [];
+  for (let i = 0; i < n; i += 1) {
+    const angle = (i / n) * Math.PI * 2;
+    folders.push({
+      id: `F${String(i).padStart(2, '0')}`,
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+    });
+  }
+  return folders;
+}
+
+test('assignSpatialFolderHues pulls an isolated folder toward its new position base', () => {
+  const colors = new Map();
+  assignSpatialFolderHues([{ id: 'F', x: 300, y: 0 }], colors, folderCenter);
+  const baseEast = 0 + (300 / 500) * 120; // 72
+  assert.equal(hueDistance(colors.get('F'), baseEast), 0, 'seeded from the east base');
+  // Moving to (0, 300): new base is 90 + 72 = 162. The hue must move toward it.
+  assignSpatialFolderHues([{ id: 'F', x: 0, y: 300 }], colors, folderCenter);
+  const toward = hueDistance(colors.get('F'), 162);
+  assert.ok(toward < 90, `moved toward the new base (was 90° away, now ${toward.toFixed(2)})`);
+  for (let frame = 0; frame < 60; frame += 1) {
+    assignSpatialFolderHues([{ id: 'F', x: 0, y: 300 }], colors, folderCenter);
+  }
+  assert.ok(hueDistance(colors.get('F'), 162) < 1, 'converges onto the base');
 });
 
-test('assignSpatialFolderHues derives hue from absolute position', () => {
-  const center = { cx: 0, cy: 0 };
+test('assignSpatialFolderHues responds to a small drag (no rounding dead zone)', () => {
   const colors = new Map();
-  // A lone folder right of center gets the east angle base (~0° + radius term).
-  assignSpatialFolderHues([{ id: 'R', x: 300, y: 0 }], colors, center);
-  const east = colors.get('R');
-  assert.ok(east >= 0 && east < 180, 'east-of-center folder is a warm hue');
-  // A lone folder below center is ~90° further around the wheel.
-  assignSpatialFolderHues([{ id: 'D', x: 0, y: 300 }], colors, center);
-  const south = colors.get('D');
-  assert.ok(hueDistance(south, (east + 90) % 360) < 20, 'south hue is ~90° from east');
+  assignSpatialFolderHues([{ id: 'F', x: 300, y: 0 }], colors, folderCenter);
+  const before = colors.get('F');
+  assignSpatialFolderHues([{ id: 'F', x: 320, y: 0 }], colors, folderCenter);
+  const after = colors.get('F');
+  assert.notEqual(after, before, 'a 20px radial move changes the hue');
+  assert.ok(Math.abs(after - before) > 0, 'nonzero floating-point change');
+});
+
+test('assignSpatialFolderHues enforces the 30° invariant for clusters', () => {
+  for (const n of [3, 6, 12]) {
+    const folders = cluster(n);
+    const colors = new Map();
+    for (let frame = 0; frame < 10; frame += 1) {
+      assignSpatialFolderHues(folders, colors, folderCenter);
+    }
+    assertPairInvariant(colors, folders);
+  }
+});
+
+test('assignSpatialFolderHues converges for unchanged positions', () => {
+  const folders = cluster(6);
+  const colors = new Map();
+  let lastChange = Infinity;
+  for (let frame = 0; frame < 80; frame += 1) {
+    const previous = new Map(colors);
+    assignSpatialFolderHues(folders, colors, folderCenter);
+    let change = 0;
+    for (const [id, hue] of colors) {
+      change = Math.max(change, Math.abs(hue - (previous.get(id) ?? hue)));
+    }
+    if (frame >= 60) lastChange = Math.min(lastChange, change);
+  }
+  assert.ok(lastChange < 1e-6, 'frames settle instead of oscillating');
+});
+
+test('assignSpatialFolderHues is independent of input order', () => {
+  const folders = cluster(6);
+  const forward = new Map();
+  const reversed = new Map();
+  for (let frame = 0; frame < 10; frame += 1) {
+    assignSpatialFolderHues(folders, forward, folderCenter);
+    assignSpatialFolderHues([...folders].reverse(), reversed, folderCenter);
+  }
+  for (const folder of folders) {
+    assert.equal(forward.get(folder.id), reversed.get(folder.id));
+  }
+});
+
+test('assignSpatialFolderHues handles the 359°/0° wraparound', () => {
+  const nearOrigin = (deg) => {
+    const radians = (deg * Math.PI) / 180;
+    return { x: Math.cos(radians) * 4, y: Math.sin(radians) * 4 };
+  };
+  const folders = [
+    { id: 'A', ...nearOrigin(355) },
+    { id: 'B', ...nearOrigin(5) },
+  ];
+  const colors = new Map();
+  for (let frame = 0; frame < 10; frame += 1) {
+    assignSpatialFolderHues(folders, colors, folderCenter);
+  }
+  assertPairInvariant(colors, folders);
+});
+
+test('assignSpatialFolderHues separates identical positions deterministically', () => {
+  const folders = [
+    { id: 'A', x: 0, y: 0 },
+    { id: 'B', x: 0, y: 0 },
+  ];
+  const colors = new Map();
+  assignSpatialFolderHues(folders, colors, folderCenter);
+  assertPairInvariant(colors, folders);
+  const again = new Map();
+  assignSpatialFolderHues([...folders].reverse(), again, folderCenter);
+  assert.equal(again.get('A'), colors.get('A'));
+  assert.equal(again.get('B'), colors.get('B'));
+});
+
+test('assignSpatialFolderHues falls back for infeasibly dense neighborhoods', () => {
+  const folders = cluster(13);
+  const colors = new Map();
+  for (let frame = 0; frame < 10; frame += 1) {
+    assignSpatialFolderHues(folders, colors, folderCenter);
+  }
+  let minSeparation = 360;
+  for (let i = 0; i < folders.length; i += 1) {
+    for (let j = i + 1; j < folders.length; j += 1) {
+      minSeparation = Math.min(
+        minSeparation,
+        hueDistance(colors.get(folders[i].id), colors.get(folders[j].id)),
+      );
+    }
+  }
+  assert.ok(minSeparation >= 360 / 13 - 1e-6, 'falls back to the 360/13 slot gap');
+  assert.ok(minSeparation < 30, '13 near folders cannot keep 30°');
 });
 
 test('assignSpatialFolderHues produces a valid hue for every folder', () => {
