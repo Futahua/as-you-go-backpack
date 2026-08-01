@@ -49,6 +49,7 @@ import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
+import { createContextMenu } from './app/components/context-menu.js';
 
 const host = createHostBridge(window);
 
@@ -1153,55 +1154,6 @@ function finishMarquee(event) {
   elements.marquee.hidden = true;
 }
 
-function closeMenu() {
-  elements.menu.hidden = true;
-  elements.menu.innerHTML = '';
-}
-
-function menuButton(action, label, danger = false, disabled = false) {
-  return `<button type="button" role="menuitem" data-action="${action}" class="${danger ? 'danger-text' : ''}" ${disabled ? 'disabled' : ''}>${label}</button>`;
-}
-
-function openMenu(x, y, kind = 'selection', parentId = currentId) {
-  let content = '';
-  if (kind === 'blank') {
-    content = [
-      menuButton('new-folder', 'New folder'),
-      menuButton('new-shortcut', 'Add shortcut'),
-      menuButton('new-web-link', 'Add web link'),
-      clipboard ? '<hr />' : '',
-      clipboard ? menuButton('paste', clipboard.mode === 'cut' ? 'Paste moved items' : 'Paste copied items') : '',
-    ].join('');
-    elements.menu.dataset.parent = parentId;
-  } else if (binMode) {
-    content = [
-      menuButton('restore', 'Restore'),
-      menuButton('delete-forever', 'Delete permanently', true),
-    ].join('');
-  } else {
-    const chosen = [...selected].map(item).filter(Boolean);
-    const only = chosen.length === 1 ? chosen[0] : null;
-    content = [
-      only ? menuButton('open', only.target ? 'Open' : 'Open folder') : '',
-      only?.target ? menuButton('edit', isWebLink(only) ? 'Edit web link' : 'Edit shortcut') : '',
-      only && !only.target ? menuButton('rename', 'Edit folder') : '',
-      only ? '<hr />' : '',
-      menuButton('copy', chosen.length > 1 ? 'Copy items' : 'Copy'),
-      menuButton('cut', chosen.length > 1 ? 'Cut items' : 'Cut'),
-      menuButton('bin', chosen.length > 1 ? 'Move items to Bin' : 'Move to Bin', true),
-      '<hr />',
-      menuButton('reset-graph-position', chosen.length > 1 ? 'Follow folders automatically' : 'Follow folder automatically'),
-    ].join('');
-  }
-  elements.menu.innerHTML = content;
-  elements.menu.hidden = false;
-  const width = 210;
-  const height = Math.min(300, elements.menu.scrollHeight);
-  elements.menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - width - 8))}px`;
-  elements.menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - height - 8))}px`;
-  elements.menu.querySelector('button:not([disabled])')?.focus();
-}
-
 function currentSelectionParent() {
   const first = item([...selected][0]);
   return first?.parentId ?? currentId;
@@ -2025,11 +1977,6 @@ elements.grid.addEventListener('contextmenu', (event) => {
   );
 });
 
-elements.menu.addEventListener('click', (event) => {
-  const button = event.target.closest('[data-action]');
-  if (button) runMenuAction(button.dataset.action);
-});
-
 document.addEventListener('click', (event) => {
   if (!elements.menu.hidden && !event.target.closest('#context-menu') && !event.target.closest('.icon-item')) {
     closeMenu();
@@ -2389,6 +2336,21 @@ const confirmDialog = createConfirmationDialog({
   commit,
 });
 
+const menu = createContextMenu({
+  elements,
+  window,
+  getCurrentId: () => currentId,
+  getBinMode: () => binMode,
+  getClipboard: () => clipboard,
+  getSelectedItems: () => [...selected].map(item).filter(Boolean),
+  isWebLink,
+  onAction: runMenuAction,
+});
+// Thin compatibility shims so the entry file's existing call sites stay put
+// while the context menu's real implementation lives in the module above.
+const closeMenu = () => menu.closeMenu();
+const openMenu = (...args) => menu.openMenu(...args);
+
 (async () => {
   try {
     const loaded = await host.loadWorkspace();
@@ -2396,6 +2358,7 @@ const confirmDialog = createConfirmationDialog({
     restoreWorkspaceView();
     toolbar.mount();
     confirmDialog.mount();
+    menu.mount();
     render();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
