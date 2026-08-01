@@ -16,6 +16,12 @@ import { selectedRootIds } from '../../prompt-library-model.js';
 
 const DRAG_THRESHOLD = 6;
 
+/** True when keyboard focus is inside an editable control, where native text
+ * editing (selection, copy/cut/paste, caret movement) must be left alone. */
+function isEditableTarget(target) {
+  return Boolean(target?.closest?.('input, textarea, [contenteditable="true"]'));
+}
+
 export function createPromptTreeController({
   document,
   list,
@@ -127,7 +133,7 @@ export function createPromptTreeController({
   // ---------------------------------------------------------------- keyboard
 
   function onKeyDown(event) {
-    if (event.target.closest('input, textarea')) return;
+    if (isEditableTarget(event.target)) return;
     const key = event.key;
     if (key === 'ArrowDown' || key === 'ArrowUp') {
       event.preventDefault();

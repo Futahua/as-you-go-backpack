@@ -21,7 +21,7 @@ function createHarness({ binMode = false } = {}) {
       }
     },
   };
-  const elements = { editorLayer: fakeNode(), confirmLayer: fakeNode(), linkEditLayer: fakeNode() };
+  const elements = { editorLayer: fakeNode(), confirmLayer: fakeNode(), linkEditLayer: fakeNode(), promptLayer: fakeNode() };
   const store = createWorkspaceStore({
     getState: () => ({}),
     setState: () => {},
@@ -142,6 +142,25 @@ test('a visible dialog layer suppresses all workspace shortcuts', () => {
   assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0);
   assert.equal(h.commandSpies['copySelection:calls'], 0);
   assert.equal(h.commandSpies['clearSelection:calls'], 0);
+});
+
+test('the visible prompt library suppresses all workspace shortcuts', () => {
+  const h = createHarness();
+  h.elements.promptLayer.hidden = false;
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'a', ctrlKey: true }));
+  h.listeners[0].handler(key({ key: 'c', ctrlKey: true }));
+  h.listeners[0].handler(key({ key: 'x', ctrlKey: true }));
+  h.listeners[0].handler(key({ key: 'v', ctrlKey: true }));
+  h.listeners[0].handler(key({ key: 'Delete' }));
+  h.listeners[0].handler(key({ key: 'Enter' }));
+  assert.equal(h.commandSpies['selectAllVisible:calls'], 0);
+  assert.equal(h.commandSpies['copySelection:calls'], 0);
+  assert.equal(h.commandSpies['cutSelection:calls'], 0);
+  assert.equal(h.commandSpies['pasteInto:calls'], 0);
+  assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0);
+  assert.equal(h.commandSpies['activateItem:calls'], 0);
+  assert.equal(h.commandSpies['clearSelection:calls'], 0, 'workspace Escape is ignored while the library is open');
 });
 
 test('Ctrl+Shift+Z routes only to redo', () => {

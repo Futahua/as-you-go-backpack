@@ -47,5 +47,6 @@ export function getWorkspaceElements(document) {
     confirmRestore: requiredElement(document, '#confirm-restore'),
     cancelConfirm: requiredElement(document, '#cancel-confirm'),
     linkEditLayer: requiredElement(document, '#link-edit-layer'),
+    promptLayer: requiredElement(document, '#prompt-layer'),
   };
 }

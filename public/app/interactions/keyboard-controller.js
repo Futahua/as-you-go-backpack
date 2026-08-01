@@ -15,7 +15,11 @@ export function createKeyboardController({
   function mount() {
     abortController = new AbortController();
     document.addEventListener('keydown', (event) => {
-      if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden || !elements.linkEditLayer.hidden) return;
+      // Any modal layer (including the prompt library) takes over keyboard
+      // handling. While the prompt library is open the tree controller owns
+      // tree shortcuts and editable controls keep native text behavior.
+      if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden
+        || !elements.linkEditLayer.hidden || !elements.promptLayer.hidden) return;
       const session = store.getSession();
       const key = event.key.toLowerCase();
 
