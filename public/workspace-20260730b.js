@@ -1289,8 +1289,10 @@ function confirmPickupCopy(message) {
   pickupCopyTimer = setTimeout(() => {
     pickupCopyTimer = null;
     button?.classList.remove('pickup-copied');
-    elements.status.classList.remove('status-copied');
     if (label) label.textContent = PICKUP_COPY_LABEL;
+    // Clear the text as well as the emphasis. Dropping only the class would
+    // leave the confirmation behind in the red error styling.
+    if (elements.status.textContent === message) setStatus('');
   }, PICKUP_COPY_FLASH_MS);
 }
 

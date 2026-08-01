@@ -86,19 +86,26 @@
   font-size: 12px;
 }
 .status:empty { display: none; }
-/* The status line is otherwise an error line (red). A copy confirmation is a
- * success, so it gets its own green panel rather than reading as a fault. */
+/* A copy confirmation is a success, but .status is otherwise an error line
+ * (red and full width). The pill therefore shrink-wraps its text instead of
+ * inheriting the 1120px bar, and gets its own green treatment. A shrink-wrapped
+ * box cannot be centred by `margin: auto`, so it is centred with a translate
+ * that does not depend on knowing its width. */
 .status.status-copied {
   display: flex;
+  left: 50%;
   align-items: center;
   gap: 7px;
+  width: max-content;
+  max-width: calc(100vw - 56px);
   border: 1px solid #b8d0be;
-  border-radius: 8px;
+  border-radius: 999px;
   background: #e8f2ea;
-  padding: 5px 12px;
+  padding: 5px 14px 5px 10px;
   color: #2f5c40;
   font-size: 13px;
   font-weight: 600;
+  transform: translateX(-50%);
 }
 .status.status-copied::before {
   flex: none;

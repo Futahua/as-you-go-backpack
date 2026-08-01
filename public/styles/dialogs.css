@@ -124,15 +124,19 @@
 /* A copy confirmation is the one status the user is actively waiting for, so
  * it reads as a notification rather than the usual quiet line. */
 .prompt-library-status.prompt-status-copied {
-  display: flex;
+  /* Shrink-wrapped pill, matching the workspace copy confirmation, so a short
+   * message is not a full-width panel. */
+  display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 30px;
+  width: max-content;
+  max-width: 100%;
+  min-height: 26px;
   margin: 0 0 8px;
   border: 1px solid #b8d0be;
-  border-radius: 8px;
+  border-radius: 999px;
   background: #e8f2ea;
-  padding: 5px 10px;
+  padding: 4px 12px 4px 8px;
   color: #2f5c40;
   font-size: 13px;
   font-weight: 600;
