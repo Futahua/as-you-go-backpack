@@ -124,7 +124,10 @@
             <button id="prompt-delete-ok" class="paper-button danger" type="button">Delete</button>
             <button id="prompt-delete-cancel" class="paper-button" type="button">Cancel</button>
           </div>
-          <div id="prompt-card-list" class="prompt-tree-list" role="tree" aria-multiselectable="true"></div>
+          <div id="prompt-tree-viewport" class="prompt-tree-viewport" tabindex="0" aria-label="Prompt library root">
+            <div id="prompt-card-list" class="prompt-tree-list" role="tree" aria-multiselectable="true" aria-label="Prompt library"></div>
+            <div class="prompt-root-surface" aria-hidden="true"></div>
+          </div>
           <div id="prompt-tree-menu" class="prompt-tree-menu" role="menu" hidden></div>
           <p id="prompt-error" class="editor-error" role="alert"></p>
           <div class="editor-actions editor-submit">

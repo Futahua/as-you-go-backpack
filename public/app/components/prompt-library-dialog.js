@@ -97,7 +97,11 @@ export function createPromptLibraryDialog({
   let treeClipboard = null;
   let cutIds = new Set();
   let activeEditSession = null;
-  let rootDestination = true;
+  /** The one place the paste destination lives. `{ type: 'root' }` means the
+   * top level, outside every folder; `{ type: 'node', nodeId }` means a row.
+   * Derived from selection changes so it can never drift from what is visible;
+   * validated against the live tree when a paste resolves. */
+  let activeDestination = { type: 'root', nodeId: null };
   let saving = false;
 
   const icon = (name) => createSvg(document, ICONS[name]);
@@ -106,6 +110,9 @@ export function createPromptLibraryDialog({
   const addPromptButton = document.querySelector('#prompt-add-prompt');
   const addFolderButton = document.querySelector('#prompt-add-folder');
   const cardList = document.querySelector('#prompt-card-list');
+  // The viewport owns the root pointer surface and scrolling; older markup
+  // without the wrapper falls back to the row list itself.
+  const viewport = document.querySelector('#prompt-tree-viewport') ?? cardList;
   const error = document.querySelector('#prompt-error');
   const cancelButton = document.querySelector('#prompt-cancel');
   const saveButton = document.querySelector('#prompt-save');
@@ -142,7 +149,12 @@ export function createPromptLibraryDialog({
 
   const intents = {
     onSelectionChange(selection) {
-      rootDestination = selection.selectedIds.size === 0;
+      // Every selection change — pointer or programmatic — flows through here,
+      // so the destination always describes the visible selection.
+      const selected = [...selection.selectedIds];
+      activeDestination = selected.length === 1
+        ? { type: 'node', nodeId: selected[0] }
+        : { type: 'root', nodeId: null };
     },
 
     onToggleFolder(id) {
@@ -225,8 +237,11 @@ export function createPromptLibraryDialog({
       contextMenu.close();
     },
     onBlankClick() {
-      rootDestination = true;
+      // Root targeting only changes the destination. The internal clipboard is
+      // deliberately preserved so copy → click root → paste works.
+      activeDestination = { type: 'root', nodeId: null };
       contextMenu.close();
+      render();
     },
     onUndo() {
       handleUndo();
@@ -242,6 +257,10 @@ export function createPromptLibraryDialog({
   const controller = createPromptTreeController({
     document,
     list: cardList,
+    viewport,
+    // Whole-modal keyboard scope: tree shortcuts must work from the add
+    // buttons, Save/Cancel and blank dialog background, not only from a row.
+    keyboardTarget: layer,
     getTree: () => draftLibrary,
     getExpandedFolders: () => expandedFolderIds,
     getPromptEditorId: () => expandedPromptId,
@@ -433,15 +452,16 @@ export function createPromptLibraryDialog({
    * otherwise exactly one selected folder (inside), otherwise one selected
    * non-folder row (after it), otherwise root. */
   function resolvePasteDestination() {
-    if (rootDestination) return { destinationParentId: null, beforeId: null };
-    const selected = [...controller.getSelection().selectedIds];
-    if (selected.length === 1) {
-      const node = findPromptNode(draftLibrary, selected[0]);
-      if (node?.type === 'folder') return { destinationParentId: selected[0], beforeId: null };
-      const row = rowForId(selected[0]);
-      return { destinationParentId: row?.dataset.parentId || null, beforeId: row?.dataset.nextId || null };
-    }
-    return { destinationParentId: null, beforeId: null };
+    const ROOT = { destinationParentId: null, beforeId: null };
+    if (activeDestination.type !== 'node') return ROOT;
+    const { nodeId } = activeDestination;
+    // A destination row that no longer exists (deleted, or undone away) falls
+    // back to root rather than resolving against stale DOM.
+    const node = findPromptNode(draftLibrary, nodeId);
+    if (!node) return ROOT;
+    if (node.type === 'folder') return { destinationParentId: nodeId, beforeId: null };
+    const row = rowForId(nodeId);
+    return { destinationParentId: row?.dataset.parentId || null, beforeId: row?.dataset.nextId || null };
   }
 
   function collapseFolder(id) {
@@ -482,7 +502,7 @@ export function createPromptLibraryDialog({
     for (const row of rows()) {
       row.classList.toggle('prompt-cut', cutIds.has(row.dataset.nodeId));
     }
-    cardList.classList.toggle('prompt-root-target', rootDestination);
+    viewport.classList.toggle('prompt-root-target', activeDestination.type === 'root');
     renderDeleteConfirm();
   }
 
@@ -873,7 +893,10 @@ export function createPromptLibraryDialog({
   /** Root context menu for blank tree space: paste at top level, new prompt,
    * new folder, and select all. Targets the root as the paste destination. */
   function openRootMenu(x, y) {
-    rootDestination = true;
+    activeDestination = { type: 'root', nodeId: null };
+    // Reflect the root target before the menu opens, so the highlight matches
+    // where a "Paste at top level" would actually land.
+    render();
     const items = [];
     if (treeClipboard) items.push({ id: 'paste-root', label: 'Paste at top level' });
     items.push(
@@ -941,7 +964,7 @@ export function createPromptLibraryDialog({
 
   function handleMenuAction(action, id, multi) {
     if (action === 'paste-root') {
-      rootDestination = true;
+      activeDestination = { type: 'root', nodeId: null };
       pasteTreeClipboard();
       return;
     }
@@ -992,13 +1015,16 @@ export function createPromptLibraryDialog({
     treeClipboard = null;
     cutIds.clear();
     activeEditSession = null;
-    rootDestination = true;
+    activeDestination = { type: 'root', nodeId: null };
     contextMenu.close();
     controller.setSelection(createTreeSelection());
     error.textContent = options.message || '';
     status.textContent = '';
     render();
     layer.hidden = false;
+    // Never leave focus on document.body: with nothing selected, root is the
+    // active destination and owns the keyboard.
+    controller.focusRoot();
   }
 
   function close() {

@@ -25,6 +25,14 @@ function isEditableTarget(target) {
 export function createPromptTreeController({
   document,
   list,
+  // Root pointer target: the scrollable area that also contains the blank
+  // surface under the last row. Defaults to the row list for callers that do
+  // not wrap it.
+  viewport = list,
+  // Keyboard scope for tree-level shortcuts. Must contain the tree, the add
+  // buttons, Save/Cancel, the context menu, and the editors so Ctrl+Z/Y/C/X/V
+  // work from anywhere non-editable in the modal. Defaults to the viewport.
+  keyboardTarget = viewport,
   getTree,
   getExpandedFolders,
   getPromptEditorId,
@@ -55,9 +63,24 @@ export function createPromptTreeController({
     return selection;
   }
 
-  function setSelection(next) {
+  /** The single path every selection change travels, pointer-driven or
+   * programmatic. Notifying by default is what keeps the dialog's destination
+   * state from drifting away from the visible selection. */
+  function setSelection(next, { notify = true } = {}) {
     selection = next;
     refreshRowStates();
+    if (notify) intents.onSelectionChange?.(selection);
+  }
+
+  /** Moves real browser focus to a row. Setting tabindex alone does not. */
+  function focusRow(id) {
+    rowFor(id)?.focus?.({ preventScroll: true });
+  }
+
+  /** Focuses the root surface so tree shortcuts keep a live keyboard target
+   * when no row is focused. */
+  function focusRoot() {
+    viewport?.focus?.({ preventScroll: true });
   }
 
   function refreshRowStates() {
@@ -71,9 +94,7 @@ export function createPromptTreeController({
   }
 
   function emitSelection(next) {
-    selection = next;
-    refreshRowStates();
-    intents.onSelectionChange?.(selection);
+    setSelection(next);
   }
 
   // ------------------------------------------------------------------ clicks
@@ -98,8 +119,11 @@ export function createPromptTreeController({
 
     const row = event.target.closest('.prompt-tree-row');
     if (!row) {
+      // Blank root space: clear rows, target root, and take focus so the next
+      // Ctrl+V has a live keyboard target. The clipboard is deliberately kept.
       emitSelection(clearSelection());
       intents.onBlankClick?.();
+      focusRoot();
       return;
     }
     const id = row.dataset.nodeId;
@@ -110,6 +134,7 @@ export function createPromptTreeController({
     } else {
       emitSelection(selectOnly(selection, id));
     }
+    focusRow(selection.focusedId ?? id);
   }
 
   function onRowDoubleClick(event) {
@@ -125,6 +150,10 @@ export function createPromptTreeController({
     event.preventDefault();
     const row = event.target.closest('.prompt-tree-row');
     if (!row) {
+      // Same root targeting as a blank left-click, then open the root menu.
+      emitSelection(clearSelection());
+      intents.onBlankClick?.();
+      focusRoot();
       intents.onOpenRootContextMenu?.(event.clientX, event.clientY);
       return;
     }
@@ -132,20 +161,29 @@ export function createPromptTreeController({
     if (!selection.selectedIds.has(id)) {
       emitSelection(selectOnly(selection, id));
     }
+    focusRow(id);
     intents.onOpenContextMenu(event.clientX, event.clientY, id);
   }
 
   // ---------------------------------------------------------------- keyboard
 
   function onKeyDown(event) {
+    // Editable controls keep native text editing: never preventDefault here.
     if (isEditableTarget(event.target)) return;
     const key = event.key;
+    const accel = event.ctrlKey || event.metaKey;
+    // The context menu owns its own arrow/Enter/Escape navigation. Let its keys
+    // through untouched, but still allow the accelerators below to reach the
+    // tree — those close the menu first so the operation applies to the tree.
+    const inMenu = Boolean(event.target?.closest?.('[role="menu"]'));
+    if (inMenu && !accel) return;
+    if (inMenu && accel) intents.onCloseContextMenu?.();
     if (key === 'ArrowDown' || key === 'ArrowUp') {
-      event.preventDefault();
       const ids = visibleIds();
       const index = ids.indexOf(selection.focusedId);
       const target = key === 'ArrowDown' ? ids[Math.min(ids.length - 1, index + 1)] : ids[Math.max(0, index - 1)];
       if (!target) return;
+      event.preventDefault();
       if (event.shiftKey) {
         const range = selectVisibleRange({ ...selection, focusedId: selection.focusedId }, target, ids);
         selection = { ...range, focusedId: target };
@@ -154,15 +192,15 @@ export function createPromptTreeController({
         selection = { ...selection, focusedId: target };
         refreshRowStates();
       }
-      rowFor(target)?.focus?.();
+      focusRow(target);
       return;
     }
     if (key === 'ArrowRight' || key === 'ArrowLeft') {
-      event.preventDefault();
       const id = selection.focusedId;
       if (!id) return;
       const node = findPromptNodeAt(getTree(), id);
       if (!node) return;
+      event.preventDefault();
       if (key === 'ArrowRight') {
         if (node.type === 'folder') {
           if (getExpandedFolders().has(id)) {
@@ -172,7 +210,7 @@ export function createPromptTreeController({
             if (firstChild) {
               selection = { ...selection, focusedId: firstChild };
               refreshRowStates();
-              rowFor(firstChild)?.focus?.();
+              focusRow(firstChild);
             }
           } else {
             intents.onExpandFolder(id);
@@ -194,11 +232,11 @@ export function createPromptTreeController({
       return;
     }
     if (key === 'Enter') {
-      event.preventDefault();
       const id = selection.focusedId;
       if (!id) return;
       const node = findPromptNodeAt(getTree(), id);
       if (!node) return;
+      event.preventDefault();
       if (node.type === 'prompt') intents.onOpenPrompt(id);
       else intents.onToggleFolder(id);
       return;
@@ -214,10 +252,9 @@ export function createPromptTreeController({
       return;
     }
     if (key === 'Delete' || key === 'Backspace') {
+      if (selection.selectedIds.size === 0) return;
       event.preventDefault();
-      if (selection.selectedIds.size > 0) {
-        intents.onDelete([...selectedRootIds(getTree(), [...selection.selectedIds])]);
-      }
+      intents.onDelete([...selectedRootIds(getTree(), [...selection.selectedIds])]);
       return;
     }
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && key.toLowerCase() === 'z') {
@@ -281,7 +318,7 @@ export function createPromptTreeController({
     if (parentId) {
       selection = { ...selection, focusedId: parentId };
       refreshRowStates();
-      rowFor(parentId)?.focus?.();
+      focusRow(parentId);
     }
   }
 
@@ -323,7 +360,9 @@ export function createPromptTreeController({
     }
     const row = event.target.closest('.prompt-tree-row');
     if (!row) {
-      if (event.target.closest('.prompt-tree-list')) {
+      // Anywhere inside the viewport but not on a row — including the blank
+      // surface below the last top-level row — drops at root.
+      if (viewport.contains?.(event.target) ?? event.target.closest('.prompt-tree-viewport, .prompt-tree-list')) {
         setRootDrop(true);
       } else {
         clearDropIndicators();
@@ -368,7 +407,7 @@ export function createPromptTreeController({
   }
 
   function setRootDrop(active) {
-    list.classList.toggle('prompt-drop-root', active);
+    viewport.classList.toggle('prompt-drop-root', active);
     if (drag) drag.rootDrop = active;
   }
 
@@ -423,14 +462,22 @@ export function createPromptTreeController({
   function mount() {
     abortController = new AbortController();
     const signal = abortController.signal;
-    list.addEventListener('click', onRowClick, { signal });
-    list.addEventListener('dblclick', onRowDoubleClick, { signal });
-    list.addEventListener('keydown', onKeyDown, { signal });
-    list.addEventListener('contextmenu', onContextMenu, { signal });
-    list.addEventListener('pointerdown', onPointerDown, { signal });
-    list.addEventListener('pointermove', onPointerMove, { signal });
-    list.addEventListener('pointerup', onPointerUp, { signal });
-    list.addEventListener('pointercancel', onPointerCancel, { signal });
+    // Pointer interaction is bound to the viewport so blank space under the
+    // last row counts as the root target.
+    viewport.addEventListener('click', onRowClick, { signal });
+    viewport.addEventListener('dblclick', onRowDoubleClick, { signal });
+    viewport.addEventListener('contextmenu', onContextMenu, { signal });
+    viewport.addEventListener('pointerdown', onPointerDown, { signal });
+    viewport.addEventListener('pointermove', onPointerMove, { signal });
+    viewport.addEventListener('pointerup', onPointerUp, { signal });
+    viewport.addEventListener('pointercancel', onPointerCancel, { signal });
+    // Keyboard is bound to the whole modal so tree shortcuts work from the add
+    // buttons, Save/Cancel, and blank dialog background — not just the rows.
+    if (keyboardTarget !== viewport) {
+      keyboardTarget.addEventListener('keydown', onKeyDown, { signal });
+    } else {
+      viewport.addEventListener('keydown', onKeyDown, { signal });
+    }
   }
 
   function destroy() {
@@ -439,5 +486,5 @@ export function createPromptTreeController({
     cancelDrag();
   }
 
-  return { mount, destroy, getSelection, setSelection, refreshRowStates, cancelDrag };
+  return { mount, destroy, getSelection, setSelection, refreshRowStates, cancelDrag, focusRow, focusRoot };
 }

@@ -148,7 +148,15 @@ function makeNode(tag) {
       }
       return null;
     },
-    focus() {},
+    focus() { focusState.activeElement = node; },
+    contains(other) {
+      let current = other;
+      while (current) {
+        if (current === node) return true;
+        current = current.parentNode;
+      }
+      return false;
+    },
     getBoundingClientRect() { return { top: 0, left: 0, width: 100, height: 100, right: 100, bottom: 100 }; },
     style: { setProperty(name, value) { node._style[name] = value; } },
   };
@@ -194,6 +202,46 @@ function makeNode(tag) {
   return node;
 }
 
+/** Focus tracking shared by every fake node, so `activeElement` is real and
+ * tests can dispatch a keydown from whatever actually holds focus. */
+const focusState = { activeElement: null };
+
+/** Wires the flat id map into the same containment the real markup has:
+ *
+ *   #prompt-layer > .prompt-library > { header buttons, status,
+ *                                       #prompt-tree-viewport > #prompt-card-list
+ *                                                             > .prompt-root-surface,
+ *                                       #prompt-tree-menu, footer buttons }
+ *
+ * Without this the fake DOM has no parent chain, so nothing bubbles and a
+ * list-scoped listener looks identical to a modal-scoped one — which is
+ * exactly how the live Ctrl+Z failure hid behind green tests. */
+function buildPromptLayerTree(nodes) {
+  // Each harness starts from a clean focus state so no test inherits another
+  // test's activeElement.
+  focusState.activeElement = null;
+  const card = makeNode('div');
+  card.className = 'confirm-card prompt-library';
+  nodes['prompt-layer'].appendChild(card);
+  nodes['prompt-tree-viewport'].className = 'prompt-tree-viewport';
+  nodes['prompt-tree-viewport'].setAttribute('tabindex', '0');
+  nodes['prompt-card-list'].className = 'prompt-tree-list';
+  nodes['prompt-root-surface'].className = 'prompt-root-surface';
+  nodes['prompt-tree-menu'].setAttribute('role', 'menu');
+  nodes['prompt-tree-viewport'].appendChild(nodes['prompt-card-list']);
+  nodes['prompt-tree-viewport'].appendChild(nodes['prompt-root-surface']);
+  for (const id of [
+    'prompt-add-prompt', 'prompt-add-folder', 'prompt-status', 'prompt-delete-confirm',
+    'prompt-tree-viewport', 'prompt-tree-menu', 'prompt-error', 'prompt-cancel', 'prompt-save',
+  ]) {
+    card.appendChild(nodes[id]);
+  }
+  nodes['prompt-delete-confirm'].appendChild(nodes['prompt-delete-message']);
+  nodes['prompt-delete-confirm'].appendChild(nodes['prompt-delete-ok']);
+  nodes['prompt-delete-confirm'].appendChild(nodes['prompt-delete-cancel']);
+  return nodes;
+}
+
 const treeFixture = () => ({
   groups: [],
   shortcuts: [],
@@ -224,18 +272,21 @@ function createHarness({ initialView = null } = {}) {
     setStatus: () => {},
   });
   const topIds = [
-    'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-card-list', 'prompt-tree-menu', 'prompt-status',
+    'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-tree-viewport', 'prompt-card-list',
+    'prompt-root-surface', 'prompt-tree-menu', 'prompt-status',
     'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
+  buildPromptLayerTree(nodes);
+  focusState.activeElement = null;
   nodes['prompt-layer'].hidden = true;
-  nodes['prompt-card-list'].className = 'prompt-tree-list';
   nodes['prompt-status'].setAttribute('role', 'status');
   nodes['prompt-status'].setAttribute('aria-live', 'polite');
 
   const documentMock = {
-    querySelector: (sel) => nodes[sel.slice(1)] ?? null,
+    querySelector: (sel) => (sel.startsWith('#') ? nodes[sel.slice(1)] ?? null : nodes['prompt-layer'].querySelector(sel)),
+    get activeElement() { return focusState.activeElement; },
     createElement: (tag) => makeNode(tag),
     createElementNS: (ns, tag) => makeNode(tag),
     createDocumentFragment: () => { const f = makeNode('fragment'); f.isFragment = true; return f; },
@@ -267,7 +318,7 @@ function createHarness({ initialView = null } = {}) {
   });
   dialog.mount();
   return {
-    dialog, store, nodes, copied, statuses,
+    dialog, store, nodes, copied, statuses, document: documentMock,
     getState: () => state,
     rows: () => nodes['prompt-card-list'].querySelectorAll('.prompt-tree-row'),
     rowFor: (id) => nodes['prompt-card-list'].querySelectorAll('.prompt-tree-row').find((r) => r.dataset.nodeId === id),
@@ -285,9 +336,16 @@ const clickRow = (h, id, modifiers = {}) => {
   const row = h.rowFor(id);
   row.dispatch('click', { target: row, ...modifiers, preventDefault, stopPropagation });
 };
+/** Dispatches a keydown from whatever currently holds focus and lets it bubble
+ * up the real parent chain, exactly as the browser would. This is what proves
+ * the listener scope is right rather than just that the callback works. */
 const keyOn = (h, event = {}) => {
-  const list = h.nodes['prompt-card-list'];
-  list.dispatch('keydown', { target: list, ...event, preventDefault, stopPropagation });
+  const from = h.document.activeElement ?? h.nodes['prompt-tree-viewport'];
+  from.dispatch('keydown', { target: from, ...event, preventDefault, stopPropagation });
+};
+/** Dispatches a keydown from a specific element, bubbling. */
+const keyFrom = (node, event = {}) => {
+  node.dispatch('keydown', { target: node, ...event, preventDefault, stopPropagation });
 };
 const openPrompt = (h, id) => {
   const chevron = h.rowFor(id).querySelector('.prompt-card-toggle');
@@ -295,13 +353,21 @@ const openPrompt = (h, id) => {
 };
 const chevronOf = (h, id) => h.rowFor(id).querySelector('.prompt-card-toggle');
 const save = async (h) => { await h.nodes['prompt-save'].dispatch('click', { preventDefault }); };
-const blankClick = (h) => h.nodes['prompt-card-list'].dispatch('click', { target: h.nodes['prompt-card-list'], preventDefault, stopPropagation });
+/** Clicks the real blank surface below the last row, which bubbles to the
+ * viewport — the live "target the top level" gesture. */
+const blankClick = (h) => {
+  const surface = h.nodes['prompt-root-surface'];
+  surface.dispatch('click', { target: surface, preventDefault, stopPropagation });
+};
 
 test('Ctrl+Z/Y/Shift+Z drive local undo/redo', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
   assert.equal(h.promptRows().length, 3, 'prompt added');
+  // Adding focuses the new title input, where Ctrl+Z must stay native. Leave
+  // the editor but stay inside the modal, exactly as the user does.
+  blankClick(h);
   keyOn(h, { key: 'z', ctrlKey: true });
   assert.equal(h.promptRows().length, 2, 'undo removed the added prompt');
   keyOn(h, { key: 'y', ctrlKey: true });
@@ -331,6 +397,7 @@ test('20 title keystrokes are one undo step', async () => {
     input.dispatch('input', { target: input });
   }
   chevronOf(h, 'prompt-root').dispatch('click', { target: chevronOf(h, 'prompt-root'), preventDefault, stopPropagation });
+  blankClick(h);
   keyOn(h, { key: 'z', ctrlKey: true });
   await save(h);
   assert.equal(h.getState().view.promptLibrary[1].title, 'Root', 'whole editing session undone in one step');
@@ -382,6 +449,7 @@ test('expansion and selection alone create no history', () => {
   open(h);
   clickRow(h, 'prompt-root');
   chevronOf(h, 'prompt-root').dispatch('click', { target: chevronOf(h, 'prompt-root'), preventDefault, stopPropagation });
+  clickRow(h, 'prompt-root');
   keyOn(h, { key: 'z', ctrlKey: true });
   assert.ok(h.nodes['prompt-status'].textContent.includes('Nothing to undo'));
 });
@@ -643,6 +711,8 @@ test('folder F2 rename commits on Enter and cancels on Escape', async () => {
   input.dispatch('input', { target: input });
   input.dispatch('keydown', { target: input, key: 'Enter', preventDefault, stopPropagation });
   assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Development');
+  // Committing the rename removes the input; re-focus the row before F2.
+  clickRow(h, 'folder-dev');
   keyOn(h, { key: 'F2' });
   input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
   input.value = 'Discarded';
@@ -887,17 +957,20 @@ test('persistence failure leaves the dialog open and re-enables Save', async () 
     setStatus: () => {},
   });
   const topIds = [
-    'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-card-list', 'prompt-tree-menu', 'prompt-status',
+    'prompt-layer', 'prompt-add-prompt', 'prompt-add-folder', 'prompt-tree-viewport', 'prompt-card-list',
+    'prompt-root-surface', 'prompt-tree-menu', 'prompt-status',
     'prompt-error', 'prompt-cancel', 'prompt-save', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
+  buildPromptLayerTree(nodes);
   nodes['prompt-layer'].hidden = true;
   nodes['prompt-status'].setAttribute('role', 'status');
   nodes['prompt-status'].setAttribute('aria-live', 'polite');
 
   const documentMock = {
-    querySelector: (sel) => nodes[sel.slice(1)] ?? null,
+    querySelector: (sel) => (sel.startsWith('#') ? nodes[sel.slice(1)] ?? null : nodes['prompt-layer'].querySelector(sel)),
+    get activeElement() { return focusState.activeElement; },
     createElement: (tag) => makeNode(tag),
     createElementNS: (ns, tag) => makeNode(tag),
     createDocumentFragment: () => { const f = makeNode('fragment'); f.isFragment = true; return f; },
@@ -1085,4 +1158,235 @@ test('destroy removes all listeners', () => {
   h.dialog.destroy();
   assert.equal(h.nodes['copy-prompt'].listeners.contextmenu?.length ?? 0, 0);
   assert.equal(h.nodes['prompt-card-list'].listeners.pointerup?.length ?? 0, 0);
+});
+
+// ===========================================================================
+// Browser-level event routing regressions.
+//
+// These reproduce the two live Papers failures that the previous fake-DOM
+// tests could not see: every keydown below is dispatched from the element
+// that actually holds focus and bubbles through the real parent chain, and
+// every root click lands on the real blank surface under the last row.
+// ===========================================================================
+
+const expandInner = (h) => {
+  const toggle = h.rowFor('folder-inner').querySelector('.prompt-folder-toggle');
+  toggle.dispatch('click', { target: toggle, preventDefault, stopPropagation });
+};
+
+test('Ctrl+Z from a selected row reaches local history', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  clickRow(h, 'prompt-root');
+  assert.equal(h.document.activeElement, h.rowFor('prompt-root'), 'clicking a row focuses it');
+  keyOn(h, { key: 'z', ctrlKey: true });
+  assert.equal(h.promptRows().length, 2, 'undo ran from the focused row');
+});
+
+test('Ctrl+Z and Ctrl+Y reach local history from the New prompt button', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  assert.equal(h.promptRows().length, 3);
+  // Focus the header button, outside the tree list entirely.
+  keyFrom(h.nodes['prompt-add-prompt'], { key: 'z', ctrlKey: true });
+  assert.equal(h.promptRows().length, 2, 'undo works from New prompt');
+  keyFrom(h.nodes['prompt-add-prompt'], { key: 'y', ctrlKey: true });
+  assert.equal(h.promptRows().length, 3, 'redo works from New prompt');
+});
+
+test('Ctrl+Z reaches local history from the Save and Cancel buttons', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  keyFrom(h.nodes['prompt-save'], { key: 'z', ctrlKey: true });
+  assert.equal(h.promptRows().length, 2, 'undo works from Save');
+  keyFrom(h.nodes['prompt-cancel'], { key: 'z', ctrlKey: true, shiftKey: true });
+  assert.equal(h.promptRows().length, 3, 'Ctrl+Shift+Z redo works from Cancel');
+});
+
+test('Ctrl+Z from the New folder button and local status line works', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-folder'].dispatch('click', { preventDefault });
+  const folders = h.folderRows().length;
+  keyFrom(h.nodes['prompt-add-folder'], { key: 'z', ctrlKey: true });
+  assert.equal(h.folderRows().length, folders - 1, 'undo works from New folder');
+  keyFrom(h.nodes['prompt-status'], { key: 'y', ctrlKey: true });
+  assert.equal(h.folderRows().length, folders, 'redo works from the local status line');
+});
+
+test('Ctrl+Z inside the prompt textarea stays native and leaves history alone', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  // Adding a prompt already opens its editor.
+  const added = h.promptRows()[h.promptRows().length - 1].dataset.nodeId;
+  const textarea = h.textareaFor(added);
+  let prevented = false;
+  textarea.dispatch('keydown', {
+    target: textarea, key: 'z', ctrlKey: true,
+    preventDefault: () => { prevented = true; }, stopPropagation,
+  });
+  assert.equal(prevented, false, 'native text undo is never prevented');
+  assert.equal(h.promptRows().length, 3, 'tree history untouched from a textarea');
+});
+
+test('opening the dialog focuses the root surface, never document.body', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  assert.equal(h.document.activeElement, h.nodes['prompt-tree-viewport'], 'root viewport holds focus on open');
+});
+
+test('clicking blank root space focuses root and clears selection but keeps the clipboard', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  clickRow(h, 'prompt-b');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  blankClick(h);
+  assert.equal(h.document.activeElement, h.nodes['prompt-tree-viewport'], 'root surface takes focus');
+  assert.equal(h.rowFor('prompt-b').getAttribute('aria-selected'), 'false', 'row selection cleared');
+  keyOn(h, { key: 'v', ctrlKey: true });
+  // Fixture has 2 top-level nodes; the surviving clipboard adds a third.
+  assert.equal(h.rows().filter((r) => r.dataset.parentId === '').length, 3, 'clipboard survived and pasted at root');
+});
+
+test('copy a nested prompt, click real root surface, Ctrl+V clones at top level', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  clickRow(h, 'prompt-b');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  blankClick(h);
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await save(h);
+  const roots = h.getState().view.promptLibrary;
+  const clone = roots.find((n) => n.title === 'Beta');
+  assert.ok(clone, 'clone landed at root');
+  assert.notEqual(clone.id, 'prompt-b', 'clone has a regenerated id');
+  const inner = roots[0].children.find((n) => n.id === 'folder-inner');
+  assert.ok(inner.children.some((n) => n.id === 'prompt-b'), 'original stayed put');
+});
+
+test('cut a nested folder, click real root surface, Ctrl+V moves the subtree with original ids', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'folder-inner');
+  keyOn(h, { key: 'x', ctrlKey: true });
+  blankClick(h);
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await save(h);
+  const roots = h.getState().view.promptLibrary;
+  const moved = roots.find((n) => n.id === 'folder-inner');
+  assert.ok(moved, 'folder moved to root with its original id');
+  assert.equal(moved.children[0].id, 'prompt-b', 'subtree kept original child ids');
+  assert.ok(!roots[0].children.some((n) => n.id === 'folder-inner'), 'removed from former parent');
+});
+
+test('copied folder pastes an independent clone at root', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'folder-inner');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  blankClick(h);
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await save(h);
+  const roots = h.getState().view.promptLibrary;
+  const clone = roots.find((n) => n.type === 'folder' && n.title === 'Inner');
+  assert.ok(clone, 'cloned folder at root');
+  assert.notEqual(clone.id, 'folder-inner', 'folder id regenerated');
+  assert.notEqual(clone.children[0].id, 'prompt-b', 'child ids regenerated');
+  assert.equal(clone.children[0].title, 'Beta', 'titles preserved');
+  assert.ok(roots[0].children.some((n) => n.id === 'folder-inner'), 'original untouched');
+});
+
+test('destination follows programmatic selection and repairs to root after undo', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  clickRow(h, 'prompt-root');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  // One selected folder -> paste inside it.
+  clickRow(h, 'folder-inner');
+  keyOn(h, { key: 'v', ctrlKey: true });
+  assert.equal(
+    h.rows().filter((r) => r.dataset.parentId === 'folder-inner').length, 2,
+    'pasted inside the selected folder',
+  );
+  // Paste selects the new node; undo removes it, so destination must fall back
+  // to root rather than pointing at a node that no longer exists.
+  keyOn(h, { key: 'z', ctrlKey: true });
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await save(h);
+  const roots = h.getState().view.promptLibrary;
+  assert.equal(roots.filter((n) => n.title === 'Root').length, 2, 'destination repaired to root after undo');
+});
+
+test('a single selected prompt pastes after it in its own parent', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  clickRow(h, 'prompt-a');
+  keyOn(h, { key: 'v', ctrlKey: true });
+  const siblings = h.rows().filter((r) => r.dataset.parentId === 'folder-dev').map((r) => r.dataset.nodeId);
+  assert.equal(siblings[0], 'prompt-a', 'original first');
+  assert.equal(siblings.length, 3, 'clone landed beside it inside folder-dev');
+});
+
+test('right-clicking blank root space clears selection, focuses root, and pastes at top level', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  expandInner(h);
+  clickRow(h, 'prompt-b');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  const surface = h.nodes['prompt-root-surface'];
+  surface.dispatch('contextmenu', { target: surface, clientX: 10, clientY: 10, preventDefault, stopPropagation });
+  // Root is targeted and takes focus first; the menu then legitimately takes
+  // focus for its own keyboard navigation, so focus ends up on the first item.
+  assert.equal(h.rowFor('prompt-b').getAttribute('aria-selected'), 'false', 'selection cleared');
+  assert.ok(
+    h.nodes['prompt-tree-viewport'].classList.contains('prompt-root-target'),
+    'root is the active destination',
+  );
+  const items = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]');
+  const pasteRoot = items.find((b) => b.textContent === 'Paste at top level');
+  assert.ok(pasteRoot, 'Paste at top level offered when the clipboard is populated');
+  pasteRoot.dispatch('click', { target: pasteRoot, preventDefault, stopPropagation });
+  await save(h);
+  assert.ok(h.getState().view.promptLibrary.some((n) => n.title === 'Beta'), 'pasted at root');
+});
+
+test('prompt-tree shortcuts never escape to a document-level listener', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  const workspaceKeys = [];
+  h.document.addEventListener('keydown', (event) => workspaceKeys.push(event.key));
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  blankClick(h);
+  keyOn(h, { key: 'z', ctrlKey: true });
+  keyOn(h, { key: 'y', ctrlKey: true });
+  assert.deepEqual(workspaceKeys, [], 'no prompt-tree shortcut escaped to a document listener');
+});
+
+test('deleting the focused row repairs selection and restores valid focus', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  keyOn(h, { key: 'Delete' });
+  assert.equal(h.rowFor('prompt-a'), undefined, 'row removed');
+  assert.ok(h.document.activeElement, 'focus is not left on nothing');
+});
+
+test('the root surface stays a clickable target with only a few rows', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const surface = h.nodes['prompt-root-surface'];
+  assert.equal(surface.parentNode, h.nodes['prompt-tree-viewport'], 'surface lives inside the root target');
+  assert.ok(!h.rows().some((r) => r.dataset.nodeId === undefined), 'no fake persisted root node was rendered');
+  clickRow(h, 'prompt-a');
+  surface.dispatch('click', { target: surface, preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'false', 'clicking below the last row targets root');
 });

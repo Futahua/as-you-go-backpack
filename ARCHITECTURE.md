@@ -60,6 +60,30 @@ tree space (or the root context menu) targets the root while the internal
 clipboard is preserved, and dragging below the last top-level row moves nodes
 to root.
 
+Three invariants keep the tree usable in a real browser, each covered by tests
+that dispatch bubbling events from the actually-focused element:
+
+- **Keyboard scope is the modal, not the row list.** The controller takes a
+  `keyboardTarget` (`#prompt-layer`) for `keydown` while pointer listeners stay
+  on the viewport. Tree shortcuts therefore work from New prompt/New folder,
+  Save/Cancel and the status line — anywhere non-editable. `isEditableTarget()`
+  still excludes inputs, textareas and contenteditable, which never get
+  `preventDefault()`, so native text undo/redo survives.
+- **Focus is explicit.** Setting `tabindex` does not move focus, so selection
+  calls `row.focus({ preventScroll: true })` and root targeting focuses
+  `#prompt-tree-viewport`. Opening the dialog focuses the root surface rather
+  than leaving `document.body` active.
+- **One destination, never a drift-prone boolean.** `activeDestination` is
+  `{ type: 'root' | 'node', nodeId }`, updated from a single
+  `controller.setSelection()` path that always notifies `onSelectionChange` —
+  pointer-driven and programmatic alike. `resolvePasteDestination()` reads it
+  and falls back to root when the node no longer exists, so paste can never
+  target a row that undo or delete removed.
+
+`#prompt-tree-viewport` owns scrolling and the blank `.prompt-root-surface`
+below the last row, so clicking, right-clicking, or dropping in empty space is
+a real root gesture. There is no persisted root node.
+
 ## Interaction controllers
 
 Controllers live in `public/app/interactions/` and own browser events for one gesture
