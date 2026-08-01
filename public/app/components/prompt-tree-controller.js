@@ -125,7 +125,7 @@ export function createPromptTreeController({
     event.preventDefault();
     const row = event.target.closest('.prompt-tree-row');
     if (!row) {
-      intents.onCloseContextMenu?.();
+      intents.onOpenRootContextMenu?.(event.clientX, event.clientY);
       return;
     }
     const id = row.dataset.nodeId;
@@ -220,6 +220,21 @@ export function createPromptTreeController({
       }
       return;
     }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && key.toLowerCase() === 'z') {
+      event.preventDefault();
+      intents.onRedo();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'y') {
+      event.preventDefault();
+      intents.onRedo();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && key.toLowerCase() === 'z') {
+      event.preventDefault();
+      intents.onUndo();
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'c') {
       event.preventDefault();
       if (selection.selectedIds.size > 0) {
@@ -308,9 +323,14 @@ export function createPromptTreeController({
     }
     const row = event.target.closest('.prompt-tree-row');
     if (!row) {
-      clearDropIndicators();
+      if (event.target.closest('.prompt-tree-list')) {
+        setRootDrop(true);
+      } else {
+        clearDropIndicators();
+      }
       return;
     }
+    setRootDrop(false);
     event.preventDefault();
     const rect = row.getBoundingClientRect();
     const plan = resolveDropPlan(row, event.clientY - rect.top, rect.height);
@@ -344,6 +364,12 @@ export function createPromptTreeController({
       delete row.dataset.dropParent;
       delete row.dataset.dropBefore;
     }
+    setRootDrop(false);
+  }
+
+  function setRootDrop(active) {
+    list.classList.toggle('prompt-drop-root', active);
+    if (drag) drag.rootDrop = active;
   }
 
   function setDraggingVisual(ids) {
@@ -356,10 +382,12 @@ export function createPromptTreeController({
   function onPointerUp(event) {
     if (!drag || event.pointerId !== drag.pointerId) return;
     const wasMoved = drag.moved;
-    const draggedIds = drag.draggedIds;
+    const draggedIds = drag.draggedIds ?? [];
     const row = event.target.closest('.prompt-tree-row');
     let plan = null;
-    if (row) {
+    if (drag.rootDrop) {
+      plan = { destinationParentId: null, beforeId: null };
+    } else if (row) {
       const destinationParentId = row.dataset.dropParent === '' ? null : row.dataset.dropParent;
       const beforeId = row.dataset.dropBefore === '' ? null : row.dataset.dropBefore;
       plan = { destinationParentId, beforeId };

@@ -19,9 +19,22 @@ import {
   repairSelectionAfterCollapse,
   repairSelectionAfterTreeChange,
   visibleDepthFirstIds,
+  selectAllVisible,
 } from './prompt-tree-selection.js';
 import { createPromptTreeController } from './prompt-tree-controller.js';
 import { createPromptTreeContextMenu } from './prompt-tree-context-menu.js';
+import {
+  createPromptLibraryHistory,
+  canUndoPromptLibrary,
+  canRedoPromptLibrary,
+  recordPromptLibraryChange,
+  replacePromptLibraryPresent,
+  undoPromptLibrary,
+  redoPromptLibrary,
+  beginPromptLibraryTransaction,
+  commitPromptLibraryTransaction,
+  cancelPromptLibraryTransaction,
+} from './prompt-library-history.js';
 import { setPromptLibrary } from '../../workspace-model-20260730b.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -75,13 +88,16 @@ export function createPromptLibraryDialog({
   setStatus,
 }) {
   let abortController = null;
-  let draftLibrary = [];
+  let history = createPromptLibraryHistory([]);
+  let draftLibrary = history.present;
   let expandedFolderIds = new Set();
   let expandedPromptId = null;
   let editingFolderId = null;
   let confirmingDeleteIds = null;
   let treeClipboard = null;
   let cutIds = new Set();
+  let activeEditSession = null;
+  let rootDestination = true;
   let saving = false;
 
   const icon = (name) => createSvg(document, ICONS[name]);
@@ -125,18 +141,18 @@ export function createPromptLibraryDialog({
   // ------------------------------------------------------------------ intents
 
   const intents = {
-    onSelectionChange: () => {},
+    onSelectionChange(selection) {
+      rootDestination = selection.selectedIds.size === 0;
+    },
 
     onToggleFolder(id) {
       if (expandedFolderIds.has(id)) collapseFolder(id);
       else {
-        syncExpandedEditorFromDom();
         expandedFolderIds.add(id);
         render();
       }
     },
     onExpandFolder(id) {
-      syncExpandedEditorFromDom();
       expandedFolderIds.add(id);
       render();
     },
@@ -144,19 +160,19 @@ export function createPromptLibraryDialog({
       collapseFolder(id);
     },
     onTogglePromptEditor(id) {
-      syncExpandedEditorFromDom();
+      commitActiveEditTransaction();
       expandedPromptId = expandedPromptId === id ? null : id;
       render();
       if (expandedPromptId) focusInRow(expandedPromptId, '.prompt-card-title');
     },
     onOpenPrompt(id) {
-      syncExpandedEditorFromDom();
+      commitActiveEditTransaction();
       expandedPromptId = id;
       render();
       focusInRow(id, '.prompt-card-title');
     },
     onCollapsePromptEditor(id) {
-      syncExpandedEditorFromDom();
+      commitActiveEditTransaction();
       if (expandedPromptId === id) expandedPromptId = null;
       render();
     },
@@ -177,7 +193,7 @@ export function createPromptLibraryDialog({
       deleteRoots(ids);
     },
     onBeginRename(id) {
-      syncExpandedEditorFromDom();
+      commitActiveEditTransaction();
       editingFolderId = id;
       render();
       focusInRow(id, '.prompt-folder-rename');
@@ -189,28 +205,34 @@ export function createPromptLibraryDialog({
       addFolder(parentId);
     },
     onMove(ids, destinationParentId, beforeId) {
-      syncExpandedEditorFromDom();
-      const next = movePromptNodes(draftLibrary, {
-        nodeIds: ids,
-        destinationParentId,
-        beforeId,
-      });
-      if (next !== draftLibrary) {
-        draftLibrary = next;
-        if (destinationParentId && !expandedFolderIds.has(destinationParentId)) {
-          expandedFolderIds.add(destinationParentId);
-        }
-        repairSelectionAfterTreeChangeAndRender();
-      }
+      commitTreeMutation(
+        movePromptNodes(history.present, { nodeIds: ids, destinationParentId, beforeId }),
+        'move',
+        { onChanged: () => {
+          if (destinationParentId && !expandedFolderIds.has(destinationParentId)) {
+            expandedFolderIds.add(destinationParentId);
+          }
+        } },
+      );
     },
     onOpenContextMenu(x, y, id) {
       openTreeMenu(x, y, id);
+    },
+    onOpenRootContextMenu(x, y) {
+      openRootMenu(x, y);
     },
     onCloseContextMenu() {
       contextMenu.close();
     },
     onBlankClick() {
+      rootDestination = true;
       contextMenu.close();
+    },
+    onUndo() {
+      handleUndo();
+    },
+    onRedo() {
+      handleRedo();
     },
     onEscape() {
       escapePriority();
@@ -264,46 +286,36 @@ export function createPromptLibraryDialog({
 
   function pasteTreeClipboard() {
     if (!treeClipboard) return;
-    const selected = [...controller.getSelection().selectedIds];
-    let destinationParentId = null;
-    let beforeId = null;
-    if (selected.length === 1) {
-      const node = findPromptNode(draftLibrary, selected[0]);
-      if (node?.type === 'folder') {
-        destinationParentId = selected[0];
-      } else {
-        const row = rowForId(selected[0]);
-        destinationParentId = row?.dataset.parentId || null;
-        beforeId = row?.dataset.nextId || null;
-      }
-    }
-    syncExpandedEditorFromDom();
-    let next = draftLibrary;
-    let pastedIds = [];
+    const { destinationParentId, beforeId } = resolvePasteDestination();
+    let pastedIds = null;
+    let ok = false;
     if (treeClipboard.mode === 'copy') {
       const clones = clonePromptNodesForPaste(treeClipboard.nodes);
-      const inserted = insertPromptNodes(draftLibrary, destinationParentId, beforeId, clones);
-      if (inserted !== draftLibrary) {
-        next = inserted;
-        pastedIds = clones.map((node) => node.id);
-      }
+      pastedIds = clones.map((node) => node.id);
+      ok = commitTreeMutation(
+        insertPromptNodes(history.present, destinationParentId, beforeId, clones),
+        'paste',
+        { selectIds: pastedIds },
+      );
     } else {
-      const moved = movePromptNodes(draftLibrary, { nodeIds: treeClipboard.nodeIds, destinationParentId, beforeId });
-      if (moved !== draftLibrary) {
-        next = moved;
-        pastedIds = treeClipboard.nodeIds;
-        treeClipboard = null;
-        cutIds.clear();
-      }
+      pastedIds = treeClipboard.nodeIds;
+      ok = commitTreeMutation(
+        movePromptNodes(history.present, { nodeIds: treeClipboard.nodeIds, destinationParentId, beforeId }),
+        'paste',
+        {
+          selectIds: pastedIds,
+          onChanged: () => {
+            treeClipboard = null;
+            cutIds.clear();
+          },
+        },
+      );
     }
-    if (next !== draftLibrary) {
-      draftLibrary = next;
+    if (ok) {
       if (destinationParentId && !expandedFolderIds.has(destinationParentId)) {
         expandedFolderIds.add(destinationParentId);
       }
-      controller.setSelection(selectOnlyPaste(pastedIds));
       statusMessage(`${pastedIds.length} ${pastedIds.length === 1 ? 'item' : 'items'} pasted.`);
-      render();
     } else {
       statusMessage('This folder cannot be moved inside itself.');
     }
@@ -314,8 +326,124 @@ export function createPromptLibraryDialog({
     return { selectedIds: new Set(ids), anchorId: first, focusedId: first };
   }
 
+  // ----------------------------------------------------- draft history
+
+  /** Ends the active text-editing transaction, producing at most one undo entry
+   * for the whole editing session. */
+  function commitActiveEditTransaction() {
+    if (history.transaction) {
+      history = commitPromptLibraryTransaction(history, history.present);
+    }
+    activeEditSession = null;
+    draftLibrary = history.present;
+  }
+
+  /** Structural cleanup after a history tree change: close the context menu,
+   * cancel delete confirmation and drag, drop invalid editor/rename/expansion
+   * state, repair the cut clipboard, repair selection, and render once. */
+  function afterHistoryTreeChange({ repairSelection = true } = {}) {
+    contextMenu.close();
+    confirmingDeleteIds = null;
+    controller.cancelDrag();
+    if (expandedPromptId && !findPromptNode(draftLibrary, expandedPromptId)) {
+      expandedPromptId = null;
+    }
+    if (editingFolderId && !findPromptNode(draftLibrary, editingFolderId)) {
+      editingFolderId = null;
+    }
+    for (const id of [...expandedFolderIds]) {
+      const node = findPromptNode(draftLibrary, id);
+      if (!node || node.type !== 'folder') expandedFolderIds.delete(id);
+    }
+    if (treeClipboard?.mode === 'cut') {
+      const valid = treeClipboard.nodeIds.filter((id) => findPromptNode(draftLibrary, id));
+      if (valid.length === 0) {
+        treeClipboard = null;
+        cutIds.clear();
+      } else {
+        treeClipboard = { ...treeClipboard, nodeIds: valid };
+        cutIds = new Set(valid);
+      }
+    }
+    if (repairSelection) {
+      const visible = visibleDepthFirstIds(draftLibrary, expandedFolderIds);
+      controller.setSelection(repairSelectionAfterTreeChange(controller.getSelection(), visible));
+    }
+    render();
+  }
+
+  /** Routes a completed draft-data mutation through the local history: commits
+   * any active edit transaction, records one undo entry (no entry when the
+   * mutator returned the same tree), and re-renders. Returns whether a change
+   * happened. `selectIds` optionally selects the resulting roots. */
+  function commitTreeMutation(nextTree, metadata, { selectIds = null, onChanged = null } = {}) {
+    commitActiveEditTransaction();
+    if (nextTree === history.present) return false;
+    history = recordPromptLibraryChange(history, nextTree, metadata);
+    draftLibrary = history.present;
+    if (onChanged) onChanged();
+    if (selectIds) controller.setSelection(selectOnlyPaste(selectIds));
+    afterHistoryTreeChange({ repairSelection: !selectIds });
+    return true;
+  }
+
+  /** Applies an editable-field input within one editing session transaction:
+   * the first input of a session records the pre-edit baseline; subsequent
+   * inputs replace present without creating separate history entries. */
+  function applyEditInput(ownerId, updater) {
+    if (activeEditSession !== ownerId) {
+      commitActiveEditTransaction();
+      history = beginPromptLibraryTransaction(history, 'edit');
+      activeEditSession = ownerId;
+    }
+    const next = updater(history.present);
+    history = replacePromptLibraryPresent(history, next);
+    draftLibrary = history.present;
+  }
+
+  function handleUndo() {
+    commitActiveEditTransaction();
+    if (!canUndoPromptLibrary(history)) {
+      statusMessage('Nothing to undo.');
+      return;
+    }
+    const label = history.lastLabel;
+    history = undoPromptLibrary(history);
+    draftLibrary = history.present;
+    statusMessage(`Undid ${label ?? 'change'}.`);
+    afterHistoryTreeChange();
+  }
+
+  function handleRedo() {
+    commitActiveEditTransaction();
+    if (!canRedoPromptLibrary(history)) {
+      statusMessage('Nothing to redo.');
+      return;
+    }
+    const label = history.lastLabel;
+    history = redoPromptLibrary(history);
+    draftLibrary = history.present;
+    statusMessage(`Redid ${label ?? 'change'}.`);
+    afterHistoryTreeChange();
+  }
+
+  /** Resolves where a paste should land: an explicit root destination first,
+   * otherwise exactly one selected folder (inside), otherwise one selected
+   * non-folder row (after it), otherwise root. */
+  function resolvePasteDestination() {
+    if (rootDestination) return { destinationParentId: null, beforeId: null };
+    const selected = [...controller.getSelection().selectedIds];
+    if (selected.length === 1) {
+      const node = findPromptNode(draftLibrary, selected[0]);
+      if (node?.type === 'folder') return { destinationParentId: selected[0], beforeId: null };
+      const row = rowForId(selected[0]);
+      return { destinationParentId: row?.dataset.parentId || null, beforeId: row?.dataset.nextId || null };
+    }
+    return { destinationParentId: null, beforeId: null };
+  }
+
   function collapseFolder(id) {
-    syncExpandedEditorFromDom();
+    commitActiveEditTransaction();
     expandedFolderIds.delete(id);
     const visible = visibleDepthFirstIds(draftLibrary, expandedFolderIds);
     controller.setSelection(repairSelectionAfterCollapse(controller.getSelection(), id, visible));
@@ -329,11 +457,12 @@ export function createPromptLibraryDialog({
     }
     if (editingFolderId) {
       editingFolderId = null;
+      activeEditSession = null;
       render();
       return;
     }
     if (expandedPromptId) {
-      syncExpandedEditorFromDom();
+      commitActiveEditTransaction();
       expandedPromptId = null;
       render();
       return;
@@ -351,6 +480,7 @@ export function createPromptLibraryDialog({
     for (const row of rows()) {
       row.classList.toggle('prompt-cut', cutIds.has(row.dataset.nodeId));
     }
+    cardList.classList.toggle('prompt-root-target', rootDestination);
     renderDeleteConfirm();
   }
 
@@ -538,20 +668,6 @@ export function createPromptLibraryDialog({
 
   // ------------------------------------------------------------- draft safety
 
-  function syncExpandedEditorFromDom() {
-    if (!expandedPromptId) return;
-    const row = rowForId(expandedPromptId);
-    if (!row) return;
-    const titleInput = row.querySelector('.prompt-card-title');
-    const textarea = detailsForId(expandedPromptId)?.querySelector('.prompt-card-text');
-    if (titleInput) {
-      draftLibrary = updatePromptNode(draftLibrary, expandedPromptId, (node) => ({ ...node, title: titleInput.value }));
-    }
-    if (textarea) {
-      draftLibrary = updatePromptNode(draftLibrary, expandedPromptId, (node) => ({ ...node, text: textarea.value }));
-    }
-  }
-
   /** Resolves the owning prompt node id for a focused control; the prompt
    * textarea lives in the details element, a sibling of the row. */
   function ownerNodeId(target) {
@@ -562,13 +678,18 @@ export function createPromptLibraryDialog({
   }
 
   function onTreeInput(event) {
-    if (event.target.classList.contains('prompt-folder-rename')) return;
+    if (event.target.classList.contains('prompt-folder-rename')) {
+      const id = ownerNodeId(event.target);
+      if (!id) return;
+      applyEditInput(id, (nodes) => updatePromptNode(nodes, id, (node) => ({ ...node, title: event.target.value })));
+      return;
+    }
     const id = ownerNodeId(event.target);
     if (!id) return;
     if (event.target.classList.contains('prompt-card-title')) {
-      draftLibrary = updatePromptNode(draftLibrary, id, (node) => ({ ...node, title: event.target.value }));
+      applyEditInput(id, (nodes) => updatePromptNode(nodes, id, (node) => ({ ...node, title: event.target.value })));
     } else if (event.target.classList.contains('prompt-card-text')) {
-      draftLibrary = updatePromptNode(draftLibrary, id, (node) => ({ ...node, text: event.target.value }));
+      applyEditInput(id, (nodes) => updatePromptNode(nodes, id, (node) => ({ ...node, text: event.target.value })));
     }
   }
 
@@ -578,11 +699,16 @@ export function createPromptLibraryDialog({
     const id = row.dataset.nodeId;
     if (!id) return;
     if (row.dataset.nodeType === 'folder') {
-      draftLibrary = updatePromptNode(draftLibrary, id, (node) => ({ ...node, includeAll: event.target.checked }));
+      commitTreeMutation(
+        updatePromptNode(history.present, id, (node) => ({ ...node, includeAll: event.target.checked })),
+        'include',
+      );
     } else {
-      draftLibrary = updatePromptNode(draftLibrary, id, (node) => ({ ...node, includeInBatch: event.target.checked }));
+      commitTreeMutation(
+        updatePromptNode(history.present, id, (node) => ({ ...node, includeInBatch: event.target.checked })),
+        event.target.checked ? 'include' : 'exclude',
+      );
     }
-    render();
   }
 
   // ------------------------------------------------------------- delete
@@ -610,7 +736,6 @@ export function createPromptLibraryDialog({
   function deleteRoots(ids) {
     const list = ids.filter((id) => findPromptNode(draftLibrary, id));
     if (list.length === 0) return;
-    syncExpandedEditorFromDom();
     if (countPromptsAfterRemoving(list) === 0) {
       error.textContent = 'Keep at least one prompt.';
       return;
@@ -624,29 +749,13 @@ export function createPromptLibraryDialog({
   }
 
   function applyDelete(ids) {
-    for (const id of ids) {
-      draftLibrary = removePromptNode(draftLibrary, id);
-      expandedFolderIds.delete(id);
-    }
+    const next = ids.reduce(
+      (tree, id) => removePromptNode(tree, id),
+      history.present,
+    );
+    for (const id of ids) expandedFolderIds.delete(id);
     if (expandedPromptId && ids.includes(expandedPromptId)) expandedPromptId = null;
-    if (treeClipboard?.mode === 'cut') {
-      const remaining = treeClipboard.nodeIds.filter((id) => !ids.includes(id));
-      if (remaining.length === 0) {
-        treeClipboard = null;
-        cutIds.clear();
-      } else {
-        treeClipboard = { ...treeClipboard, nodeIds: remaining };
-        cutIds = new Set(remaining);
-      }
-    }
-    confirmingDeleteIds = null;
-    repairSelectionAfterTreeChangeAndRender();
-  }
-
-  function repairSelectionAfterTreeChangeAndRender() {
-    const visible = visibleDepthFirstIds(draftLibrary, expandedFolderIds);
-    controller.setSelection(repairSelectionAfterTreeChange(controller.getSelection(), visible));
-    render();
+    commitTreeMutation(next, 'delete');
   }
 
   function onDeleteOk() {
@@ -679,46 +788,37 @@ export function createPromptLibraryDialog({
 
   function addPrompt(parentId) {
     const added = createPromptNode();
-    if (parentId == null) {
-      draftLibrary = [...draftLibrary, added];
-    } else {
-      draftLibrary = updatePromptNode(draftLibrary, parentId, (folder) => ({
-        ...folder,
-        children: [...folder.children, added],
-      }));
-      expandedFolderIds.add(parentId);
-    }
+    const next = parentId == null
+      ? [...history.present, added]
+      : updatePromptNode(history.present, parentId, (folder) => ({
+          ...folder,
+          children: [...folder.children, added],
+        }));
     expandedPromptId = added.id;
-    controller.setSelection(selectOnlyPaste([added.id]));
-    render();
+    if (parentId) expandedFolderIds.add(parentId);
+    commitTreeMutation(next, 'add prompt', { selectIds: [added.id] });
     focusInRow(added.id, '.prompt-card-title');
   }
 
   function addFolder(parentId) {
     const added = createPromptFolder();
-    if (parentId == null) {
-      draftLibrary = [...draftLibrary, added];
-    } else {
-      draftLibrary = updatePromptNode(draftLibrary, parentId, (folder) => ({
-        ...folder,
-        children: [...folder.children, added],
-      }));
-      expandedFolderIds.add(parentId);
-    }
+    const next = parentId == null
+      ? [...history.present, added]
+      : updatePromptNode(history.present, parentId, (folder) => ({
+          ...folder,
+          children: [...folder.children, added],
+        }));
     expandedFolderIds.add(added.id);
+    if (parentId) expandedFolderIds.add(parentId);
     editingFolderId = added.id;
-    controller.setSelection(selectOnlyPaste([added.id]));
-    render();
+    commitTreeMutation(next, 'add folder', { selectIds: [added.id] });
     focusInRow(added.id, '.prompt-folder-rename');
   }
 
   // -------------------------------------------------------------- rename
 
-  function commitFolderRename(id, value) {
-    const title = typeof value === 'string' ? value : '';
-    if (title.trim()) {
-      draftLibrary = updatePromptNode(draftLibrary, id, (node) => ({ ...node, title }));
-    }
+  function commitFolderRename() {
+    commitActiveEditTransaction();
     editingFolderId = null;
     render();
   }
@@ -731,11 +831,16 @@ export function createPromptLibraryDialog({
     if (event.key === 'Enter') {
       event.preventDefault();
       event.stopPropagation();
-      commitFolderRename(id, input.value);
+      commitFolderRename();
     } else if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
+      if (history.transaction) {
+        history = cancelPromptLibraryTransaction(history);
+      }
       editingFolderId = null;
+      activeEditSession = null;
+      draftLibrary = history.present;
       render();
     }
   }
@@ -745,7 +850,7 @@ export function createPromptLibraryDialog({
     if (!input) return;
     const id = input.closest('.prompt-tree-row')?.dataset.nodeId;
     if (!id || editingFolderId !== id) return;
-    commitFolderRename(id, input.value);
+    commitFolderRename();
   }
 
   // ---------------------------------------------------------- context menu
@@ -760,6 +865,29 @@ export function createPromptLibraryDialog({
       y,
       items,
       onAction: (action) => handleMenuAction(action, id, multi),
+    });
+  }
+
+  /** Root context menu for blank tree space: paste at top level, new prompt,
+   * new folder, and select all. Targets the root as the paste destination. */
+  function openRootMenu(x, y) {
+    rootDestination = true;
+    const items = [];
+    if (treeClipboard) items.push({ id: 'paste-root', label: 'Paste at top level' });
+    items.push(
+      { id: 'new-prompt', label: 'New prompt' },
+      { id: 'new-folder', label: 'New folder' },
+      { id: 'select-all', label: 'Select all' },
+    );
+    contextMenu.open({
+      x,
+      y,
+      items,
+      onAction: (action) => {
+        if (action === 'new-prompt') addPrompt(null);
+        else if (action === 'new-folder') addFolder(null);
+        else handleMenuAction(action, null, false);
+      },
     });
   }
 
@@ -810,6 +938,16 @@ export function createPromptLibraryDialog({
   }
 
   function handleMenuAction(action, id, multi) {
+    if (action === 'paste-root') {
+      rootDestination = true;
+      pasteTreeClipboard();
+      return;
+    }
+    if (action === 'select-all') {
+      const visible = visibleDepthFirstIds(draftLibrary, expandedFolderIds);
+      controller.setSelection(selectAllVisible(controller.getSelection(), visible));
+      return;
+    }
     const ids = multi ? [...controller.getSelection().selectedIds] : [id];
     if (action === 'edit') intents.onOpenPrompt(id);
     else if (action === 'copy-text') intents.onCopyPrompt(id);
@@ -826,20 +964,22 @@ export function createPromptLibraryDialog({
   }
 
   function setBatchIncludedFor(ids, included) {
-    for (const id of ids) {
-      draftLibrary = updatePromptNode(draftLibrary, id, (node) => (
+    const next = ids.reduce(
+      (tree, id) => updatePromptNode(tree, id, (node) => (
         node.type === 'prompt'
           ? { ...node, includeInBatch: included }
           : { ...node, includeAll: included }
-      ));
-    }
-    render();
+      )),
+      history.present,
+    );
+    commitTreeMutation(next, included ? 'include' : 'exclude');
   }
 
   // ------------------------------------------------------------------ open
 
   function open(options = {}) {
-    draftLibrary = snapshotLibrary().map(cloneNode);
+    history = createPromptLibraryHistory(snapshotLibrary().map(cloneNode));
+    draftLibrary = history.present;
     expandedFolderIds = new Set();
     for (const node of draftLibrary) {
       if (node.type === 'folder') expandedFolderIds.add(node.id);
@@ -849,6 +989,8 @@ export function createPromptLibraryDialog({
     confirmingDeleteIds = null;
     treeClipboard = null;
     cutIds.clear();
+    activeEditSession = null;
+    rootDestination = true;
     contextMenu.close();
     controller.setSelection(createTreeSelection());
     error.textContent = options.message || '';
@@ -861,6 +1003,7 @@ export function createPromptLibraryDialog({
     contextMenu.close();
     treeClipboard = null;
     cutIds.clear();
+    activeEditSession = null;
     status.textContent = '';
     layer.hidden = true;
     error.textContent = '';
@@ -870,9 +1013,8 @@ export function createPromptLibraryDialog({
 
   async function onSave() {
     if (saving) return;
-    syncExpandedEditorFromDom();
-    if (editingFolderId) commitFolderRename(editingFolderId, rowForId(editingFolderId)?.querySelector('.prompt-folder-rename')?.value ?? '');
-    const validationError = validatePromptLibrary(draftLibrary);
+    commitActiveEditTransaction();
+    const validationError = validatePromptLibrary(history.present);
     if (validationError) {
       error.textContent = validationError;
       return;
@@ -880,7 +1022,7 @@ export function createPromptLibraryDialog({
     saving = true;
     saveButton.disabled = true;
     try {
-      const next = setPromptLibrary(store.getSnapshot(), draftLibrary);
+      const next = setPromptLibrary(store.getSnapshot(), history.present);
       store.replace(next);
       await store.save(next);
       close();

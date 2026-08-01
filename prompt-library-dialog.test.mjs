@@ -230,6 +230,7 @@ function createHarness({ initialView = null } = {}) {
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   nodes['prompt-layer'].hidden = true;
+  nodes['prompt-card-list'].className = 'prompt-tree-list';
   nodes['prompt-status'].setAttribute('role', 'status');
   nodes['prompt-status'].setAttribute('aria-live', 'polite');
 
@@ -293,6 +294,175 @@ const openPrompt = (h, id) => {
   chevron.dispatch('click', { target: chevron, preventDefault, stopPropagation });
 };
 const chevronOf = (h, id) => h.rowFor(id).querySelector('.prompt-card-toggle');
+const save = async (h) => { await h.nodes['prompt-save'].dispatch('click', { preventDefault }); };
+const blankClick = (h) => h.nodes['prompt-card-list'].dispatch('click', { target: h.nodes['prompt-card-list'], preventDefault, stopPropagation });
+
+test('Ctrl+Z/Y/Shift+Z drive local undo/redo', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  assert.equal(h.promptRows().length, 3, 'prompt added');
+  keyOn(h, { key: 'z', ctrlKey: true });
+  assert.equal(h.promptRows().length, 2, 'undo removed the added prompt');
+  keyOn(h, { key: 'y', ctrlKey: true });
+  assert.equal(h.promptRows().length, 3, 'redo restored the added prompt');
+  keyOn(h, { key: 'z', ctrlKey: true });
+  keyOn(h, { key: 'z', ctrlKey: true, shiftKey: true });
+  assert.equal(h.promptRows().length, 3, 'Ctrl+Shift+Z also redoes');
+});
+
+test('Ctrl+Z inside an editable control stays native', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  const added = h.promptRows()[h.promptRows().length - 1];
+  const input = added.querySelector('.prompt-card-title');
+  input.dispatch('keydown', { target: input, key: 'z', ctrlKey: true, preventDefault, stopPropagation });
+  assert.equal(h.promptRows().length, 3, 'tree undo is not triggered from inside an input');
+});
+
+test('20 title keystrokes are one undo step', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  openPrompt(h, 'prompt-root');
+  const input = h.rowFor('prompt-root').querySelector('.prompt-card-title');
+  for (let i = 0; i < 20; i += 1) {
+    input.value += 'x';
+    input.dispatch('input', { target: input });
+  }
+  chevronOf(h, 'prompt-root').dispatch('click', { target: chevronOf(h, 'prompt-root'), preventDefault, stopPropagation });
+  keyOn(h, { key: 'z', ctrlKey: true });
+  await save(h);
+  assert.equal(h.getState().view.promptLibrary[1].title, 'Root', 'whole editing session undone in one step');
+});
+
+test('delete restores the complete folder subtree on undo', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'folder-dev');
+  keyOn(h, { key: 'Delete' });
+  h.nodes['prompt-delete-ok'].dispatch('click', { preventDefault });
+  assert.equal(h.rowFor('folder-dev'), undefined);
+  keyOn(h, { key: 'z', ctrlKey: true });
+  await save(h);
+  assert.equal(h.getState().view.promptLibrary[0].id, 'folder-dev', 'folder restored');
+  assert.equal(h.getState().view.promptLibrary[0].children.length, 2, 'subtree restored');
+});
+
+test('copy paste is removed by one undo and redone with the same ids', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await save(h);
+  const afterPaste = h.getState().view.promptLibrary[0].children.map((n) => n.id);
+  keyOn(h, { key: 'z', ctrlKey: true });
+  keyOn(h, { key: 'y', ctrlKey: true });
+  await save(h);
+  assert.deepEqual(h.getState().view.promptLibrary[0].children.map((n) => n.id), afterPaste, 'redo restores the same nodes');
+});
+
+test('cut paste restores the exact source position by one undo', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  keyOn(h, { key: 'x', ctrlKey: true });
+  blankClick(h);
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await save(h);
+  assert.ok(h.getState().view.promptLibrary.some((n) => n.id === 'prompt-a'), 'moved to root');
+  keyOn(h, { key: 'z', ctrlKey: true });
+  await save(h);
+  assert.ok(h.getState().view.promptLibrary[0].children.some((n) => n.id === 'prompt-a'), 'restored to original parent');
+});
+
+test('expansion and selection alone create no history', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-root');
+  chevronOf(h, 'prompt-root').dispatch('click', { target: chevronOf(h, 'prompt-root'), preventDefault, stopPropagation });
+  keyOn(h, { key: 'z', ctrlKey: true });
+  assert.ok(h.nodes['prompt-status'].textContent.includes('Nothing to undo'));
+});
+
+test('blank click targets the root and creates no history', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  blankClick(h);
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'false', 'blank clears selection');
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await save(h);
+  assert.equal(h.getState().view.promptLibrary.length, 3, 'copied node pasted at root');
+  keyOn(h, { key: 'z', ctrlKey: true });
+  await save(h);
+  assert.equal(h.getState().view.promptLibrary.length, 2, 'root paste undone in one step');
+});
+
+test('right-click blank space opens the root menu with Paste at top level', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  const list = h.nodes['prompt-card-list'];
+  list.dispatch('contextmenu', { target: list, clientX: 10, clientY: 10, preventDefault });
+  const labels = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').map((b) => b.textContent);
+  assert.ok(labels.includes('Paste at top level'));
+  assert.ok(labels.includes('New prompt'));
+  assert.ok(labels.includes('New folder'));
+  assert.ok(labels.includes('Select all'));
+  const pasteItem = h.nodes['prompt-tree-menu'].querySelectorAll('[role="menuitem"]').find((b) => b.textContent === 'Paste at top level');
+  pasteItem.dispatch('click', { target: pasteItem, preventDefault, stopPropagation });
+  assert.equal(h.rowFor('prompt-a').getAttribute('aria-selected'), 'false', 'blank right-click clears row selection');
+  assert.equal(h.promptRows().length, 3, 'root paste duplicated a prompt at top level');
+});
+
+test('multiple selected rows paste at root by default', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'prompt-a');
+  clickRow(h, 'prompt-root', { ctrlKey: true });
+  keyOn(h, { key: 'c', ctrlKey: true });
+  keyOn(h, { key: 'v', ctrlKey: true });
+  await save(h);
+  assert.equal(h.getState().view.promptLibrary.length, 4, 'both copied roots pasted at top level');
+});
+
+test('dragging below the final top-level row moves nodes to root', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  const src = h.rowFor('prompt-a');
+  const list = h.nodes['prompt-card-list'];
+  const data = { pointerId: 9 };
+  src.dispatch('pointerdown', { ...data, button: 0, clientX: 50, clientY: 50, target: src });
+  list.dispatch('pointermove', { ...data, clientX: 200, clientY: 200, target: list, preventDefault, stopPropagation });
+  list.dispatch('pointerup', { ...data, clientX: 200, clientY: 200, target: list, preventDefault, stopPropagation });
+  await save(h);
+  assert.ok(h.getState().view.promptLibrary.some((n) => n.id === 'prompt-a'), 'dragged to root');
+  assert.ok(h.getState().view.promptLibrary[0].children.every((n) => n.id !== 'prompt-a'), 'left its folder');
+});
+
+test('Cancel after undo/redo leaves the saved store unchanged', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  keyOn(h, { key: 'z', ctrlKey: true });
+  keyOn(h, { key: 'y', ctrlKey: true });
+  h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
+  assert.equal(h.getState().view.promptLibrary.length, 2, 'saved store untouched by undo/redo drafts');
+});
+
+test('reopening the dialog starts with empty local history', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
+  open(h);
+  keyOn(h, { key: 'z', ctrlKey: true });
+  assert.ok(h.nodes['prompt-status'].textContent.includes('Nothing to undo'));
+});
 
 test('right-clicking the copy button opens the library', () => {
   const h = createHarness({ initialView: treeFixture().view });
@@ -470,11 +640,13 @@ test('folder F2 rename commits on Enter and cancels on Escape', async () => {
   let input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
   assert.ok(input, 'rename input appears');
   input.value = 'Development';
+  input.dispatch('input', { target: input });
   input.dispatch('keydown', { target: input, key: 'Enter', preventDefault, stopPropagation });
   assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Development');
   keyOn(h, { key: 'F2' });
   input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
   input.value = 'Discarded';
+  input.dispatch('input', { target: input });
   input.dispatch('keydown', { target: input, key: 'Escape', preventDefault, stopPropagation });
   assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Development');
   await h.nodes['prompt-save'].dispatch('click', { preventDefault });
@@ -488,6 +660,7 @@ test('folder rename commits on focusout', () => {
   keyOn(h, { key: 'F2' });
   const input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
   input.value = 'Blurred';
+  input.dispatch('input', { target: input });
   input.dispatch('focusout', { target: input, preventDefault, stopPropagation });
   assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Blurred');
 });

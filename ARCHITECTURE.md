@@ -32,6 +32,7 @@ The prompt library is a nested tree of prompts and folders persisted in
 |---|---|
 | Pure tree data (normalize/migrate, create/find/update/remove, single and atomic multi-node move, batch inclusion via folder `includeAll`, explicit Copy Selected, validation) | `public/prompt-library-model.js` |
 | Pure temporary row-selection logic (select/toggle/range/visible order/collapse repair; no DOM/store/host) | `public/app/components/prompt-tree-selection.js` |
+| Pure dialog-local undo/redo (past/present/future, edit transactions, limit; no DOM/store/host) | `public/app/components/prompt-library-history.js` |
 | Tree DOM interaction → plain intents (clicks, keyboard, drag, context-menu requests; selection state; no host/persistence) | `public/app/components/prompt-tree-controller.js` |
 | Prompt-tree context menu (rendering, keyboard nav, dismissal, action intents) | `public/app/components/prompt-tree-context-menu.js` |
 | Panel composition root (open/close, draft tree, expansion/editor/rename/delete-confirm, rendering, Save/Cancel) | `public/app/components/prompt-library-dialog.js` |
@@ -51,7 +52,13 @@ which is reserved for prompt double-click and "Copy prompt text"). Feedback
 for modal actions uses the local `#prompt-status`, not the workspace status.
 New prompt / New folder are permanent header buttons; New prompt inserts
 inside the selected folder only when exactly one folder row is selected,
-otherwise at root.
+otherwise at root. Ctrl/Meta+Z/Y/Shift+Z drive a dialog-local undo/redo on the
+draft (never the workspace store history); each completed data mutation is one
+entry, a focused editing session is one transaction, and editable controls keep
+native text editing. The tree root is a first-class paste destination: blank
+tree space (or the root context menu) targets the root while the internal
+clipboard is preserved, and dragging below the last top-level row moves nodes
+to root.
 
 ## Interaction controllers
 
