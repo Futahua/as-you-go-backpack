@@ -75,11 +75,8 @@ const elements = getWorkspaceElements(document);
 
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
-let currentId = ROOT_ID;
 let graphExpanded = new Set();
 let clipboard = null;
-let binMode = false;
-let binCurrentId = 'bin';
 
 const store = createWorkspaceStore({
   getState: () => state,
@@ -87,6 +84,7 @@ const store = createWorkspaceStore({
   normalizeState,
   persist: (snapshot) => host.saveWorkspace(snapshot),
   setStatus,
+  initialSession: { currentId: ROOT_ID },
   prepare: (next, session) => captureWorkspaceViewFrom(next, session),
   afterCommit: () => {
     closeMenu();
@@ -244,10 +242,10 @@ function isAvailableItem(itemId) {
 
 function captureWorkspaceViewFrom(currentState, currentSession) {
   return updateWorkspaceView(currentState, {
-    currentGroupId: currentId,
+    currentGroupId: currentSession.currentId,
     graphExpandedGroupIds: [...graphExpanded],
     selectedItemIds: [...currentSession.selected],
-    binMode,
+    binMode: currentSession.binMode,
   });
 }
 
@@ -257,7 +255,7 @@ function captureWorkspaceView() {
 
 function restoreWorkspaceView() {
   const requestedCurrent = state.view.currentGroupId;
-  currentId =
+  session.currentId =
     requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
       ? requestedCurrent
       : ROOT_ID;
@@ -265,11 +263,11 @@ function restoreWorkspaceView() {
     (state.view.graphExpandedGroupIds ?? []).filter((groupId) =>
       Boolean(group(groupId))),
   );
-  binMode = state.view.binMode;
+  session.binMode = state.view.binMode;
   const binnedIds = new Set(binnedItems(state).map((candidate) => candidate.id));
   session.selected = new Set(
     state.view.selectedItemIds.filter((itemId) =>
-      binMode ? binnedIds.has(itemId) : isAvailableItem(itemId)),
+      session.binMode ? binnedIds.has(itemId) : isAvailableItem(itemId)),
   );
   session.selectionAnchor = [...session.selected].at(-1) ?? null;
   state = store.replace(captureWorkspaceView());
@@ -367,7 +365,7 @@ function createGraphController() {
     viewport = document.createElement('div');
     viewport.className = 'graph-viewport';
     viewport.id = 'graph-viewport';
-    viewport.dataset.blankParent = binMode ? 'bin' : currentId;
+    viewport.dataset.blankParent = session.binMode ? 'bin' : session.currentId;
 
     camera = document.createElement('div');
     camera.className = 'graph-camera';
@@ -543,7 +541,7 @@ function createGraphController() {
       if (!byParent.has(key)) byParent.set(key, []);
       byParent.get(key).push(vi);
     }
-    const ctxId = graphContextId(currentId, binMode);
+    const ctxId = graphContextId(session.currentId, session.binMode);
     for (const vi of visibleItems) {
       const parentIds = vi.parentIds ?? [vi.parentId];
       let node = nodes.get(vi.id);
@@ -611,7 +609,7 @@ function createGraphController() {
     const isExpanded = canExpand && graphExpanded.has(candidate.id);
     const isSelected = !isGhost && session.selected.has(candidate.id);
     iconItem.dataset.kind = candidate.kind;
-    iconItem.dataset.parent = candidate.parentId ?? (binMode ? 'bin' : currentId);
+    iconItem.dataset.parent = candidate.parentId ?? (session.binMode ? 'bin' : session.currentId);
     iconItem.setAttribute('draggable', 'false');
     iconItem.setAttribute('aria-selected', String(isSelected));
     iconItem.classList.toggle('selected', isSelected);
@@ -625,7 +623,7 @@ function createGraphController() {
       candidate.icon ?? null,
       candidate.linked ?? false,
       isExpanded,
-      binMode,
+      session.binMode,
       state.view.iconSize,
     ]);
     if (node.contentSignature !== signature) {
@@ -659,7 +657,7 @@ function createGraphController() {
     iconItem.className = `icon-item${isSelected ? ' selected' : ''}${isGhost ? ' bin-origin-ghost' : ''}`;
     iconItem.dataset.id = candidate.id;
     iconItem.dataset.kind = candidate.kind;
-    iconItem.dataset.parent = candidate.parentId ?? (binMode ? 'bin' : currentId);
+    iconItem.dataset.parent = candidate.parentId ?? (session.binMode ? 'bin' : session.currentId);
     iconItem.setAttribute('draggable', 'false');
     iconItem.setAttribute('role', isGhost ? 'presentation' : 'option');
     iconItem.setAttribute('aria-selected', String(isSelected));
@@ -683,7 +681,7 @@ function createGraphController() {
       candidate.icon ?? null,
       candidate.linked ?? false,
       isExpanded,
-      binMode,
+      session.binMode,
       state.view.iconSize,
     ]);
 
@@ -880,14 +878,14 @@ function createGraphController() {
       return;
     }
     updatePending = false;
-    const visible = visibleGraphItems(state, currentId, graphExpanded, binMode, binCurrentId);
+    const visible = visibleGraphItems(state, session.currentId, graphExpanded, session.binMode, session.binCurrentId);
     if (visible.length === 0) {
       nodes.forEach((_, id) => removeNode(id));
       syncEdges([]);
       syncOriginEdges([]);
       return;
     }
-    const originEdges = binMode ? binOriginEdges(visible) : [];
+    const originEdges = session.binMode ? binOriginEdges(visible) : [];
     const ghostIds = new Set(originEdges.filter((e) => e.ghost).map((e) => e.ghostGroupId));
     const ghostItems = [...ghostIds].map((groupId, index) => ({
       id: `bin-origin:${groupId}`,
@@ -957,29 +955,29 @@ function renderGraph(initialFit = false) {
 }
 
 function render() {
-  if (binMode && binCurrentId !== 'bin' && !group(binCurrentId)?.bin) {
+  if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
     // us (e.g. via the top-level Bin list or "Delete all") — fall back to
     // the top of the Bin rather than rendering a dangling, nonexistent
     // breadcrumb segment.
-    binCurrentId = 'bin';
+    session.binCurrentId = 'bin';
   }
   const iconSize = state.view.iconSize;
   document.documentElement.style.setProperty('--icon-size', `${iconSize}px`);
-  elements.breadcrumbs.innerHTML = binMode
-    ? pathToBin(binCurrentId === 'bin' ? null : binCurrentId).map((candidate, index, path) =>
+  elements.breadcrumbs.innerHTML = session.binMode
+    ? pathToBin(session.binCurrentId === 'bin' ? null : session.binCurrentId).map((candidate, index, path) =>
         `<button type="button" data-bin-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
       ).join('')
-    : pathTo(currentId).map((candidate, index, path) =>
+    : pathTo(session.currentId).map((candidate, index, path) =>
         `<button type="button" data-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
       ).join('');
 
-  const visible = binMode
-    ? (binCurrentId === 'bin' ? binnedItems(state) : itemsInBinnedGroup(state, binCurrentId))
-    : itemsIn(state, currentId);
-  elements.grid.dataset.blankParent = binMode ? binCurrentId : currentId;
+  const visible = session.binMode
+    ? (session.binCurrentId === 'bin' ? binnedItems(state) : itemsInBinnedGroup(state, session.binCurrentId))
+    : itemsIn(state, session.currentId);
+  elements.grid.dataset.blankParent = session.binMode ? session.binCurrentId : session.currentId;
   elements.grid.dataset.view = 'graph';
-  elements.grid.classList.toggle('bin-canvas', binMode);
+  elements.grid.classList.toggle('bin-canvas', session.binMode);
 
   if (!graph.isAttached) {
     elements.grid.innerHTML = '';
@@ -988,8 +986,8 @@ function render() {
     graph.updateGraphView(false);
   }
   elements.empty.hidden = visible.length !== 0;
-  elements.empty.textContent = binMode
-    ? (binCurrentId === 'bin' ? 'The Bin is empty.' : 'Nothing left here.')
+  elements.empty.textContent = session.binMode
+    ? (session.binCurrentId === 'bin' ? 'The Bin is empty.' : 'Nothing left here.')
     : 'This folder is empty. Right-click here to add something.';
 
   syncSelection();
@@ -997,12 +995,12 @@ function render() {
   const binCount = binnedItems(state).length;
   elements.binCount.hidden = binCount === 0;
   elements.binCount.textContent = String(binCount);
-  elements.binButton.setAttribute('aria-pressed', String(binMode));
-  elements.binLabel.textContent = binMode ? 'Close Bin' : 'Bin';
-  elements.binButton.title = binMode ? 'Close Bin' : 'Bin';
-  const hasSelection = binMode && session.selected.size > 0;
-  elements.deleteAllBin.hidden = !binMode || binCount === 0;
-  elements.restoreAllBin.hidden = !binMode || binCount === 0;
+  elements.binButton.setAttribute('aria-pressed', String(session.binMode));
+  elements.binLabel.textContent = session.binMode ? 'Close Bin' : 'Bin';
+  elements.binButton.title = session.binMode ? 'Close Bin' : 'Bin';
+  const hasSelection = session.binMode && session.selected.size > 0;
+  elements.deleteAllBin.hidden = !session.binMode || binCount === 0;
+  elements.restoreAllBin.hidden = !session.binMode || binCount === 0;
   elements.deleteAllBin.classList.toggle('selective', hasSelection);
   elements.restoreAllBin.classList.toggle('selective', hasSelection);
   elements.deleteAllBin.title = hasSelection ? 'Delete selection permanently' : 'Delete all';
@@ -1139,22 +1137,22 @@ function finishMarquee(event) {
 
 function currentSelectionParent() {
   const first = item([...session.selected][0]);
-  return first?.parentId ?? currentId;
+  return first?.parentId ?? session.currentId;
 }
 
 function selectedPasteDestinations() {
   const folders = [...session.selected].map((itemId) => group(itemId)).filter(Boolean);
-  return folders.length > 0 ? folders.map((folder) => folder.id) : [currentId];
+  return folders.length > 0 ? folders.map((folder) => folder.id) : [session.currentId];
 }
 
 async function activate(itemId) {
   const folder = group(itemId);
   if (folder) {
-    if (binMode) {
+    if (session.binMode) {
       // Drilling into a binned folder stays inside the Bin — it must never
       // jump to the real explorer, since the folder (and everything under
       // it) is still hidden there and would just show up empty.
-      binCurrentId = folder.id;
+      session.binCurrentId = folder.id;
       session.selected.clear();
       graph.destroyGraphView();
       closeMenu();
@@ -1162,7 +1160,7 @@ async function activate(itemId) {
       saveWorkspaceView();
       return;
     }
-    currentId = folder.id;
+    session.currentId = folder.id;
     session.selected.clear();
     graph.destroyGraphView();
     closeMenu();
@@ -1340,7 +1338,7 @@ async function runMenuAction(action) {
   if (action === 'restore') return confirmDialog.askRestoreConfirm([...session.selected]);
   if (action === 'delete-forever') return confirmDialog.askPermanentDelete();
   if (action === 'reset-graph-position') {
-    const ctxId = graphContextId(currentId, binMode);
+    const ctxId = graphContextId(session.currentId, session.binMode);
     state = store.replace(removeGraphPositions(state, ctxId, [...session.selected]));
     for (const id of session.selected) {
       const node = graph._getNode(id);
@@ -1538,7 +1536,7 @@ elements.grid.addEventListener('pointermove', (event) => {
     }
     graph.reheat(0.12);
 
-    if (!binMode && elements.binButton) {
+    if (!session.binMode && elements.binButton) {
       const overBin = elements.binButton.contains(document.elementFromPoint(event.clientX, event.clientY));
       elements.binButton.classList.toggle('graph-bin-drop-target', overBin);
     }
@@ -1572,7 +1570,7 @@ elements.grid.addEventListener('pointerup', (event) => {
       document.querySelectorAll('.graph-dragging').forEach((el) => el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
       document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
       elements.binButton?.classList.remove('graph-bin-drop-target');
-      const hitBin = !binMode && elements.binButton?.contains(document.elementFromPoint(event.clientX, event.clientY));
+      const hitBin = !session.binMode && elements.binButton?.contains(document.elementFromPoint(event.clientX, event.clientY));
       const shells = [...elements.grid.querySelectorAll('.graph-node-shell')];
       shells.forEach((s) => s.style.pointerEvents = '');
       let hitFolderId = null;
@@ -1598,7 +1596,7 @@ elements.grid.addEventListener('pointerup', (event) => {
 
       if (hitBin) {
         try {
-          const ctxId = graphContextId(currentId, binMode);
+          const ctxId = graphContextId(session.currentId, session.binMode);
           const next = removeGraphPositions(
             binSelection(state, resolveBinTargets(graphDragCopy.itemIds)),
             ctxId,
@@ -1624,13 +1622,13 @@ elements.grid.addEventListener('pointerup', (event) => {
           for (const shortcutId of wholeShortcutIds) {
             next = collapsePlacements(next, shortcutId, hitFolderId);
           }
-          const ctxId = graphContextId(currentId, binMode);
+          const ctxId = graphContextId(session.currentId, session.binMode);
           commit(removeGraphPositions(next, ctxId, graphDragCopy.itemIds), 'Moved.');
         } catch (error) {
           setStatus(error instanceof Error ? error.message : String(error));
         }
       } else if (graphDragCopy.pinOnRelease) {
-        const ctxId = graphContextId(currentId, binMode);
+        const ctxId = graphContextId(session.currentId, session.binMode);
         const updates = {};
         for (const id of graphDragCopy.itemIds) {
           const node = graph._getNode(id);
@@ -1642,7 +1640,7 @@ elements.grid.addEventListener('pointerup', (event) => {
         graph._setSimulationDecay();
         saveWorkspaceView();
       } else {
-        const ctxId = graphContextId(currentId, binMode);
+        const ctxId = graphContextId(session.currentId, session.binMode);
         state = store.replace(removeGraphPositions(state, ctxId, graphDragCopy.itemIds));
         for (const id of graphDragCopy.itemIds) {
           const node = graph._getNode(id);
@@ -1775,7 +1773,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
   }
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
   if (!blank) return;
-  if (binMode) {
+  if (session.binMode) {
     if (session.selected.size > 0) openMenu(event.clientX, event.clientY);
     return;
   }
@@ -1787,7 +1785,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
     event.clientX,
     event.clientY,
     'blank',
-    blank.dataset.blankParent ?? currentId,
+    blank.dataset.blankParent ?? session.currentId,
   );
 });
 
@@ -1800,7 +1798,7 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden || !elements.linkEditLayer.hidden) return;
   if (
-    binMode
+    session.binMode
     && event.ctrlKey
     && ['c', 'x', 'v'].includes(event.key.toLowerCase())
   ) {
@@ -1844,19 +1842,19 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.key === 'Delete' && session.selected.size > 0) {
     event.preventDefault();
-    if (binMode) confirmDialog.askPermanentDelete();
+    if (session.binMode) confirmDialog.askPermanentDelete();
     else moveToBin();
   }
-  if (event.key === 'Enter' && event.ctrlKey && session.selected.size > 0 && !binMode) {
+  if (event.key === 'Enter' && event.ctrlKey && session.selected.size > 0 && !session.binMode) {
     event.preventDefault();
     revealSelection();
     return;
   }
-  if (event.key === 'Enter' && session.selected.size === 1 && !binMode) {
+  if (event.key === 'Enter' && session.selected.size === 1 && !session.binMode) {
     event.preventDefault();
     activate([...session.selected][0]);
   }
-  if (event.key === 'Enter' && session.selected.size > 1 && !binMode) {
+  if (event.key === 'Enter' && session.selected.size > 1 && !session.binMode) {
     event.preventDefault();
     activateSelection();
   }
@@ -1872,7 +1870,7 @@ elements.explorer.addEventListener('wheel', (event) => {
 }, { passive: false });
 
 elements.grid.addEventListener('dragover', (event) => {
-  if (binMode) return;
+  if (session.binMode) return;
   event.preventDefault();
   document.querySelectorAll('.drop-inside, .graph-drop-target').forEach((node) =>
     node.classList.remove('drop-inside', 'graph-drop-target'));
@@ -1923,13 +1921,13 @@ function nameForDroppedUrl(url) {
 }
 
 elements.grid.addEventListener('drop', async (event) => {
-  if (binMode) return;
+  if (session.binMode) return;
   const droppedFiles = [...event.dataTransfer.files];
   const tile = event.target.closest('.icon-item');
   const blank = event.target.closest('[data-blank-parent]');
   const destination = tile?.dataset.kind === 'group'
     ? tile.dataset.id
-    : blank?.dataset.blankParent ?? currentId;
+    : blank?.dataset.blankParent ?? session.currentId;
 
   if (droppedFiles.length === 0) {
     const url = extractDroppedUrl(event.dataTransfer);
@@ -1980,7 +1978,7 @@ elements.grid.addEventListener('drop', async (event) => {
 elements.breadcrumbs.addEventListener('click', (event) => {
   const binCrumb = event.target.closest('[data-bin-breadcrumb]');
   if (binCrumb) {
-    binCurrentId = binCrumb.dataset.binBreadcrumb;
+    session.binCurrentId = binCrumb.dataset.binBreadcrumb;
     session.selected.clear();
     graph.destroyGraphView();
     render();
@@ -1989,7 +1987,7 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   }
   const crumb = event.target.closest('[data-breadcrumb]');
   if (!crumb) return;
-  currentId = crumb.dataset.breadcrumb;
+  session.currentId = crumb.dataset.breadcrumb;
   session.selected.clear();
   graph.destroyGraphView();
   render();
@@ -2037,8 +2035,8 @@ const confirmDialog = createConfirmationDialog({
 const menu = createContextMenu({
   elements,
   window,
-  getCurrentId: () => currentId,
-  getBinMode: () => binMode,
+  getCurrentId: () => session.currentId,
+  getBinMode: () => session.binMode,
   getClipboard: () => clipboard,
   getSelectedItems: () => [...session.selected].map(item).filter(Boolean),
   isWebLink,
@@ -2053,7 +2051,7 @@ const editorDialog = createEditorDialog({
   elements,
   document,
   getState: () => state,
-  getCurrentId: () => currentId,
+  getCurrentId: () => session.currentId,
   closeMenu,
   host,
   iconCache,
@@ -2079,11 +2077,11 @@ const showEditor = (...args) => editorDialog.showEditor(...args);
 const binControls = createBinControls({
   elements,
   getState: () => state,
-  getBinMode: () => binMode,
-  setBinMode: (next) => { binMode = next; },
+  getBinMode: () => session.binMode,
+  setBinMode: (next) => { session.binMode = next; },
   getSelectedIds: () => [...session.selected],
   clearSelection: () => { session.selected.clear(); },
-  resetDrillDown: () => { binCurrentId = 'bin'; },
+  resetDrillDown: () => { session.binCurrentId = 'bin'; },
   binnedItems,
   moveToBin,
   confirmDialog,

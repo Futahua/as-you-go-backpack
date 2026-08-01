@@ -16,6 +16,7 @@ export function createWorkspaceStore({
   prepare,
   afterCommit,
   setStatus,
+  initialSession = {},
 }) {
   let undoStack = [];
   let redoStack = [];
@@ -23,6 +24,12 @@ export function createWorkspaceStore({
   const session = {
     selected: new Set(),
     selectionAnchor: null,
+    currentId: null,
+    binCurrentId: 'bin',
+    binMode: false,
+    graphExpanded: new Set(),
+    clipboard: null,
+    ...initialSession,
   };
 
   function save(nextState = getState()) {

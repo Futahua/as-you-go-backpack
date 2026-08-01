@@ -134,6 +134,21 @@ test('updateSession merges changes into the session object', () => {
   assert.equal(store.getSession().selectionAnchor, 'x');
 });
 
+test('initialSession seeds navigation and bin session state', () => {
+  let state = {};
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => {},
+    normalizeState: (s) => s,
+    setStatus: () => {},
+    initialSession: { currentId: 'ROOT', binMode: true, binCurrentId: 'bin-deep' },
+  });
+  assert.equal(store.getSession().currentId, 'ROOT');
+  assert.equal(store.getSession().binMode, true);
+  assert.equal(store.getSession().binCurrentId, 'bin-deep');
+});
+
 test('a throwing normalizeState leaves the current selection untouched', async () => {
   let state = { items: ['root'] };
   const store = createWorkspaceStore({
