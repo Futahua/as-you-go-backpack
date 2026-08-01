@@ -47,6 +47,7 @@ import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-lin
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
+import { createToolbarController } from './app/components/toolbar-controller.js';
 
 const host = createHostBridge(window);
 
@@ -2418,190 +2419,26 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
   }
 });
 
-/** A dragged pill's saved x/y are offsets from whichever edge (left/right,
- * top/bottom) it landed nearest to at drop time, stored as a fraction of
- * the workspace's width/height (0..1). A positive value is a distance from
- * the left/top edge, a negative value is a distance from the right/bottom
- * edge (stored as its negation). This keeps a pill dropped near the right
- * edge, say, still near the right edge after the window is resized, and the
- * percentage-based offsets prevent it from drifting offscreen or overlapping
- * other pills the way a fixed pixel offset would. */
-function toolbarPositionFromRect(rect, workspaceRect) {
-  const width = Math.max(1, workspaceRect.width);
-  const height = Math.max(1, workspaceRect.height);
-  const distanceFromLeft = rect.left - workspaceRect.left;
-  const distanceFromRight = workspaceRect.right - rect.right;
-  const distanceFromTop = rect.top - workspaceRect.top;
-  const distanceFromBottom = workspaceRect.bottom - rect.bottom;
-  return {
-    x: distanceFromRight < distanceFromLeft ? -distanceFromRight / width : distanceFromLeft / width,
-    y: distanceFromBottom < distanceFromTop ? -distanceFromBottom / height : distanceFromTop / height,
-  };
-}
-
-const TOOLBAR_EDGE_MARGIN = 8;
-
-/** Clamps a saved edge-offset fraction so the pill's full width/height always
- * stays within the workspace, with a small margin. `offset` is a fraction
- * (0..1) of the workspace span, `size` is the pill's own width/height in
- * pixels, and `span` is the workspace's current width/height in pixels. */
-function clampToolbarOffset(offset, size, span) {
-  const margin = TOOLBAR_EDGE_MARGIN / Math.max(1, span);
-  const maxOffset = Math.max(margin, 1 - size / Math.max(1, span) - margin);
-  return Math.min(Math.max(offset, margin), maxOffset);
-}
-
-function applyToolbarPosition(element, key) {
-  const saved = getToolbarPosition(state, key);
-  if (!saved) return;
-  const workspace = document.querySelector('.workspace');
-  const workspaceRect = workspace?.getBoundingClientRect();
-  const elementRect = element.getBoundingClientRect();
-  const width = elementRect.width || element.offsetWidth;
-  const height = elementRect.height || element.offsetHeight;
-  const spanX = workspaceRect?.width ?? window.innerWidth;
-  const spanY = workspaceRect?.height ?? window.innerHeight;
-
-  // Legacy positions were stored as pixel offsets; convert them to fractions.
-  let x = saved.x;
-  let y = saved.y;
-  if (Math.abs(x) > 1) x = x / Math.max(1, spanX);
-  if (Math.abs(y) > 1) y = y / Math.max(1, spanY);
-
-  if (x < 0) {
-    element.style.right = `${clampToolbarOffset(-x, width, spanX) * 100}%`;
-    element.style.left = 'auto';
-  } else {
-    element.style.left = `${clampToolbarOffset(x, width, spanX) * 100}%`;
-    element.style.right = 'auto';
-  }
-  if (y < 0) {
-    element.style.bottom = `${clampToolbarOffset(-y, height, spanY) * 100}%`;
-    element.style.top = 'auto';
-  } else {
-    element.style.top = `${clampToolbarOffset(y, height, spanY) * 100}%`;
-    element.style.bottom = 'auto';
-  }
-}
-
-function restoreToolbarPositions() {
-  document.querySelectorAll('.toolbar-float[data-toolbar-key]').forEach((element) => {
-    applyToolbarPosition(element, element.dataset.toolbarKey);
-  });
-}
-
-function logToolbarPositions() {
-  const positions = state.view?.toolbarPositions ?? {};
-  const keys = Object.keys(positions);
-  if (keys.length === 0) {
-    console.log('Toolbar positions: (none, using CSS defaults)');
-  } else {
-    console.log('Toolbar positions:', Object.fromEntries(
-      keys.map((key) => [key, positions[key]]),
-    ));
-  }
-}
-
-function setupToolbarDragging() {
-  let drag = null;
-  let suppressClickFor = null;
-  document.querySelectorAll('.toolbar-float[data-toolbar-key]').forEach((element) => {
-    element.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      // The breadcrumb pill's visible surface is almost entirely its own
-      // navigation buttons, so unlike the other toolbar-float elements it
-      // must allow starting a drag from those buttons too — the 4px move
-      // threshold below (and the click-suppression on release) is what
-      // still lets a plain click navigate normally.
-      const interactiveAncestor = event.target.closest('button, a, input');
-      if (interactiveAncestor && interactiveAncestor !== element && !element.classList.contains('breadcrumbs')) return;
-      const rect = element.getBoundingClientRect();
-      drag = {
-        element,
-        key: element.dataset.toolbarKey,
-        pointerId: event.pointerId,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-        moved: false,
-      };
-      // Pointer capture is deferred until the drag threshold is actually
-      // crossed (below), not taken on every pointerdown — capturing
-      // immediately interferes with a plain click's default activation on
-      // a nested <button> (the breadcrumb's own navigation buttons), which
-      // broke breadcrumb navigation entirely. Matches the same deferred-
-      // capture pattern already used for graph node dragging.
-    });
-    element.addEventListener('pointermove', (event) => {
-      if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
-      const dx = event.clientX - drag.startClientX;
-      const dy = event.clientY - drag.startClientY;
-      if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
-      if (!drag.moved) {
-        drag.moved = true;
-        drag.element.classList.add('toolbar-dragging');
-        element.setPointerCapture(event.pointerId);
-      }
-      const workspace = document.querySelector('.workspace');
-      const workspaceRect = workspace.getBoundingClientRect();
-      const elementRect = drag.element.getBoundingClientRect();
-      const width = elementRect.width || drag.element.offsetWidth;
-      const height = elementRect.height || drag.element.offsetHeight;
-      const maxX = Math.max(TOOLBAR_EDGE_MARGIN, workspaceRect.width - width - TOOLBAR_EDGE_MARGIN);
-      const maxY = Math.max(TOOLBAR_EDGE_MARGIN, workspaceRect.height - height - TOOLBAR_EDGE_MARGIN);
-      const x = Math.min(Math.max(TOOLBAR_EDGE_MARGIN, event.clientX - workspaceRect.left - drag.offsetX), maxX);
-      const y = Math.min(Math.max(TOOLBAR_EDGE_MARGIN, event.clientY - workspaceRect.top - drag.offsetY), maxY);
-      drag.element.style.left = `${x}px`;
-      drag.element.style.top = `${y}px`;
-      drag.element.style.right = 'auto';
-      drag.element.style.bottom = 'auto';
-    });
-    const finishDrag = (event) => {
-      if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
-      if (element.hasPointerCapture(event.pointerId)) {
-        element.releasePointerCapture(event.pointerId);
-      }
-      const { key, moved } = drag;
-      drag.element.classList.remove('toolbar-dragging');
-      drag = null;
-      if (!moved) return;
-      suppressClickFor = element;
-      const rect = element.getBoundingClientRect();
-      const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
-      state = setToolbarPosition(state, key, toolbarPositionFromRect(rect, workspaceRect));
-      void persist(state).catch((error) =>
-        setStatus(error instanceof Error ? error.message : String(error)));
-    };
-    element.addEventListener('pointerup', finishDrag);
-    element.addEventListener('pointercancel', finishDrag);
-    element.addEventListener('click', (event) => {
-      if (suppressClickFor === element) {
-        suppressClickFor = null;
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    }, { capture: true });
-  });
-}
+const toolbar = createToolbarController({
+  window,
+  document,
+  getState: () => state,
+  setState: (next) => { state = next; },
+  setToolbarPosition,
+  getToolbarPosition,
+  persist,
+  setStatus,
+});
 
 (async () => {
   try {
     const loaded = await host.loadWorkspace();
     state = normalizeState(typeof loaded === 'string' ? JSON.parse(loaded) : loaded);
     restoreWorkspaceView();
-    restoreToolbarPositions();
-    logToolbarPositions();
-    setupToolbarDragging();
+    toolbar.mount();
     render();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
     render();
   }
 })();
-
-let toolbarResizeTimer = null;
-window.addEventListener('resize', () => {
-  clearTimeout(toolbarResizeTimer);
-  toolbarResizeTimer = setTimeout(restoreToolbarPositions, 80);
-});
