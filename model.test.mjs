@@ -30,6 +30,7 @@ import {
   setGraphPositions,
   removeGraphPositions,
   normalizeGraphPositions,
+  setPickupPrompt,
 } from './model.mjs';
 
 import {
@@ -313,6 +314,17 @@ test('the local project preserves its explorer working position', () => {
     toolbarPositions: {},
     pickupPrompt: null,
   });
+});
+
+test('setPickupPrompt persists and normalizeState keeps it', () => {
+  let state = emptyState();
+  assert.equal(state.view.pickupPrompt, null);
+  state = setPickupPrompt(state, '  Custom prompt  ');
+  assert.equal(state.view.pickupPrompt, '  Custom prompt  ');
+  const restored = normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.equal(restored.view.pickupPrompt, '  Custom prompt  ');
+  state = setPickupPrompt(state, null);
+  assert.equal(state.view.pickupPrompt, null);
 });
 
 test('the explorer view mode defaults to explorer and persists as graph', () => {

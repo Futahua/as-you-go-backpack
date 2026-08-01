@@ -101,6 +101,18 @@
           </div>
         </div>
       </section>
+
+      <section class="confirm-layer" id="prompt-layer" hidden>
+        <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
+          <h2 id="prompt-title">Copy prompt</h2>
+          <label>Agent pickup prompt<textarea id="prompt-input" class="prompt-input" rows="14"></textarea></label>
+          <p class="editor-error" id="prompt-error" role="alert"></p>
+          <div class="editor-actions editor-submit">
+            <button class="paper-button" id="prompt-cancel" type="button">Cancel</button>
+            <button class="paper-button primary" id="prompt-save" type="button">Save</button>
+          </div>
+        </div>
+      </section>
     </main>
   </body>
 </html>

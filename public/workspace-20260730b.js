@@ -48,6 +48,7 @@ import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
+import { createPickupPromptEditor } from './app/components/pickup-prompt-editor.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
 import { createEditorDialog } from './app/components/editor-dialog.js';
@@ -1265,7 +1266,11 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
       .map((selectedId) => shortcutByRecordOrPlacementId(selectedId))
       .filter(Boolean)
       .map((candidate) => candidate.target);
-    const text = selectedTargets.length > 0 ? selectedTargets.join('\n') : PICKUP_PROMPT;
+    const text = selectedTargets.length > 0
+      ? selectedTargets.join('\n')
+      : ((typeof state.view?.pickupPrompt === 'string' && state.view.pickupPrompt)
+          ? state.view.pickupPrompt
+          : PICKUP_PROMPT);
     await host.copyText(text);
     document.querySelector('.copy-label').textContent = 'Copied';
     setTimeout(() => {
@@ -1434,6 +1439,12 @@ const keyboard = createKeyboardController({
   confirmDialog,
 });
 
+const promptEditor = createPickupPromptEditor({
+  document,
+  store,
+  fallbackPrompt: PICKUP_PROMPT,
+});
+
 bootstrapWorkspace({
   loadState: () => host.loadWorkspace(),
   setState: (next) => { state = store.install(next); },
@@ -1448,4 +1459,5 @@ bootstrapWorkspace({
   keyboard,
   drop,
   pointer,
+  promptEditor,
 });

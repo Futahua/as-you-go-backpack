@@ -22,6 +22,7 @@ export function emptyState() {
       selectedItemIds: [],
       binMode: false,
       layout: 'explorer',
+      pickupPrompt: null,
       graphPositions: {},
       toolbarPositions: {},
     },
@@ -329,6 +330,8 @@ export function normalizeState(raw) {
       layout: raw?.view?.layout === 'graph' ? 'graph' : 'explorer',
       graphPositions: normalizeGraphPositions(raw?.view?.graphPositions),
       toolbarPositions: normalizeFlatPositions(raw?.view?.toolbarPositions),
+      pickupPrompt:
+        typeof raw?.view?.pickupPrompt === 'string' ? raw.view.pickupPrompt : null,
     },
   };
 
@@ -870,8 +873,15 @@ export function updateWorkspaceView(state, changes) {
       toolbarPositions: has('toolbarPositions')
         ? normalizeFlatPositions(changes.toolbarPositions)
         : (state.view?.toolbarPositions ?? {}),
+      pickupPrompt: has('pickupPrompt')
+        ? (typeof changes.pickupPrompt === 'string' ? changes.pickupPrompt : null)
+        : (state.view?.pickupPrompt ?? null),
     },
   };
+}
+
+export function setPickupPrompt(state, text) {
+  return updateWorkspaceView(state, { pickupPrompt: typeof text === 'string' ? text : null });
 }
 
 export function graphContextId(currentGroupId, binMode) {
