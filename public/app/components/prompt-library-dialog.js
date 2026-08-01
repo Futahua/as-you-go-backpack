@@ -7,10 +7,11 @@ import {
 } from '../../prompt-library-model.js';
 import { setPromptCards } from '../../workspace-model-20260730b.js';
 
-/** Owns the prompt-library panel opened from the copy button. All edits live in
- * a private draft until Save; Cancel discards them. This component knows
- * nothing about selected workspace shortcuts or the toolbar's target-copy
- * behavior. */
+/** Owns the prompt-library panel opened from the copy button. Cards render as a
+ * compact, single-open accordion: only one card is expanded for editing at a
+ * time. All edits live in a private draft until Save; Cancel discards them.
+ * This component knows nothing about selected workspace shortcuts or the
+ * toolbar's target-copy behavior. */
 export function createPromptLibraryDialog({
   document,
   store,
@@ -22,6 +23,7 @@ export function createPromptLibraryDialog({
   let draftCards = [];
   let dragId = null;
   let saving = false;
+  let expandedCardId = null;
 
   const layer = document.querySelector('#prompt-layer');
   const addButton = document.querySelector('#prompt-add');
@@ -45,6 +47,7 @@ export function createPromptLibraryDialog({
 
   function open(options = {}) {
     draftCards = snapshotCards().map((card) => ({ ...card }));
+    expandedCardId = null;
     error.textContent = options.message || '';
     renderCards();
     layer.hidden = false;
@@ -70,12 +73,14 @@ export function createPromptLibraryDialog({
   }
 
   function createCardElement(card) {
+    const expanded = card.id === expandedCardId;
     const article = document.createElement('article');
     article.className = 'prompt-card';
     article.dataset.promptId = card.id;
+    article.classList.toggle('prompt-card-expanded', expanded);
 
     const header = document.createElement('header');
-    header.className = 'prompt-card-header';
+    header.className = 'prompt-card-summary-row';
 
     const handle = document.createElement('button');
     handle.type = 'button';
@@ -88,40 +93,66 @@ export function createPromptLibraryDialog({
     handleLabel.textContent = 'Drag to reorder';
     handle.append(handleLabel);
 
-    const titleInput = document.createElement('input');
-    titleInput.className = 'prompt-card-title';
-    titleInput.type = 'text';
-    titleInput.setAttribute('aria-label', 'Prompt title');
-    titleInput.maxLength = 120;
-    titleInput.value = card.title;
-
     const toggleLabel = document.createElement('label');
     toggleLabel.className = 'prompt-batch-toggle';
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = card.includeInBatch;
-    toggleLabel.append(checkbox);
-    toggleLabel.append('Include in batch');
+    const toggleSr = document.createElement('span');
+    toggleSr.className = 'sr-only';
+    toggleSr.textContent = 'Include in batch';
+    toggleLabel.append(checkbox, toggleSr);
 
-    const copyButton = document.createElement('button');
-    copyButton.type = 'button';
-    copyButton.dataset.promptAction = 'copy';
-    copyButton.textContent = 'Copy';
+    const summary = document.createElement('button');
+    summary.type = 'button';
+    summary.className = 'prompt-card-summary';
+    summary.setAttribute('aria-expanded', String(expanded));
+    summary.setAttribute('aria-controls', `prompt-details-${card.id}`);
+    const summaryTitle = document.createElement('span');
+    summaryTitle.className = 'prompt-card-summary-title';
+    summaryTitle.textContent = card.title;
+    const chevron = document.createElement('span');
+    chevron.className = 'prompt-card-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '⌄';
+    summary.append(summaryTitle, chevron);
 
-    const deleteButton = document.createElement('button');
-    deleteButton.type = 'button';
-    deleteButton.dataset.promptAction = 'delete';
-    deleteButton.textContent = 'Delete';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.dataset.promptAction = 'copy';
+    copyBtn.textContent = 'Copy';
 
-    header.append(handle, titleInput, toggleLabel, copyButton, deleteButton);
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.dataset.promptAction = 'delete';
+    deleteBtn.textContent = 'Delete';
 
+    header.append(handle, toggleLabel, summary, copyBtn, deleteBtn);
+
+    const details = document.createElement('div');
+    details.className = 'prompt-card-details';
+    details.id = `prompt-details-${card.id}`;
+    details.hidden = !expanded;
+
+    const titleLabel = document.createElement('label');
+    titleLabel.append('Title');
+    const titleInput = document.createElement('input');
+    titleInput.className = 'prompt-card-title';
+    titleInput.type = 'text';
+    titleInput.maxLength = 120;
+    titleInput.value = card.title;
+    titleLabel.append(titleInput);
+
+    const promptLabel = document.createElement('label');
+    promptLabel.append('Prompt');
     const textarea = document.createElement('textarea');
     textarea.className = 'prompt-card-text';
     textarea.rows = 8;
-    textarea.setAttribute('aria-label', 'Prompt text');
     textarea.value = card.text;
+    promptLabel.append(textarea);
 
-    article.append(header, textarea);
+    details.append(titleLabel, promptLabel);
+    article.append(header, details);
     return article;
   }
 
@@ -129,8 +160,21 @@ export function createPromptLibraryDialog({
     return draftCards.find((card) => card.id === id) ?? null;
   }
 
+  function cardElements() {
+    return cardList.querySelectorAll('.prompt-card');
+  }
+
+  function focusCardControl(id, selector) {
+    for (const article of cardElements()) {
+      if (article.dataset.promptId === id) {
+        article.querySelector(selector)?.focus();
+        return;
+      }
+    }
+  }
+
   function syncDraftFromDom() {
-    draftCards = [...cardList.querySelectorAll('.prompt-card')].map((article) => ({
+    draftCards = [...cardElements()].map((article) => ({
       id: article.dataset.promptId,
       title: article.querySelector('.prompt-card-title').value,
       text: article.querySelector('.prompt-card-text').value,
@@ -145,6 +189,8 @@ export function createPromptLibraryDialog({
     if (!card) return;
     if (event.target.classList.contains('prompt-card-title')) {
       card.title = event.target.value;
+      const summaryTitle = article.querySelector('.prompt-card-summary-title');
+      if (summaryTitle) summaryTitle.textContent = event.target.value;
     } else if (event.target.classList.contains('prompt-card-text')) {
       card.text = event.target.value;
     }
@@ -161,6 +207,18 @@ export function createPromptLibraryDialog({
   }
 
   function onCardClick(event) {
+    const summary = event.target.closest('.prompt-card-summary');
+    if (summary) {
+      const article = summary.closest('.prompt-card');
+      const id = article?.dataset.promptId;
+      if (!id) return;
+      syncDraftFromDom();
+      expandedCardId = expandedCardId === id ? null : id;
+      renderCards();
+      if (expandedCardId) focusCardControl(expandedCardId, '.prompt-card-text');
+      return;
+    }
+
     const article = event.target.closest('.prompt-card');
     if (!article) return;
     const action = event.target.dataset?.promptAction;
@@ -180,17 +238,20 @@ export function createPromptLibraryDialog({
         error.textContent = 'Keep at least one prompt card.';
         return;
       }
+      syncDraftFromDom();
       draftCards = draftCards.filter((candidate) => candidate.id !== card.id);
+      if (expandedCardId === card.id) expandedCardId = null;
       renderCards();
     }
   }
 
   function onAdd() {
-    draftCards.push(createPromptCard());
+    syncDraftFromDom();
+    const added = createPromptCard();
+    draftCards.push(added);
+    expandedCardId = added.id;
     renderCards();
-    const articles = cardList.querySelectorAll('.prompt-card');
-    const last = articles[articles.length - 1];
-    last?.querySelector('.prompt-card-title')?.focus();
+    focusCardControl(added.id, '.prompt-card-title');
   }
 
   function onKeyDown(event) {
@@ -199,11 +260,11 @@ export function createPromptLibraryDialog({
     const article = handle.closest('.prompt-card');
     if (!article) return;
     const id = article.dataset.promptId;
-    const index = draftCards.findIndex((card) => card.id === id);
-    if (index === -1) return;
     if (event.altKey && event.key === 'ArrowUp') {
       event.preventDefault();
       event.stopPropagation();
+      syncDraftFromDom();
+      const index = draftCards.findIndex((card) => card.id === id);
       if (index > 0) {
         draftCards = reorderPromptCards(draftCards, id, draftCards[index - 1].id);
         renderCards();
@@ -211,7 +272,9 @@ export function createPromptLibraryDialog({
     } else if (event.altKey && event.key === 'ArrowDown') {
       event.preventDefault();
       event.stopPropagation();
-      if (index < draftCards.length - 1) {
+      syncDraftFromDom();
+      const index = draftCards.findIndex((card) => card.id === id);
+      if (index !== -1 && index < draftCards.length - 1) {
         draftCards = reorderPromptCards(draftCards, id, draftCards[index + 2]?.id ?? null);
         renderCards();
       }
@@ -249,6 +312,7 @@ export function createPromptLibraryDialog({
     event.preventDefault();
     event.stopPropagation();
     const article = event.target.closest('.prompt-card');
+    syncDraftFromDom();
     if (article) {
       const beforeId = article.dataset.dropBefore === 'true'
         ? article.dataset.promptId

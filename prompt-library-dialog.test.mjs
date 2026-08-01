@@ -52,7 +52,6 @@ function makeNode(tag) {
     maxLength: 0,
     type: '',
     title: '',
-    _text: '',
     appendChild(child) {
       if (typeof child !== 'string') {
         node.children.push(child);
@@ -208,53 +207,124 @@ function createHarness({ storedCards = null, legacyPrompt = null } = {}) {
   };
 }
 
-const open = (h, options) => h.dialog.open(options);
 const preventDefault = () => {};
 const stopPropagation = () => {};
+const open = (h, options) => h.dialog.open(options);
+const summaryOf = (h, i) => h.cards()[i].querySelector('.prompt-card-summary');
+const detailsOf = (h, i) => h.cards()[i].querySelector('.prompt-card-details');
+const summaryTitleOf = (h, i) => h.cards()[i].querySelector('.prompt-card-summary-title');
+const toggleExpand = (h, i) => summaryOf(h, i).dispatch('click', { target: summaryOf(h, i), preventDefault, stopPropagation });
+const setTitle = (h, i, value) => {
+  const input = h.cardTitle(h.cards()[i]);
+  input.value = value;
+  input.dispatch('input', { target: input });
+};
+const setText = (h, i, value) => {
+  const input = h.cardText(h.cards()[i]);
+  input.value = value;
+  input.dispatch('input', { target: input });
+};
 
-test('right-clicking the copy button opens the card library', () => {
+test('right-clicking the copy button opens the card library collapsed', () => {
   const h = createHarness();
   assert.equal(h.nodes['prompt-layer'].hidden, true);
   h.nodes['copy-prompt'].dispatch('contextmenu', { preventDefault });
   assert.equal(h.nodes['prompt-layer'].hidden, false);
-  assert.equal(h.cards().length, 1, 'a default card appears');
-  assert.equal(h.cardTitle(h.cards()[0]).value, 'Agent pickup prompt');
-  assert.equal(h.cardText(h.cards()[0]).value, 'FALLBACK PROMPT');
+  assert.equal(h.cards().length, 1);
+  assert.equal(detailsOf(h, 0).hidden, true, 'default card starts collapsed');
+  assert.equal(summaryTitleOf(h, 0).textContent, 'Agent pickup prompt');
+  assert.equal(h.cardCheckbox(h.cards()[0]).checked, true);
 });
 
-test('Add creates an unchecked draft card', () => {
+test('opening with several saved cards shows every card collapsed', () => {
+  const h = createHarness({
+    storedCards: [
+      { id: 'prompt-a', title: 'One', text: 'first', includeInBatch: true },
+      { id: 'prompt-b', title: 'Two', text: 'second', includeInBatch: false },
+    ],
+  });
+  open(h);
+  assert.equal(h.cards().length, 2);
+  assert.ok(h.cards().every((article) => detailsOf(h, 0).hidden && detailsOf(h, 1).hidden));
+});
+
+test('clicking a summary expands that card and clicking again collapses it', () => {
+  const h = createHarness();
+  open(h);
+  toggleExpand(h, 0);
+  assert.equal(detailsOf(h, 0).hidden, false);
+  assert.ok(h.cards()[0].classList.contains('prompt-card-expanded'));
+  assert.equal(summaryOf(h, 0).getAttribute('aria-expanded'), 'true');
+  toggleExpand(h, 0);
+  assert.equal(detailsOf(h, 0).hidden, true);
+  assert.equal(summaryOf(h, 0).getAttribute('aria-expanded'), 'false');
+});
+
+test('expanding one card closes the other', () => {
+  const h = createHarness({
+    storedCards: [
+      { id: 'prompt-a', title: 'One', text: 'first', includeInBatch: true },
+      { id: 'prompt-b', title: 'Two', text: 'second', includeInBatch: false },
+    ],
+  });
+  open(h);
+  toggleExpand(h, 0);
+  toggleExpand(h, 1);
+  assert.equal(detailsOf(h, 0).hidden, true, 'first card closed');
+  assert.equal(detailsOf(h, 1).hidden, false, 'second card open');
+});
+
+test('checkbox, Copy, Delete, and drag handle do not toggle expansion', () => {
+  const h = createHarness({
+    storedCards: [
+      { id: 'prompt-a', title: 'One', text: 'first', includeInBatch: true },
+      { id: 'prompt-b', title: 'Two', text: 'second', includeInBatch: false },
+    ],
+  });
+  open(h);
+  toggleExpand(h, 0);
+  const article = h.cards()[0];
+  h.cardCheckbox(article).dispatch('click', { target: h.cardCheckbox(article), preventDefault, stopPropagation });
+  assert.equal(detailsOf(h, 0).hidden, false, 'checkbox keeps the card expanded');
+  const copyButton = article.querySelector('[data-prompt-action="copy"]');
+  copyButton.dispatch('click', { target: copyButton, preventDefault, stopPropagation });
+  assert.equal(detailsOf(h, 0).hidden, false, 'Copy keeps the card expanded');
+  h.cardHandle(article).dispatch('click', { target: h.cardHandle(article), preventDefault, stopPropagation });
+  assert.equal(detailsOf(h, 0).hidden, false, 'drag handle keeps the card expanded');
+  const deleteButton = h.cards()[1].querySelector('[data-prompt-action="delete"]');
+  deleteButton.dispatch('click', { target: deleteButton, preventDefault, stopPropagation });
+  assert.equal(detailsOf(h, 0).hidden, false, 'deleting another card keeps this one expanded');
+  assert.equal(h.cards().length, 1);
+});
+
+test('Add creates an unchecked card and expands it immediately', () => {
   const h = createHarness();
   open(h);
   h.nodes['prompt-add'].dispatch('click', { preventDefault });
   assert.equal(h.cards().length, 2);
-  const last = h.cards()[1];
-  assert.equal(h.cardTitle(last).value, 'New prompt');
-  assert.equal(h.cardText(last).value, '');
-  assert.equal(h.cardCheckbox(last).checked, false);
+  assert.equal(detailsOf(h, 0).hidden, true, 'previous card collapsed');
+  assert.equal(detailsOf(h, 1).hidden, false, 'new card expanded');
+  assert.equal(h.cardTitle(h.cards()[1]).value, 'New prompt');
+  assert.equal(h.cardText(h.cards()[1]).value, '');
+  assert.equal(h.cardCheckbox(h.cards()[1]).checked, false);
 });
 
-test('input changes update draft state', () => {
+test('editing the title updates the draft and the collapsed summary title', () => {
   const h = createHarness();
   open(h);
-  const article = h.cards()[0];
-  h.cardTitle(article).value = 'Renamed';
-  h.cardTitle(article).dispatch('input', { target: h.cardTitle(article) });
-  h.cardText(article).value = 'Body text';
-  h.cardText(article).dispatch('input', { target: h.cardText(article) });
-  h.cardCheckbox(article).checked = true;
-  h.cardCheckbox(article).dispatch('change', { target: h.cardCheckbox(article) });
-  assert.equal(h.dialog.getSnapshotCards()[0].title, 'Agent pickup prompt', 'snapshot is untouched before save');
-  assert.equal(h.dialog.getBatchText(), 'FALLBACK PROMPT', 'batch reads the saved snapshot, not the draft');
+  toggleExpand(h, 0);
+  setTitle(h, 0, 'Renamed');
+  assert.equal(summaryTitleOf(h, 0).textContent, 'Renamed');
+  assert.equal(h.dialog.getSnapshotCards()[0].title, 'Agent pickup prompt', 'saved snapshot untouched');
 });
 
 test('checkbox state saves', async () => {
   const h = createHarness();
   open(h);
-  const article = h.cards()[0];
-  h.cardText(article).value = 'Checked body';
-  h.cardText(article).dispatch('input', { target: h.cardText(article) });
-  h.cardCheckbox(article).checked = true;
-  h.cardCheckbox(article).dispatch('change', { target: h.cardCheckbox(article) });
+  toggleExpand(h, 0);
+  setText(h, 0, 'Checked body');
+  h.cardCheckbox(h.cards()[0]).checked = true;
+  h.cardCheckbox(h.cards()[0]).dispatch('change', { target: h.cardCheckbox(h.cards()[0]) });
   await h.nodes['prompt-save'].dispatch('click', { preventDefault });
   assert.deepEqual(h.getState().view.promptCards[0], {
     id: h.getState().view.promptCards[0].id,
@@ -268,19 +338,16 @@ test('drag drop changes the saved array order', async () => {
   const h = createHarness();
   open(h);
   h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  const [first, second] = h.cards();
-  h.cardTitle(first).value = 'First';
-  h.cardTitle(first).dispatch('input', { target: h.cardTitle(first) });
-  h.cardText(first).value = 'one';
-  h.cardText(first).dispatch('input', { target: h.cardText(first) });
-  h.cardTitle(second).value = 'Second';
-  h.cardTitle(second).dispatch('input', { target: h.cardTitle(second) });
-  h.cardText(second).value = 'two';
-  h.cardText(second).dispatch('input', { target: h.cardText(second) });
+  setTitle(h, 0, 'First');
+  setText(h, 0, 'one');
+  setTitle(h, 1, 'Second');
+  setText(h, 1, 'two');
 
+  const second = h.cards()[1];
   const handle = h.cardHandle(second);
   const dataTransfer = { effectAllowed: '', dropEffect: '', setData() {} };
   handle.dispatch('dragstart', { target: handle, dataTransfer, preventDefault, stopPropagation });
+  const first = h.cards()[0];
   first.dispatch('dragover', { target: first, clientY: 10, dataTransfer, preventDefault, stopPropagation });
   first.dispatch('drop', { target: first, dataTransfer, preventDefault, stopPropagation });
   first.dispatch('dragend', { target: first, preventDefault, stopPropagation });
@@ -297,13 +364,10 @@ test('keyboard reorder works via Alt+ArrowUp', async () => {
   const h = createHarness();
   open(h);
   h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  const [first, second] = h.cards();
-  h.cardText(second).value = 'moved body';
-  h.cardText(second).dispatch('input', { target: h.cardText(second) });
-  h.cardTitle(second).value = 'Moved';
-  h.cardTitle(second).dispatch('input', { target: h.cardTitle(second) });
-  h.cardHandle(second).dispatch('keydown', {
-    target: h.cardHandle(second),
+  setTitle(h, 1, 'Moved');
+  setText(h, 1, 'moved body');
+  h.cardHandle(h.cards()[1]).dispatch('keydown', {
+    target: h.cardHandle(h.cards()[1]),
     altKey: true,
     key: 'ArrowUp',
     preventDefault,
@@ -314,25 +378,62 @@ test('keyboard reorder works via Alt+ArrowUp', async () => {
   assert.equal(titles[0], 'Moved', 'second card moved above the default card');
 });
 
-test('individual Copy calls copyText with that card only', () => {
+test('expanded state follows the card ID after reorder', () => {
   const h = createHarness();
   open(h);
-  const article = h.cards()[0];
-  h.cardText(article).value = 'Single copy body';
-  h.cardText(article).dispatch('input', { target: h.cardText(article) });
-  const copyButton = article.querySelector('[data-prompt-action="copy"]');
+  h.nodes['prompt-add'].dispatch('click', { preventDefault });
+  h.cardHandle(h.cards()[1]).dispatch('keydown', {
+    target: h.cardHandle(h.cards()[1]),
+    altKey: true,
+    key: 'ArrowUp',
+    preventDefault,
+    stopPropagation,
+  });
+  assert.ok(h.cards()[0].classList.contains('prompt-card-expanded'), 'the moved card stays expanded');
+  assert.equal(h.cards()[1].classList.contains('prompt-card-expanded'), false);
+});
+
+test('individual Copy works while collapsed and copies the current draft text', () => {
+  const h = createHarness();
+  open(h);
+  toggleExpand(h, 0);
+  setText(h, 0, 'draft body');
+  toggleExpand(h, 0);
+  const copyButton = h.cards()[0].querySelector('[data-prompt-action="copy"]');
   copyButton.dispatch('click', { target: copyButton, preventDefault, stopPropagation });
   return Promise.resolve().then(() => {
-    assert.deepEqual(h.copied, ['Single copy body']);
+    assert.deepEqual(h.copied, ['draft body']);
   });
+});
+
+test('edits survive collapsing, expanding another card, and reordering', async () => {
+  const h = createHarness();
+  open(h);
+  toggleExpand(h, 0);
+  setTitle(h, 0, 'Renamed');
+  setText(h, 0, 'edited body');
+  h.nodes['prompt-add'].dispatch('click', { preventDefault });
+  setTitle(h, 1, 'Second');
+  setText(h, 1, 'second body');
+  h.cardHandle(h.cards()[1]).dispatch('keydown', {
+    target: h.cardHandle(h.cards()[1]),
+    altKey: true,
+    key: 'ArrowUp',
+    preventDefault,
+    stopPropagation,
+  });
+  await h.nodes['prompt-save'].dispatch('click', { preventDefault });
+  assert.deepEqual(
+    h.getState().view.promptCards.map((c) => [c.title, c.text]),
+    [['Second', 'second body'], ['Renamed', 'edited body']],
+  );
 });
 
 test('Cancel discards every draft change', async () => {
   const h = createHarness();
   open(h);
-  const article = h.cards()[0];
-  h.cardText(article).value = 'Draft body';
-  h.cardText(article).dispatch('input', { target: h.cardText(article) });
+  toggleExpand(h, 0);
+  setText(h, 0, 'Draft body');
   h.nodes['prompt-add'].dispatch('click', { preventDefault });
   h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
   assert.equal(h.nodes['prompt-layer'].hidden, true);
@@ -343,16 +444,12 @@ test('Cancel discards every draft change', async () => {
 test('Save persists all cards once', async () => {
   const h = createHarness();
   open(h);
+  toggleExpand(h, 0);
+  setTitle(h, 0, 'One');
+  setText(h, 0, 'one');
   h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  const articles = h.cards();
-  h.cardText(articles[0]).value = 'one';
-  h.cardText(articles[0]).dispatch('input', { target: h.cardText(articles[0]) });
-  h.cardTitle(articles[0]).value = 'One';
-  h.cardTitle(articles[0]).dispatch('input', { target: h.cardTitle(articles[0]) });
-  h.cardText(articles[1]).value = 'two';
-  h.cardText(articles[1]).dispatch('input', { target: h.cardText(articles[1]) });
-  h.cardTitle(articles[1]).value = 'Two';
-  h.cardTitle(articles[1]).dispatch('input', { target: h.cardTitle(articles[1]) });
+  setTitle(h, 1, 'Two');
+  setText(h, 1, 'two');
   await h.nodes['prompt-save'].dispatch('click', { preventDefault });
   assert.equal(h.nodes['prompt-layer'].hidden, true);
   assert.deepEqual(
@@ -387,6 +484,7 @@ test('persistence failure leaves the dialog open', async () => {
   dialog.mount();
   dialog.open();
   const article = nodes['prompt-card-list'].querySelector('.prompt-card');
+  article.querySelector('.prompt-card-summary').dispatch('click', { target: article.querySelector('.prompt-card-summary'), preventDefault, stopPropagation });
   article.querySelector('.prompt-card-text').value = 'body';
   await nodes['prompt-save'].dispatch('click', { preventDefault });
   assert.equal(nodes['prompt-layer'].hidden, false, 'dialog stays open');
@@ -397,21 +495,10 @@ test('persistence failure leaves the dialog open', async () => {
 test('deleting the last card is blocked', () => {
   const h = createHarness();
   open(h);
-  const article = h.cards()[0];
-  const deleteButton = article.querySelector('[data-prompt-action="delete"]');
+  const deleteButton = h.cards()[0].querySelector('[data-prompt-action="delete"]');
   deleteButton.dispatch('click', { target: deleteButton, preventDefault, stopPropagation });
   assert.equal(h.cards().length, 1, 'final card cannot be deleted');
   assert.ok(h.nodes['prompt-error'].textContent.includes('at least one'));
-});
-
-test('deleting a non-final card removes it from the draft', () => {
-  const h = createHarness();
-  open(h);
-  h.nodes['prompt-add'].dispatch('click', { preventDefault });
-  const [first] = h.cards();
-  const deleteButton = first.querySelector('[data-prompt-action="delete"]');
-  deleteButton.dispatch('click', { target: deleteButton, preventDefault, stopPropagation });
-  assert.equal(h.cards().length, 1);
 });
 
 test('destroy removes all listeners', () => {
