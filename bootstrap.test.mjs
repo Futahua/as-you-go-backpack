@@ -24,7 +24,6 @@ function createHarness({ loadWorkspace }) {
   const promise = bootstrapWorkspace({
     loadState: async () => loadWorkspace(),
     setState: (next) => { state = next; calls.push('setState'); },
-    normalizeState: (loaded) => ({ ...loaded, normalized: true }),
     restoreWorkspaceView: () => { calls.push('restoreWorkspaceView'); },
     setStatus: (text) => { status = text; calls.push('setStatus'); },
     render: () => { rendered += 1; calls.push('render'); },
@@ -74,7 +73,7 @@ test('when loading succeeds, state is restored and the toolbar mounts', async ()
 
   assert.equal(h.getStatus(), null);
   assert.equal(h.getRendered(), 1);
-  assert.deepEqual(h.getState(), { groups: [], shortcuts: [], normalized: true });
+  assert.deepEqual(h.getState(), { groups: [], shortcuts: [] });
   assert.equal(h.toolbar.mounted, 1);
   assert.ok(h.calls.includes('restoreWorkspaceView'));
 });

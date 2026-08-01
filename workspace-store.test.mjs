@@ -98,3 +98,47 @@ test('afterCommit runs after the new state is installed', async () => {
   await h.store.commit({ items: ['a'] }, {});
   assert.deepEqual(h.afterCommits, [{ items: ['a'], prepared: true }]);
 });
+
+test('save queue serializes saves in order despite varying latencies', async () => {
+  const order = [];
+  let state = {};
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async (snapshot) => {
+      await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 12)));
+      order.push(JSON.parse(snapshot).tag);
+    },
+    normalizeState: (s) => s,
+    setStatus: () => {},
+  });
+  await Promise.all([
+    store.save({ tag: 'a' }),
+    store.save({ tag: 'b' }),
+    store.save({ tag: 'c' }),
+  ]);
+  assert.deepEqual(order, ['a', 'b', 'c']);
+});
+
+test('save queue recovers after a failed save so later saves still run', async () => {
+  const order = [];
+  let state = {};
+  let shouldFail = true;
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async (snapshot) => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error('disk full');
+      }
+      order.push(JSON.parse(snapshot).tag);
+    },
+    normalizeState: (s) => s,
+    setStatus: () => {},
+  });
+  await assert.rejects(store.save({ tag: 'a' }), /disk full/);
+  await store.save({ tag: 'b' });
+  await store.save({ tag: 'c' });
+  assert.deepEqual(order, ['b', 'c']);
+});

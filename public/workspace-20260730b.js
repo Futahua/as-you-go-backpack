@@ -2099,7 +2099,6 @@ const binControls = createBinControls({
 bootstrapWorkspace({
   loadState: () => host.loadWorkspace(),
   setState: (next) => { state = store.install(next); },
-  normalizeState,
   restoreWorkspaceView,
   setStatus,
   render,

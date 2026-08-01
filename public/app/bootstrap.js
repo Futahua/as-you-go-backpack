@@ -7,7 +7,6 @@
 export function bootstrapWorkspace({
   loadState,
   setState,
-  normalizeState,
   restoreWorkspaceView,
   setStatus,
   render,
@@ -25,9 +24,9 @@ export function bootstrapWorkspace({
   return (async () => {
     try {
       const loaded = await loadState();
-      setState(normalizeState(
-        typeof loaded === 'string' ? JSON.parse(loaded) : loaded,
-      ));
+      // setState routes to the store's install(), the single normalizing
+      // install point — normalizeState is not applied here a second time.
+      setState(typeof loaded === 'string' ? JSON.parse(loaded) : loaded);
       restoreWorkspaceView();
       toolbar.mount();
     } catch (error) {
