@@ -1045,6 +1045,32 @@ test('expanded prompt row carries the expanded styling class', () => {
   assert.ok(h.rowFor('prompt-root').classList.contains('prompt-row-expanded'));
 });
 
+test('copying a folder is rejected while moving it stays supported', () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'folder-dev');
+  keyOn(h, { key: 'c', ctrlKey: true });
+  assert.ok(h.nodes['prompt-status'].textContent.includes('Folders can be moved but not copied'), 'folder copy rejected');
+  keyOn(h, { key: 'x', ctrlKey: true });
+  assert.ok(h.nodes['prompt-status'].textContent.includes('1 item cut'), 'folder cut still supported');
+  assert.ok(h.rowFor('folder-dev').classList.contains('prompt-cut'));
+});
+
+test('prompt dialog use never changes workspace entity counts', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  const before = structuredClone(h.getState());
+  open(h);
+  h.nodes['prompt-add-prompt'].dispatch('click', { preventDefault });
+  keyOn(h, { key: 'z', ctrlKey: true });
+  keyOn(h, { key: 'y', ctrlKey: true });
+  openPrompt(h, 'prompt-root');
+  const input = h.rowFor('prompt-root').querySelector('.prompt-card-title');
+  input.value = 'Renamed';
+  input.dispatch('input', { target: input });
+  h.nodes['prompt-cancel'].dispatch('click', { preventDefault });
+  assert.deepEqual(h.getState(), before, 'workspace store untouched by prompt dialog activity');
+});
+
 test('destroy removes all listeners', () => {
   const h = createHarness();
   const before = h.nodes['copy-prompt'].listeners.contextmenu?.length ?? 0;

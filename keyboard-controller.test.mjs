@@ -7,7 +7,7 @@ function fakeNode() {
   return { hidden: true };
 }
 
-function createHarness({ binMode = false } = {}) {
+function createHarness({ binMode = false, initialState = null } = {}) {
   const listeners = [];
   const documentMock = {
     addEventListener(type, handler, options) {
@@ -23,7 +23,7 @@ function createHarness({ binMode = false } = {}) {
   };
   const elements = { editorLayer: fakeNode(), confirmLayer: fakeNode(), linkEditLayer: fakeNode(), promptLayer: fakeNode() };
   const store = createWorkspaceStore({
-    getState: () => ({}),
+    getState: () => initialState ?? {},
     setState: () => {},
     persist: async () => {},
     normalizeState: (s) => s,
@@ -161,6 +161,35 @@ test('the visible prompt library suppresses all workspace shortcuts', () => {
   assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0);
   assert.equal(h.commandSpies['activateItem:calls'], 0);
   assert.equal(h.commandSpies['clearSelection:calls'], 0, 'workspace Escape is ignored while the library is open');
+});
+
+test('prompt modal shortcuts leave the workspace store state completely unchanged', () => {
+  const initialState = {
+    groups: [
+      { id: 'g-letters', name: 'Letters', parentId: 'root', order: 0 },
+      { id: 'g-run', name: 'Run', parentId: 'g-letters', order: 0 },
+    ],
+    shortcuts: [
+      { id: 's-slop', name: 'slop', target: 'C:\\slop', placements: [{ id: 'p1', parentId: 'g-run', order: 0 }] },
+    ],
+    view: { iconSize: 96 },
+  };
+  const h = createHarness({ initialState });
+  h.elements.promptLayer.hidden = false;
+  h.store.setSelection(['g-letters']);
+  const before = structuredClone(h.store.getSnapshot());
+  for (const event of [
+    key({ key: 'a', ctrlKey: true }),
+    key({ key: 'c', ctrlKey: true }),
+    key({ key: 'x', ctrlKey: true }),
+    key({ key: 'v', ctrlKey: true }),
+    key({ key: 'Delete' }),
+    key({ key: 'Enter' }),
+    key({ key: 'Escape' }),
+  ]) {
+    h.listeners[0].handler(event);
+  }
+  assert.deepEqual(h.store.getSnapshot(), before, 'no workspace record, placement, selection, or view changed');
 });
 
 test('Ctrl+Shift+Z routes only to redo', () => {

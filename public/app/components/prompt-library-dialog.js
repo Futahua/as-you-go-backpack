@@ -267,9 +267,15 @@ export function createPromptLibraryDialog({
     if (roots.length === 0) return;
     const nodes = roots
       .map((id) => findPromptNode(draftLibrary, id))
-      .filter(Boolean)
-      .map(cloneNode);
-    treeClipboard = { mode: 'copy', nodes };
+      .filter(Boolean);
+    // Folders have no shared placement/alias system, so copying them would
+    // deep-clone the subtree into independent duplicate records. Until folder
+    // aliasing exists, folders can be moved but not copied.
+    if (nodes.some((node) => node.type === 'folder')) {
+      statusMessage('Folders can be moved but not copied. Copying folders as linked aliases is not supported yet.');
+      return;
+    }
+    treeClipboard = { mode: 'copy', nodes: nodes.map(cloneNode) };
     cutIds.clear();
     statusMessage(`${nodes.length} ${nodes.length === 1 ? 'item' : 'items'} copied.`);
     render();

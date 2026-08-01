@@ -91,8 +91,55 @@ test('expanding Letters produces seven uniquely positioned children and seven ed
   assert.ok(edges.every((e) => e.source === letters.id));
 });
 
-test('graph model can be built with no Explorer DOM mounted', () => {
-  const state = makeFixtureState();
+test('one shortcut record with three placements renders once with three edges', () => {
+  let state = createGroup(emptyState(), 'A');
+  const a = state.groups[0];
+  state = createGroup(state, 'B');
+  const b = state.groups[1];
+  state = createGroup(state, 'C');
+  const c = state.groups[2];
+  state = createShortcut(state, { name: 'Shared', target: 'C:\\x.exe', parentId: a.id });
+  const placementId = state.shortcuts[0].placements[0].id;
+  // Link the same shortcut record into B and C (linked placements, no clone).
+  state = copySelection(state, [placementId], b.id);
+  state = copySelection(state, [placementId], c.id);
+  assert.equal(state.shortcuts.length, 1, 'one canonical shortcut record');
+  assert.equal(state.shortcuts[0].placements.length, 3);
+
+  const items = visibleGraphItems(state, ROOT_ID, new Set([a.id, b.id, c.id]), false);
+  const shared = items.filter((i) => i.kind === 'shortcut');
+  assert.equal(shared.length, 1, 'one graph node for a linked shortcut');
+  assert.equal(shared[0].id, state.shortcuts[0].id, 'graph identity is the shortcut id');
+  assert.deepEqual([...shared[0].parentIds].sort(), [a.id, b.id, c.id].sort(), 'all three parents recorded');
+  const edges = graphEdges(items).filter((e) => e.target === state.shortcuts[0].id);
+  assert.equal(edges.length, 3, 'three incoming membership edges');
+});
+
+test('two distinct shortcut records stay two nodes even when names match', () => {
+  let state = createShortcut(emptyState(), { name: 'Apps', target: 'C:\\one.exe', parentId: ROOT_ID });
+  state = createShortcut(state, { name: 'Apps', target: 'C:\\two.exe', parentId: ROOT_ID });
+  const items = visibleGraphItems(state, ROOT_ID, new Set(), false).filter((i) => i.kind === 'shortcut');
+  assert.equal(items.length, 2, 'graph identity is not name-based');
+  assert.notEqual(items[0].id, items[1].id);
+});
+
+test('workspace copySelection deep-clones folder subtrees (leak mechanism)', () => {
+  let state = createGroup(emptyState(), 'Letters');
+  const letters = state.groups[0];
+  state = createGroup(state, 'Run', letters.id);
+  const run = state.groups[1];
+  state = createShortcut(state, { name: 'slop', target: 'C:\\slop', parentId: run.id });
+  const groupCount = state.groups.length;
+  const shortcutCount = state.shortcuts.length;
+  const copied = copySelection(state, [letters.id], ROOT_ID);
+  assert.ok(copied.groups.length > groupCount, 'copying a folder clones its subtree');
+  const newGroups = copied.groups.slice(groupCount);
+  assert.ok(newGroups.some((g) => g.name === 'Letters'), 'a cloned Letters group was created');
+  assert.ok(newGroups.some((g) => g.name === 'Run'), 'a cloned Run group was created');
+  assert.equal(copied.shortcuts.length, shortcutCount, 'shortcut records are not duplicated; placements stay linked');
+});
+
+test('graph model can be built with no Explorer DOM mounted', () => {  const state = makeFixtureState();
   const items = visibleGraphItems(state, ROOT_ID, new Set(), false);
   assert.ok(items.length > 0);
   assert.ok(items.every((i) => i.kind === 'group' || i.kind === 'shortcut'));
