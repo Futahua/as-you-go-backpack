@@ -211,6 +211,10 @@ export function createToolbarController({
   function destroy() {
     abortController?.abort();
     abortController = null;
+    if (toolbarResizeTimer !== null) {
+      clearTimeout(toolbarResizeTimer);
+      toolbarResizeTimer = null;
+    }
     drag = null;
     suppressClickFor = null;
   }
