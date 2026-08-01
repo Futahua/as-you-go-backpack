@@ -109,6 +109,8 @@ const commands = createWorkspaceCommands({
   copySelection,
   collapsePlacements,
   binSelection,
+  graphContextId,
+  removeGraphPositions,
   syncSelection,
   saveWorkspaceView,
   closeMenu,
@@ -1171,24 +1173,7 @@ async function runMenuAction(action) {
   if (action === 'bin') return commands.moveSelectionToBin();
   if (action === 'restore') return confirmDialog.askRestoreConfirm([...session.selected]);
   if (action === 'delete-forever') return confirmDialog.askPermanentDelete();
-  if (action === 'reset-graph-position') {
-    const ctxId = graphContextId(session.currentId, session.binMode);
-    state = store.replace(removeGraphPositions(state, ctxId, [...session.selected]));
-    for (const id of session.selected) {
-      const node = graph._getNode(id);
-      if (node) {
-        node.fx = null;
-        node.fy = null;
-        node.positioned = false;
-        node.vx = 0;
-        node.vy = 0;
-      }
-    }
-    graph.reheat(0.3);
-    closeMenu();
-    saveWorkspaceView();
-    return;
-  }
+  if (action === 'reset-graph-position') return commands.resetGraphPositions();
 }
 
 elements.grid.addEventListener('click', (event) => {

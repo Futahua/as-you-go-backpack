@@ -37,8 +37,11 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     collapsePlacements: (s, id, parentId) => ({ ...s, collapsed: [id, parentId] }),
     binSelection: (s, ids) => ({ ...s, binned: ids }),
     resolveBinTargets: (ids) => ids,
+    graphContextId: () => 'ctx',
+    removeGraphPositions: (s, ctxId, ids) => ({ ...s, positionsRemoved: ids }),
   };
   Object.assign(base, model);
+  const graphNodes = new Map();
   const commands = createWorkspaceCommands({
     store,
     host: {
@@ -46,7 +49,11 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
       openWebLink: async (url) => { effects.openWeb.push(url); },
       revealShortcut: async (id) => { effects.reveal.push(id); },
     },
-    graph: { destroyGraphView: () => { effects.destroyGraph += 1; } },
+    graph: {
+      destroyGraphView: () => { effects.destroyGraph += 1; },
+      _getNode: (id) => graphNodes.get(id) ?? null,
+      reheat: () => { effects.reheat = (effects.reheat ?? 0) + 1; },
+    },
     ...base,
     syncSelection: () => { effects.sync += 1; },
     saveWorkspaceView: () => { effects.saves += 1; },
@@ -54,7 +61,7 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     render: () => { effects.render += 1; },
     setStatus: (text) => { effects.status.push(text); },
   });
-  return { store, commands, effects, base };
+  return { store, commands, effects, base, graphNodes };
 }
 
 test('selectItem without modifiers selects just the item and sets the anchor', () => {
@@ -222,4 +229,26 @@ test('selectedPasteDestinations uses selected folders or the current folder', ()
   h.store.setSelection(['s1']);
   h.store.setNavigation({ currentId: 'root' });
   assert.deepEqual(h.commands.selectedPasteDestinations(), ['root']);
+});
+
+test('resetGraphPositions removes saved positions, resets nodes, reheats, and saves', () => {
+  const node = { fx: 10, fy: 10, positioned: true, vx: 1, vy: 1 };
+  const h = createHarness({
+    model: {
+      graphContextId: () => 'ctx-1',
+      removeGraphPositions: (s, ctxId, ids) => ({ ...s, positionsRemoved: { ctxId, ids } }),
+    },
+  });
+  h.graphNodes.set('s1', node);
+  h.store.setSelection(['s1']);
+  h.commands.resetGraphPositions();
+  assert.deepEqual(h.store.getSnapshot().positionsRemoved, { ctxId: 'ctx-1', ids: ['s1'] });
+  assert.equal(node.fx, null);
+  assert.equal(node.fy, null);
+  assert.equal(node.positioned, false);
+  assert.equal(node.vx, 0);
+  assert.equal(node.vy, 0);
+  assert.equal(h.effects.reheat, 1);
+  assert.equal(h.effects.close, 1);
+  assert.equal(h.effects.saves, 1);
 });

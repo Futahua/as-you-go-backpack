@@ -21,6 +21,8 @@ export function createWorkspaceCommands({
   copySelection: copySelectionModel,
   collapsePlacements,
   binSelection,
+  graphContextId,
+  removeGraphPositions,
   syncSelection,
   saveWorkspaceView,
   closeMenu,
@@ -237,6 +239,25 @@ export function createWorkspaceCommands({
     );
   }
 
+  function resetGraphPositions() {
+    const session = store.getSession();
+    const ctxId = graphContextId(session.currentId, session.binMode);
+    store.replace(removeGraphPositions(store.getSnapshot(), ctxId, [...session.selected]));
+    for (const id of session.selected) {
+      const node = graph._getNode(id);
+      if (node) {
+        node.fx = null;
+        node.fy = null;
+        node.positioned = false;
+        node.vx = 0;
+        node.vy = 0;
+      }
+    }
+    graph.reheat(0.3);
+    closeMenu();
+    saveWorkspaceView();
+  }
+
   return {
     selectItem,
     activateItem,
@@ -246,6 +267,7 @@ export function createWorkspaceCommands({
     cutSelection,
     pasteInto,
     moveSelectionToBin,
+    resetGraphPositions,
     selectedPasteDestinations,
     undo,
     redo,
