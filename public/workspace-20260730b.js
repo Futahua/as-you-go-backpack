@@ -57,6 +57,7 @@ import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
+import { createDropController } from './app/interactions/drop-controller.js';
 
 const host = createHostBridge(window);
 
@@ -1538,112 +1539,6 @@ elements.explorer.addEventListener('wheel', (event) => {
   zoomTimer = setTimeout(() => persist().catch((error) => setStatus(String(error))), 250);
 }, { passive: false });
 
-elements.grid.addEventListener('dragover', (event) => {
-  if (session.binMode) return;
-  event.preventDefault();
-  document.querySelectorAll('.drop-inside, .graph-drop-target').forEach((node) =>
-    node.classList.remove('drop-inside', 'graph-drop-target'));
-  const types = event.dataTransfer.types;
-  if (types.includes('Files') || types.includes('text/plain') || types.includes('text/uri-list')) {
-    const tile = event.target.closest('.icon-item');
-    const shell = tile?.closest('.graph-node-shell');
-    if (tile?.dataset.kind === 'group' && shell) {
-      shell.classList.add('graph-drop-target');
-      tile.classList.add('drop-inside');
-    }
-    event.dataTransfer.dropEffect = 'link';
-    return;
-  }
-  event.dataTransfer.dropEffect = 'none';
-});
-
-elements.grid.addEventListener('dragleave', (event) => {
-  if (!elements.grid.contains(event.relatedTarget)) {
-    document.querySelectorAll('.drop-inside, .graph-drop-target').forEach((node) =>
-      node.classList.remove('drop-inside', 'graph-drop-target'));
-  }
-});
-
-/** Pulls the first http(s) URL out of dropped text — dataTransfer's
- * text/uri-list is the canonical source when the browser provides it (a
- * dragged link), but a plain text/plain selection (e.g. a URL the user
- * highlighted and dragged, possibly with surrounding text) needs scanning
- * for the first URL-looking token instead of being used verbatim. */
-function extractDroppedUrl(dataTransfer) {
-  const uriList = dataTransfer.getData('text/uri-list').trim();
-  if (uriList) {
-    const firstLine = uriList.split(/\r?\n/).find((line) => line && !line.startsWith('#'));
-    if (firstLine) return firstLine.trim();
-  }
-  const plain = dataTransfer.getData('text/plain').trim();
-  const match = plain.match(/https?:\/\/\S+/i);
-  return match ? match[0] : plain;
-}
-
-function nameForDroppedUrl(url) {
-  try {
-    const hostname = new URL(url).hostname.replace(/^www\./i, '');
-    return hostname || url;
-  } catch {
-    return url;
-  }
-}
-
-elements.grid.addEventListener('drop', async (event) => {
-  if (session.binMode) return;
-  const droppedFiles = [...event.dataTransfer.files];
-  const tile = event.target.closest('.icon-item');
-  const blank = event.target.closest('[data-blank-parent]');
-  const destination = tile?.dataset.kind === 'group'
-    ? tile.dataset.id
-    : blank?.dataset.blankParent ?? session.currentId;
-
-  if (droppedFiles.length === 0) {
-    const url = extractDroppedUrl(event.dataTransfer);
-    if (!url) return;
-    event.preventDefault();
-    try {
-      let name = nameForDroppedUrl(url);
-      let icon = null;
-      try {
-        const resolved = await host.resolveWebIcon(url);
-        if (resolved?.title) name = resolved.title;
-        if (resolved?.icon) icon = resolved.icon;
-      } catch {
-        // Fall back to the hostname-derived name/no icon — the link is
-        // still worth creating even if the page couldn't be reached.
-      }
-      const next = createWebLink(state, {
-        name,
-        target: url,
-        icon,
-        parentId: destination,
-      });
-      await commit(next, 'Added.');
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
-    }
-    return;
-  }
-
-  event.preventDefault();
-  try {
-    const targets = await host.resolveDroppedTargets(droppedFiles);
-    const next = createDroppedShortcuts(state, targets, destination);
-    if (next.shortcuts.length === state.shortcuts.length) {
-      setStatus('Those shortcuts already exist here.');
-      return;
-    }
-    await commit(next);
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error));
-  } finally {
-    document.querySelectorAll('.graph-drop-target').forEach((el) => el.classList.remove('graph-drop-target'));
-  }
-});
-
 elements.breadcrumbs.addEventListener('click', (event) => {
   const binCrumb = event.target.closest('[data-bin-breadcrumb]');
   if (binCrumb) {
@@ -1738,6 +1633,8 @@ const commands = createWorkspaceCommands({
   binSelection,
   graphContextId,
   removeGraphPositions,
+  createWebLink,
+  createDroppedShortcuts,
   syncSelection,
   saveWorkspaceView,
   closeMenu,
@@ -1751,6 +1648,13 @@ const marquee = createMarqueeController({
   elements,
   commands,
   itemsIntersectingMarquee,
+});
+
+const drop = createDropController({
+  document,
+  elements,
+  store,
+  commands,
 });
 
 const editorDialog = createEditorDialog({
@@ -1818,4 +1722,5 @@ bootstrapWorkspace({
   editorDialog,
   binControls,
   keyboard,
+  drop,
 });

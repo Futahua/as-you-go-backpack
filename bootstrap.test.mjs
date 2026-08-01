@@ -18,6 +18,7 @@ function createHarness({ loadWorkspace }) {
   const editorDialog = fakeComponent();
   const binControls = fakeComponent();
   const keyboard = fakeComponent();
+  const drop = fakeComponent();
   let state = null;
   let status = null;
   let rendered = 0;
@@ -34,10 +35,11 @@ function createHarness({ loadWorkspace }) {
     editorDialog,
     binControls,
     keyboard,
+    drop,
   });
 
   return {
-    promise, calls, toolbar, confirmDialog, menu, editorDialog, binControls, keyboard,
+    promise, calls, toolbar, confirmDialog, menu, editorDialog, binControls, keyboard, drop,
     getState: () => state,
     getStatus: () => status,
     getRendered: () => rendered,
@@ -52,6 +54,7 @@ test('behavior components mount synchronously even before loading resolves', () 
   assert.equal(h.editorDialog.mounted, 1);
   assert.equal(h.binControls.mounted, 1);
   assert.equal(h.keyboard.mounted, 1);
+  assert.equal(h.drop.mounted, 1);
 });
 
 test('when loading rejects, the fallback still renders and components stay wired', async () => {

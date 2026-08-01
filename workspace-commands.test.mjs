@@ -39,16 +39,26 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     resolveBinTargets: (ids) => ids,
     graphContextId: () => 'ctx',
     removeGraphPositions: (s, ctxId, ids) => ({ ...s, positionsRemoved: ids }),
+    createWebLink: (s, input) => ({ ...s, webLink: input }),
+    createDroppedShortcuts: (s, targets, destination) => ({
+      ...s,
+      dropped: { targets, destination },
+      shortcuts: [...s.shortcuts, ...targets],
+    }),
   };
   Object.assign(base, model);
+  const host = {
+    launchShortcut: async (id) => { effects.launch.push(id); },
+    openWebLink: async (url) => { effects.openWeb.push(url); },
+    revealShortcut: async (id) => { effects.reveal.push(id); },
+    resolveWebIcon: async (url) => ({ title: 'Site', icon: 'data:icon' }),
+    resolveDroppedTargets: async (files) => files.map((f) => ({ name: f.name, target: f.name })),
+  };
+  if (model.host) Object.assign(host, model.host);
   const graphNodes = new Map();
   const commands = createWorkspaceCommands({
     store,
-    host: {
-      launchShortcut: async (id) => { effects.launch.push(id); },
-      openWebLink: async (url) => { effects.openWeb.push(url); },
-      revealShortcut: async (id) => { effects.reveal.push(id); },
-    },
+    host,
     graph: {
       destroyGraphView: () => { effects.destroyGraph += 1; },
       _getNode: (id) => graphNodes.get(id) ?? null,
@@ -305,4 +315,46 @@ test('finishMarqueeSelection saves only when the gesture moved', () => {
   const h2 = createHarness();
   h2.commands.finishMarqueeSelection({ moved: false });
   assert.equal(h2.effects.saves, 0);
+});
+
+test('dropUrl resolves the web icon, creates a web link, and commits', async () => {
+  const h = createHarness({
+    model: {
+      host: {
+        resolveWebIcon: async (url) => ({ title: 'Docs', icon: 'data:docs' }),
+      },
+    },
+  });
+  await h.commands.dropUrl('https://docs.example.com', 'g1');
+  assert.deepEqual(h.store.getSnapshot().webLink, {
+    name: 'Docs',
+    target: 'https://docs.example.com',
+    icon: 'data:docs',
+    parentId: 'g1',
+  });
+  assert.equal(h.effects.status.length, 0);
+});
+
+test('dropFiles resolves targets, creates shortcuts, and commits', async () => {
+  const h = createHarness();
+  await h.commands.dropFiles([{ name: 'a.txt' }, { name: 'b.txt' }], 'g1');
+  assert.deepEqual(h.store.getSnapshot().dropped, {
+    targets: [
+      { name: 'a.txt', target: 'a.txt' },
+      { name: 'b.txt', target: 'b.txt' },
+    ],
+    destination: 'g1',
+  });
+  assert.equal(h.effects.status.length, 0);
+});
+
+test('dropFiles reports when shortcuts already exist without committing', async () => {
+  const h = createHarness({
+    model: {
+      createDroppedShortcuts: (s) => s,
+    },
+  });
+  await h.commands.dropFiles([{ name: 'a.txt' }], 'g1');
+  assert.equal(h.effects.status[0], 'Those shortcuts already exist here.');
+  assert.equal(h.store.getSnapshot().dropped, undefined);
 });

@@ -16,12 +16,14 @@ export function bootstrapWorkspace({
   editorDialog,
   binControls,
   keyboard,
+  drop,
 }) {
   confirmDialog.mount();
   menu.mount();
   editorDialog.mount();
   binControls.mount();
   keyboard.mount();
+  drop.mount();
 
   return (async () => {
     try {

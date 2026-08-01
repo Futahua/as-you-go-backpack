@@ -23,6 +23,8 @@ export function createWorkspaceCommands({
   binSelection,
   graphContextId,
   removeGraphPositions,
+  createWebLink,
+  createDroppedShortcuts,
   syncSelection,
   saveWorkspaceView,
   closeMenu,
@@ -292,6 +294,57 @@ export function createWorkspaceCommands({
     saveWorkspaceView();
   }
 
+  function nameForDroppedUrl(url) {
+    try {
+      const hostname = new URL(url).hostname.replace(/^www\./i, '');
+      return hostname || url;
+    } catch {
+      return url;
+    }
+  }
+
+  /** Drops a URL into a destination: resolves the web icon, creates the web
+   * link, and commits. Reports errors through setStatus. */
+  async function dropUrl(url, destination) {
+    try {
+      let name = nameForDroppedUrl(url);
+      let icon = null;
+      try {
+        const resolved = await host.resolveWebIcon(url);
+        if (resolved?.title) name = resolved.title;
+        if (resolved?.icon) icon = resolved.icon;
+      } catch {
+        // Fall back to the hostname-derived name/no icon — the link is
+        // still worth creating even if the page couldn't be reached.
+      }
+      const next = createWebLink(store.getSnapshot(), {
+        name,
+        target: url,
+        icon,
+        parentId: destination,
+      });
+      await store.commit(next);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Drops files into a destination: resolves targets, creates shortcuts,
+   * and commits — or reports that they already exist. */
+  async function dropFiles(files, destination) {
+    try {
+      const targets = await host.resolveDroppedTargets(files);
+      const next = createDroppedShortcuts(store.getSnapshot(), targets, destination);
+      if (next.shortcuts.length === store.getSnapshot().shortcuts.length) {
+        setStatus('Those shortcuts already exist here.');
+        return;
+      }
+      await store.commit(next);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   return {
     selectItem,
     clearSelection,
@@ -307,6 +360,8 @@ export function createWorkspaceCommands({
     pasteInto,
     moveSelectionToBin,
     resetGraphPositions,
+    dropUrl,
+    dropFiles,
     selectedPasteDestinations,
     undo,
     redo,
