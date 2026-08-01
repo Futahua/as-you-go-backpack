@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test.mjs model.test.mjs renderer.test.mjs host-bridge.test.mjs dom.test.mjs toolbar-controller.test.mjs confirmation-dialog.test.mjs context-menu.test.mjs editor-dialog.test.mjs bin-controls.test.mjs bootstrap.test.mjs workspace-store.test.mjs workspace-commands.test.mjs keyboard-controller.test.mjs marquee-controller.test.mjs drop-controller.test.mjs pointer-controller.test.mjs prompt-library-model.test.mjs prompt-library-dialog.test.mjs prompt-library-history.test.mjs prompt-tree-selection.test.mjs prompt-tree-context-menu.test.mjs styles.test.mjs"
+    "test": "node --test test.mjs model.test.mjs renderer.test.mjs host-bridge.test.mjs dom.test.mjs toolbar-controller.test.mjs confirmation-dialog.test.mjs context-menu.test.mjs editor-dialog.test.mjs bin-controls.test.mjs bootstrap.test.mjs workspace-store.test.mjs workspace-commands.test.mjs keyboard-controller.test.mjs marquee-controller.test.mjs drop-controller.test.mjs pointer-controller.test.mjs prompt-library-model.test.mjs prompt-library-dialog.test.mjs prompt-library-history.test.mjs prompt-tree-selection.test.mjs prompt-tree-context-menu.test.mjs sets-model.test.mjs styles.test.mjs"
   },
   "dependencies": {
     "d3-force": "^3.0.0",

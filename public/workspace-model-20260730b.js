@@ -1,4 +1,5 @@
 import { normalizePromptLibrary } from './prompt-library-model.js';
+import { normalizeItemSets } from './sets-model.js';
 
 export const ROOT_ID = 'root';
 export const DEFAULT_ICON_SIZE = 96;
@@ -340,6 +341,8 @@ export function normalizeState(raw) {
         raw?.view?.promptCards,
         raw?.view?.pickupPrompt,
       ),
+      // Sets are normalized below, once the item ids they reference are known.
+      itemSets: [],
     },
   };
 
@@ -360,6 +363,14 @@ export function normalizeState(raw) {
     });
     combined.forEach((entry, order) => entry.apply(order));
   }
+
+  // Sets reference items by id, so they are normalized once every item is
+  // known: a member naming something that no longer exists is pruned rather
+  // than left dangling. Membership is independent of folder location.
+  state.view.itemSets = normalizeItemSets(raw?.view?.itemSets, [
+    ...state.groups.map((candidate) => candidate.id),
+    ...state.shortcuts.map((candidate) => candidate.id),
+  ]);
   return state;
 }
 
@@ -884,12 +895,28 @@ export function updateWorkspaceView(state, changes) {
       promptLibrary: has('promptLibrary')
         ? normalizePromptLibrary(changes.promptLibrary)
         : (state.view?.promptLibrary ?? []),
+      // Members are validated by setItemSets, which knows the item ids; this
+      // only guards the record shape.
+      itemSets: has('itemSets')
+        ? normalizeItemSets(changes.itemSets)
+        : (state.view?.itemSets ?? []),
     },
   };
 }
 
 export function setPromptLibrary(state, nodes) {
   return updateWorkspaceView(state, { promptLibrary: normalizePromptLibrary(nodes) });
+}
+
+/** Installs item sets, pruning members that are not real items so a set can
+ * never keep a dangling reference. */
+export function setItemSets(state, sets) {
+  return updateWorkspaceView(state, {
+    itemSets: normalizeItemSets(sets, [
+      ...(state.groups ?? []).map((candidate) => candidate.id),
+      ...(state.shortcuts ?? []).map((candidate) => candidate.id),
+    ]),
+  });
 }
 
 export function graphContextId(currentGroupId, binMode) {
