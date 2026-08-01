@@ -409,3 +409,44 @@ test('releaseDraggedNodes removes the positions and saves', () => {
   assert.deepEqual(h.store.getSnapshot().positionsRemoved, ['s1']);
   assert.equal(h.effects.saves, 1);
 });
+
+test('activateItem with revealDirectoryTarget reveals a directory shortcut', async () => {
+  const h = createHarness({
+    shortcuts: [{ id: 's-dir', name: 'D', target: 'D:\\Folder' }],
+  });
+  await h.commands.activateItem('s-dir', { revealDirectoryTarget: true });
+  assert.deepEqual(h.effects.reveal, ['s-dir']);
+  assert.deepEqual(h.effects.launch, []);
+  assert.deepEqual(h.effects.openWeb, []);
+  assert.equal(h.effects.close, 1);
+});
+
+test('activateItem reveal failure reports status', async () => {
+  const h = createHarness({
+    shortcuts: [{ id: 's-dir', name: 'D', target: 'D:\\Folder' }],
+    model: {
+      host: { revealShortcut: async () => { throw new Error('boom'); } },
+    },
+  });
+  await h.commands.activateItem('s-dir', { revealDirectoryTarget: true });
+  assert.match(h.effects.status[0], /boom/);
+});
+
+test('activateItem launches a normal shortcut without the reveal flag', async () => {
+  const h = createHarness({
+    shortcuts: [{ id: 's-file', name: 'F', target: 'C:\\app.exe' }],
+  });
+  await h.commands.activateItem('s-file');
+  assert.deepEqual(h.effects.launch, ['s-file']);
+  assert.deepEqual(h.effects.reveal, []);
+});
+
+test('activateItem opens a web link even with revealDirectoryTarget', async () => {
+  const h = createHarness({
+    shortcuts: [{ id: 's-web', name: 'W', target: 'https://example.com' }],
+  });
+  await h.commands.activateItem('s-web', { revealDirectoryTarget: true });
+  assert.deepEqual(h.effects.openWeb, ['https://example.com']);
+  assert.deepEqual(h.effects.reveal, []);
+  assert.deepEqual(h.effects.launch, []);
+});

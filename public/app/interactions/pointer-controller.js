@@ -18,6 +18,7 @@ export function createPointerController({
   closeMenu,
   setSuppressGraphClick,
   setSuppressBlankClick,
+  consumeSuppressGraphClick,
 }) {
   let drag = null;
   let shiftKeydown = null;
@@ -92,6 +93,13 @@ export function createPointerController({
       x: (localX - transform.x) / transform.k,
       y: (localY - transform.y) / transform.k,
     };
+  }
+
+  function onDoubleClick(event) {
+    if (consumeSuppressGraphClick()) return;
+    const tile = event.target.closest('.icon-item');
+    if (!tile) return;
+    commands.activateItem(tile.dataset.id, { revealDirectoryTarget: true });
   }
 
   function onPointerDown(event) {
@@ -354,6 +362,7 @@ export function createPointerController({
     abortController = new AbortController();
     const signal = abortController.signal;
     elements.grid.addEventListener('pointerdown', onPointerDown, { signal });
+    elements.grid.addEventListener('dblclick', onDoubleClick, { signal });
     elements.grid.addEventListener('pointermove', onPointerMove, { signal });
     elements.grid.addEventListener('pointerup', onPointerUp, { signal });
     elements.grid.addEventListener('pointercancel', onPointerCancel, { signal });

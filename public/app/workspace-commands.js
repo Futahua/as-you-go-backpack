@@ -121,11 +121,42 @@ export function createWorkspaceCommands({
     }
   }
 
+  /** Reveals a single shortcut's target in the file manager. */
+  async function revealShortcut(itemId) {
+    closeMenu();
+    try {
+      await host.revealShortcut(itemId);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Exact copy of the pre-refactor heuristic: a target whose last path
+   * segment has no extension is treated as a directory for double-click. */
+  function isDirectoryTarget(target) {
+    if (!target) return false;
+    const normalized = target.replace(/\\/g, '/');
+    const lastSlash = normalized.lastIndexOf('/');
+    const basename = lastSlash === -1 ? normalized : normalized.slice(lastSlash + 1);
+    return !basename.includes('.');
+  }
+
   /** Owns the folder-versus-shortcut decision for opening an item: a group
-   * navigates into it (explorer or Bin), a shortcut launches or opens it. */
-  function activateItem(itemId) {
+   * navigates into it (explorer or Bin), a shortcut launches or opens it. With
+   * revealDirectoryTarget, a non-web directory shortcut reveals its target in
+   * the file manager instead of launching. */
+  function activateItem(itemId, { revealDirectoryTarget = false } = {}) {
     if (group(itemId)) return navigateToFolder(itemId);
-    if (shortcut(itemId)) return launchShortcut(itemId);
+    const chosen = shortcut(itemId);
+    if (!chosen) return;
+    if (
+      revealDirectoryTarget
+      && !isWebLink(chosen)
+      && isDirectoryTarget(chosen.target)
+    ) {
+      return revealShortcut(itemId);
+    }
+    return launchShortcut(itemId);
   }
 
   function directoryOf(target) {

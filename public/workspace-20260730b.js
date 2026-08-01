@@ -1314,6 +1314,11 @@ const pointer = createPointerController({
   closeMenu,
   setSuppressGraphClick: (value) => { suppressGraphClick = value; },
   setSuppressBlankClick: (value) => { suppressBlankClick = value; },
+  consumeSuppressGraphClick: () => {
+    if (!suppressGraphClick) return false;
+    suppressGraphClick = false;
+    return true;
+  },
 });
 graph._setOnDragCancel(() => pointer.cancelDrag());
 

@@ -71,6 +71,7 @@ function createHarness({ binMode = false } = {}) {
   const commandCalls = [];
   const commands = {
     selectItem: (id, opts) => { commandCalls.push(['select', id, opts]); },
+    activateItem: (id, opts) => { commandCalls.push(['activate', id, opts]); },
     dragDropToBin: (input) => { commandCalls.push(['bin', input]); },
     dragDropToFolder: (input) => { commandCalls.push(['folder', input]); },
     pinDraggedNodes: (input) => { commandCalls.push(['pin', input]); },
@@ -90,6 +91,7 @@ function createHarness({ binMode = false } = {}) {
     move: (input) => { commandCalls.push(['marquee-move', input]); },
     finish: (pointerId) => { marqueeActivePointer = null; return true; },
   };
+  let suppressGraphClickFlag = false;
   const controller = createPointerController({
     window: windowMock,
     document: documentMock,
@@ -104,6 +106,11 @@ function createHarness({ binMode = false } = {}) {
     closeMenu: () => { effects.close += 1; },
     setSuppressGraphClick: (v) => { effects.suppressGraph.push(v); },
     setSuppressBlankClick: (v) => { effects.suppressBlank.push(v); },
+    consumeSuppressGraphClick: () => {
+      if (!suppressGraphClickFlag) return false;
+      suppressGraphClickFlag = false;
+      return true;
+    },
   });
   controller.mount();
   return {
@@ -112,6 +119,8 @@ function createHarness({ binMode = false } = {}) {
     setShells: (value) => { shells = value; },
     setElementAtPoint: (value) => { elementAtPoint = value; },
     getReleased: () => released,
+    setSuppressGraphClickFlag: (value) => { suppressGraphClickFlag = value; },
+    getSuppressGraphClickFlag: () => suppressGraphClickFlag,
   };
 }
 
@@ -244,6 +253,26 @@ test('destroy removes the pointer listeners', () => {
   assert.ok(h.grid._listeners.length > 0);
   h.controller.destroy();
   assert.equal(h.grid._listeners.length, 0);
+});
+
+test('double-click on a tile routes activateItem with revealDirectoryTarget', () => {
+  const h = createHarness();
+  const tile = fakeNode();
+  tile.dataset = { id: 's1', kind: 'shortcut' };
+  tile.closest = (sel) => (sel === '.icon-item' ? tile : null);
+  h.grid._dispatch('dblclick', { target: tile });
+  assert.deepEqual(h.commandCalls, [['activate', 's1', { revealDirectoryTarget: true }]]);
+});
+
+test('double-click after a consumed graph click does not activate', () => {
+  const h = createHarness();
+  h.setSuppressGraphClickFlag(true);
+  const tile = fakeNode();
+  tile.dataset = { id: 's1', kind: 'shortcut' };
+  tile.closest = (sel) => (sel === '.icon-item' ? tile : null);
+  h.grid._dispatch('dblclick', { target: tile });
+  assert.equal(h.commandCalls.length, 0);
+  assert.equal(h.getSuppressGraphClickFlag(), false);
 });
 
 function startDrag(h, overrides = {}) {
