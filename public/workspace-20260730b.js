@@ -56,6 +56,7 @@ import { bootstrapWorkspace } from './app/bootstrap.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
+import { createMarqueeController } from './app/interactions/marquee-controller.js';
 
 const host = createHostBridge(window);
 
@@ -93,7 +94,14 @@ const store = createWorkspaceStore({
 });
 const session = store.getSession();
 
-let marqueeDrag = null;
+const marquee = createMarqueeController({
+  elements,
+  store,
+  itemsIntersectingMarquee,
+  syncSelection,
+  saveWorkspaceView,
+});
+
 let suppressBlankClick = false;
 let suppressGraphClick = false;
 let zoomTimer = null;
@@ -1059,55 +1067,6 @@ function visibleItemIds() {
   return [...elements.grid.querySelectorAll('.icon-item')].map((node) => node.dataset.id);
 }
 
-function marqueeBounds(startX, startY, endX, endY) {
-  return {
-    left: Math.min(startX, endX),
-    top: Math.min(startY, endY),
-    right: Math.max(startX, endX),
-    bottom: Math.max(startY, endY),
-  };
-}
-
-function showMarquee(bounds) {
-  const explorerBounds = elements.explorer.getBoundingClientRect();
-  elements.marquee.hidden = false;
-  elements.marquee.style.left = `${bounds.left - explorerBounds.left}px`;
-  elements.marquee.style.top = `${bounds.top - explorerBounds.top}px`;
-  elements.marquee.style.width = `${bounds.right - bounds.left}px`;
-  elements.marquee.style.height = `${bounds.bottom - bounds.top}px`;
-}
-
-function updateMarqueeSelection(bounds) {
-  const tiles = [...elements.grid.querySelectorAll('.icon-item')]
-    .map((tile) => {
-      const rectangle = tile.getBoundingClientRect();
-      return {
-        id: tile.dataset.id,
-        left: rectangle.left,
-        top: rectangle.top,
-        right: rectangle.right,
-        bottom: rectangle.bottom,
-      };
-    })
-    .filter((tile) => tile.right > tile.left && tile.bottom > tile.top);
-  store.setSelection([
-    ...marqueeDrag.baseSelection,
-    ...itemsIntersectingMarquee(tiles, bounds),
-  ]);
-  syncSelection();
-}
-
-function finishMarquee(event) {
-  if (!marqueeDrag || event.pointerId !== marqueeDrag.pointerId) return;
-  if (elements.grid.hasPointerCapture(event.pointerId)) {
-    elements.grid.releasePointerCapture(event.pointerId);
-  }
-  suppressBlankClick = marqueeDrag.moved;
-  if (marqueeDrag.moved) saveWorkspaceView();
-  marqueeDrag = null;
-  elements.marquee.hidden = true;
-}
-
 function currentSelectionParent() {
   const first = item([...session.selected][0]);
   return first?.parentId ?? session.currentId;
@@ -1241,19 +1200,12 @@ elements.grid.addEventListener('pointerdown', (event) => {
   ) return;
 
   closeMenu();
-  marqueeDrag = {
+  marquee.start({
     pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    baseSelection: event.ctrlKey ? new Set(session.selected) : new Set(),
-    moved: false,
-  };
-  if (!event.ctrlKey) {
-    store.clearSelection();
-    store.setSelectionAnchor(null);
-    syncSelection();
-  }
-  elements.grid.setPointerCapture(event.pointerId);
+    clientX: event.clientX,
+    clientY: event.clientY,
+    ctrlKey: event.ctrlKey,
+  });
   event.preventDefault();
 });
 
@@ -1340,19 +1292,12 @@ elements.grid.addEventListener('pointermove', (event) => {
     return;
   }
 
-  if (!marqueeDrag || event.pointerId !== marqueeDrag.pointerId) return;
-  const bounds = marqueeBounds(
-    marqueeDrag.startX,
-    marqueeDrag.startY,
-    event.clientX,
-    event.clientY,
-  );
-  if (!marqueeDrag.moved && bounds.right - bounds.left < 3 && bounds.bottom - bounds.top < 3) {
-    return;
-  }
-  marqueeDrag.moved = true;
-  showMarquee(bounds);
-  updateMarqueeSelection(bounds);
+  if (!marquee.isActive(event.pointerId)) return;
+  marquee.move({
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  });
 });
 
 elements.grid.addEventListener('pointerup', (event) => {
@@ -1457,8 +1402,8 @@ elements.grid.addEventListener('pointerup', (event) => {
     return;
   }
 
-  if (marqueeDrag) {
-    finishMarquee(event);
+  if (marquee.isActive(event.pointerId)) {
+    suppressBlankClick = marquee.finish(event.pointerId);
   }
 });
 
@@ -1514,7 +1459,8 @@ elements.grid.addEventListener('pointercancel', (event) => {
     graphDrag = null;
     return;
   }
-  finishMarquee(event);
+  const moved = marquee.finish(event.pointerId);
+  if (moved !== null) suppressBlankClick = moved;
 });
 
 elements.grid.addEventListener('contextmenu', (event) => {
