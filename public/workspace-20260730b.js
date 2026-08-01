@@ -323,9 +323,9 @@ function createGraphController() {
   let pendingInitialFit = false;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
-  // Folder hues span the whole color spectrum (see assignDistinctFolderHues),
-  // kept per folder id in a session map so a folder keeps its color across
-  // renders and navigation.
+  // Folder hues span the whole color spectrum (see assignSpatialFolderHues),
+  // kept per folder id in a session map that carries the relaxation state, so
+  // colors follow the folder positions and update as they are dragged.
   const folderColors = new Map();
 
   function folderColor(id) {
