@@ -9,6 +9,7 @@ import {
   updatePromptNode,
   removePromptNode,
   movePromptNode,
+  movePromptNodes,
   descendantPromptIds,
   countPromptNodes,
   collectIncludedPrompts,
@@ -271,6 +272,70 @@ test('movePromptNode and update are non-mutating', () => {
   removePromptNode(library, 'folder-x');
   assert.deepEqual(library.map((n) => n.id), ['a', 'folder-x']);
   assert.equal(findPromptNode(library, 'a').title, 'A');
+});
+
+test('movePromptNodes moves multiple siblings before another sibling', () => {
+  const library = [prompt('a', 'A', 'one', true), prompt('b', 'B', 'two', true), prompt('c', 'C', 'three', true), prompt('d', 'D', 'four', true)];
+  const moved = movePromptNodes(library, { nodeIds: ['c', 'a'], destinationParentId: null, beforeId: 'b' });
+  assert.deepEqual(moved.map((n) => n.id), ['a', 'c', 'b', 'd'], 'relative visual order preserved');
+});
+
+test('movePromptNodes moves multiple siblings after another sibling', () => {
+  const library = [prompt('a', 'A', 'one', true), prompt('b', 'B', 'two', true), prompt('c', 'C', 'three', true)];
+  const moved = movePromptNodes(library, { nodeIds: ['a', 'c'], destinationParentId: null, beforeId: null });
+  assert.deepEqual(moved.map((n) => n.id), ['b', 'a', 'c']);
+});
+
+test('movePromptNodes moves nodes from different parents into one folder preserving order', () => {
+  const library = [
+    { id: 'folder-x', type: 'folder', title: 'X', children: [prompt('a', 'A', 'one', true), prompt('b', 'B', 'two', true)] },
+    prompt('c', 'C', 'three', true),
+  ];
+  const moved = movePromptNodes(library, { nodeIds: ['c', 'a'], destinationParentId: 'folder-x', beforeId: null });
+  assert.deepEqual(moved.map((n) => n.id), ['folder-x']);
+  assert.deepEqual(findPromptNode(moved, 'folder-x').children.map((n) => n.id), ['b', 'a', 'c']);
+});
+
+test('movePromptNodes preserves relative visual order and selected folder subtree', () => {
+  const library = [
+    { id: 'folder-a', type: 'folder', title: 'A', children: [prompt('p1', 'P', 'one', true)] },
+    prompt('b', 'B', 'two', true),
+    prompt('c', 'C', 'three', true),
+  ];
+  const moved = movePromptNodes(library, { nodeIds: ['p1', 'folder-a', 'c'], destinationParentId: null, beforeId: null });
+  assert.deepEqual(moved.map((n) => n.id), ['b', 'folder-a', 'c']);
+  assert.deepEqual(findPromptNode(moved, 'folder-a').children.map((n) => n.id), ['p1'], 'subtree intact');
+});
+
+test('movePromptNodes suppresses selected descendants under a selected folder', () => {
+  const library = [
+    { id: 'folder-a', type: 'folder', title: 'A', children: [prompt('p1', 'P', 'one', true)] },
+    prompt('b', 'B', 'two', true),
+  ];
+  const moved = movePromptNodes(library, { nodeIds: ['folder-a', 'p1'], destinationParentId: null, beforeId: null });
+  assert.deepEqual(moved.map((n) => n.id), ['b', 'folder-a']);
+  assert.equal(countPromptNodes(moved), 2, 'no nodes lost');
+});
+
+test('movePromptNodes rejects cycles and invalid destinations', () => {
+  const library = [
+    { id: 'folder-a', type: 'folder', title: 'A', children: [{ id: 'folder-b', type: 'folder', title: 'B', children: [prompt('p1', 'P', 'one', true)] }] },
+  ];
+  assert.equal(movePromptNodes(library, { nodeIds: ['folder-a'], destinationParentId: 'folder-b', beforeId: null }), library, 'into descendant rejected');
+  assert.equal(movePromptNodes(library, { nodeIds: ['folder-a'], destinationParentId: 'folder-a', beforeId: null }), library, 'into itself rejected');
+  assert.equal(movePromptNodes(library, { nodeIds: ['folder-a'], destinationParentId: 'zz', beforeId: null }), library, 'invalid parent rejected');
+  assert.equal(movePromptNodes(library, { nodeIds: ['folder-a'], destinationParentId: 'p1', beforeId: null }), library, 'non-folder parent rejected');
+  assert.equal(movePromptNodes(library, { nodeIds: ['folder-a'], destinationParentId: null, beforeId: 'zz' }), library, 'invalid beforeId rejected');
+  assert.equal(movePromptNodes(library, { nodeIds: ['folder-a'], destinationParentId: null, beforeId: 'p1' }), library, 'beforeId of removed descendant rejected');
+});
+
+test('movePromptNodes fails safely without node loss', () => {
+  const library = [prompt('a', 'A', 'one', true), prompt('b', 'B', 'two', true)];
+  assert.equal(movePromptNodes(library, { nodeIds: ['a', 'zz'], destinationParentId: null, beforeId: null }), library, 'unknown id rejected');
+  assert.equal(movePromptNodes(library, { nodeIds: [], destinationParentId: null, beforeId: null }), library);
+  assert.deepEqual(movePromptNodes(library, { nodeIds: ['a'], destinationParentId: null, beforeId: 'b' }).map((n) => n.id), ['a', 'b'], 'same-position move is a no-op');
+  assert.equal(countPromptNodes(library), 2, 'original tree untouched');
+  assert.deepEqual(library.map((n) => n.id), ['a', 'b']);
 });
 
 test('subtree deletion removes the folder and its descendants', () => {

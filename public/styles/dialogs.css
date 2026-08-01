@@ -155,6 +155,30 @@
   padding: 0 6px;
   border-top: 1px solid #e1dbcf;
 }
+.prompt-tree-menu {
+  position: fixed;
+  z-index: 130;
+  min-width: 190px;
+  border: 1px solid #d8d2c6;
+  border-radius: 10px;
+  background: #fffef9;
+  box-shadow: 0 12px 30px rgba(55, 50, 41, 0.18);
+  padding: 4px;
+}
+.prompt-tree-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 8px 10px;
+  color: #2c2a25;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.prompt-tree-menu button:hover,
+.prompt-tree-menu button:focus { background: #f0ece2; outline: none; }
 .prompt-tree-children { position: relative; }
 .prompt-tree-children::before {
   position: absolute;

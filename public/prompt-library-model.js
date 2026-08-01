@@ -241,6 +241,76 @@ function insertNode(nodes, parentId, node, beforeId) {
   });
 }
 
+function insertNodes(nodes, parentId, nodesToInsert, beforeId) {
+  if (parentId == null) {
+    const next = [...nodes];
+    const index = beforeId == null
+      ? next.length
+      : next.findIndex((candidate) => candidate.id === beforeId);
+    if (index === -1) return nodes;
+    next.splice(index, 0, ...nodesToInsert);
+    return next;
+  }
+  return nodes.map((candidate) => {
+    if (candidate.id === parentId) {
+      const children = [...candidate.children];
+      const index = beforeId == null
+        ? children.length
+        : children.findIndex((child) => child.id === beforeId);
+      if (index === -1) return candidate;
+      children.splice(index, 0, ...nodesToInsert);
+      return { ...candidate, children };
+    }
+    if (candidate.type === 'folder') {
+      const inner = insertNodes(candidate.children, parentId, nodesToInsert, beforeId);
+      if (inner !== candidate.children) return { ...candidate, children: inner };
+    }
+    return candidate;
+  });
+}
+
+/**
+ * Moves several nodes (and their subtrees) to a new position atomically.
+ * `nodeIds` are reduced to selected roots first (descendants under a selected
+ * ancestor are removed), then validated, removed, and inserted together in
+ * their current depth-first order, preserving relative order. Rejects unknown
+ * ids, non-folder destinations, folder-into-descendant cycles, a destination
+ * inside the moved group, and beforeId siblings that do not belong to the
+ * destination. Non-mutating; returns the original tree on any failure.
+ */
+export function movePromptNodes(nodes, { nodeIds, destinationParentId = null, beforeId = null }) {
+  const ids = Array.isArray(nodeIds) ? nodeIds : [];
+  if (ids.length === 0) return nodes;
+  for (const id of ids) {
+    if (!findPromptNode(nodes, id)) return nodes;
+  }
+  if (destinationParentId != null) {
+    const destination = findPromptNode(nodes, destinationParentId);
+    if (!destination || destination.type !== 'folder') return nodes;
+    if (ids.includes(destinationParentId)) return nodes;
+    for (const id of ids) {
+      const node = findPromptNode(nodes, id);
+      if (node.type === 'folder' && isDescendantOf(destinationParentId, id, nodes)) return nodes;
+    }
+  }
+  const roots = selectedRootIds(nodes, ids);
+  if (roots.length === 0) return nodes;
+  let without = nodes;
+  const removedNodes = [];
+  for (const id of roots) {
+    const result = removeNode(without, id);
+    without = result.nodes;
+    if (result.removed) removedNodes.push(result.removed);
+  }
+  if (removedNodes.length === 0) return nodes;
+  const siblings = destinationParentId == null
+    ? without
+    : (findPromptNode(without, destinationParentId)?.children ?? null);
+  if (siblings == null) return nodes;
+  if (beforeId != null && !siblings.some((candidate) => candidate.id === beforeId)) return nodes;
+  return insertNodes(without, destinationParentId, removedNodes, beforeId);
+}
+
 /**
  * Moves a node (and its subtree) to a new position. `destinationParentId` is
  * the folder to drop into (null means root); `beforeId` is the sibling to
