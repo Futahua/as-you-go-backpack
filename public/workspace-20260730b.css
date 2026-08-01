@@ -512,6 +512,12 @@ button { color: inherit; }
   place-items: center;
   overflow: hidden;
 }
+.icon-preview-shell.drag-over {
+  border-color: var(--green);
+  background: var(--green-soft);
+  outline: 2px dashed var(--green);
+  outline-offset: 2px;
+}
 .icon-preview { max-width: 68px; max-height: 68px; object-fit: contain; }
 #icon-fallback {
   display: grid;

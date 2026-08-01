@@ -2430,6 +2430,40 @@ elements.iconInput.addEventListener('change', async () => {
   }
 });
 
+const iconDropZone = document.querySelector('.icon-preview-shell');
+iconDropZone.addEventListener('dragover', (event) => {
+  if (event.dataTransfer.types.includes('Files')) {
+    event.preventDefault();
+    event.stopPropagation();
+    iconDropZone.classList.add('drag-over');
+  }
+});
+iconDropZone.addEventListener('dragleave', () => {
+  iconDropZone.classList.remove('drag-over');
+});
+iconDropZone.addEventListener('drop', async (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  iconDropZone.classList.remove('drag-over');
+  const file = [...event.dataTransfer.files].find((f) => f.type.startsWith('image/'));
+  if (!file) {
+    elements.editorError.textContent = 'Drop an image file.';
+    return;
+  }
+  elements.saveButton.disabled = true;
+  elements.editorError.textContent = 'Preparing icon…';
+  try {
+    editorIcon = await compressIconFile(file);
+    elements.editorError.textContent = '';
+    showIconPreview(editorIcon);
+  } catch (error) {
+    elements.editorError.textContent =
+      error instanceof Error ? error.message : String(error);
+  } finally {
+    elements.saveButton.disabled = false;
+  }
+});
+
 document.querySelector('#cancel-link-edit').addEventListener('click', () => {
   elements.linkEditLayer.hidden = true;
 });
