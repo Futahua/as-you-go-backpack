@@ -15,6 +15,9 @@ import {
   ringPath,
   forceRingShape,
 } from './public/set-ring-model.js';
+// The real forces, so containment is measured against the configuration the
+// app actually runs rather than an idealised one.
+import { forceSimulation, forceManyBody, forceCollide, forceLink } from './public/vendor/d3-force.js';
 
 function tile(id, x, y) {
   return { id, x, y, width: 72, height: 72 };
@@ -144,4 +147,101 @@ test('ring nodes stay affordable at realistic scale', () => {
     total += reconcileRing({ setId: `s${s}`, members }).nodes.length;
   }
   assert.ok(total < 200, `8 sets need ${total} ring nodes, which the simulation can carry`);
+});
+
+// ===========================================================================
+// Containment. The architecture's headline claim is that a member cannot leave
+// and an outsider cannot get in "for the same reason a node cannot walk through
+// another node". That is true of nodes the simulation is free to move, and
+// measurably NOT true of a node the user is dragging — so it is worth stating
+// exactly which of the two the code delivers.
+// ===========================================================================
+
+/** Runs the app's own force configuration over members plus a ring. */
+function settle(members, extra = [], links = [], ticks = 200) {
+  const nodes = [...members, ...extra];
+  const simulation = forceSimulation(nodes).alpha(1).stop()
+    .force('charge', forceManyBody().strength((n) => (n.ring ? 0 : -280)))
+    .force('collide', forceCollide()
+      .radius((n) => (n.ring ? 18 : Math.max(n.width, n.height) / 2 + 20))
+      .strength(0.9))
+    .force('link', forceLink(links).id((d) => d.id)
+      .distance((l) => (l.source.ring ? 60 : 145))
+      .strength((l) => (l.source.ring ? 0.9 : 0.14)))
+    .force('ring', forceRingShape({ membersOf: () => members }));
+  for (let i = 0; i < ticks; i += 1) simulation.tick();
+  return simulation;
+}
+
+/** Ray casting against the ring in loop order. Ordering by ringIndex matters:
+ * the node array is not the polygon unless it is walked around the loop. */
+function insideRing(ringNodes, point) {
+  const loop = [...ringNodes].sort((a, b) => a.ringIndex - b.ringIndex);
+  let inside = false;
+  for (let i = 0, j = loop.length - 1; i < loop.length; j = i, i += 1) {
+    const a = loop[i];
+    const b = loop[j];
+    if ((a.y > point.y) !== (b.y > point.y)
+      && point.x < a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x)) inside = !inside;
+  }
+  return inside;
+}
+
+test('the ring encloses its own members once settled', () => {
+  const members = [tile('a', 0, 0), tile('b', 140, 0), tile('c', 70, 120)];
+  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
+  settle(members, ring, links, 300);
+  for (const member of members) {
+    assert.ok(insideRing(ring, member), `member ${member.id} ended up outside its own set`);
+  }
+});
+
+/** Pulls an outsider towards the set centre with the given per-tick strength,
+ * and reports whether it ended up inside the ring. */
+function pullInside(pull, ticks = 400) {
+  const members = [tile('a', 0, 0), tile('b', 140, 0)];
+  const outsider = tile('out', 700, 0);
+  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
+  const simulation = settle(members, [outsider, ...ring], links, 200);
+  for (let i = 0; i < ticks; i += 1) {
+    outsider.vx += (70 - outsider.x) * pull;
+    outsider.vy += (0 - outsider.y) * pull;
+    simulation.tick();
+  }
+  return insideRing(ring, outsider);
+}
+
+test('the ring resists a gentle push but is not impassable', () => {
+  // The measured truth, and it is weaker than "an outsider cannot get in".
+  // The ring holds against a slow drift and is pushed through by anything
+  // firmer: breach begins somewhere between 0.002 and 0.005 per tick.
+  //
+  // Worth pinning precisely, because the architecture is sold on containment
+  // being a free consequence of collision. It is a real effect — the boundary
+  // does push back — but it is resistance, not prevention, and a feature that
+  // needs a hard rule cannot be built on it.
+  assert.equal(pullInside(0.001), false, 'a gentle drift is held out');
+  assert.equal(pullInside(0.01), true, 'a firm push gets through');
+});
+
+test('a dragged outsider passes straight through the ring', () => {
+  // Dragging is the worst case and the one the user will actually do.
+  // pointer-controller moves a node by pinning fx/fy, which sets its position
+  // outright, so collision can shove the ring aside but has nothing to push
+  // back against. Anything that must stop a drag has to be a rule in the drag
+  // code; the physics will not do it.
+  //
+  // Asserted rather than left as a comment so that a change making the ring
+  // genuinely drag-proof fails here and forces this note to be rewritten.
+  const members = [tile('a', 0, 0), tile('b', 140, 0)];
+  const outsider = tile('out', 700, 0);
+  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
+  const simulation = settle(members, [outsider, ...ring], links, 200);
+
+  for (let x = 700; x >= 70; x -= 40) {
+    outsider.fx = x;
+    outsider.fy = 0;
+    for (let i = 0; i < 12; i += 1) simulation.tick();
+  }
+  assert.ok(insideRing(ring, outsider), 'a pinned node is not stopped by collision');
 });
