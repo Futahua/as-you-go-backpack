@@ -142,6 +142,11 @@ export function createPointerController({
           startWorldX: null,
           startWorldY: null,
           initialPositions: new Map(),
+          // Where each item was last legally placed. The swept constraint
+          // resolves from here rather than from the drag's origin, so an item
+          // held against a wall slides along it as the pointer moves instead of
+          // re-testing the whole journey from the start every frame.
+          lastValid: new Map(),
           pinOnRelease: event.shiftKey,
           moved: false,
           thresholdPassed: false,
@@ -229,19 +234,27 @@ export function createPointerController({
         if (!node) continue;
         const initial = drag.initialPositions.get(id);
         if (!initial) continue;
-        node.fx = initial.x + deltaX;
-        node.fy = initial.y + deltaY;
+        const proposed = { x: initial.x + deltaX, y: initial.y + deltaY };
+        // Stop at the membrane rather than pass through it. The tile used to
+        // follow the cursor anywhere and revert on release, which reads as the
+        // drag being broken rather than as a boundary being enforced. It now
+        // travels as far along the path as it legally can and stays there while
+        // the pointer carries on — the wall is felt, not explained afterwards.
+        //
+        // Each item is resolved from its own last accepted position, so one
+        // blocked item in a multi-item drag stops on its own wall without
+        // dragging the rest of the selection to a halt.
+        const previous = drag.lastValid.get(id) ?? { x: initial.x, y: initial.y };
+        const resolved = graph.constrainSetMotion
+          ? graph.constrainSetMotion(id, previous, proposed, drag.regionSnapshot)
+          : { x: proposed.x, y: proposed.y, blocked: false };
+        drag.lastValid.set(id, { x: resolved.x, y: resolved.y });
+        node.fx = resolved.x;
+        node.fy = resolved.y;
         node.x = node.fx;
         node.y = node.fy;
         node.positioned = true;
-        // Preview rather than prevent: the tile follows the cursor wherever it
-        // goes and is marked instead, so the user can see that this particular
-        // destination will not be kept before letting go. Blocking the motion
-        // itself would read as the drag being broken.
-        node.shell?.classList.toggle(
-          'graph-move-blocked',
-          !mayMoveTo(id, { x: node.x, y: node.y }, drag.regionSnapshot),
-        );
+        node.shell?.classList.toggle('graph-move-blocked', resolved.blocked === true);
       }
       graph.reheat(0.12);
 
@@ -306,6 +319,12 @@ export function createPointerController({
   }
 
   /** Puts back every item whose destination its sets do not allow.
+   *
+   * The movement itself is now clamped at the membrane as it happens, so a
+   * normal release is already legal and this changes nothing. It is kept as a
+   * defensive check: geometry can be replaced mid-gesture, and a position that
+   * slipped through should not be committed just because the preview accepted
+   * it.
    *
    * Each item is judged on its own: one blocked item in a multi-item drag
    * returns to where it started while the rest keep their new positions,

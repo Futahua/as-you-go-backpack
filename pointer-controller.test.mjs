@@ -96,6 +96,26 @@ function createHarness({ binMode = false } = {}) {
     getSetRegions: () => snapshotToken,
     setIdsAtPoint: (point, regions) =>
       regions === snapshotToken ? snapshotAtPoint(point) : liveAtPoint(point),
+    // The real one sweeps the item's whole rectangle along the whole path and
+    // stops it at the first membrane. The mock keeps that contract — walk the
+    // segment, return the last position the drop rule accepts — over the same
+    // point predicate the rest of the harness uses, so a test can express a
+    // wall as "past x=150 is set A" and still exercise clamping rather than
+    // destination testing.
+    constrainSetMotion: (itemId, from, to, regions) => {
+      const at = (point) => (regions === snapshotToken ? snapshotAtPoint(point) : liveAtPoint(point));
+      const allowed = (point) => dropRule(itemId, at(point));
+      if (!allowed(from)) return { x: to.x, y: to.y, blocked: false };
+      const steps = 64;
+      let last = { x: from.x, y: from.y };
+      for (let i = 1; i <= steps; i += 1) {
+        const t = i / steps;
+        const point = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+        if (!allowed(point)) return { ...last, blocked: true };
+        last = point;
+      }
+      return { x: to.x, y: to.y, blocked: false };
+    },
   };
   let marqueeActivePointer = null;
   const marquee = {
@@ -381,7 +401,7 @@ function dragTile(h, id, from, to) {
   return tile;
 }
 
-test('an item blocked at its destination returns to where it started', () => {
+test('an item held against a membrane stops there and stays there', () => {
   const h = createHarness();
   const n = node('loose', 100, 100);
   h.graphNodes.set('loose', n);
@@ -390,11 +410,12 @@ test('an item blocked at its destination returns to where it started', () => {
   h.setDropRule((itemId, regionSetIds) => regionSetIds.length === 0);
 
   dragTile(h, 'loose', { x: 10, y: 10 }, { x: 200, y: 10 });
-  assert.equal(n.x, 290, 'it followed the cursor while dragging');
+  // It used to follow the cursor to 290 and snap back on release, which reads
+  // as the drag being broken rather than as a wall being there.
+  assert.ok(n.x <= 150, `it stopped at the wall (x=${n.x}), not at the cursor`);
 
   h.grid._dispatch('pointerup', pointerEvent(1, 200, 10));
-  assert.equal(n.x, 100, 'and went back on release');
-  assert.equal(n.y, 100);
+  assert.ok(n.x <= 150, 'and release changes nothing, because the position is already legal');
 });
 
 test('an item allowed at its destination keeps its new position', () => {
@@ -429,50 +450,53 @@ test('each item in a multi-item drag is judged on its own', () => {
   h.grid._dispatch('pointermove', pointerEvent(1, 200, 10));
   h.grid._dispatch('pointerup', pointerEvent(1, 200, 10));
 
-  // One blocked item must not veto the whole gesture.
+  // One item hitting a wall must not veto the whole gesture: each is swept and
+  // clamped on its own, so the member travels the full distance while the
+  // setless item stops where its own membrane is.
   assert.equal(allowed.x, 290, 'the member kept its move');
-  assert.equal(blocked.x, 100, 'the setless item went back');
+  assert.ok(blocked.x <= 150, `the setless item stopped at the wall (x=${blocked.x})`);
+  assert.ok(blocked.x > 100, 'having travelled as far as it legally could');
 });
 
-test('release is judged against the regions frozen at drag start, not the live ones', () => {
+test('the drag is judged against the regions frozen at drag start, not the live ones', () => {
   const h = createHarness();
   const n = node('loose', 100, 100);
   h.graphNodes.set('loose', n);
   // At drag start, anywhere past x=150 is inside set A, which 'loose' does not
-  // belong to — so the destination reads as blocked.
+  // belong to — so the item may not cross that line.
   h.setSnapshotRegionsAtPoint((point) => (point.x > 150 ? ['A'] : []));
   // A redraw part-way through the drag recomputes the live regions with the
-  // dragged item at its *new* position, where it carves a hole around itself
-  // and the same destination reads as allowed.
+  // dragged item at its *new* position, where the same destination would read
+  // as allowed. Judging against those would let the drag's own motion move its
+  // own goalposts, so a quick and a slow release could disagree.
   h.setLiveRegionsAtPoint(() => []);
   h.setDropRule((itemId, regionSetIds) => regionSetIds.length === 0);
 
   dragTile(h, 'loose', { x: 10, y: 10 }, { x: 200, y: 10 });
-  assert.equal(n.x, 290, 'it followed the cursor while dragging');
+  assert.ok(n.x <= 150, `it stopped at the frozen wall rather than passing through (x=${n.x})`);
 
   h.grid._dispatch('pointerup', pointerEvent(1, 200, 10));
-  // Judging against the live regions — which the drag itself just changed —
-  // would let the move stand; the snapshot makes the outcome deterministic.
-  assert.equal(n.x, 100, 'release still reverts the blocked move');
-  assert.equal(n.y, 100);
+  // Already legal on release, so nothing is reverted — the clamp during the
+  // drag is what enforced the rule, not a correction afterwards.
+  assert.ok(n.x <= 150, 'and it stayed where the wall stopped it');
 });
 
-test('drag preview flags blocked moves against the frozen snapshot', () => {
+test('a blocked drag stops at the membrane instead of passing through it', () => {
   const h = createHarness();
   const n = node('loose', 100, 100);
   h.graphNodes.set('loose', n);
   h.setSnapshotRegionsAtPoint((point) => (point.x > 150 ? ['A'] : []));
-  // The live regions would carve a hole around the item at its destination and
-  // allow it, but the preview must agree with the release, so it is judged
-  // against the same snapshot.
   h.setLiveRegionsAtPoint(() => []);
   h.setDropRule((itemId, regionSetIds) => regionSetIds.length === 0);
 
+  // The pointer travels to x=290; the item may not go past 150.
   dragTile(h, 'loose', { x: 10, y: 10 }, { x: 200, y: 10 });
   assert.ok(
     n.shell.classList.contains('graph-move-blocked'),
-    'the blocked destination is marked while dragging',
+    'the item is marked as held against the wall',
   );
+  assert.ok(n.x <= 150, `the icon stopped at the wall (x=${n.x}) while the pointer went on to 290`);
+  assert.ok(n.x > 100, 'but it did travel as far as it legally could');
 });
 
 test('dropping into a folder is not governed by the set rules', () => {

@@ -54,6 +54,7 @@ import {
   regionIntersectsRect,
 } from './set-region-model.js';
 import { canDropInsideRegions, belongsToSet } from './sets-model.js';
+import { resolveSweptPlacement } from './set-constraint-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -1179,6 +1180,37 @@ My request:
       return hits.sort((a, b) => a.area - b.area).map((hit) => hit.setId);
     }
 
+    /** The set ids an item belongs to, by the same rule the region was drawn
+     * with — so a drag is judged against the membership the outline shows. */
+    function ownSetIdsFor(itemId) {
+      return (state.view?.itemSets ?? [])
+        .filter((set) => belongsToSet(set, itemId, ancestorsOfNode))
+        .map((set) => set.id);
+    }
+
+    /** How far an item may actually travel towards where it has been dragged.
+     *
+     * The whole item rectangle is tested along the whole path, not its centre
+     * at its destination. Both halves matter: an icon could otherwise straddle
+     * a membrane with half its body across the wall, and a fast pointer
+     * movement could jump over a thin neck with both ends of the move legal.
+     *
+     * `regions` defaults to the live geometry, but a drag passes the snapshot
+     * frozen at drag start: the drag's own motion reheats the simulation and
+     * recomputes the regions around the item's new position, so judging against
+     * those would let the movement move its own goalposts. */
+    function constrainSetMotion(itemId, from, proposed, regions = setRegions) {
+      const node = nodes.get(itemId);
+      if (!node) return { x: proposed.x, y: proposed.y, blocked: false };
+      return resolveSweptPlacement({
+        from,
+        to: proposed,
+        itemSize: { width: node.width, height: node.height },
+        ownSetIds: ownSetIdsFor(itemId),
+        regions,
+      });
+    }
+
     /** Every set whose region the rectangle touches, so a sweep catches a set
      * without having to enclose it. */
     function setIdsIntersectingRect(rect) {
@@ -1199,6 +1231,7 @@ My request:
       getSetRegions,
       setIdsAtPoint,
       setIdsIntersectingRect,
+      constrainSetMotion,
       ancestorsOfNode,
       _getNode: (id) => nodes.get(id) ?? null,
       _setOnDragCancel(callback) { onDragCancel = callback; },
