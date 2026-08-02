@@ -503,6 +503,33 @@ function createGraphController() {
     return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
   }
 
+  /** Every folder an item sits inside, walked up to the root, nearest first.
+   *
+   * belongsToSet uses this to decide inherited membership: putting a folder in
+   * a set covers its contents, so a child is a member when any ancestor is.
+   * Passing nothing would make inheritance silently stop working, and passing
+   * an undefined identifier — which is what this replaces — threw on every
+   * group attempt with "ancestorsOfNode is not defined".
+   *
+   * The chain comes from the graph's own parentIds rather than the stored
+   * folder tree, because that is what the visible layout is built from. */
+  function ancestorsOfNode(nodeId) {
+    const chain = [];
+    const seen = new Set();
+    const node = nodes.get(nodeId);
+    const queue = (node?.parentIds?.length ? [...node.parentIds] : [node?.parentId]).filter(Boolean);
+    while (queue.length > 0) {
+      const parentId = queue.shift();
+      if (!parentId || parentId === ROOT_ID || parentId === 'bin' || seen.has(parentId)) continue;
+      seen.add(parentId);
+      chain.push(parentId);
+      const parent = nodes.get(parentId);
+      if (parent?.parentIds?.length) queue.push(...parent.parentIds);
+      else if (parent?.parentId) queue.push(parent.parentId);
+    }
+    return chain;
+  }
+
   /** The visible members of a set, as rectangles the ring can enclose. */
   function membersOnScreen(setId) {
     const itemSet = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId);
