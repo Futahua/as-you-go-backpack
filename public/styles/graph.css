@@ -69,6 +69,15 @@
   outline-color: rgba(76, 114, 90, 0.9);
   outline-width: 2.5px;
 }
+/* This destination is not allowed by the item's sets, so releasing here will
+ * put the tile back. Shown while dragging rather than on release, so the user
+ * finds out before letting go — and the tile still follows the cursor, since
+ * refusing to move would read as the drag being broken. */
+.graph-node-shell.graph-move-blocked .icon-item {
+  outline-color: rgba(176, 92, 84, 0.9);
+  outline-style: dashed;
+  outline-width: 2.5px;
+}
 .graph-node-shell.will-release .icon-item {
   outline-color: rgba(120, 120, 120, 0.55);
   outline-style: dashed;

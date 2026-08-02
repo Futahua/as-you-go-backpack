@@ -52,6 +52,7 @@ import {
   regionArea,
   polygonIntersectsRect,
 } from './set-region-model.js';
+import { canDropInsideRegions } from './sets-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -1635,6 +1636,14 @@ My request:
     graph,
     marquee,
     zoomTransform,
+    // The spatial rules: a setless item may not enter a set, a member may not
+    // leave its own, and an item in several is confined to their intersection.
+    canDropInsideRegions: (itemId, regionSetIds) => canDropInsideRegions(
+      state.view?.itemSets ?? [],
+      itemId,
+      regionSetIds,
+      (id) => ancestorFolderIds(state, id),
+    ),
     group,
     visiblePlacementIdFor,
     closeMenu,

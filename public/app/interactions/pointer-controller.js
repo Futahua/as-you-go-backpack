@@ -13,6 +13,9 @@ export function createPointerController({
   graph,
   marquee,
   zoomTransform,
+  // Decides whether one item may sit inside a given set of regions. Optional
+  // so the controller still works with no sets in play at all.
+  canDropInsideRegions = null,
   group,
   visiblePlacementIdFor,
   closeMenu,
@@ -71,6 +74,11 @@ export function createPointerController({
       el.classList.remove('graph-dragging', 'will-pin', 'will-release'));
     document.querySelectorAll('.graph-drop-target').forEach((el) =>
       el.classList.remove('graph-drop-target'));
+    // Queried separately: a blocked tile has already lost .graph-dragging by
+    // the time this runs on some paths, and a marker left behind would stick
+    // to the tile for the rest of the session.
+    document.querySelectorAll('.graph-move-blocked').forEach((el) =>
+      el.classList.remove('graph-move-blocked'));
     elements.binButton?.classList.remove('graph-bin-drop-target');
   }
 
@@ -216,6 +224,14 @@ export function createPointerController({
         node.x = node.fx;
         node.y = node.fy;
         node.positioned = true;
+        // Preview rather than prevent: the tile follows the cursor wherever it
+        // goes and is marked instead, so the user can see that this particular
+        // destination will not be kept before letting go. Blocking the motion
+        // itself would read as the drag being broken.
+        node.shell?.classList.toggle(
+          'graph-move-blocked',
+          !mayMoveTo(id, { x: node.x, y: node.y }),
+        );
       }
       graph.reheat(0.12);
 
@@ -266,6 +282,36 @@ export function createPointerController({
     return { hitBin, hitFolderId };
   }
 
+  /** Whether an item may sit where it has been dragged.
+   *
+   * The destination regions come from the same polygons that are drawn, so the
+   * rule is decided against what the user can see rather than against a
+   * separate idea of where the sets are. */
+  function mayMoveTo(itemId, position) {
+    if (!canDropInsideRegions || !graph.setIdsAtPoint) return true;
+    return canDropInsideRegions(itemId, graph.setIdsAtPoint(position));
+  }
+
+  /** Puts back every item whose destination its sets do not allow.
+   *
+   * Each item is judged on its own: one blocked item in a multi-item drag
+   * returns to where it started while the rest keep their new positions,
+   * rather than vetoing the whole gesture. */
+  function revertDisallowedMoves(current) {
+    if (!current) return;
+    for (const id of current.itemIds) {
+      const node = graph._getNode(id);
+      const initial = current.initialPositions.get(id);
+      if (!node || !initial) continue;
+      if (mayMoveTo(id, { x: node.x, y: node.y })) continue;
+      node.x = initial.x;
+      node.y = initial.y;
+      node.fx = initial.fx;
+      node.fy = initial.fy;
+      node.positioned = initial.fx != null;
+    }
+  }
+
   function onPointerUp(event) {
     if (drag && event.pointerId === drag.pointerId) {
       if (elements.grid.hasPointerCapture(event.pointerId)) {
@@ -277,6 +323,11 @@ export function createPointerController({
         setSuppressGraphClick(true);
         clearDragVisuals();
         const { hitBin, hitFolderId } = hitTest(event);
+        // Enforce the set movement rules before anything is committed. Only a
+        // free move on the canvas is governed by them: dropping into the Bin
+        // or a folder is a different gesture entirely, and a set that follows
+        // its members would otherwise block the user from filing anything.
+        if (!hitBin && !hitFolderId) revertDisallowedMoves(drag);
         const dragCopy = {
           itemIds: [...drag.itemIds],
           placementIds: drag.placementIds,

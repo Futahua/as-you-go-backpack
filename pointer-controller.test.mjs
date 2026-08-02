@@ -79,10 +79,15 @@ function createHarness({ binMode = false } = {}) {
   };
   const graphNodes = new Map();
   const effects = { reheat: [], decay: 0, close: 0, suppressGraph: [], suppressBlank: [] };
+  // Set regions the drag rules are judged against. Tests supply a predicate
+  // over a world position; by default nothing is inside any set.
+  let regionsAtPoint = () => [];
+  let dropRule = () => true;
   const graph = {
     _getNode: (id) => graphNodes.get(id) ?? null,
     reheat: (a) => { effects.reheat.push(a); },
     _setSimulationDecay: () => { effects.decay += 1; },
+    setIdsAtPoint: (point) => regionsAtPoint(point),
   };
   let marqueeActivePointer = null;
   const marquee = {
@@ -101,6 +106,7 @@ function createHarness({ binMode = false } = {}) {
     graph,
     marquee,
     zoomTransform: () => ({ x: 0, y: 0, k: 1 }),
+    canDropInsideRegions: (itemId, regionSetIds) => dropRule(itemId, regionSetIds),
     group: () => null,
     visiblePlacementIdFor: (id) => `p-${id}`,
     closeMenu: () => { effects.close += 1; },
@@ -114,6 +120,8 @@ function createHarness({ binMode = false } = {}) {
   });
   controller.mount();
   return {
+    setRegionsAtPoint: (fn) => { regionsAtPoint = fn; },
+    setDropRule: (fn) => { dropRule = fn; },
     controller, grid, binButton, store, commands, commandCalls, graphNodes, effects, windowListeners, marquee,
     getShells: () => shells,
     setShells: (value) => { shells = value; },
@@ -345,4 +353,100 @@ test('a plain pointerdown on the same tile still selects, proving Alt is the dif
   h.graphNodes.set('g1', node('g1'));
   h.grid._dispatch('pointerdown', pointerEvent(1, 10, 10, { target: tile }));
   assert.equal(h.commandCalls[0][0], 'select');
+});
+
+// ===========================================================================
+// Set movement rules: enforced on release against the rendered regions.
+// ===========================================================================
+
+/** Starts a drag on one tile and moves it by the given client delta. */
+function dragTile(h, id, from, to) {
+  const tile = fakeNode();
+  tile.dataset = { id, kind: 'shortcut' };
+  tile.closest = (sel) =>
+    (sel === '.icon-item' || sel === '.graph-node-shell' ? tile : null);
+  h.store.setSelection([id]);
+  h.grid._dispatch('pointerdown', pointerEvent(1, from.x, from.y, { target: tile }));
+  h.grid._dispatch('pointermove', pointerEvent(1, to.x, to.y));
+  return tile;
+}
+
+test('an item blocked at its destination returns to where it started', () => {
+  const h = createHarness();
+  const n = node('loose', 100, 100);
+  h.graphNodes.set('loose', n);
+  // Anywhere past x=150 is inside set A, which 'loose' does not belong to.
+  h.setRegionsAtPoint((point) => (point.x > 150 ? ['A'] : []));
+  h.setDropRule((itemId, regionSetIds) => regionSetIds.length === 0);
+
+  dragTile(h, 'loose', { x: 10, y: 10 }, { x: 200, y: 10 });
+  assert.equal(n.x, 290, 'it followed the cursor while dragging');
+
+  h.grid._dispatch('pointerup', pointerEvent(1, 200, 10));
+  assert.equal(n.x, 100, 'and went back on release');
+  assert.equal(n.y, 100);
+});
+
+test('an item allowed at its destination keeps its new position', () => {
+  const h = createHarness();
+  const n = node('loose', 100, 100);
+  h.graphNodes.set('loose', n);
+  h.setRegionsAtPoint(() => []);
+  h.setDropRule(() => true);
+
+  dragTile(h, 'loose', { x: 10, y: 10 }, { x: 200, y: 10 });
+  h.grid._dispatch('pointerup', pointerEvent(1, 200, 10));
+  assert.equal(n.x, 290, 'the move stands');
+});
+
+test('each item in a multi-item drag is judged on its own', () => {
+  const h = createHarness();
+  const allowed = node('member', 100, 100);
+  const blocked = node('loose', 100, 200);
+  h.graphNodes.set('member', allowed);
+  h.graphNodes.set('loose', blocked);
+  h.setRegionsAtPoint((point) => (point.x > 150 ? ['A'] : []));
+  // Only 'member' belongs to A, so only it may land inside.
+  h.setDropRule((itemId, regionSetIds) =>
+    (regionSetIds.length === 0 ? itemId !== 'member' : itemId === 'member'));
+
+  const tile = fakeNode();
+  tile.dataset = { id: 'member', kind: 'shortcut' };
+  tile.closest = (sel) =>
+    (sel === '.icon-item' || sel === '.graph-node-shell' ? tile : null);
+  h.store.setSelection(['member', 'loose']);
+  h.grid._dispatch('pointerdown', pointerEvent(1, 10, 10, { target: tile }));
+  h.grid._dispatch('pointermove', pointerEvent(1, 200, 10));
+  h.grid._dispatch('pointerup', pointerEvent(1, 200, 10));
+
+  // One blocked item must not veto the whole gesture.
+  assert.equal(allowed.x, 290, 'the member kept its move');
+  assert.equal(blocked.x, 100, 'the setless item went back');
+});
+
+test('dropping into a folder is not governed by the set rules', () => {
+  const h = createHarness();
+  const n = node('loose', 100, 100);
+  h.graphNodes.set('loose', n);
+  h.setRegionsAtPoint(() => ['A']);
+  h.setDropRule(() => false);
+
+  // hitTest walks from the element under the pointer up to a shell, then down
+  // to its .icon-item, so the mock has to be that shape.
+  const folderItem = fakeNode();
+  folderItem.dataset = { id: 'f1', kind: 'group' };
+  const folderShell = fakeNode();
+  folderShell.dataset = { graphNodeId: 'f1' };
+  folderShell.querySelector = (sel) => (sel === '.icon-item' ? folderItem : null);
+  folderShell.closest = (sel) => (sel === '.graph-node-shell' ? folderShell : null);
+
+  dragTile(h, 'loose', { x: 10, y: 10 }, { x: 200, y: 10 });
+  h.setShells([folderShell]);
+  h.setElementAtPoint(folderShell);
+  h.grid._dispatch('pointerup', pointerEvent(1, 200, 10));
+
+  // Filing something away is a different gesture; a set that follows its
+  // members would otherwise make folders unreachable while dragging.
+  const folderCall = h.commandCalls.find(([name]) => name === 'folder');
+  assert.ok(folderCall, 'the drop still routed to the folder');
 });
