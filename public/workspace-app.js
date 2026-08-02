@@ -46,7 +46,7 @@ import {
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
-import { setOutlinePath } from './set-hull-model.js';
+import { buildSetRegions } from './set-region-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -337,7 +337,10 @@ My request:
     let edgeLayer = null;
     let setLayer = null;
     const setShapes = new Map();
-    let setAnimationId = 0;
+    // The regions last drawn, keyed by set id. Selection, drop rules and
+    // marquee hit-testing all read this rather than deriving their own
+    // geometry, so what the user clicks is exactly what they can see.
+    let setRegions = new Map();
     let nodeLayer = null;
     let svg = null;
     let resizeObserver = null;
@@ -411,8 +414,8 @@ My request:
         camera = null;
         edgeLayer = null;
         setLayer = null;
-        stopSetAnimation();
         setShapes.clear();
+        setRegions = new Map();
         nodeLayer = null;
         svg = null;
         throw error;
@@ -447,9 +450,15 @@ My request:
       nodes.clear();
       edges.clear();
       originEdges.clear();
+      // The paths go with the viewport below, but the maps that track them
+      // would otherwise survive into the next attach and describe shapes that
+      // no longer exist.
+      setShapes.clear();
+      setRegions = new Map();
       if (viewport) { viewport.remove(); viewport = null; }
       camera = null;
       edgeLayer = null;
+      setLayer = null;
       nodeLayer = null;
       svg = null;
       viewportSelection = null;
@@ -472,8 +481,8 @@ My request:
     }
 
     /** Creates and removes one path per set that has members on screen. The
-     * shape itself is recomputed every frame in drawFrame, since it is derived
-     * from live node positions. */
+     * geometry itself is filled in by drawSetShapes, which runs whenever nodes
+     * move rather than on a timer. */
     function syncSetShapes() {
       if (!setLayer) return;
       const wanted = new Map();
@@ -504,73 +513,54 @@ My request:
         }
         shape.memberIds = members;
       }
-      if (setShapes.size === 0) stopSetAnimation();
-      else ensureSetAnimation();
     }
 
-    /** Keeps the outlines breathing after the force simulation settles.
+
+    /** Recomputes every region from where its members are right now.
      *
-     * drawFrame otherwise only runs on a simulation tick, so once the graph
-     * comes to rest the wobble would freeze mid-cycle. The loop exists only
-     * while at least one set is on screen, so a workspace with no sets does no
-     * extra work at all. */
-    function ensureSetAnimation() {
-      if (setShapes.size === 0 || setAnimationId) return;
-      const step = () => {
-        if (setShapes.size === 0) {
-          setAnimationId = 0;
-          return;
-        }
-        drawSetShapes();
-        setAnimationId = requestAnimationFrame(step);
-      };
-      setAnimationId = requestAnimationFrame(step);
-    }
-
-    function stopSetAnimation() {
-      if (!setAnimationId) return;
-      cancelAnimationFrame(setAnimationId);
-      setAnimationId = 0;
-    }
-
-    /** Recomputes every outline from where its members are right now. */
+     * The regions are extracted from a sampled occupancy field rather than
+     * drawn as a curve through hull points, so the path set here is exactly
+     * the geometry that was tested for separation — see set-region-model.js.
+     * That also makes it the geometry hit-testing can use, instead of a second
+     * approximation that could disagree with what is on screen. */
     function drawSetShapes() {
       if (setShapes.size === 0) return;
-      const time = (performance.now() ?? 0) / 1000;
       const chosen = new Set(setMembershipMode.chosenSetIds());
       const picking = setMembershipMode.isActive();
+
+      // Every node on screen, member or not. Non-members are obstacles: a
+      // setless item constrains an outline just as much as a foreign set's
+      // item does, which is what stops it being swallowed.
+      const visibleItems = [];
+      for (const [nodeId, node] of nodes) {
+        if (node.exiting) continue;
+        visibleItems.push({ id: nodeId, x: node.x, y: node.y, width: node.width, height: node.height });
+      }
+
+      const sets = [...setShapes.values()].map((shape) => ({
+        id: shape.setId,
+        memberIds: shape.memberIds ?? [],
+      }));
+      const coverage = new Map(sets.map((set) => [set.id, new Set(set.memberIds)]));
+
+      setRegions = buildSetRegions({
+        sets,
+        visibleItems,
+        // Coverage, not storage: a folder member's visible descendants are
+        // part of its set's region, so the outline wraps what the user sees
+        // inside the folder rather than just the folder tile.
+        membersOf: (set) => {
+          const stored = coverage.get(set.id) ?? new Set();
+          return visibleItems
+            .filter((entry) => stored.has(entry.id)
+              || ancestorFolderIds(state, entry.id).some((ancestorId) => stored.has(ancestorId)))
+            .map((entry) => entry.id);
+        },
+      });
+
       for (const shape of setShapes.values()) {
-        const rects = (shape.memberIds ?? [])
-          .map((memberId) => nodes.get(memberId))
-          .filter(Boolean)
-          .map((node) => ({ x: node.x, y: node.y, width: node.width, height: node.height }));
-        if (rects.length === 0) {
-          shape.path.setAttribute('d', '');
-          continue;
-        }
-        // Only items belonging to sets this one shares nothing with, plus
-        // setless items, hold the outline back. Sets that share a member are
-        // meant to blend — that overlap is the Venn — so their exclusive items
-        // are deliberately not treated as foreign.
-        const own = new Set(shape.memberIds ?? []);
-        const disjoint = new Set();
-        for (const other of setShapes.values()) {
-          if (other.setId === shape.setId) continue;
-          const shares = (other.memberIds ?? []).some((memberId) => own.has(memberId));
-          if (!shares) for (const memberId of other.memberIds ?? []) disjoint.add(memberId);
-        }
-        const foreignRects = [];
-        for (const [nodeId, node] of nodes) {
-          if (own.has(nodeId) || node.exiting) continue;
-          // A setless item never blends anything, so it does not constrain.
-          if (!disjoint.has(nodeId)) continue;
-          foreignRects.push({ x: node.x, y: node.y, width: node.width, height: node.height });
-        }
-        shape.path.setAttribute('d', setOutlinePath(rects, {
-          id: shape.setId,
-          time,
-          foreignRects,
-        }));
+        const region = setRegions.get(shape.setId);
+        shape.path.setAttribute('d', region?.svgPath ?? '');
         shape.path.classList.toggle('set-picking', picking);
         shape.path.classList.toggle('set-chosen', picking && chosen.has(shape.setId));
       }

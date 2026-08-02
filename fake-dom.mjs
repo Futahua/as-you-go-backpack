@@ -112,10 +112,23 @@ export function createElement(tagName, { namespace = null } = {}) {
       return payload;
     },
 
-    // Geometry stubs: no layout engine, so these report a fixed box unless a
-    // test overrides them deliberately.
+    // Geometry stubs: there is no layout engine, so a node reports whatever
+    // size a test assigns. The default is a plausible viewport rather than
+    // zero, because code that waits for a non-empty box before rendering
+    // would otherwise never run at all.
+    clientWidth: 1280,
+    clientHeight: 800,
     getBoundingClientRect() {
-      return { x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+      return {
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: node.clientWidth,
+        bottom: node.clientHeight,
+        width: node.clientWidth,
+        height: node.clientHeight,
+      };
     },
     setPointerCapture() {},
     releasePointerCapture() {},
@@ -189,7 +202,7 @@ export function createFakeDocument({ selectors = [], extraSelectors = [] } = {})
   return document;
 }
 
-export function createFakeWindow(document) {
+export function createFakeWindow(document, { reducedMotion = false } = {}) {
   const frames = [];
   const window = {
     document,
@@ -217,17 +230,22 @@ export function createFakeWindow(document) {
       for (const callback of pending) callback(time);
       return pending.length;
     },
-    // Observes nothing: there is no layout to change. Held so a test can fire
-    // the callback deliberately if it needs to simulate a resize.
+    // A real ResizeObserver fires once as soon as it starts observing, which
+    // is how the graph learns its viewport has a size. Without that initial
+    // callback the view waits forever for a box and never renders, so the
+    // fake delivers it too — synchronously, so tests need no extra tick.
     ResizeObserver: class {
       constructor(callback) { this.callback = callback; window._resizeObservers.push(this); }
-      observe() {}
+      observe(target) { this.callback([{ target, contentRect: target.getBoundingClientRect() }], this); }
       unobserve() {}
       disconnect() {}
     },
     _resizeObservers: [],
     getComputedStyle() { return { getPropertyValue: () => '' }; },
-    matchMedia() { return { matches: false, addEventListener() {}, removeEventListener() {} }; },
+    matchMedia(query) {
+      const matches = reducedMotion && String(query).includes('prefers-reduced-motion');
+      return { matches, media: query, addEventListener() {}, removeEventListener() {} };
+    },
     chrome: { webview: { postMessage() {}, addEventListener() {}, removeEventListener() {} } },
   };
   document.defaultView = window;
