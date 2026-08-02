@@ -313,6 +313,10 @@ test('the local project preserves its explorer working position', () => {
     graphPositions: {},
     toolbarPositions: {},
     promptLibrary: [],
+    // Sets live in the view alongside the other per-workspace settings. A state
+    // saved before they existed normalizes to an empty list rather than an
+    // absent key, so older saves migrate without a special case.
+    itemSets: [],
   });
 });
 
