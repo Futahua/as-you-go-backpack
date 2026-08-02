@@ -77,8 +77,25 @@ drawn through them) is the spec. Reading it decides the fix:
    reordering.
 3. **Pull a member outward and the ring stretches, growing more beads.** "It
    can get as big as needed" is literally more nodes. `reconcileRing` already
-   derives count from perimeter, so this half exists; what was never observed is
-   whether growth and reordering interact during a fast drag.
+   derives count from perimeter, so that half exists.
+
+   But the panel shows an **ellipse stretched along the drag**, and the
+   implementation grows **radially in every direction**, which is not the same
+   thing and is not wanted. `enclosingCircle` returns one centroid and one
+   scalar radius; a circle cannot express direction, so spreading members along
+   one axis inflates the ring on both. Measured, two 72px tiles side by side:
+
+   ```
+   separation    ring height
+            0           182
+          200           382
+          800           982     <- should still be about 112
+   ```
+
+   At 800px apart the set is 982px tall for two tiles in a row. The fix has to
+   replace the enclosing circle with something orientable — an enclosing
+   ellipse, or per-node targets derived from the members' own spread — so the
+   boundary stretches along the drag instead of ballooning across it.
 4. **Two rings crossing is an overlap**, with no special case.
 
 Panel 2 is the tangle case, and it rules out the cheap fix:
