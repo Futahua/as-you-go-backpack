@@ -11,6 +11,28 @@
  * measurement or painting cannot be written against it, which is why the live
  * app still has to be driven by hand before a visual claim is made. */
 
+/** Installs the browser globals d3 reads off the global scope rather than off
+ * the window we hand it.
+ *
+ * d3-zoom's defaultExtent does a bare `this instanceof SVGElement` to decide
+ * whether to measure a viewBox or fall back to clientWidth/clientHeight. In a
+ * browser that global always exists; under node it throws a ReferenceError the
+ * moment a zoom gesture is constructed. Nothing here inherits from the
+ * stand-in, so the check is false and d3 takes the HTML-element branch — which
+ * is the correct answer for the workspace viewport, a plain div.
+ *
+ * Returns a restore function so a test can leave the global scope as it found
+ * it. */
+export function installBrowserGlobals(target = globalThis) {
+  const had = Object.prototype.hasOwnProperty.call(target, 'SVGElement');
+  const previous = target.SVGElement;
+  if (!had) target.SVGElement = class SVGElement {};
+  return function restore() {
+    if (had) target.SVGElement = previous;
+    else delete target.SVGElement;
+  };
+}
+
 /** Style objects double as plain property bags and as a CSS-variable sink —
  * the app sets custom properties (--icon-size and friends) through
  * setProperty, which a bare object would not answer. */

@@ -4,10 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "vendor:d3": "node tools/vendor-d3.mjs .",
     "test": "node --test test.mjs model.test.mjs renderer.test.mjs host-bridge.test.mjs dom.test.mjs toolbar-controller.test.mjs confirmation-dialog.test.mjs context-menu.test.mjs editor-dialog.test.mjs bin-controls.test.mjs bootstrap.test.mjs workspace-store.test.mjs workspace-commands.test.mjs keyboard-controller.test.mjs marquee-controller.test.mjs drop-controller.test.mjs pointer-controller.test.mjs prompt-library-model.test.mjs prompt-library-dialog.test.mjs prompt-library-history.test.mjs prompt-tree-selection.test.mjs prompt-tree-context-menu.test.mjs sets-model.test.mjs set-membership-mode.test.mjs set-region-model.test.mjs workspace-app.test.mjs styles.test.mjs"
   },
   "dependencies": {
     "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
+    "d3-transition": "^3.0.1",
     "d3-zoom": "^3.0.0"
   }
 }
