@@ -40,6 +40,13 @@ export function createKeyboardController({
         commands.selectAllVisible(getVisibleItemIds());
         return;
       }
+      // Plain G, not Ctrl+G: Ctrl+G is the browser's find-again, and grouping
+      // is frequent enough to deserve a bare key.
+      if (!event.ctrlKey && !event.altKey && key === 'g' && session.selected.size > 0) {
+        event.preventDefault();
+        commands.groupSelectionIntoSet?.();
+        return;
+      }
       if (event.ctrlKey && key === 'c') {
         event.preventDefault();
         commands.copySelection();

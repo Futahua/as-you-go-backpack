@@ -26,6 +26,8 @@ export function createWorkspaceCommands({
   setGraphPositions,
   createWebLink,
   createDroppedShortcuts,
+  setItemSets,
+  createItemSet,
   syncSelection,
   saveWorkspaceView,
   closeMenu,
@@ -67,6 +69,20 @@ export function createWorkspaceCommands({
     store.setSelectionAnchor(null);
     syncSelection();
     saveWorkspaceView();
+  }
+
+  /** Groups the current selection into a new set.
+   *
+   * The set stores ids only — never positions or a shape. Where its outline
+   * ends up is decided by the simulation, so a set that is grouped here and
+   * then dragged apart keeps its membership while its boundary follows. */
+  async function groupSelectionIntoSet() {
+    const selected = [...store.getSession().selected];
+    if (selected.length === 0) return;
+    const state = store.getState();
+    await store.commit(
+      setItemSets(state, [...(state.view?.itemSets ?? []), createItemSet(selected)]),
+    );
   }
 
   /** Begins a marquee gesture. With preserveSelection, the current selection
@@ -440,6 +456,7 @@ export function createWorkspaceCommands({
     selectItem,
     clearSelection,
     selectAllVisible,
+    groupSelectionIntoSet,
     beginMarqueeSelection,
     updateMarqueeSelection,
     finishMarqueeSelection,

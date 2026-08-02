@@ -30,6 +30,7 @@ import {
   forkPlacement,
   collapsePlacements,
   placementCount,
+  setItemSets,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -43,6 +44,8 @@ import {
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
+import { belongsToSet, createItemSet } from './sets-model.js';
+import { reconcileRing, ringPath, forceRingShape } from './set-ring-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -315,6 +318,19 @@ function createGraphController() {
   let viewport = null;
   let camera = null;
   let edgeLayer = null;
+  let setLayer = null;
+  // One path per set, and the ring nodes whose positions it is drawn through.
+  // The nodes live in the simulation alongside the icons, so the outline is
+  // wherever the physics put them rather than a shape computed from the
+  // members' positions.
+  const setShapes = new Map();
+  const setRings = new Map();
+  // A ring node's collision radius. Small enough that neighbours pack shoulder
+  // to shoulder into a solid boundary, large enough that an icon cannot slip
+  // between two of them — an icon is stopped by the pair it meets, so this only
+  // has to exceed half the spacing.
+  const RING_NODE_RADIUS = 18;
+  const RING_LINK_DISTANCE = 60;
   let nodeLayer = null;
   let svg = null;
   let resizeObserver = null;
@@ -352,8 +368,12 @@ function createGraphController() {
     svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'graph-edges-svg');
     svg.setAttribute('aria-hidden', 'true');
+    // Set outlines sit behind the edges so tiles and links stay readable on
+    // top of them.
+    setLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    setLayer.setAttribute('class', 'graph-set-layer');
     edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    svg.append(edgeLayer);
+    svg.append(setLayer, edgeLayer);
 
     nodeLayer = document.createElement('div');
     nodeLayer.className = 'graph-node-layer';
@@ -383,6 +403,9 @@ function createGraphController() {
       viewport = null;
       camera = null;
       edgeLayer = null;
+      setLayer = null;
+      setShapes.clear();
+      setRings.clear();
       nodeLayer = null;
       svg = null;
       throw error;
@@ -417,9 +440,15 @@ function createGraphController() {
     nodes.clear();
     edges.clear();
     originEdges.clear();
+    // The paths go with the viewport below, but the maps that track them would
+    // otherwise survive into the next attach and describe rings that no longer
+    // exist.
+    setShapes.clear();
+    setRings.clear();
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
+    setLayer = null;
     nodeLayer = null;
     svg = null;
     viewportSelection = null;
@@ -447,6 +476,7 @@ function createGraphController() {
       node.shell.style.transform =
         `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
     });
+    drawSetRings();
     syncFolderColors();
     edges.forEach((edge) => {
       const source = nodes.get(edge.sourceId);
@@ -465,6 +495,70 @@ function createGraphController() {
   function edgePath(x1, y1, x2, y2) {
     const mx = (x1 + x2) / 2;
     return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+  }
+
+  /** The visible members of a set, as rectangles the ring can enclose. */
+  function membersOnScreen(setId) {
+    const itemSet = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId);
+    if (!itemSet) return [];
+    const members = [];
+    for (const [nodeId, node] of nodes) {
+      if (node.exiting) continue;
+      if (!belongsToSet(itemSet, nodeId, ancestorsOfNode)) continue;
+      members.push({ id: nodeId, x: node.x, y: node.y, width: node.width, height: node.height });
+    }
+    return members;
+  }
+
+  /** Creates and removes the ring for each set that has members on screen.
+   *
+   * The ring nodes are added to the simulation by syncSimulation, so this only
+   * decides how many there should be and where new ones start. It runs on
+   * structural changes rather than every frame: the node count follows the
+   * ring's perimeter, which only changes when members move appreciably. */
+  function syncSetRings() {
+    if (!setLayer) return;
+    const wanted = new Set();
+    for (const itemSet of (state.view?.itemSets ?? [])) {
+      const members = membersOnScreen(itemSet.id);
+      // A set with nothing on screen has no ring to draw; it still exists in
+      // the data and comes back when its members do.
+      if (members.length === 0) continue;
+      wanted.add(itemSet.id);
+
+      const previous = setRings.get(itemSet.id)?.nodes ?? [];
+      const ring = reconcileRing({ setId: itemSet.id, members, existing: previous });
+      setRings.set(itemSet.id, ring);
+
+      if (!setShapes.has(itemSet.id)) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-set-outline');
+        path.dataset.setId = itemSet.id;
+        setLayer.append(path);
+        setShapes.set(itemSet.id, { setId: itemSet.id, path });
+      }
+    }
+
+    for (const [setId, shape] of setShapes) {
+      if (wanted.has(setId)) continue;
+      shape.path?.remove();
+      setShapes.delete(setId);
+      setRings.delete(setId);
+    }
+  }
+
+  /** Redraws each outline through its ring nodes' current positions.
+   *
+   * Cheap enough for every frame — it reads positions and builds a path string,
+   * with no sampling, routing or contour extraction. That is the whole point of
+   * the ring: the expensive part is the simulation, which was already running.
+   */
+  function drawSetRings() {
+    for (const [setId, shape] of setShapes) {
+      const ring = setRings.get(setId);
+      shape.path.setAttribute('d', ring ? ringPath(ring.nodes) : '');
+      shape.path.classList.toggle('set-selected', session.selectedSets?.has(setId) === true);
+    }
   }
 
   function buildCandidate(vi) {
@@ -825,9 +919,23 @@ function createGraphController() {
     simulation = forceSimulation()
       .force('cx', forceX(w / 2).strength(0.05))
       .force('cy', forceY(h / 2).strength(0.05))
-      .force('charge', forceManyBody().strength(-280))
-      .force('collide', forceCollide().radius((n) => Math.max(n.width, n.height) / 2 + 20).strength(0.9))
-      .force('link', forceLink().id((n) => n.id).distance(145).strength(0.14))
+      // Ring nodes do not repel. Hundreds of them each pushing on everything
+      // would both swamp the layout the icons make between themselves and pay
+      // the charge cost for nodes whose position is already decided by their
+      // links and the shape force.
+      .force('charge', forceManyBody().strength((n) => (n.ring ? 0 : -280)))
+      .force('collide', forceCollide()
+        .radius((n) => (n.ring ? RING_NODE_RADIUS : Math.max(n.width, n.height) / 2 + 20))
+        .strength(0.9))
+      // Ring links are short and stiff: the boundary has to hold its spacing
+      // against the icons pushing on it, where the graph's own links are long
+      // and slack so the layout can breathe.
+      .force('link', forceLink()
+        .id((n) => n.id)
+        .distance((link) => (link.source.ring ? RING_LINK_DISTANCE : 145))
+        .strength((link) => (link.source.ring ? 0.9 : 0.14)))
+      // Holds each ring around its own members rather than letting it drift.
+      .force('ring', forceRingShape({ membersOf: membersOnScreen }))
       .alphaDecay(0.028)
       .velocityDecay(0.32);
     simulation.on('tick', scheduleRender);
@@ -835,8 +943,16 @@ function createGraphController() {
 
   function syncSimulation() {
     ensureSimulation();
+    syncSetRings();
     const nodeArray = [...nodes.values()].filter((n) => !n.exiting);
+    // Ring nodes are ordinary simulation nodes. That is the whole design: they
+    // collide with icons, so a member cannot leave its set and an outsider
+    // cannot get in, and the outline dents and stretches because the same
+    // forces act on it as on everything else. Nothing about containment is
+    // enforced separately.
+    for (const ring of setRings.values()) nodeArray.push(...ring.nodes);
     simulation.nodes(nodeArray);
+
     const edgeArray = [];
     edges.forEach((edge) => {
       edgeArray.push({ source: edge.sourceId, target: edge.targetId });
@@ -844,8 +960,16 @@ function createGraphController() {
     originEdges.forEach((edge) => {
       edgeArray.push({ source: edge.sourceId, target: edge.targetId });
     });
+    // The links closing each ring into a loop, which is what stops the boundary
+    // opening up under load.
+    for (const ring of setRings.values()) edgeArray.push(...ring.links);
+
     simulation.force('link').links(edgeArray);
-    simulation.force('collide').radius((n) => Math.max(n.width, n.height) / 2 + 20);
+    // Ring nodes are small, so they pack tightly along the boundary instead of
+    // being held a whole icon apart by the padding icons need.
+    simulation.force('collide').radius((n) => (n.ring
+      ? RING_NODE_RADIUS
+      : Math.max(n.width, n.height) / 2 + 20));
     const w = viewport?.clientWidth || 800;
     const h = viewport?.clientHeight || 600;
     simulation.force('cx').x(w / 2);
@@ -908,6 +1032,9 @@ function createGraphController() {
       nodes.forEach((_, id) => removeNode(id));
       syncEdges([]);
       syncOriginEdges([]);
+      // Nothing on screen means no members, so every ring goes too. Without
+      // this the previous view's outlines would stay drawn over an empty graph.
+      syncSetRings();
       return;
     }
     const originEdges = session.binMode ? binOriginEdges(visible) : [];
@@ -1376,6 +1503,8 @@ const commands = createWorkspaceCommands({
   setGraphPositions,
   createWebLink,
   createDroppedShortcuts,
+  setItemSets,
+  createItemSet,
   syncSelection,
   saveWorkspaceView,
   closeMenu,

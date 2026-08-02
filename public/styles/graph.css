@@ -21,6 +21,24 @@
   pointer-events: none;
   z-index: 0;
 }
+/* Set outlines. The path is drawn through the ring nodes' positions, so this
+   is styling only — the shape itself comes from the simulation. */
+.graph-set-outline {
+  fill: color-mix(in oklab, var(--accent, #6b8f71) 12%, transparent);
+  stroke: color-mix(in oklab, var(--accent, #6b8f71) 55%, transparent);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  /* A set that wraps around a non-member leaves a hole rather than covering
+     it, and the ring can cross itself while the physics settles. */
+  fill-rule: evenodd;
+  transition: fill 120ms ease, stroke 120ms ease;
+}
+.graph-set-outline.set-selected {
+  fill: color-mix(in oklab, var(--accent, #6b8f71) 22%, transparent);
+  stroke: color-mix(in oklab, var(--accent, #6b8f71) 85%, transparent);
+  stroke-width: 3px;
+}
+
 .graph-node-layer {
   position: absolute;
   top: 0;
