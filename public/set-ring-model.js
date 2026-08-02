@@ -200,7 +200,19 @@ export function ringPath(nodes, { tension = 6 } = {}) {
  * members are never rearranged to suit the ring — that was the mistake the
  * membrane approach made, and it is what made dragging feel like a negotiation.
  */
-export function forceRingShape({ membersOf, padding = 40, strength = 0.35 } = {}) {
+export function forceRingShape({
+  membersOf,
+  padding = 40,
+  strength = 0.35,
+  // The pull never drops below this however cool the simulation gets.
+  //
+  // d3 decays alpha towards zero, so a shape force scaled by alpha alone fades
+  // out exactly when the graph settles — and a dragged member then walks away
+  // from a ring that has stopped chasing it. Measured on a realistic drag (many
+  // small steps at reheat 0.12, which is what pointer-controller does), the
+  // ring finished 205px behind its member and shrank from 183 wide to 120.
+  minAlpha = 0.25,
+} = {}) {
   let nodes = [];
 
   function force(alpha) {
@@ -213,29 +225,30 @@ export function forceRingShape({ membersOf, padding = 40, strength = 0.35 } = {}
       const circle = circles.get(node.setId);
       if (!circle) continue;
 
-      const dx = node.x - circle.x;
-      const dy = node.y - circle.y;
-      const distance = Math.hypot(dx, dy);
-      // A node exactly on the centre has no direction to be pushed along, and
-      // scaling a zero vector leaves it stuck there forever. Its index around
-      // the ring gives it one — deterministic, so a ring that starts collapsed
-      // opens out the same way every time rather than depending on which node
-      // drifted first.
-      let ux;
-      let uy;
-      if (distance > 1e-6) {
-        ux = dx / distance;
-        uy = dy / distance;
-      } else {
-        const angle = (2 * Math.PI * (node.ringIndex ?? 0)) / Math.max(1, node.ringCount ?? 1);
-        ux = Math.cos(angle);
-        uy = Math.sin(angle);
-      }
-      // Towards the circle's rim: outward when the node has fallen inside,
-      // inward when it has been pushed too far out.
-      const correction = (circle.radius - distance) * strength * alpha;
-      node.vx += ux * correction;
-      node.vy += uy * correction;
+      // Towards this node's own slot on the rim, as a point.
+      //
+      // The version this replaces applied (radius - distance) along the node's
+      // own outward unit vector. That can only move a node in or out along the
+      // line it already sits on, never around the circle, so when the members
+      // move the ring can only resize in place — it cannot redistribute to
+      // follow. Aiming at an absolute point gives the correction a tangential
+      // component, which is what lets the ring travel.
+      //
+      // The slot angle also gives a node sitting exactly on the centre a
+      // direction to open out along, which a zero-length radial vector cannot.
+      //
+      // Measured together with the alpha floor below, on the drag pattern
+      // pointer-controller actually performs: 42px behind the member, keeping
+      // its size, against 205px and a collapse from 197px wide to 122 for the
+      // original. The two changes were not separable in testing — removing the
+      // floor alone reddens three tests, and the exact split of credit between
+      // them is NOT established.
+      const angle = (2 * Math.PI * (node.ringIndex ?? 0)) / Math.max(1, node.ringCount ?? 1);
+      const targetX = circle.x + Math.cos(angle) * circle.radius;
+      const targetY = circle.y + Math.sin(angle) * circle.radius;
+      const pull = strength * Math.max(alpha, minAlpha);
+      node.vx += (targetX - node.x) * pull;
+      node.vy += (targetY - node.y) * pull;
     }
   }
 

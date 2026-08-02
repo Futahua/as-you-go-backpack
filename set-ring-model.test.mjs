@@ -211,28 +211,25 @@ function pullInside(pull, ticks = 400) {
   return insideRing(ring, outsider);
 }
 
-test('the ring resists a gentle push but is not impassable', () => {
-  // The measured truth, and it is weaker than "an outsider cannot get in".
-  // The ring holds against a slow drift and is pushed through by anything
-  // firmer: breach begins somewhere between 0.002 and 0.005 per tick.
-  //
-  // Worth pinning precisely, because the architecture is sold on containment
-  // being a free consequence of collision. It is a real effect — the boundary
-  // does push back — but it is resistance, not prevention, and a feature that
-  // needs a hard rule cannot be built on it.
+test('the ring holds an outsider out however hard it is pushed', () => {
+  // With the earlier radial force this was only resistance: a drift was held
+  // out and anything firmer than about 0.005 per tick went through. Pulling
+  // each node to its own slot keeps the boundary in shape under load, so it
+  // now holds across two orders of magnitude of push.
   assert.equal(pullInside(0.001), false, 'a gentle drift is held out');
-  assert.equal(pullInside(0.01), true, 'a firm push gets through');
+  assert.equal(pullInside(0.01), false, 'and so is a firm push');
+  assert.equal(pullInside(0.05), false, 'and a very hard one');
 });
 
-test('a dragged outsider passes straight through the ring', () => {
-  // Dragging is the worst case and the one the user will actually do.
-  // pointer-controller moves a node by pinning fx/fy, which sets its position
-  // outright, so collision can shove the ring aside but has nothing to push
-  // back against. Anything that must stop a drag has to be a rule in the drag
-  // code; the physics will not do it.
+test('a dragged outsider is stopped by the ring', () => {
+  // Dragging is the worst case and the one the user will actually do:
+  // pointer-controller pins fx/fy, which sets position outright, so collision
+  // has nothing to push back against and this used to pass straight through.
+  // It no longer does — the ring deforms around the drag instead of opening.
   //
-  // Asserted rather than left as a comment so that a change making the ring
-  // genuinely drag-proof fails here and forces this note to be rewritten.
+  // This is the architecture's original claim finally holding: containment as
+  // a consequence of nodes not being able to walk through each other, with no
+  // rule in the drag code.
   const members = [tile('a', 0, 0), tile('b', 140, 0)];
   const outsider = tile('out', 700, 0);
   const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
@@ -243,5 +240,52 @@ test('a dragged outsider passes straight through the ring', () => {
     outsider.fy = 0;
     for (let i = 0; i < 12; i += 1) simulation.tick();
   }
-  assert.ok(insideRing(ring, outsider), 'a pinned node is not stopped by collision');
+  assert.ok(!insideRing(ring, outsider), 'the outsider never got inside');
+});
+
+test('the ring follows a member that is dragged away', () => {
+  // The fault that retired the previous branch: the outline stayed behind and
+  // collapsed into a flat lens.
+  //
+  // The drag has to be simulated the way pointer-controller performs one —
+  // many small steps, each pinning fx/fy and reheating to 0.12 — because that
+  // is what exposes it. A single large jump does NOT reproduce the fault, and
+  // an earlier version of this test used one, passed against the broken code,
+  // and led to a wrong diagnosis.
+  const member = tile('me', 0, 0);
+  const members = [member];
+  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
+  const simulation = settle(members, ring, links, 400);
+
+  const spread = () => {
+    const xs = ring.map((n) => n.x);
+    const ys = ring.map((n) => n.y);
+    return { w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  };
+  const settledSize = spread();
+
+  for (let x = 0; x <= 400; x += 20) {
+    member.fx = x;
+    member.fy = -x * 0.75;
+    member.x = x;
+    member.y = -x * 0.75;
+    simulation.alpha(0.12);
+    for (let i = 0; i < 3; i += 1) simulation.tick();
+  }
+
+  const cx = ring.reduce((total, n) => total + n.x, 0) / ring.length;
+  const cy = ring.reduce((total, n) => total + n.y, 0) / ring.length;
+  const lag = Math.hypot(member.x - cx, member.y - cy);
+  // 205px with the original force, 42 with this one. The threshold is set to
+  // catch a regression towards the old behaviour, not to pin the exact figure.
+  assert.ok(lag < 90, `the ring trailed ${lag.toFixed(0)}px behind its member`);
+
+  // And it must not shrink on the way. Collapsing is what produced the lens:
+  // the original force left it at 120x97 from a settled 183x174.
+  const dragged = spread();
+  assert.ok(
+    dragged.w > settledSize.w * 0.8 && dragged.h > settledSize.h * 0.8,
+    `the ring collapsed from ${settledSize.w.toFixed(0)}x${settledSize.h.toFixed(0)} `
+    + `to ${dragged.w.toFixed(0)}x${dragged.h.toFixed(0)}`,
+  );
 });
