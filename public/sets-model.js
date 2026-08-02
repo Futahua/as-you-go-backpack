@@ -6,11 +6,12 @@
  * changes what it belongs to.
  *
  * Sets have no stored position or size. Their outline is derived from where
- * their members happen to be, so nothing can desync: a member that moves
- * simply reshapes its own set. Spatially, a non-member may not be dropped
- * inside a set's region, and an item belonging to several sets lives in their
- * intersection — it cannot sit in the part of one set the others do not
- * cover, which is what keeps a Venn overlap meaningful.
+ * their members happen to be, so nothing can desync: the shape is recomputed
+ * from the members' current positions each time it is drawn. Spatially, a
+ * non-member may not be dropped inside a set's region, and an item belonging
+ * to several sets lives in their intersection — it cannot sit in the part of
+ * one set the others do not cover, which is what keeps a Venn overlap
+ * meaningful.
  *
  * A member id always refers to a workspace item, never to another set, so
  * there is no set-of-sets to traverse and no cycle to guard against. One set's

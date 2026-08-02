@@ -417,6 +417,233 @@ test('a loose item outside the folder is not in the set', async () => {
   mounted.app.graph.destroyGraphView();
 });
 
+/** A linked shortcut S: one placement at root, one inside folder F (and, for
+ * the union case, another inside G). F and G are collapsed, so the visible
+ * graph only ever walks S's root placement — the folder placements are hidden
+ * but must still contribute membership. */
+function linkedState({
+  excludedIds = [],
+  binnedPlacement = false,
+  union = false,
+} = {}) {
+  const extraPlacements = union
+    ? [
+        { id: 'pSF', parentId: 'F', order: 1 },
+        { id: 'pSG', parentId: 'G', order: 2 },
+      ]
+    : [{ id: 'pSF', parentId: 'F', order: 1, ...(binnedPlacement ? { bin: { parentId: 'F', order: 0, binnedAt: '2026-01-01T00:00:00.000Z' } } : {}) }];
+  const groups = union
+    ? [
+        { id: 'F', parentId: 'root', name: 'F' },
+        { id: 'G', parentId: 'root', name: 'G' },
+      ]
+    : [{ id: 'F', parentId: 'root', name: 'F' }];
+  const sets = union
+    ? [
+        { id: 'setF', title: '', memberIds: ['F'], excludedIds },
+        { id: 'setG', title: '', memberIds: ['G'], excludedIds },
+      ]
+    : [{ id: 'setF', title: '', memberIds: ['F'], excludedIds }];
+  return {
+    schemaVersion: 1,
+    groups,
+    shortcuts: [
+      {
+        id: 'S', name: 's', target: 'C:/s',
+        placements: [{ id: 'pSRoot', parentId: 'root', order: 0 }, ...extraPlacements],
+      },
+      { id: 'L', name: 'l', target: 'C:/l', placements: [{ id: 'pL', parentId: 'root', order: 3 }] },
+    ],
+    view: {
+      layout: 'graph',
+      itemSets: sets,
+      // Neither folder is expanded: S is on screen only through its root
+      // placement, exactly the state the visible-walk ancestry got wrong.
+      graphExpandedGroupIds: [],
+      graphPositions: {
+        root: {
+          F: { x: 0, y: 0 },
+          ...(union ? { G: { x: 400, y: 0 } } : {}),
+          S: { x: 120, y: 0 },
+          L: { x: 600, y: 0 },
+        },
+      },
+    },
+  };
+}
+
+test('a linked shortcut inherits a set through a placement inside a collapsed folder', async () => {
+  const mounted = mount({ loadWorkspace: async () => linkedState() });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+
+  // The visible walk only ever recorded the root placement as S's parent, so
+  // node.parentIds could not see the collapsed F. The placement list can.
+  assert.deepEqual(
+    mounted.app.graph.ancestorsOfNode('S'), ['F'],
+    'ancestry comes from the placement list, not the visible walk',
+  );
+  assert.ok(
+    mounted.app.graph.setIdsAtPoint({ x: 120, y: 0 }).includes('setF'),
+    'the shortcut at its root placement is inside the folder set',
+  );
+  mounted.app.graph.destroyGraphView();
+});
+
+test('expanding and collapsing the folder does not change linked membership', async () => {
+  const mounted = mount({ loadWorkspace: async () => linkedState() });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+  assert.deepEqual(mounted.app.graph.ancestorsOfNode('S'), ['F'], 'collapsed');
+
+  mounted.app.store.addToGraphExpanded('F');
+  mounted.app.render();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(32);
+  assert.deepEqual(
+    mounted.app.graph.ancestorsOfNode('S'), ['F'],
+    'expanded: membership is logical, not visual',
+  );
+  assert.ok(
+    mounted.app.graph.setIdsAtPoint({ x: 120, y: 0 }).includes('setF'),
+    'still inside the set after expanding',
+  );
+
+  mounted.app.store.removeFromGraphExpanded('F');
+  mounted.app.render();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(32);
+  assert.deepEqual(
+    mounted.app.graph.ancestorsOfNode('S'), ['F'],
+    'collapsed again: the chain is unchanged',
+  );
+  mounted.app.graph.destroyGraphView();
+});
+
+test('a hidden binned placement does not grant linked membership', async () => {
+  const mounted = mount({ loadWorkspace: async () => linkedState({ binnedPlacement: true }) });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+
+  // The F placement is binned, so S's only active placement is at the root.
+  assert.deepEqual(
+    mounted.app.graph.ancestorsOfNode('S'), [],
+    'a binned placement contributes no chain',
+  );
+  assert.ok(
+    !mounted.app.graph.setIdsAtPoint({ x: 120, y: 0 }).includes('setF'),
+    'the shortcut does not inherit through the binned placement',
+  );
+  assert.ok(
+    mounted.app.graph.setIdsAtPoint({ x: 0, y: 0 }).includes('setF'),
+    'the folder itself still belongs',
+  );
+  mounted.app.graph.destroyGraphView();
+});
+
+test('multiple hidden placements contribute the union of their ancestor chains', async () => {
+  const mounted = mount({ loadWorkspace: async () => linkedState({ union: true }) });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+
+  assert.deepEqual(
+    mounted.app.graph.ancestorsOfNode('S'), ['F', 'G'],
+    'both hidden placements contribute, nearest-first, deduplicated',
+  );
+  const hits = mounted.app.graph.setIdsAtPoint({ x: 120, y: 0 });
+  assert.ok(hits.includes('setF'), 'inside the first folder set');
+  assert.ok(hits.includes('setG'), 'and the second');
+  mounted.app.graph.destroyGraphView();
+});
+
+test('excluding a linked shortcut still removes it from the inherited set', async () => {
+  const mounted = mount({ loadWorkspace: async () => linkedState({ excludedIds: ['S'] }) });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+
+  // The chain still resolves (the placement is active); the exclusion is what
+  // takes S out of the set — it must not break the placement lookup.
+  assert.deepEqual(mounted.app.graph.ancestorsOfNode('S'), ['F'], 'chain intact');
+  assert.ok(
+    !mounted.app.graph.setIdsAtPoint({ x: 120, y: 0 }).includes('setF'),
+    'the excluded shortcut is outside the set',
+  );
+  assert.ok(
+    mounted.app.graph.setIdsAtPoint({ x: 0, y: 0 }).includes('setF'),
+    'the folder still is',
+  );
+  mounted.app.graph.destroyGraphView();
+});
+
+/** A root with two set members (g1 in s1, g2 in s2) plus an empty folder and
+ * a folder holding a loose item. Navigating into either folder must clear the
+ * root's set regions synchronously, because the empty-view branch of
+ * renderGraph calls syncSetShapes() and returns before any drawFrame runs. */
+function staleRegionState() {
+  return {
+    schemaVersion: 1,
+    groups: [
+      { id: 'g1', parentId: 'root', name: 'A' },
+      { id: 'g2', parentId: 'root', name: 'B' },
+      { id: 'emptyF', parentId: 'root', name: 'Empty' },
+      { id: 'looseF', parentId: 'root', name: 'Loose' },
+    ],
+    shortcuts: [
+      { id: 'L', name: 'l', target: 'C:/l', placements: [{ id: 'pL', parentId: 'looseF', order: 0 }] },
+    ],
+    view: {
+      layout: 'graph',
+      itemSets: [
+        { id: 's1', title: '', memberIds: ['g1'] },
+        { id: 's2', title: '', memberIds: ['g2'] },
+      ],
+      graphPositions: { root: { g1: { x: 0, y: 0 }, g2: { x: 300, y: 0 } } },
+    },
+  };
+}
+
+test('navigating to an empty folder clears set regions synchronously', async () => {
+  const mounted = mount({ loadWorkspace: async () => staleRegionState() });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+  assert.equal(mounted.app.graph.getSetRegions().size, 2, 'two sets drawn at the root');
+
+  mounted.app.store.setNavigation({ currentId: 'emptyF' });
+  mounted.app.render();
+  // Deliberately NO _runFrame: the empty-view branch must not leave the old
+  // polygons answerable until the next animation frame drains.
+
+  assert.equal(mounted.app.graph.getSetRegions().size, 0, 'regions cleared before any frame');
+  assert.deepEqual(mounted.app.graph.setIdsAtPoint({ x: 0, y: 0 }), [], 'no set answers a hit');
+
+  // A blank click over where s1 used to be must not select it.
+  clickGraphAt(mounted, { x: 0, y: 0 });
+  assert.equal(mounted.app.store.getSession().selectedSets.size, 0, 'the old set is not clickable');
+
+  // A drag starting now captures no stale region snapshot: getSetRegions is
+  // what pointer-controller reads at drag start.
+  assert.equal(mounted.app.graph.getSetRegions().size, 0, 'drag start would snapshot nothing');
+  mounted.app.graph.destroyGraphView();
+});
+
+test('navigating to a non-empty view with no effective set members clears regions', async () => {
+  const mounted = mount({ loadWorkspace: async () => staleRegionState() });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+  assert.equal(mounted.app.graph.getSetRegions().size, 2, 'drawn at the root');
+
+  // Inside looseF the only on-screen item is L, which belongs to no set. The
+  // view is not empty — but no set has a drawable member, so the invariant
+  // must still hold before any frame runs.
+  mounted.app.store.setNavigation({ currentId: 'looseF' });
+  mounted.app.render();
+
+  assert.equal(mounted.app.graph.getSetRegions().size, 0, 'no set members, no regions');
+  assert.deepEqual(mounted.app.graph.setIdsAtPoint({ x: 0, y: 0 }), [], 'nothing hittable');
+  assert.equal(mounted.app.graph._getNode('L') !== null, true, 'the loose item is on screen');
+  mounted.app.graph.destroyGraphView();
+});
+
 test('a failing state load still leaves the interface mounted', async () => {
   const { app } = mount({ loadWorkspace: async () => { throw new Error('host unavailable'); } });
   // bootstrapWorkspace mounts behaviour-only controllers before loading, so a

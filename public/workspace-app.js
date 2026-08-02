@@ -26,6 +26,7 @@ import {
   setGraphPositions,
   setItemSets,
   ancestorFolderIds,
+  shortcutAncestorFolderIds,
   removeGraphPositions,
   setToolbarPosition,
   getToolbarPosition,
@@ -527,6 +528,17 @@ My request:
         }
         shape.memberIds = members;
       }
+      // The invariant: if no set path is drawable, setRegions must already be
+      // empty before control returns to event handling. The empty-view branch
+      // of renderGraph calls this and returns before any drawFrame runs, so
+      // waiting for drawSetShapes to clear regions would leave the previous
+      // view's polygons answerable to clicking, sweeping and drag-start
+      // snapshots after their paths have been removed. Regions for sets whose
+      // shape was just removed are pruned too — a removed outline must not
+      // remain hittable just because another set is still on screen.
+      setRegions = new Map(
+        [...setRegions].filter(([setId]) => setShapes.has(setId)),
+      );
     }
 
 
@@ -1103,17 +1115,21 @@ My request:
       });
     }
 
-    /** Every folder a visible node sits inside, walked up to the root.
+    /** Every folder an item sits inside, walked up to the root, nearest first.
      *
-     * ancestorFolderIds() cannot answer this for a shortcut: graph nodes are
-     * keyed by the shared record id, and that resolves neither a group nor a
-     * placement, so it returns an empty chain and a shortcut inside a member
-     * folder inherits nothing. The graph already knows the answer — parentIds
-     * on the node — so the chain is walked from there instead.
+     * Groups use their normal stored folder ancestry (ancestorFolderIds).
      *
-     * A linked shortcut placed in several folders returns the union of all its
-     * chains: it is genuinely inside each of them, so it inherits from each. */
+     * A shortcut is a different problem: the graph keys nodes by the shared
+     * record id, which ancestorFolderIds cannot resolve (it searches by
+     * placement id). The chain must come from the record's placements, not
+     * from the visible walk — node.parentIds only records folders the walk
+     * happened to expand, so a linked shortcut with a placement inside a
+     * collapsed folder would inherit nothing from it. shortcutAncestorFolderIds
+     * reads every active placement, so a hidden placement contributes its
+     * chain too, and a binned one contributes nothing. */
     function ancestorsOfNode(nodeId) {
+      const isShortcut = state.shortcuts?.some((record) => record.id === nodeId);
+      if (isShortcut) return shortcutAncestorFolderIds(state, nodeId);
       const node = nodes.get(nodeId);
       const starts = node?.parentIds?.length ? node.parentIds : [node?.parentId];
       const chain = [];

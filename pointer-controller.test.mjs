@@ -496,8 +496,8 @@ test('dropping into a folder is not governed by the set rules', () => {
   h.setElementAtPoint(folderShell);
   h.grid._dispatch('pointerup', pointerEvent(1, 200, 10));
 
-  // Filing something away is a different gesture; a set that follows its
-  // members would otherwise make folders unreachable while dragging.
+  // Filing something away is a different gesture; judging it by the drag-start
+  // set regions would otherwise make folders unreachable while dragging.
   const folderCall = h.commandCalls.find(([name]) => name === 'folder');
   assert.ok(folderCall, 'the drop still routed to the folder');
 });

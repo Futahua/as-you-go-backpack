@@ -33,6 +33,8 @@ import {
   removeGraphPositions,
   normalizeGraphPositions,
   setPromptLibrary,
+  ancestorFolderIds,
+  shortcutAncestorFolderIds,
 } from './model.mjs';
 
 import {
@@ -74,6 +76,85 @@ test('groups and shortcuts form a nested explorer tree', () => {
   state = createShortcut(state, { name: 'CLIPS', target: 'D:\\Programs\\CLIPS.bat', parentId: year.id });
   assert.equal(children(state, year.id).shortcuts[0].name, 'CLIPS');
   assert.equal(children(state, ROOT_ID).groups[0].name, 'Projects');
+});
+
+/** A linked shortcut with a root placement plus one placement per folder in
+ * `folders`, optionally binned. Built directly so the helper is about the
+ * ancestry function, not about the model's editing API. */
+function linkedShortcutState({ folders = [], binned = [] } = {}) {
+  let state = emptyState();
+  const groupIds = {};
+  for (const name of folders) {
+    state = createGroup(state, name);
+    groupIds[name] = state.groups[state.groups.length - 1].id;
+  }
+  const shortcutId = 'shortcut-S';
+  state.shortcuts.push({
+    id: shortcutId,
+    name: 'S',
+    target: 'C:/s',
+    description: '',
+    icon: null,
+    placements: [
+      { id: 'p-root', parentId: ROOT_ID, order: 0 },
+      ...folders.map((name, index) => ({
+        id: `p-${name}`,
+        parentId: groupIds[name],
+        order: index + 1,
+        ...(binned.includes(name) ? { bin: { parentId: groupIds[name], order: 0, binnedAt: '2026-01-01T00:00:00.000Z' } } : {}),
+      })),
+    ],
+  });
+  return { state, groupIds, shortcutId };
+}
+
+test('shortcutAncestorFolderIds walks every active placement, not just visible ones', () => {
+  const { state, groupIds } = linkedShortcutState({ folders: ['F', 'G'] });
+  assert.deepEqual(
+    shortcutAncestorFolderIds(state, state.shortcuts[0].id),
+    [groupIds.F, groupIds.G],
+    'both placements contribute their parent folders',
+  );
+});
+
+test('shortcutAncestorFolderIds returns the full chain for a nested placement', () => {
+  let state = emptyState();
+  const outer = createGroup(state, 'Outer');
+  state = outer;
+  const outerId = outer.groups[0].id;
+  const inner = createGroup(state, 'Inner', outerId);
+  state = inner;
+  const innerId = inner.groups[1].id;
+  state = createShortcut(state, { name: 'S', target: 'C:/s', parentId: innerId });
+  assert.deepEqual(
+    shortcutAncestorFolderIds(state, state.shortcuts[0].id),
+    [innerId, outerId],
+    'nearest folder first, then its ancestors',
+  );
+});
+
+test('shortcutAncestorFolderIds ignores binned placements', () => {
+  const { state } = linkedShortcutState({ folders: ['F', 'G'], binned: ['F'] });
+  assert.deepEqual(
+    shortcutAncestorFolderIds(state, state.shortcuts[0].id),
+    [state.groups.find((g) => g.name === 'G').id],
+    'the binned placement contributes nothing',
+  );
+});
+
+test('shortcutAncestorFolderIds returns an empty chain for an unknown id', () => {
+  const { state } = linkedShortcutState({ folders: [] });
+  assert.deepEqual(shortcutAncestorFolderIds(state, 'nope'), []);
+});
+
+test('a plain shortcut with one placement inherits exactly its folder chain', () => {
+  const { state, groupIds } = linkedShortcutState({ folders: ['F'] });
+  const placementId = state.shortcuts[0].placements.find((p) => p.parentId === groupIds.F).id;
+  assert.deepEqual(
+    ancestorFolderIds(state, placementId),
+    [groupIds.F],
+    'ancestorFolderIds resolves a placement id to its folder chain',
+  );
 });
 
 test('moving a selected folder and its visible children preserves the folder tree', () => {

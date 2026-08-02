@@ -36,6 +36,43 @@ export function ancestorFolderIds(state, itemId) {
   return chain;
 }
 
+/** The union of ancestor folder chains across every active placement of a
+ * shortcut record, nearest first, each folder appearing once.
+ *
+ * A linked shortcut placed in several folders genuinely lives in each of
+ * them, so it inherits set membership from every chain — including placements
+ * inside collapsed or otherwise non-visible folders, which the visible graph
+ * walk never reaches. The visible walk is a rendering structure, not the
+ * authority on where an item lives; the placement list is.
+ *
+ * Binned placements grant nothing: one binned individually (placement.bin) or
+ * a placement inside a binned folder is in the Bin, not the canvas, so it
+ * must not drag its folder's sets along.
+ *
+ * `ancestorFolderIds(state, recordId)` cannot answer this: it resolves an id
+ * to at most one placement, searching by placement id, and graph nodes are
+ * keyed by the shared shortcut record id, which matches no placement. */
+export function shortcutAncestorFolderIds(state, shortcutId) {
+  const record = state.shortcuts?.find((candidate) => candidate.id === shortcutId);
+  if (!record) return [];
+  const chain = [];
+  const seen = new Set();
+  for (const placement of activePlacements(record)) {
+    if (isUnderBinnedGroupId(state, placement.parentId)) continue;
+    const parentId = placement.parentId;
+    if (parentId && parentId !== ROOT_ID && parentId !== 'bin' && !seen.has(parentId)) {
+      seen.add(parentId);
+      chain.push(parentId);
+    }
+    for (const ancestorId of ancestorFolderIds(state, parentId)) {
+      if (ancestorId === ROOT_ID || ancestorId === 'bin' || seen.has(ancestorId)) continue;
+      seen.add(ancestorId);
+      chain.push(ancestorId);
+    }
+  }
+  return chain;
+}
+
 export function displayName(candidate) {
   const name = typeof candidate?.name === 'string' ? candidate.name.trim() : '';
   return name || UNTITLED_LABEL;
