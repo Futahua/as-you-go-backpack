@@ -111,7 +111,10 @@ export function createWorkspaceCommands({
     if (ids.length === 0) return;
     const snapshot = store.getSnapshot();
     const current = snapshot.view?.itemSets ?? [];
-    const next = setMembership(current, ids, setIds);
+    // The ancestor chain is required, not optional: without it, removing an
+    // item that belongs through its parent folder filters a list the item was
+    // never in, and the removal silently does nothing.
+    const next = setMembership(current, ids, setIds, ancestorsOf);
     if (next === current) return;
     try {
       await store.commit(setItemSets(snapshot, next));

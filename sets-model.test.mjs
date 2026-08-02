@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   createItemSet,
   normalizeItemSets,
+  belongsToSet,
   setsContaining,
   coveredItemIds,
   isSetless,
@@ -348,4 +349,77 @@ test('an item inside a member folder cannot be dropped outside the set', () => {
 test('without an ancestor lookup only direct membership counts', () => {
   const sets = [set('a', ['f1'])];
   assert.deepEqual(setsContaining(sets, 'i1'), [], 'inheritance is opt-in per call');
+});
+
+// ===========================================================================
+// Exclusions: what makes inherited membership editable.
+// ===========================================================================
+
+test('a child can leave a set it inherits from its parent folder', () => {
+  const sets = [set('a', ['f1'])];
+  assert.equal(belongsToSet(sets[0], 'i1', ancestors), true, 'inherited to begin with');
+
+  const next = setMembership(sets, ['i1'], [], ancestors);
+  assert.equal(belongsToSet(next[0], 'i1', ancestors), false, 'the child left the set');
+  assert.deepEqual(next[0].memberIds, ['f1'], 'the folder is still the stored member');
+  assert.deepEqual(next[0].excludedIds, ['i1'], 'removal was recorded as an exclusion');
+});
+
+test('excluding one child leaves its siblings alone', () => {
+  const sets = [set('a', ['f1'])];
+  const next = setMembership(sets, ['i1'], [], ancestors);
+  assert.equal(belongsToSet(next[0], 'f2', ancestors), true, 'sibling folder still in');
+  assert.equal(belongsToSet(next[0], 'i2', ancestors), true, 'its contents still in');
+});
+
+test('excluding a folder excludes its whole subtree', () => {
+  const sets = [set('a', ['f1'])];
+  const next = setMembership(sets, ['f2'], [], ancestors);
+  assert.equal(belongsToSet(next[0], 'f2', ancestors), false, 'the folder left');
+  assert.equal(belongsToSet(next[0], 'i2', ancestors), false, 'and so did what it contains');
+  assert.equal(belongsToSet(next[0], 'i1', ancestors), true, 'an unrelated child is untouched');
+});
+
+test('adding an excluded item back restores it', () => {
+  const sets = [set('a', ['f1'])];
+  const removed = setMembership(sets, ['i1'], [], ancestors);
+  assert.deepEqual(removed[0].excludedIds, ['i1']);
+
+  const restored = setMembership(removed, ['i1'], ['a'], ancestors);
+  assert.equal(belongsToSet(restored[0], 'i1', ancestors), true, 'back in the set');
+  assert.deepEqual(restored[0].excludedIds, [], 'the exclusion was lifted, not stacked against');
+});
+
+test('removing a directly stored member still drops it from memberIds', () => {
+  // Exclusions are only for inherited membership. A direct member must not
+  // accumulate an exclusion it does not need.
+  const sets = [set('a', ['i1', 'i2'])];
+  const next = setMembership(sets, ['i1'], []);
+  assert.deepEqual(next[0].memberIds, ['i2'], 'dropped from storage');
+  assert.deepEqual(next[0].excludedIds, [], 'no exclusion needed');
+});
+
+test('removal without an ancestor lookup cannot silently fail', () => {
+  // Called without ancestorsOf, an inherited item is not seen as a member at
+  // all, so nothing is stored and the item stays in the set. This documents
+  // the trap: the ancestor lookup is required for removal to mean anything.
+  const sets = [set('a', ['f1'])];
+  const next = setMembership(sets, ['i1'], []);
+  assert.equal(belongsToSet(next[0], 'i1', ancestors), true, 'still inherited');
+});
+
+test('persisted exclusions survive normalization and prune with their items', () => {
+  const [restored] = normalizeItemSets(
+    [{ id: 'a', memberIds: ['f1'], excludedIds: ['i1', 'gone'] }],
+    ['f1', 'i1'],
+  );
+  assert.deepEqual(restored.memberIds, ['f1']);
+  assert.deepEqual(restored.excludedIds, ['i1'], 'an exclusion naming a deleted item is dropped');
+});
+
+test('a set with no excludedIds behaves exactly as before', () => {
+  // Existing persisted data has no excludedIds at all.
+  const [restored] = normalizeItemSets([{ id: 'a', memberIds: ['f1'] }], ['f1', 'i1']);
+  assert.deepEqual(restored.excludedIds, [], 'normalized to empty rather than left undefined');
+  assert.equal(belongsToSet(restored, 'i1', ancestors), true, 'inheritance still applies');
 });

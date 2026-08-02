@@ -22,6 +22,13 @@
  * whatever the folder belongs to, at any depth. Only the folder is stored, so
  * items added to it later join its sets automatically.
  *
+ * A set therefore carries two lists. `memberIds` is what it contains;
+ * `excludedIds` is what has been taken back out of an inherited subtree.
+ * Without the second, "remove this item from the set" cannot be honoured for
+ * an inherited item at all — the folder is the only thing stored, so the only
+ * alternative would be expanding it into its contents, which loses the
+ * property that makes inheritance worth having.
+ *
  * No DOM, host, store, or browser events. */
 
 let setSequence = 0;
@@ -39,6 +46,7 @@ export function createItemSet(memberIds, overrides = {}) {
     type: 'set',
     title: typeof overrides.title === 'string' ? overrides.title : 'New set',
     memberIds: uniqueIds(memberIds),
+    excludedIds: uniqueIds(overrides.excludedIds),
   };
 }
 
@@ -75,40 +83,54 @@ export function normalizeItemSets(raw, knownItemIds = null) {
       // nested set, so it is dropped rather than traversed.
       .filter((memberId) => !setIds.has(memberId))
       .filter((memberId) => (known ? known.has(memberId) : true));
+    const excludedIds = uniqueIds(record.excludedIds)
+      .filter((excludedId) => !setIds.has(excludedId))
+      .filter((excludedId) => (known ? known.has(excludedId) : true));
     sets.push({
       id,
       type: 'set',
       title: typeof record.title === 'string' ? record.title : 'New set',
       memberIds,
+      excludedIds,
     });
   }
   return sets;
 }
 
-/** Every set the item belongs to, in stored order.
+/** Whether one item belongs to one set, accounting for inheritance and
+ * exclusions.
  *
  * Membership is inherited: a folder's contents belong to whatever the folder
  * belongs to, at any depth. `ancestorsOf` maps an item to its chain of
- * containing folders — omit it and only direct membership counts. Inheriting
- * rather than expanding at creation time means items added to a folder later
- * join its sets automatically, and the folder stays the single member to
- * edit. */
+ * containing folders — omit it and only direct membership counts.
+ *
+ * `excludedIds` is what makes inherited membership editable. Without it there
+ * is no way to take one child out of a set it inherits from its parent folder:
+ * the folder is the only thing stored, so removing the child would mean
+ * expanding the folder into its contents and losing the very property that
+ * makes inheritance worth having — that items added to the folder later join
+ * automatically. An exclusion is checked over the same ancestor chain, so
+ * excluding a folder excludes its whole subtree. */
+export function belongsToSet(set, itemId, ancestorsOf = null) {
+  if (!set) return false;
+  const chain = [itemId, ...(ancestorsOf ? ancestorsOf(itemId) : [])];
+  const included = chain.some((id) => set.memberIds.includes(id));
+  if (!included) return false;
+  return !chain.some((id) => (set.excludedIds ?? []).includes(id));
+}
+
+/** Every set the item belongs to, in stored order. */
 export function setsContaining(sets, itemId, ancestorsOf = null) {
   const list = Array.isArray(sets) ? sets : [];
-  const chain = [itemId, ...(ancestorsOf ? ancestorsOf(itemId) : [])];
-  return list.filter((set) => chain.some((id) => set.memberIds.includes(id)));
+  return list.filter((set) => belongsToSet(set, itemId, ancestorsOf));
 }
 
 /** Every item a set covers on screen: its stored members plus everything
  * inside any member folder. Used for hit-testing and outlines, never for
  * storage — the stored member list stays just the folder. */
 export function coveredItemIds(set, candidateIds, ancestorsOf = null) {
-  const members = new Set(set?.memberIds ?? []);
-  return (Array.isArray(candidateIds) ? candidateIds : []).filter((id) => {
-    if (members.has(id)) return true;
-    const ancestors = ancestorsOf ? ancestorsOf(id) : [];
-    return ancestors.some((ancestorId) => members.has(ancestorId));
-  });
+  return (Array.isArray(candidateIds) ? candidateIds : [])
+    .filter((id) => belongsToSet(set, id, ancestorsOf));
 }
 
 /** True when the item belongs to no set at all. */
@@ -174,9 +196,22 @@ export function removeItemSet(sets, setId) {
  * them from every set, which is how an item is returned to setless. This is
  * the one membership-editing path (Ctrl+G); dragging never changes it.
  *
+ * Removal has two shapes, and picking the wrong one silently does nothing:
+ *
+ * - direct membership is removed by dropping the id from `memberIds`;
+ * - inherited membership can only be removed by *adding* an exclusion, since
+ *   the stored member is the ancestor folder, not this item.
+ *
+ * `ancestorsOf` is what distinguishes them. Without it, removing an inherited
+ * item filters a list the item was never in and the item stays in the set.
+ *
+ * Adding is the mirror: an exclusion is lifted first, so re-adding an item
+ * that was excluded from an inherited set restores it rather than stacking a
+ * member on top of a still-live exclusion.
+ *
  * Sets left with no members are dropped, since an empty outline has nothing
  * to enclose. */
-export function setMembership(sets, itemIds, setIds) {
+export function setMembership(sets, itemIds, setIds, ancestorsOf = null) {
   const items = uniqueIds(itemIds);
   if (items.length === 0) return sets;
   const target = new Set(Array.isArray(setIds) ? setIds : []);
@@ -185,17 +220,34 @@ export function setMembership(sets, itemIds, setIds) {
   const next = [];
   for (const set of sets) {
     const shouldContain = target.has(set.id);
+    const previousExcluded = set.excludedIds ?? [];
+
+    // Adding always clears any exclusion on the item itself; removing keeps
+    // the others untouched.
+    let excludedIds = previousExcluded.filter((id) => !itemSet.has(id));
     const without = set.memberIds.filter((id) => !itemSet.has(id));
-    const memberIds = shouldContain ? [...without, ...items] : without;
-    if (memberIds.length !== set.memberIds.length
-      || memberIds.some((id, index) => id !== set.memberIds[index])) {
-      changed = true;
+    let memberIds = shouldContain ? [...without, ...items] : without;
+
+    if (!shouldContain) {
+      // Anything still reaching this set through an ancestor needs an explicit
+      // exclusion — dropping it from memberIds above cannot have removed it.
+      const stillInherited = items.filter(
+        (id) => belongsToSet({ ...set, memberIds, excludedIds }, id, ancestorsOf),
+      );
+      if (stillInherited.length > 0) excludedIds = [...excludedIds, ...stillInherited];
     }
+
+    const membersChanged = memberIds.length !== set.memberIds.length
+      || memberIds.some((id, index) => id !== set.memberIds[index]);
+    const exclusionsChanged = excludedIds.length !== previousExcluded.length
+      || excludedIds.some((id, index) => id !== previousExcluded[index]);
+    if (membersChanged || exclusionsChanged) changed = true;
+
     if (memberIds.length === 0) {
       changed = true;
       continue;
     }
-    next.push({ ...set, memberIds });
+    next.push({ ...set, memberIds, excludedIds });
   }
   return changed ? next : sets;
 }
