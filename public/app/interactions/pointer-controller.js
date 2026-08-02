@@ -13,8 +13,9 @@ export function createPointerController({
   graph,
   marquee,
   zoomTransform,
-  // Decides whether one item may sit inside a given set of regions. Optional
-  // so the controller still works with no sets in play at all.
+  // Retained for the drop-rule seam, but the pointer no longer consults it: a
+  // drag is never refused, and the membership rules are restored after release
+  // by settling the layout around what was dropped.
   canDropInsideRegions = null,
   group,
   visiblePlacementIdFor,
@@ -142,24 +143,9 @@ export function createPointerController({
           startWorldX: null,
           startWorldY: null,
           initialPositions: new Map(),
-          // Where each item was last legally placed. The swept constraint
-          // resolves from here rather than from the drag's origin, so an item
-          // held against a wall slides along it as the pointer moves instead of
-          // re-testing the whole journey from the start every frame.
-          lastValid: new Map(),
           pinOnRelease: event.shiftKey,
           moved: false,
           thresholdPassed: false,
-          // The regions exactly as drawn when the gesture began. The preview
-          // and the release check both judge against this snapshot rather than
-          // the live geometry: reheating the simulation on every pointer move
-          // recomputes regions with the dragged item at its new position, so
-          // the live answer would depend on whether a redraw happened to run
-          // between the drag and the release — a quick and a slow release could
-          // reach different verdicts at the same coordinates. Freezing them at
-          // drag start makes the outcome deterministic. undefined (no graph
-          // method) falls back to the live regions via setIdsAtPoint's default.
-          regionSnapshot: graph.getSetRegions?.(),
         };
         closeMenu();
         event.preventDefault();
@@ -234,27 +220,24 @@ export function createPointerController({
         if (!node) continue;
         const initial = drag.initialPositions.get(id);
         if (!initial) continue;
-        const proposed = { x: initial.x + deltaX, y: initial.y + deltaY };
-        // Stop at the membrane rather than pass through it. The tile used to
-        // follow the cursor anywhere and revert on release, which reads as the
-        // drag being broken rather than as a boundary being enforced. It now
-        // travels as far along the path as it legally can and stays there while
-        // the pointer carries on — the wall is felt, not explained afterwards.
+        // The pointer has absolute authority. The icon goes exactly where the
+        // cursor puts it — never clamped, never blocked, never reverted.
         //
-        // Each item is resolved from its own last accepted position, so one
-        // blocked item in a multi-item drag stops on its own wall without
-        // dragging the rest of the selection to a halt.
-        const previous = drag.lastValid.get(id) ?? { x: initial.x, y: initial.y };
-        const resolved = graph.constrainSetMotion
-          ? graph.constrainSetMotion(id, previous, proposed, drag.regionSnapshot)
-          : { x: proposed.x, y: proposed.y, blocked: false };
-        drag.lastValid.set(id, { x: resolved.x, y: resolved.y });
-        node.fx = resolved.x;
-        node.fy = resolved.y;
+        // It used to be stopped at the membrane, on the reasoning that a set is
+        // a container and a container has walls. That was backwards. A set has
+        // no authority over the thing the user is holding: the envelope follows
+        // its members, not the reverse. Clamping made four ordinary items feel
+        // frozen and turned a direct manipulation into a negotiation.
+        //
+        // The invariants are restored after release, by moving the world rather
+        // than by refusing the movement — see the settlement pass. During the
+        // drag a set may legitimately look torn or overlapping; that is a
+        // temporary preview, and it is honest about being unsettled.
+        node.fx = initial.x + deltaX;
+        node.fy = initial.y + deltaY;
         node.x = node.fx;
         node.y = node.fy;
         node.positioned = true;
-        node.shell?.classList.toggle('graph-move-blocked', resolved.blocked === true);
       }
       graph.reheat(0.12);
 
@@ -305,43 +288,19 @@ export function createPointerController({
     return { hitBin, hitFolderId };
   }
 
-  /** Whether an item may sit where it has been dragged.
+  /** Settles the scene around where the user dropped things.
    *
-   * The destination regions come from the same polygons that are drawn, so the
-   * rule is decided against what the user can see rather than against a
-   * separate idea of where the sets are. The snapshot is the geometry captured
-   * when the drag began: during the drag the item's own motion reheats the
-   * simulation and recomputes the live regions, so judging against those would
-   * make the answer depend on whether a redraw has run yet. */
-  function mayMoveTo(itemId, position, regionSnapshot) {
-    if (!canDropInsideRegions || !graph.setIdsAtPoint) return true;
-    return canDropInsideRegions(itemId, graph.setIdsAtPoint(position, regionSnapshot));
-  }
-
-  /** Puts back every item whose destination its sets do not allow.
+   * Nothing is reverted. The dropped items stay exactly where they were left —
+   * they are the fixed points of the arrangement — and the invariants are
+   * restored by moving everything else: other icons yield, members make room,
+   * and the set bodies are rebuilt around the result.
    *
-   * The movement itself is now clamped at the membrane as it happens, so a
-   * normal release is already legal and this changes nothing. It is kept as a
-   * defensive check: geometry can be replaced mid-gesture, and a position that
-   * slipped through should not be committed just because the preview accepted
-   * it.
-   *
-   * Each item is judged on its own: one blocked item in a multi-item drag
-   * returns to where it started while the rest keep their new positions,
-   * rather than vetoing the whole gesture. */
-  function revertDisallowedMoves(current) {
-    if (!current) return;
-    for (const id of current.itemIds) {
-      const node = graph._getNode(id);
-      const initial = current.initialPositions.get(id);
-      if (!node || !initial) continue;
-      if (mayMoveTo(id, { x: node.x, y: node.y }, current.regionSnapshot)) continue;
-      node.x = initial.x;
-      node.y = initial.y;
-      node.fx = initial.fx;
-      node.fy = initial.fy;
-      node.positioned = initial.fx != null;
-    }
+   * This replaces a revert pass that put blocked items back where they started.
+   * Refusing a drop tells the user their intent was wrong; moving the world
+   * around it treats the drop as the instruction it was. */
+  function settleAfterDrop(current) {
+    if (!current || !graph.settleAroundAnchors) return;
+    graph.settleAroundAnchors([...current.itemIds]);
   }
 
   function onPointerUp(event) {
@@ -355,11 +314,10 @@ export function createPointerController({
         setSuppressGraphClick(true);
         clearDragVisuals();
         const { hitBin, hitFolderId } = hitTest(event);
-        // Enforce the set movement rules before anything is committed. Only a
-        // free move on the canvas is governed by them: dropping into the Bin
-        // or a folder is a different gesture entirely, and a set that follows
-        // its members would otherwise block the user from filing anything.
-        if (!hitBin && !hitFolderId) revertDisallowedMoves(drag);
+        // Settle the scene around where the items were dropped. Only a free
+        // move on the canvas needs it: dropping into the Bin or a folder is a
+        // different gesture, and the item is leaving this layout anyway.
+        if (!hitBin && !hitFolderId) settleAfterDrop(drag);
         const dragCopy = {
           itemIds: [...drag.itemIds],
           placementIds: drag.placementIds,

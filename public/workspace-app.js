@@ -55,6 +55,7 @@ import {
 } from './set-region-model.js';
 import { canDropInsideRegions, belongsToSet } from './sets-model.js';
 import { resolveSweptPlacement } from './set-constraint-model.js';
+import { settleLayout } from './set-settlement-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -354,6 +355,11 @@ My request:
     let resizeObserver = null;
     let rafId = 0;
     let pendingFrame = false;
+    // Deferred set-geometry rebuild. Long enough that a settling animation does
+    // not retrigger it every frame, short enough that the outlines catch up
+    // before the user looks away from what they just moved.
+    const SETTLE_DELAY_MS = 160;
+    let settleTimer = null;
     let initialized = false;
     let fitPending = false;
     let attached = false;
@@ -451,6 +457,7 @@ My request:
       onDragCancel?.();
       if (simulation) { simulation.stop(); simulation = null; }
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; pendingFrame = false; }
+      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
       nodes.forEach((node) => {
         if (node.exitTimer) { clearTimeout(node.exitTimer); node.exitTimer = null; }
       });
@@ -486,6 +493,31 @@ My request:
         rafId = 0;
         drawFrame();
       });
+    }
+
+    /** Rebuilds the set geometry once the layout has stopped moving.
+     *
+     * The rebuild is expensive enough that it cannot live in the render loop,
+     * so it is deferred to the quiet moment after motion instead. Each tick
+     * pushes the deadline back, which means a long settling animation pays for
+     * one rebuild rather than one per frame.
+     *
+     * The outlines therefore lag the icons slightly while a layout is moving.
+     * That lag is honest — it is the geometry as last computed, and it is what
+     * hit-testing and the drop rules are answering against — and it resolves
+     * the moment the motion stops. */
+    function scheduleSettle() {
+      if (settleTimer) clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        settleTimer = null;
+        settleSetShapes();
+      }, SETTLE_DELAY_MS);
+    }
+
+    function settleSetShapes() {
+      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      if (!attached) return;
+      drawSetShapes();
     }
 
     /** Creates and removes one path per set that has members on screen. The
@@ -543,13 +575,40 @@ My request:
     }
 
 
+    /** The picking and selection classes, which are cheap and change often.
+     *
+     * Split out from the geometry rebuild so an ordinary frame can restyle the
+     * outlines without recomputing them. Rebuilding is measured in tens of
+     * milliseconds; this is a handful of class toggles. */
+    function styleSetShapes() {
+      const chosen = new Set(setMembershipMode.chosenSetIds());
+      // Partial sets are neither in nor out: Enter leaves them exactly as they
+      // are, so they must not read as either.
+      const mixed = new Set(setMembershipMode.mixedSetIds?.() ?? []);
+      const picking = setMembershipMode.isActive();
+      for (const shape of setShapes.values()) {
+        shape.path.classList.toggle('set-picking', picking);
+        shape.path.classList.toggle('set-chosen', picking && chosen.has(shape.setId));
+        shape.path.classList.toggle('set-partial', picking && mixed.has(shape.setId));
+        // Selection is not a picking state: Delete acts on this, so it has to
+        // be visible outside the Ctrl+G mode too.
+        shape.path.classList.toggle('set-selected', session.selectedSets.has(shape.setId));
+      }
+    }
+
     /** Recomputes every region from where its members are right now.
      *
      * The regions are extracted from a sampled occupancy field rather than
      * drawn as a curve through hull points, so the path set here is exactly
      * the geometry that was tested for separation — see set-region-model.js.
      * That also makes it the geometry hit-testing can use, instead of a second
-     * approximation that could disagree with what is on screen. */
+     * approximation that could disagree with what is on screen.
+     *
+     * This is the expensive path — tens of milliseconds for a couple of sets —
+     * and it must never run from an animation frame. It ran from every
+     * simulation tick, which put a full grid sample, route search and contour
+     * extraction inside the render loop. It now runs when the layout settles,
+     * and `drawFrame` restyles the existing paths instead. */
     function drawSetShapes() {
       // Nothing drawn means no region. Leaving the previous setRegions in place
       // would make hit-testing answer against geometry that is no longer on
@@ -560,15 +619,8 @@ My request:
         setRegions = new Map();
         return;
       }
-      const chosen = new Set(setMembershipMode.chosenSetIds());
-      // Partial sets are neither in nor out: Enter leaves them exactly as they
-      // are, so they must not read as either.
-      const mixed = new Set(setMembershipMode.mixedSetIds?.() ?? []);
-      const picking = setMembershipMode.isActive();
 
-      // Every node on screen, member or not. Non-members are obstacles: a
-      // setless item constrains an outline just as much as a foreign set's
-      // item does, which is what stops it being swallowed.
+      // Every node on screen, member or not.
       const visibleItems = [];
       for (const [nodeId, node] of nodes) {
         if (node.exiting) continue;
@@ -597,13 +649,8 @@ My request:
       for (const shape of setShapes.values()) {
         const region = setRegions.get(shape.setId);
         shape.path.setAttribute('d', region?.svgPath ?? '');
-        shape.path.classList.toggle('set-picking', picking);
-        shape.path.classList.toggle('set-chosen', picking && chosen.has(shape.setId));
-        shape.path.classList.toggle('set-partial', picking && mixed.has(shape.setId));
-        // Selection is not a picking state: Delete acts on this, so it has to
-        // be visible outside the Ctrl+G mode too.
-        shape.path.classList.toggle('set-selected', session.selectedSets.has(shape.setId));
       }
+      styleSetShapes();
     }
 
     function drawFrame() {
@@ -612,7 +659,11 @@ My request:
         node.shell.style.transform =
           `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
       });
-      drawSetShapes();
+      // Deliberately not drawSetShapes(). An animation frame moves icons and
+      // edges and nothing else; the set geometry is rebuilt when the layout
+      // settles. Calling the rebuild from here put a grid sample, a route
+      // search and a contour extraction inside the render loop on every tick.
+      styleSetShapes();
       syncFolderColors();
       edges.forEach((edge) => {
         const source = nodes.get(edge.sourceId);
@@ -996,7 +1047,12 @@ My request:
         .force('link', forceLink().id((n) => n.id).distance(145).strength(0.14))
         .alphaDecay(0.028)
         .velocityDecay(0.32);
-      simulation.on('tick', scheduleRender);
+      simulation.on('tick', () => {
+        scheduleRender();
+        scheduleSettle();
+      });
+      // One rebuild after the motion stops, not one per tick.
+      simulation.on('end', () => { settleSetShapes(); });
     }
 
     function syncSimulation() {
@@ -1093,6 +1149,11 @@ My request:
       syncOriginEdges(originEdges);
       syncSetShapes();
       syncSimulation();
+      // The geometry for the view as it stands now. Waiting for the settle
+      // timer would leave the outlines missing for the first frames after any
+      // structural change — a set appearing, a folder expanding, a navigation —
+      // and hit-testing answering against nothing.
+      settleSetShapes();
       reheat(initialFit ? 0.7 : 0.35);
       if (initialFit && !initialized) {
         fitPending = true;
@@ -1180,6 +1241,46 @@ My request:
       return hits.sort((a, b) => a.area - b.area).map((hit) => hit.setId);
     }
 
+    /** Moves the world so the membership rules hold around what was dropped.
+     *
+     * The dropped items are anchors and do not move. Everything else yields:
+     * other icons make way, members open real space around an outsider, and
+     * exclusive sets push apart. The set bodies are then rebuilt around the
+     * settled positions, so the outline follows its members rather than the
+     * members being refused by the outline. */
+    function settleAroundAnchors(anchorIds) {
+      const visibleItems = [];
+      for (const [nodeId, node] of nodes) {
+        if (node.exiting) continue;
+        visibleItems.push({ id: nodeId, x: node.x, y: node.y, width: node.width, height: node.height });
+      }
+      if (visibleItems.length === 0) return;
+
+      const result = settleLayout({
+        items: visibleItems,
+        setsOf: ownSetIdsFor,
+        anchorIds,
+      });
+
+      for (const [nodeId, position] of result.positions) {
+        const node = nodes.get(nodeId);
+        if (!node) continue;
+        node.x = position.x;
+        node.y = position.y;
+        // An anchor stays pinned so the settling that follows cannot drift it
+        // off the spot the user chose. Everything else is released back to the
+        // simulation, which smooths out the corrections.
+        if (anchorIds.includes(nodeId)) {
+          node.fx = position.x;
+          node.fy = position.y;
+          node.positioned = true;
+        }
+      }
+      // Geometry once, after the positions are final.
+      settleSetShapes();
+      scheduleRender();
+    }
+
     /** The set ids an item belongs to, by the same rule the region was drawn
      * with — so a drag is judged against the membership the outline shows. */
     function ownSetIdsFor(itemId) {
@@ -1232,6 +1333,7 @@ My request:
       setIdsAtPoint,
       setIdsIntersectingRect,
       constrainSetMotion,
+      settleAroundAnchors,
       ancestorsOfNode,
       _getNode: (id) => nodes.get(id) ?? null,
       _setOnDragCancel(callback) { onDragCancel = callback; },
