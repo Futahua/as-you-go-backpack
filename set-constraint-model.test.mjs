@@ -205,9 +205,13 @@ test('a move that never leaves legal space is not clamped', () => {
   assert.deepEqual({ x: resolved.x, y: resolved.y }, to, 'and it arrived exactly');
 });
 
-test('an item that starts invalid is allowed to move rather than frozen', () => {
-  // A legacy layout can hold an outsider a set has since grown around. Refusing
-  // to move it would trap it inside forever, so the sweep lets it go.
+// ===========================================================================
+// Escaping an illegal start. A legacy layout can hold an item a set has since
+// grown around, so such an item has to be able to leave — but "may move" is
+// not "may move anywhere", and every test here fails if it is.
+// ===========================================================================
+
+test('an outsider trapped inside a set can leave by the nearest wall', () => {
   const regions = oneSet();
   const from = { x: 0, y: 0 };
   assert.equal(
@@ -219,7 +223,103 @@ test('an item that starts invalid is allowed to move rather than frozen', () => 
     from, to: { x: 400, y: 0 }, itemSize: SMALL, ownSetIds: [], regions,
   });
   assert.equal(resolved.startedInvalid, true, 'reported as an invalid start');
-  assert.equal(resolved.blocked, false, 'and not clamped in place');
+  assert.equal(
+    itemPlacementIsValid({ itemRect: itemRectAt(resolved, SMALL), ownSetIds: [], regions }),
+    true,
+    'and it reached legal space',
+  );
+});
+
+test('a trapped outsider cannot burrow deeper into the set', () => {
+  // Starting off-centre and driven towards the middle. Permitting any motion
+  // from an invalid start would let it swim further in; the violation score
+  // must refuse a move that makes matters worse.
+  const regions = oneSet();
+  const from = { x: 55, y: 0 };
+  const resolved = resolveSweptPlacement({
+    from, to: { x: 0, y: 0 }, itemSize: SMALL, ownSetIds: [], regions,
+  });
+  assert.ok(
+    resolved.x >= from.x - 1e-6,
+    `it did not move deeper in (from x=${from.x} to x=${resolved.x.toFixed(1)})`,
+  );
+  assert.equal(resolved.escaped, false, 'and it has not escaped either');
+});
+
+test('a trapped outsider cannot cross the set and surface on the far side', () => {
+  // The tunnelling case from an illegal start. At x=-20 the nearest way out is
+  // leftwards, so a drag aimed at the far right has to travel *deeper* before
+  // it could ever reach the opposite wall. The rule refuses at the first uphill
+  // step, which is the whole point: an item cannot buy passage through a set by
+  // having started inside it.
+  const regions = oneSet();
+  const from = { x: -20, y: 0 };
+  const resolved = resolveSweptPlacement({
+    from, to: { x: 400, y: 0 }, itemSize: SMALL, ownSetIds: [], regions,
+  });
+  assert.ok(resolved.x <= from.x + 1e-6, `it went nowhere rightwards (x=${resolved.x.toFixed(1)})`);
+  assert.equal(resolved.escaped, false, 'and it certainly did not surface beyond the set');
+
+  // Aimed the other way — towards the near wall — the same item leaves freely.
+  const escaping = resolveSweptPlacement({
+    from, to: { x: -400, y: 0 }, itemSize: SMALL, ownSetIds: [], regions,
+  });
+  assert.equal(escaping.escaped, true, 'the nearest exit is available');
+  assert.equal(
+    itemPlacementIsValid({ itemRect: itemRectAt(escaping, SMALL), ownSetIds: [], regions }),
+    true,
+    'and it ends up legal',
+  );
+});
+
+test('a trapped outsider cannot escape one set by entering another', () => {
+  // Two exclusive sets with a legal corridor between them. An item inside the
+  // first may leave, but heading straight for the second must stop in the gap
+  // rather than trade one violation for another.
+  const items = [tile('a', 0, 0), tile('b', 260, 0)];
+  const regions = buildSetRegions({
+    sets: [{ id: 'sa', memberIds: ['a'] }, { id: 'sb', memberIds: ['b'] }],
+    visibleItems: items,
+  });
+  const resolved = resolveSweptPlacement({
+    from: { x: 0, y: 0 },
+    to: { x: 260, y: 0 },
+    itemSize: SMALL,
+    ownSetIds: [],
+    regions,
+  });
+  assert.equal(
+    itemPlacementIsValid({ itemRect: itemRectAt(resolved, SMALL), ownSetIds: [], regions }),
+    true,
+    'it ended up in neither set',
+  );
+  assert.ok(
+    !regionOverlapsItemRect(regions.get('sb'), itemRectAt(resolved, SMALL)),
+    'and specifically not inside the second one',
+  );
+});
+
+test('a member outside its own set may move towards it but not further away', () => {
+  const regions = oneSet();
+  const from = { x: 200, y: 0 };
+  assert.equal(
+    itemPlacementIsValid({ itemRect: itemRectAt(from, SMALL), ownSetIds: ['s1'], regions }),
+    false,
+    'a member out here is invalid',
+  );
+
+  const inward = resolveSweptPlacement({
+    from, to: { x: 0, y: 0 }, itemSize: SMALL, ownSetIds: ['s1'], regions,
+  });
+  assert.ok(inward.x < from.x, 'it may head back towards its set');
+
+  const outward = resolveSweptPlacement({
+    from, to: { x: 600, y: 0 }, itemSize: SMALL, ownSetIds: ['s1'], regions,
+  });
+  assert.ok(
+    outward.x <= from.x + 1e-6,
+    `it may not drift further away (from x=${from.x} to x=${outward.x.toFixed(1)})`,
+  );
 });
 
 test('an outsider trapped inside a set is ejected to the nearest legal spot', () => {
