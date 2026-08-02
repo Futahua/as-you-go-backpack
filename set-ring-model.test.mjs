@@ -17,10 +17,12 @@ import {
   forceRingShape,
   ejectionTarget,
   pointInsideRing,
+  forceSpeedLimit,
 } from './public/set-ring-model.js';
 // The real forces, so containment is measured against the configuration the
 // app actually runs rather than an idealised one.
 import { forceSimulation, forceManyBody, forceCollide, forceLink } from './public/vendor/d3-force.js';
+import { forceSetExclusion } from './public/set-gravity-model.js';
 
 function tile(id, x, y) {
   return { id, x, y, width: 72, height: 72 };
@@ -407,4 +409,90 @@ test('ejection takes the shortest way out, not the way through the middle', () =
 test('a degenerate ring cannot eject anything', () => {
   assert.equal(ejectionTarget({ x: 0, y: 0 }, []), null);
   assert.equal(ejectionTarget({ x: 0, y: 0 }, [{ x: 0, y: 0, ringIndex: 0 }]), null);
+});
+
+// ===========================================================================
+// The speed limit. Dragging several foreign items through a set compounds:
+// each pushes the members, the members pull the ring, and the sum explodes
+// even though no single force is wrong.
+// ===========================================================================
+
+test('a node moving faster than the cap is slowed to it', () => {
+  const fast = { id: 'a', vx: 100, vy: 0 };
+  const force = forceSpeedLimit({ maxPerTick: 8 });
+  force.initialize([fast]);
+  force(1);
+  assert.equal(Math.hypot(fast.vx, fast.vy).toFixed(2), '8.00');
+  assert.ok(fast.vx > 0, 'and keeps its direction');
+});
+
+test('a node already within the cap is untouched', () => {
+  // A governor that rescaled everything would drag the whole layout towards a
+  // uniform speed, which is its own kind of wrongness.
+  const slow = { id: 'a', vx: 2, vy: 1 };
+  const force = forceSpeedLimit({ maxPerTick: 8 });
+  force.initialize([slow]);
+  force(1);
+  assert.equal(slow.vx, 2);
+  assert.equal(slow.vy, 1);
+});
+
+test('direction survives the cap exactly', () => {
+  const node = { id: 'a', vx: 30, vy: 40 };
+  const before = Math.atan2(node.vy, node.vx);
+  const force = forceSpeedLimit({ maxPerTick: 5 });
+  force.initialize([node]);
+  force(1);
+  assert.ok(
+    Math.abs(Math.atan2(node.vy, node.vx) - before) < 1e-9,
+    'a cap must slow a node, never steer it',
+  );
+});
+
+test('the cap tames several items dragged through a set at once', () => {
+  // The reproduction: four foreign items swept through a set on pinned
+  // positions. Uncapped this reached 164px in a single tick.
+  const members = [tile('a', 0, -150), tile('b', 20, 0), tile('c', -10, 150)];
+  const foreign = [tile('f1', -200, -60), tile('f2', 180, 40), tile('f3', -160, 180), tile('f4', 150, -180)];
+  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
+
+  const simulation = forceSimulation([...members, ...foreign, ...ring]).alpha(1).stop()
+    .force('charge', forceManyBody().strength((n) => (n.ring ? 0 : -280)))
+    .force('collide', forceCollide()
+      .radius((n) => (n.ring ? 30 : Math.max(n.width, n.height) / 2 + 20)).strength(0.9))
+    .force('link', forceLink(links).id((d) => d.id)
+      .distance((l) => (l.source.ring ? 60 : 145))
+      .strength((l) => (l.source.ring ? 0.9 : 0.14)))
+    .force('ring', forceRingShape({ membersOf: () => members }))
+    // The exclusion force has to be here: it is what makes the drag compound,
+    // because each foreign item shoves the members and the members drag the
+    // ring. An earlier version of this test left it out, measured a peak of
+    // 7.8px that was already under the cap, and so passed with the cap
+    // disabled — proving nothing at all.
+    .force('setExclusion', forceSetExclusion({
+      setsOf: (id) => (members.some((m) => m.id === id) ? ['s1'] : []),
+      membersOf: () => members,
+      isHeld: (id) => foreign.some((f) => f.id === id),
+    }))
+    .force('speedLimit', forceSpeedLimit());
+  for (let i = 0; i < 400; i += 1) simulation.tick();
+
+  let peak = 0;
+  for (let step = 0; step < 40; step += 1) {
+    const before = ring.map((n) => ({ x: n.x, y: n.y }));
+    foreign.forEach((item, i) => {
+      const angle = (step * 0.3) + (i * 1.6);
+      item.fx = Math.cos(angle) * 160;
+      item.fy = Math.sin(angle) * 160;
+      item.x = item.fx;
+      item.y = item.fy;
+    });
+    simulation.alpha(0.12);
+    for (let i = 0; i < 3; i += 1) simulation.tick();
+    for (let i = 0; i < ring.length; i += 1) {
+      peak = Math.max(peak, Math.hypot(ring[i].x - before[i].x, ring[i].y - before[i].y));
+    }
+  }
+  // Three ticks per step, so the ceiling is three times the per-tick cap.
+  assert.ok(peak < 30, `the ring still lurched ${peak.toFixed(0)}px in one step`);
 });

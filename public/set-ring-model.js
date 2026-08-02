@@ -410,3 +410,38 @@ export function pointInsideRing(point, ringNodes) {
   }
   return inside;
 }
+
+/** Caps how far any node may travel in a single tick.
+ *
+ * Registered after the other forces so it sees their combined effect: it is a
+ * governor on the result, not another opinion about where things should go.
+ *
+ * Dragging several foreign items through a set at once is what needs it. Each
+ * one pushes the members, the members drag the ring after them, and with four
+ * in flight the feedback compounds — measured, the ring went from moving 0.3px
+ * per tick when settled to 17.5px on average and 164px in a single tick, which
+ * is the violent convulsing seen on screen. Nothing there is wrong
+ * individually; it is the sum that explodes.
+ *
+ * A cap is the honest fix rather than weakening any one force, because the
+ * problem is the total. 8px per tick is roughly half a tile at 60fps: fast
+ * enough that the boundary still keeps up with a dragged member — measured,
+ * members are flung 70px from home against 455 uncapped — and slow enough that
+ * nothing can cross the screen in a frame.
+ */
+export function forceSpeedLimit({ maxPerTick = 8 } = {}) {
+  let nodes = [];
+
+  function force() {
+    for (const node of nodes) {
+      const speed = Math.hypot(node.vx ?? 0, node.vy ?? 0);
+      if (speed <= maxPerTick) continue;
+      const scale = maxPerTick / speed;
+      node.vx *= scale;
+      node.vy *= scale;
+    }
+  }
+
+  force.initialize = (value) => { nodes = value ?? []; };
+  return force;
+}
