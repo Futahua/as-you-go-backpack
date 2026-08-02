@@ -9,6 +9,11 @@ export function createKeyboardController({
   closeMenu,
   getVisibleItemIds,
   confirmDialog,
+  // Ctrl+G membership picking. Optional so the controller still mounts in
+  // tests and contexts that have no set support.
+  beginSetMembershipEdit = () => false,
+  setMembershipMode = null,
+  setStatus = () => {},
 }) {
   let abortController = null;
 
@@ -32,7 +37,36 @@ export function createKeyboardController({
         // Close the menu before clearing/syncing/saving, matching the
         // original handler's sequence.
         closeMenu();
+        // A live set selection is dismissed first and on its own. Clearing
+        // both at once would make one Escape undo two different things.
+        if (setMembershipMode?.isActive()) {
+          setMembershipMode.cancel();
+          return;
+        }
+        if (session.selectedSets.size > 0) {
+          commands.clearSetSelection();
+          return;
+        }
         commands.clearSelection();
+        return;
+      }
+      // Plain G groups. No modifier, so it must not fire while the user is
+      // typing — the guard above already returned for editable layers.
+      if (!event.ctrlKey && !event.altKey && !event.metaKey && key === 'g') {
+        event.preventDefault();
+        void commands.groupSelectionIntoSet();
+        return;
+      }
+      if (event.ctrlKey && key === 'g') {
+        event.preventDefault();
+        if (!beginSetMembershipEdit()) {
+          setStatus('Select items first, then press Ctrl+G to change their sets.');
+        }
+        return;
+      }
+      if (setMembershipMode?.isActive() && event.key === 'Enter') {
+        event.preventDefault();
+        void setMembershipMode.confirm();
         return;
       }
       if (event.ctrlKey && key === 'a') {
@@ -63,6 +97,15 @@ export function createKeyboardController({
       if (event.ctrlKey && (key === 'y' || (event.shiftKey && key === 'z'))) {
         event.preventDefault();
         commands.redo();
+        return;
+      }
+      // Checked before the item branch: with a set selected, Delete removes
+      // the grouping and leaves the items alone. Binning a set's contents
+      // because a set was selected would be a bad surprise, and the two
+      // selections are separate precisely so this choice can be made.
+      if (event.key === 'Delete' && session.selectedSets.size > 0) {
+        event.preventDefault();
+        void commands.deleteSelectedSets();
         return;
       }
       if (event.key === 'Delete' && session.selected.size > 0) {

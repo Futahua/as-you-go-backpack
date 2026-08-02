@@ -7,7 +7,7 @@ function fakeNode() {
   return { hidden: true };
 }
 
-function createHarness({ binMode = false, initialState = null } = {}) {
+function createHarness({ binMode = false, initialState = null, membershipMode = null } = {}) {
   const listeners = [];
   const documentMock = {
     addEventListener(type, handler, options) {
@@ -30,12 +30,15 @@ function createHarness({ binMode = false, initialState = null } = {}) {
     setStatus: () => {},
     initialSession: { binMode },
   });
-  const called = { close: 0, permanentDelete: 0 };
+  const called = {
+    close: 0, permanentDelete: 0, beginPicker: 0, pickerOpens: true, status: [],
+  };
   const commandSpies = {};
   for (const name of [
     'clearSelection', 'selectAllVisible', 'copySelection', 'cutSelection',
     'pasteInto', 'undo', 'redo', 'moveSelectionToBin', 'revealSelection',
     'activateItem', 'activateSelection', 'selectedPasteDestinations',
+    'groupSelectionIntoSet', 'clearSetSelection', 'deleteSelectedSets',
   ]) {
     commandSpies[`${name}:calls`] = 0;
     commandSpies[`${name}:args`] = [];
@@ -53,6 +56,9 @@ function createHarness({ binMode = false, initialState = null } = {}) {
     closeMenu: () => { called.close += 1; },
     getVisibleItemIds: () => ['a', 'b', 'c'],
     confirmDialog: { askPermanentDelete: () => { called.permanentDelete += 1; } },
+    beginSetMembershipEdit: () => { called.beginPicker += 1; return called.pickerOpens; },
+    setMembershipMode: membershipMode,
+    setStatus: (text) => { called.status.push(text); },
   });
   controller.mount();
   return { controller, store, elements, commandSpies, called, listeners };
@@ -203,4 +209,83 @@ test('Ctrl+V passes the selected paste destinations to pasteInto', () => {
   const h = createHarness();
   h.listeners[0].handler(key({ key: 'v', ctrlKey: true }));
   assert.deepEqual(h.commandSpies['pasteInto:args'][0], [['dest']]);
+});
+
+// ===========================================================================
+// Sets. The ordering rules matter more than the bindings: with a set selected,
+// Delete and Escape must act on the set, not on the items inside it.
+// ===========================================================================
+
+test('G groups the selection', () => {
+  const h = createHarness();
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'g' }));
+  assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 1);
+});
+
+test('G is a plain key, so Ctrl+G does not also group', () => {
+  const h = createHarness();
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'g', ctrlKey: true }));
+  assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 0, 'grouping did not fire');
+  assert.equal(h.called.beginPicker, 1, 'the picker did');
+});
+
+test('Ctrl+G with nothing selected says so rather than failing silently', () => {
+  const h = createHarness();
+  h.called.pickerOpens = false;
+  h.listeners[0].handler(key({ key: 'g', ctrlKey: true }));
+  assert.match(h.called.status.at(-1), /Select items first/);
+});
+
+test('Delete with a set selected removes the grouping, not the items', () => {
+  const h = createHarness();
+  h.store.setSelection(['a', 'b']);
+  h.store.setSelectedSets(['s1']);
+  h.listeners[0].handler(key({ key: 'Delete' }));
+  assert.equal(h.commandSpies['deleteSelectedSets:calls'], 1);
+  assert.equal(
+    h.commandSpies['moveSelectionToBin:calls'], 0,
+    'binning a set contents because a set was selected would be a bad surprise',
+  );
+});
+
+test('Delete with no set selected still bins the item selection', () => {
+  const h = createHarness();
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'Delete' }));
+  assert.equal(h.commandSpies['moveSelectionToBin:calls'], 1);
+  assert.equal(h.commandSpies['deleteSelectedSets:calls'], 0);
+});
+
+test('Escape dismisses a set selection before touching the items', () => {
+  const h = createHarness();
+  h.store.setSelection(['a']);
+  h.store.setSelectedSets(['s1']);
+  h.listeners[0].handler(key({ key: 'Escape' }));
+  assert.equal(h.commandSpies['clearSetSelection:calls'], 1);
+  assert.equal(
+    h.commandSpies['clearSelection:calls'], 0,
+    'one Escape undoes one thing',
+  );
+});
+
+test('Escape cancels the picker before either selection', () => {
+  let cancelled = 0;
+  const h = createHarness({
+    membershipMode: { isActive: () => true, cancel: () => { cancelled += 1; }, confirm: async () => {} },
+  });
+  h.store.setSelectedSets(['s1']);
+  h.listeners[0].handler(key({ key: 'Escape' }));
+  assert.equal(cancelled, 1);
+  assert.equal(h.commandSpies['clearSetSelection:calls'], 0);
+});
+
+test('Enter confirms the picker while it is open', () => {
+  let confirmed = 0;
+  const h = createHarness({
+    membershipMode: { isActive: () => true, cancel: () => {}, confirm: async () => { confirmed += 1; } },
+  });
+  h.listeners[0].handler(key({ key: 'Enter' }));
+  assert.equal(confirmed, 1);
 });

@@ -23,6 +23,11 @@ export function createWorkspaceStore({
   let saveQueue = Promise.resolve();
   const session = {
     selected: new Set(),
+    // Sets are selected separately from items, and deliberately so: it lets
+    // Delete mean two different things without either being a surprise —
+    // removing a grouping and leaving its contents alone, or binning items.
+    // A shared selection would have to guess which was meant.
+    selectedSets: new Set(),
     selectionAnchor: null,
     currentId: null,
     binCurrentId: 'bin',
@@ -89,6 +94,9 @@ export function createWorkspaceStore({
     addToSelection: (id) => { session.selected.add(id); },
     removeFromSelection: (id) => { session.selected.delete(id); },
     clearSelection: () => { session.selected.clear(); },
+    setSelectedSets: (ids) => { session.selectedSets = new Set(ids); },
+    addToSelectedSets: (id) => { session.selectedSets.add(id); },
+    clearSelectedSets: () => { session.selectedSets.clear(); },
     setSelectionAnchor: (anchor) => { session.selectionAnchor = anchor; },
     setNavigation: ({ currentId, binCurrentId, binMode } = {}) => {
       if (currentId !== undefined) session.currentId = currentId;

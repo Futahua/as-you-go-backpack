@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createWorkspaceCommands } from './public/app/workspace-commands.js';
+// The real one, not a stub: these tests exist to prove the set commands reach
+// the store, and a stubbed writer would pass whether or not they did.
+import { setItemSets } from './public/workspace-model-20260730b.js';
 
 function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
   let state = { groups, shortcuts, view: { currentGroupId: 'root' } };
@@ -46,6 +49,7 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
       dropped: { targets, destination },
       shortcuts: [...s.shortcuts, ...targets],
     }),
+    setItemSets,
   };
   Object.assign(base, model);
   const host = {
@@ -449,4 +453,110 @@ test('activateItem opens a web link even with revealDirectoryTarget', async () =
   assert.deepEqual(h.effects.openWeb, ['https://example.com']);
   assert.deepEqual(h.effects.reveal, []);
   assert.deepEqual(h.effects.launch, []);
+});
+
+// ===========================================================================
+// Sets. These assert on committed state rather than on a spy, because the
+// failure they exist to catch is a command that throws and looks like an
+// unbound key.
+// ===========================================================================
+
+test('G groups the selection into a set that reaches the store', () => {
+  const h = createHarness({
+    groups: [{ id: 'g1', parentId: 'root', name: 'A' }, { id: 'g2', parentId: 'root', name: 'B' }],
+  });
+  h.store.setSelection(['g1', 'g2']);
+
+  return h.commands.groupSelectionIntoSet().then(() => {
+    const sets = h.store.getSnapshot().view.itemSets;
+    assert.equal(sets.length, 1, 'one set was created');
+    assert.deepEqual(sets[0].memberIds, ['g1', 'g2'], 'holding exactly the selection');
+  });
+});
+
+test('G reports what it did in the status line', () => {
+  const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'A' }] });
+  h.store.setSelection(['g1']);
+  return h.commands.groupSelectionIntoSet().then(() => {
+    // A successful group and a silently failed one look identical until the
+    // outline happens to render, and the outline is the likeliest thing to be
+    // broken, so the confirmation carries the count.
+    assert.match(h.effects.status.at(-1), /Grouped 1 item \(1 set\)/);
+  });
+});
+
+test('G with nothing selected creates no set and says why', () => {
+  const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'A' }] });
+  return h.commands.groupSelectionIntoSet().then(() => {
+    assert.equal(h.store.getSnapshot().view?.itemSets, undefined, 'nothing committed');
+    assert.match(h.effects.status.at(-1), /Select items first/);
+  });
+});
+
+test('grouping twice makes two sets rather than replacing the first', () => {
+  const h = createHarness({
+    groups: [{ id: 'g1', parentId: 'root', name: 'A' }, { id: 'g2', parentId: 'root', name: 'B' }],
+  });
+  h.store.setSelection(['g1']);
+  return h.commands.groupSelectionIntoSet().then(() => {
+    h.store.setSelection(['g2']);
+    return h.commands.groupSelectionIntoSet();
+  }).then(() => {
+    const sets = h.store.getSnapshot().view.itemSets;
+    assert.equal(sets.length, 2, 'both sets survive');
+    assert.deepEqual(sets.map((s) => s.memberIds), [['g1'], ['g2']]);
+  });
+});
+
+test('a failing commit reaches the status bar instead of vanishing', () => {
+  // The lesson from the last attempt: a throw inside a command whose promise
+  // the caller drops is indistinguishable from a key that was never bound. The
+  // failure has to arrive somewhere the user can see.
+  const h = createHarness({
+    groups: [{ id: 'g1', parentId: 'root', name: 'A' }],
+    model: { setItemSets: () => { throw new Error('disk on fire'); } },
+  });
+  h.store.setSelection(['g1']);
+  return h.commands.groupSelectionIntoSet().then(() => {
+    assert.match(h.effects.status.at(-1), /disk on fire/);
+  });
+});
+
+test('selecting sets leaves the item selection alone', () => {
+  const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'A' }] });
+  h.store.setSelection(['g1']);
+  h.commands.selectSets(['s1']);
+  assert.deepEqual([...h.store.getSession().selectedSets], ['s1']);
+  assert.deepEqual([...h.store.getSession().selected], ['g1'], 'items untouched');
+
+  h.commands.selectSets(['s2'], { additive: true });
+  assert.deepEqual([...h.store.getSession().selectedSets].sort(), ['s1', 's2']);
+});
+
+test('deleting a set removes the grouping and keeps every item', () => {
+  const h = createHarness({
+    groups: [{ id: 'g1', parentId: 'root', name: 'A' }, { id: 'g2', parentId: 'root', name: 'B' }],
+  });
+  h.store.setSelection(['g1', 'g2']);
+  return h.commands.groupSelectionIntoSet().then(() => {
+    const [created] = h.store.getSnapshot().view.itemSets;
+    h.commands.selectSets([created.id]);
+    return h.commands.deleteSelectedSets();
+  }).then(() => {
+    const snapshot = h.store.getSnapshot();
+    assert.deepEqual(snapshot.view.itemSets, [], 'the grouping is gone');
+    assert.deepEqual(
+      snapshot.groups.map((entry) => entry.id), ['g1', 'g2'],
+      'and both items are untouched — this is the whole distinction from Delete on items',
+    );
+    assert.match(h.effects.status.at(-1), /items are unchanged/);
+    assert.equal(h.store.getSession().selectedSets.size, 0, 'selection cleared');
+  });
+});
+
+test('deleting with no set selected does nothing at all', () => {
+  const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'A' }] });
+  return h.commands.deleteSelectedSets().then(() => {
+    assert.equal(h.effects.status.length, 0, 'no status, no commit');
+  });
 });
