@@ -152,9 +152,15 @@ export function isInsideRegion(point, memberRects, obstacleRects, options = {}) 
 /** Whether any border cell of a sampled field is occupied.
  *
  * A region reaching the edge of its own grid produces an open contour, which
- * marching squares cannot close into a ring. The bounds are therefore grown
- * until this is false rather than sized from a formula. */
-function fieldTouchesBorder(field) {
+ * marching squares cannot close into a ring — and an open chain returned as a
+ * polygon inverts the region under even-odd counting. This is the precondition
+ * for extraction, so the bounds are grown until it is false rather than sized
+ * from a formula.
+ *
+ * `chainSegments` rejects open chains as well. Both layers are kept
+ * deliberately: this one stops a bad field reaching extraction at all, and
+ * that one catches any future path that bypasses this check. */
+export function fieldHasOccupiedBorder(field) {
   const { inside, columns, rows } = field;
   for (let column = 0; column < columns; column += 1) {
     if (inside[column] || inside[(rows - 1) * columns + column]) return true;
@@ -476,6 +482,8 @@ export function buildMembraneField(options) {
     cellSize,
     neckRadius = Math.max(cellSize, Math.min(padding * 0.55, 16)),
     reserved = null,
+    marginGrowthStep = padding + neckRadius + gap + cellSize * 4,
+    maxMarginGrowthAttempts = 6,
   } = options;
 
   // Necks bow outside the members' padded box when routing around an exclusive
@@ -493,16 +501,47 @@ export function buildMembraneField(options) {
   // even-odd counting cancels the area between them: 1662 cells of one set
   // vanished, and it presented as that set overlapping the very set whose
   // reservation had displaced its neck. The field was correct throughout.
+  //
+  // The growth is capped. An unbounded retry would turn a pathological layout
+  // into a hang rather than an error, and every attempt resamples the whole
+  // grid — cost grows with the square of the margin. Exhausting the cap is a
+  // structured failure, not a silently larger grid.
   const displacement = reserved
     ? Math.max(0, ...reserved.map((segment) => segment.radius)) + neckRadius + gap
     : 0;
-  let extraMargin = neckRadius + displacement + cellSize * 2;
+  const initialExtraMargin = options.initialExtraMargin
+    ?? (neckRadius + displacement + cellSize * 2);
+
+  let extraMargin = initialExtraMargin;
+  let attempts = 0;
   let built = buildMembraneFieldOnGrid(options, neckRadius, extraMargin);
-  for (let attempt = 0; attempt < 6 && fieldTouchesBorder(built.field); attempt += 1) {
-    extraMargin += padding + neckRadius + gap + cellSize * 4;
+  while (fieldHasOccupiedBorder(built.field) && attempts < maxMarginGrowthAttempts) {
+    attempts += 1;
+    extraMargin += marginGrowthStep;
     built = buildMembraneFieldOnGrid(options, neckRadius, extraMargin);
   }
-  return built;
+
+  if (fieldHasOccupiedBorder(built.field)) {
+    // Never hand an open field to contour extraction. It would chain into open
+    // paths and come back as polygons claiming space the field does not have.
+    return {
+      field: built.field,
+      valid: false,
+      connected: false,
+      componentCount: built.componentCount,
+      connectorRoutes: [],
+      reservations: [],
+      failureReason: 'field-bounds-exhausted',
+      attemptedBounds: { extraMargin, attempts, cellCount: built.field.columns * built.field.rows },
+    };
+  }
+
+  return {
+    ...built,
+    valid: true,
+    failureReason: null,
+    attemptedBounds: { extraMargin, attempts, cellCount: built.field.columns * built.field.rows },
+  };
 }
 
 /** One attempt at a membrane on a grid of the given margin. */
@@ -723,6 +762,11 @@ function buildMembraneFieldOnGrid({
   connected = built.count <= 1;
   // What later sets must keep clear of. Consecutive route cells, so a corridor
   // is described by the same spine the thickening used.
+  // World coordinates, never grid indexes. Each set samples on its own origin
+  // and dimensions — legitimately, since bounds follow that set's own members —
+  // so a row/column reused across two fields refers to a different place in
+  // each. Storing the spine in world space is what makes a reservation mean the
+  // same thing to every set that reads it.
   const reservations = [];
   for (const route of connectorRoutes) {
     for (let i = 1; i < route.length; i += 1) {
@@ -1132,11 +1176,22 @@ function segmentsIntersect(p1, p2, p3, p4) {
  * this one shares nothing with still carve, through the separation band, so
  * two exclusive sets can never blend.
  *
- * Each region carries its topology: `componentCount` counts the seed
- * components before connectors, `connected` says whether they were all joined,
- * and `connectorRoutes` is the world-space spine of each neck. A caller that
- * sees `connected: false` should repair or reject the layout rather than
- * render unrelated islands as one set. */
+ * Each region carries its topology and a verdict:
+ *
+ *   { valid, connected, componentCount, polygons, svgPath, connectorRoutes,
+ *     failureReason, attemptedBounds }
+ *
+ * `valid` is true only when the geometry that came out satisfies all three
+ * invariants: the field was closed, the contour extracted into one connected
+ * filled component, and the region is positively separated from every set it
+ * shares no member with. It is checked on the polygons rather than on the
+ * intent behind them — the defect that motivated this contract had a correct
+ * field and inverted polygons, and only a check on the output could tell.
+ *
+ * An invalid region carries empty `polygons` and an empty `svgPath`, so a
+ * failed build can never be hit-tested, clicked, or dropped into. Callers may
+ * read `failureReason` — 'field-bounds-exhausted', 'disconnected' or
+ * 'exclusive-overlap' — and repair or reject the layout that caused it. */
 export function buildSetRegions({
   sets,
   visibleItems,
@@ -1145,6 +1200,9 @@ export function buildSetRegions({
   gap = 14,
   cellSize = 4,
   neckRadius,
+  initialExtraMargin,
+  marginGrowthStep,
+  maxMarginGrowthAttempts,
 } = {}) {
   const regions = new Map();
   const items = Array.isArray(visibleItems) ? visibleItems : [];
@@ -1161,6 +1219,10 @@ export function buildSetRegions({
   // Every corridor committed so far, per set, so a set is never made to avoid
   // its own necks or those of a set it overlaps with by sharing a member.
   const committed = new Map();
+  // Which sets each one shares no member with, kept so the validity check can
+  // measure separation against exactly those and not against a set it is meant
+  // to overlap.
+  const exclusiveOf = new Map();
 
   for (const set of ordered) {
     const memberIds = coverage.get(set.id);
@@ -1171,15 +1233,18 @@ export function buildSetRegions({
     // one are meant to overlap — that overlap is the Venn, and walling them
     // apart would destroy the thing the feature exists to show.
     const exclusiveIds = new Set();
+    const exclusiveSetIds = new Set();
     const reserved = [];
     for (const other of list) {
       if (other.id === set.id) continue;
       const otherMembers = coverage.get(other.id);
       const shares = [...memberIds].some((id) => otherMembers.has(id));
       if (shares) continue;
+      exclusiveSetIds.add(other.id);
       for (const id of otherMembers) exclusiveIds.add(id);
       reserved.push(...(committed.get(other.id) ?? []));
     }
+    exclusiveOf.set(set.id, exclusiveSetIds);
     const exclusiveRects = items.filter((item) => exclusiveIds.has(item.id));
 
     const membrane = buildMembraneField({
@@ -1191,17 +1256,83 @@ export function buildSetRegions({
       gap,
       cellSize,
       ...(neckRadius == null ? {} : { neckRadius }),
+      ...(initialExtraMargin == null ? {} : { initialExtraMargin }),
+      ...(marginGrowthStep == null ? {} : { marginGrowthStep }),
+      ...(maxMarginGrowthAttempts == null ? {} : { maxMarginGrowthAttempts }),
     });
     committed.set(set.id, membrane.reservations);
+
+    // A build that failed its own preconditions never becomes a usable region.
+    // Returning empty polygons alongside the reason keeps the failure legible
+    // to a caller without letting it be hit-tested, clicked or dropped into.
+    if (!membrane.valid) {
+      regions.set(set.id, {
+        polygons: [],
+        svgPath: '',
+        valid: false,
+        connected: false,
+        componentCount: membrane.componentCount,
+        connectorRoutes: [],
+        failureReason: membrane.failureReason,
+        attemptedBounds: membrane.attemptedBounds,
+      });
+      continue;
+    }
+
     const polygons = extractContours(membrane.field);
     if (polygons.length === 0) continue;
-    regions.set(set.id, {
+    const region = {
       polygons,
       svgPath: ringsToPath(polygons),
       componentCount: membrane.componentCount,
       connected: membrane.connected,
       connectorRoutes: membrane.connectorRoutes,
-    });
+      attemptedBounds: membrane.attemptedBounds,
+    };
+
+    // Validity is the whole contract, checked on the geometry that was actually
+    // produced rather than on the intent that produced it. One connected filled
+    // component, and positive separation from every exclusive region built so
+    // far — measured segment-to-segment, because two polygons can cross without
+    // sharing a vertex and a vertex measure reports a comfortable number for it.
+    //
+    // The separation half is what would have caught the inverted-region defect
+    // at its source: the field was correct, the polygons were not, and only a
+    // check on the polygons could tell the difference.
+    let separated = true;
+    let blockedBy = null;
+    for (const [otherId, other] of regions) {
+      if (!other.valid || !exclusiveOf.get(set.id)?.has(otherId)) continue;
+      if (regionDistance(region, other) > 0) continue;
+      separated = false;
+      blockedBy = otherId;
+      break;
+    }
+    region.valid = separated && region.connected && filledComponents(polygons) === 1;
+    region.failureReason = region.valid
+      ? null
+      : (!separated ? 'exclusive-overlap' : 'disconnected');
+    if (!separated) region.blockedBySetIds = [blockedBy];
+    regions.set(set.id, region);
   }
   return regions;
+}
+
+/** How many separate filled pieces a set of rings describes.
+ *
+ * Ring count is not the answer: a set with a hole in it has two rings and one
+ * filled piece. A ring bounds filled space only when it lies inside an even
+ * number of the others, which is the same even-odd rule the region renders and
+ * hit-tests with. */
+function filledComponents(rings) {
+  let outer = 0;
+  for (const ring of rings) {
+    let depth = 0;
+    for (const other of rings) {
+      if (other === ring) continue;
+      if (pointInPolygon(ring[0], other)) depth += 1;
+    }
+    if (depth % 2 === 0) outer += 1;
+  }
+  return outer;
 }

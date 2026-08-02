@@ -23,6 +23,7 @@ import {
   labelComponents,
   selectSpanningRoutes,
   foreignSeedDistance,
+  fieldHasOccupiedBorder,
 } from './public/set-region-model.js';
 
 const TILE = { width: 90, height: 90 };
@@ -820,6 +821,147 @@ test('every extracted ring is closed, and an open field is rejected', () => {
     }
   }
   assert.throws(() => extractContours(open), /did not close/);
+});
+
+test('an occupied cell on any border is detected', () => {
+  // The precondition for extraction, tested on each edge separately: a
+  // one-sided check would pass three of these while the fourth let an open
+  // contour through.
+  const edges = [
+    ['top', (field) => 0],
+    ['bottom', (field) => (field.rows - 1) * field.columns],
+    ['left', (field) => Math.floor(field.rows / 2) * field.columns],
+    ['right', (field) => (Math.floor(field.rows / 2) * field.columns) + field.columns - 1],
+  ];
+  for (const [name, cellOf] of edges) {
+    const field = sampleField([tile('a', 0, 0)], [], { padding: 26, gap: 14, cellSize: 4 });
+    assert.equal(fieldHasOccupiedBorder(field), false, `${name}: a clear field reports clear`);
+    field.inside[cellOf(field)] = 1;
+    assert.equal(fieldHasOccupiedBorder(field), true, `${name}: one occupied border cell is caught`);
+  }
+});
+
+test('exhausting the margin growth returns a structured failure, not a polygon', () => {
+  // The growth loop must be finite. An unbounded retry turns a pathological
+  // layout into a hang, and every attempt resamples the whole grid, so cost
+  // grows with the square of the margin.
+  //
+  // Starving the cap is how this is provoked: no attempts, and a margin too
+  // small to contain the members' own padding. What must not happen is an open
+  // field reaching extraction — that is what inverted a region before.
+  const regions = buildSetRegions({
+    sets: [{ id: 's1', memberIds: ['a', 'b'] }],
+    visibleItems: [tile('a', 0, 0), tile('b', 300, 0)],
+    initialExtraMargin: -60,
+    maxMarginGrowthAttempts: 0,
+  });
+  const region = regions.get('s1');
+  assert.equal(region.valid, false, 'the build reports itself invalid');
+  assert.equal(region.failureReason, 'field-bounds-exhausted', 'and says why');
+  assert.deepEqual(region.polygons, [], 'no polygons escape');
+  assert.equal(region.svgPath, '', 'and nothing is drawable');
+  assert.equal(region.attemptedBounds.attempts, 0, 'the cap was honoured');
+
+  // The same layout with the cap restored succeeds, so the fixture is provoking
+  // the limit rather than an impossible scene.
+  const ok = buildSetRegions({
+    sets: [{ id: 's1', memberIds: ['a', 'b'] }],
+    visibleItems: [tile('a', 0, 0), tile('b', 300, 0)],
+  }).get('s1');
+  assert.equal(ok.valid, true, 'the same scene builds when growth is allowed');
+});
+
+test('a valid region is connected, closed and separated', () => {
+  // The contract itself. Validity is asserted on the geometry that came out,
+  // not on the intent that produced it: the defect that motivated this had a
+  // correct field and inverted polygons.
+  const items = [tile('a1', 0, 0), tile('b1', 210, 0), tile('a2', 420, 0), tile('b2', 630, 0)];
+  const regions = buildSetRegions({
+    sets: [{ id: 'sa', memberIds: ['a1', 'a2'] }, { id: 'sb', memberIds: ['b1', 'b2'] }],
+    visibleItems: items,
+  });
+  for (const [setId, region] of regions) {
+    assert.equal(region.valid, true, `${setId} is valid`);
+    assert.equal(region.failureReason, null, `${setId} has no failure reason`);
+    assert.equal(filledComponentCount(region), 1, `${setId} is one filled component`);
+    assert.ok(region.svgPath.length > 0, `${setId} is drawable`);
+  }
+  assert.ok(
+    polygonSeparation(regions.get('sa').polygons, regions.get('sb').polygons) > 0,
+    'and the two are separated',
+  );
+});
+
+test('translating the whole scene translates the geometry and nothing else', () => {
+  // A metamorphic check, and the one that would have caught the defect at its
+  // root. Sets legitimately sample on different grid origins, so any place that
+  // reused a row/column index across two fields would drift under a shift that
+  // does not land on the grid — hence the deliberately unaligned offset.
+  const offset = { x: 13.7, y: -29.2 };
+  const base = [tile('a1', 0, 0), tile('b1', 210, 0), tile('a2', 420, 0), tile('b2', 630, 0)];
+  const shifted = base.map((item) => ({ ...item, x: item.x + offset.x, y: item.y + offset.y }));
+  const sets = [{ id: 'sa', memberIds: ['a1', 'a2'] }, { id: 'sb', memberIds: ['b1', 'b2'] }];
+
+  const before = buildSetRegions({ sets, visibleItems: base });
+  const after = buildSetRegions({ sets, visibleItems: shifted });
+
+  for (const setId of ['sa', 'sb']) {
+    const a = before.get(setId);
+    const b = after.get(setId);
+    assert.equal(b.valid, a.valid, `${setId} validity is unchanged`);
+    assert.equal(b.connected, a.connected, `${setId} connectivity is unchanged`);
+    assert.equal(
+      filledComponentCount(b), filledComponentCount(a),
+      `${setId} topology is unchanged`,
+    );
+    // Area is translation-invariant and, unlike vertex-by-vertex comparison,
+    // does not demand that an unaligned shift land on the same sample points.
+    assert.ok(
+      Math.abs(regionArea(b) - regionArea(a)) < regionArea(a) * 0.02,
+      `${setId} area moved by more than sampling noise`,
+    );
+    // The geometry itself moved with the scene.
+    const centroid = (region) => {
+      const points = region.polygons.flat();
+      return {
+        x: points.reduce((total, p) => total + p.x, 0) / points.length,
+        y: points.reduce((total, p) => total + p.y, 0) / points.length,
+      };
+    };
+    const from = centroid(a);
+    const to = centroid(b);
+    assert.ok(Math.abs((to.x - from.x) - offset.x) < 4, `${setId} moved by dx=${offset.x}`);
+    assert.ok(Math.abs((to.y - from.y) - offset.y) < 4, `${setId} moved by dy=${offset.y}`);
+  }
+  assert.ok(
+    polygonSeparation(after.get('sa').polygons, after.get('sb').polygons) > 0,
+    'separation survives the translation',
+  );
+});
+
+test('the order the sets are passed in does not change the result', () => {
+  // Sets are built in a fixed order internally because each one's necks become
+  // corridors the later ones avoid. If that ordering ever came from the caller,
+  // the same layout would render differently between calls — and the drag rules
+  // read this geometry.
+  const items = [tile('a1', 0, 0), tile('b1', 210, 0), tile('a2', 420, 0), tile('b2', 630, 0)];
+  const sa = { id: 'sa', memberIds: ['a1', 'a2'] };
+  const sb = { id: 'sb', memberIds: ['b1', 'b2'] };
+
+  const forward = buildSetRegions({ sets: [sa, sb], visibleItems: items });
+  const backward = buildSetRegions({ sets: [sb, sa], visibleItems: items });
+
+  for (const setId of ['sa', 'sb']) {
+    assert.equal(backward.get(setId).valid, true, `${setId} is valid either way`);
+    assert.equal(
+      backward.get(setId).svgPath, forward.get(setId).svgPath,
+      `${setId} produced identical geometry regardless of input order`,
+    );
+  }
+  assert.ok(
+    polygonSeparation(backward.get('sa').polygons, backward.get('sb').polygons) > 0,
+    'and the two stay separated',
+  );
 });
 
 test('the sampled field closes rather than running off the grid', () => {
