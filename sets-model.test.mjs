@@ -4,6 +4,9 @@ import {
   createItemSet,
   normalizeItemSets,
   belongsToSet,
+  membershipState,
+  membershipMatrix,
+  applyMembershipChanges,
   setsContaining,
   coveredItemIds,
   isSetless,
@@ -415,6 +418,106 @@ test('persisted exclusions survive normalization and prune with their items', ()
   );
   assert.deepEqual(restored.memberIds, ['f1']);
   assert.deepEqual(restored.excludedIds, ['i1'], 'an exclusion naming a deleted item is dropped');
+});
+
+// ===========================================================================
+// Tri-state membership: what makes Ctrl+G safe on a mixed selection.
+// ===========================================================================
+
+test('membershipState reports all, none, or mixed', () => {
+  const s = set('a', ['i1', 'i2']);
+  assert.equal(membershipState(s, ['i1', 'i2']), 'all');
+  assert.equal(membershipState(s, ['i3', 'i4']), 'none');
+  assert.equal(membershipState(s, ['i1', 'i3']), 'mixed');
+});
+
+test('membershipState follows inheritance and exclusions', () => {
+  const inherited = set('a', ['f1']);
+  assert.equal(membershipState(inherited, ['i1', 'i2'], ancestors), 'all', 'both inherit from f1');
+
+  const withExclusion = { ...set('a', ['f1']), excludedIds: ['i1'] };
+  assert.equal(membershipState(withExclusion, ['i1', 'i2'], ancestors), 'mixed', 'one is excluded');
+});
+
+test('opening the picker and confirming immediately changes nothing', () => {
+  // The bug this replaces: the picker took the union across the selection, so
+  // a set only some items belonged to was pre-chosen, and confirming added
+  // the rest to it.
+  const sets = [set('A', ['i1']), set('B', ['i2'])];
+  const items = ['i1', 'i2'];
+  const captured = membershipMatrix(sets, items);
+  assert.deepEqual([...captured], [['A', 'mixed'], ['B', 'mixed']]);
+
+  const unchanged = applyMembershipChanges(sets, items, captured, new Map(captured));
+  assert.equal(unchanged, sets, 'the same array is returned, so no history is recorded');
+});
+
+test('a set reported as mixed is never resolved either way', () => {
+  // 'mixed' is not a state anything can ask for — only one a set can be left
+  // in. Without the guard it falls through to the removal branch and the set
+  // is emptied and dropped, silently destroying a grouping the user was not
+  // editing.
+  const sets = [set('A', ['i1', 'i2'])];
+  const next = applyMembershipChanges(
+    sets, ['i1', 'i2'], new Map([['A', 'all']]), new Map([['A', 'mixed']]),
+  );
+  assert.ok(findItemSet(next, 'A'), 'the set still exists');
+  assert.deepEqual(findItemSet(next, 'A').memberIds, ['i1', 'i2'], 'and is untouched');
+});
+
+test('changing one set leaves the others exactly as they were', () => {
+  const sets = [set('A', ['i1']), set('B', ['i2'])];
+  const items = ['i1', 'i2'];
+  const captured = membershipMatrix(sets, items);
+
+  const next = applyMembershipChanges(
+    sets, items, captured, new Map(captured).set('A', 'all'),
+  );
+  const A = findItemSet(next, 'A');
+  const B = findItemSet(next, 'B');
+  assert.equal(belongsToSet(A, 'i1'), true);
+  assert.equal(belongsToSet(A, 'i2'), true, 'A was set to all');
+  assert.equal(belongsToSet(B, 'i1'), false, 'i1 was never added to B');
+  assert.equal(belongsToSet(B, 'i2'), true, 'B is untouched');
+});
+
+test('a set left mixed keeps its partial membership', () => {
+  const sets = [set('A', ['i1']), set('B', ['i2'])];
+  const items = ['i1', 'i2'];
+  const captured = membershipMatrix(sets, items);
+
+  // Only B is touched; A stays mixed and must not be resolved either way.
+  const next = applyMembershipChanges(
+    sets, items, captured, new Map(captured).set('B', 'none'),
+  );
+  const A = findItemSet(next, 'A');
+  assert.equal(belongsToSet(A, 'i1'), true, 'still in');
+  assert.equal(belongsToSet(A, 'i2'), false, 'still out');
+  assert.equal(findItemSet(next, 'B'), null, 'B emptied and was dropped');
+});
+
+test('setting a set to none removes the whole selection from it', () => {
+  const sets = [set('A', ['i1', 'i2', 'i3'])];
+  const captured = membershipMatrix(sets, ['i1', 'i2']);
+  assert.equal(captured.get('A'), 'all');
+
+  const next = applyMembershipChanges(
+    sets, ['i1', 'i2'], captured, new Map(captured).set('A', 'none'),
+  );
+  assert.deepEqual(findItemSet(next, 'A').memberIds, ['i3']);
+});
+
+test('tri-state changes reach inherited members through exclusions', () => {
+  const sets = [set('A', ['f1'])];
+  const items = ['i1'];
+  const captured = membershipMatrix(sets, items, ancestors);
+  assert.equal(captured.get('A'), 'all', 'inherited from f1');
+
+  const next = applyMembershipChanges(
+    sets, items, captured, new Map(captured).set('A', 'none'), ancestors,
+  );
+  assert.equal(belongsToSet(findItemSet(next, 'A'), 'i1', ancestors), false, 'the child left');
+  assert.deepEqual(findItemSet(next, 'A').memberIds, ['f1'], 'the folder is still stored');
 });
 
 test('a set with no excludedIds behaves exactly as before', () => {

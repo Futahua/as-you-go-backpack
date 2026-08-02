@@ -258,6 +258,104 @@ export function forgetItems(sets, itemIds) {
   return setMembership(sets, itemIds, []);
 }
 
+/** How a set relates to a group of items: 'all', 'none', or 'mixed'.
+ *
+ * A picker that only knows chosen/not-chosen has to collapse 'mixed' into one
+ * of the other two, and either choice silently edits items the user never
+ * touched — the union pre-chooses a set that only some of the selection is in,
+ * so confirming adds the rest to it. Keeping mixed as its own state is what
+ * lets an untouched set be left exactly as it was. */
+export function membershipState(set, itemIds, ancestorsOf = null) {
+  const items = uniqueIds(itemIds);
+  if (items.length === 0) return 'none';
+  let members = 0;
+  for (const itemId of items) {
+    if (belongsToSet(set, itemId, ancestorsOf)) members += 1;
+  }
+  if (members === 0) return 'none';
+  return members === items.length ? 'all' : 'mixed';
+}
+
+/** The membership matrix for a selection, captured when a picker opens so it
+ * can tell an untouched set from one the user deliberately set to 'none'. */
+export function membershipMatrix(sets, itemIds, ancestorsOf = null) {
+  const matrix = new Map();
+  for (const set of Array.isArray(sets) ? sets : []) {
+    matrix.set(set.id, membershipState(set, itemIds, ancestorsOf));
+  }
+  return matrix;
+}
+
+/** Applies only the states the user actually changed.
+ *
+ * `original` is the matrix captured on open; `current` is the matrix after
+ * their clicks. A set whose state is unchanged is skipped entirely — including
+ * a still-'mixed' one, which is what makes opening the picker and pressing
+ * Enter immediately a true no-op instead of a silent edit.
+ *
+ * Returns the same array when nothing changed, so callers can skip recording
+ * history. */
+export function applyMembershipChanges(sets, itemIds, original, current, ancestorsOf = null) {
+  const items = uniqueIds(itemIds);
+  if (items.length === 0) return sets;
+  let next = sets;
+  for (const set of Array.isArray(sets) ? sets : []) {
+    const before = original?.get(set.id) ?? 'none';
+    const after = current?.get(set.id) ?? before;
+    // Skipping an unchanged set is mostly an optimisation — reapplying 'all'
+    // to a set that already holds exactly these items is idempotent.
+    if (after === before) continue;
+    // This one is not. 'mixed' is a state a set can be left in but never asked
+    // for, and without this it would fall through to the removal branch below
+    // and empty the set — silently destroying a grouping nobody was editing.
+    if (after === 'mixed') continue;
+    next = setMembershipForOneSet(next, items, set.id, after === 'all', ancestorsOf);
+  }
+  return next;
+}
+
+/** Adds or removes one set's membership, touching no other set.
+ *
+ * Deliberately not routed through setMembership(): that replaces an item's
+ * whole set list at once, so editing one set through it would rewrite every
+ * other set the selection touches — reintroducing the union bug this tri-state
+ * path exists to fix. Editing one record in place is the only way an untouched
+ * set can genuinely stay untouched. */
+function setMembershipForOneSet(sets, itemIds, setId, shouldContain, ancestorsOf) {
+  const items = new Set(itemIds);
+  let changed = false;
+  const next = [];
+  for (const set of sets) {
+    if (set.id !== setId) { next.push(set); continue; }
+
+    const previousExcluded = set.excludedIds ?? [];
+    // Adding clears any exclusion standing in the way; removing drops direct
+    // membership and excludes whatever still arrives through an ancestor.
+    let excludedIds = previousExcluded.filter((id) => !items.has(id));
+    let memberIds = set.memberIds.filter((id) => !items.has(id));
+
+    if (shouldContain) {
+      memberIds = [...memberIds, ...itemIds];
+    } else {
+      const stillInherited = [...items].filter(
+        (id) => belongsToSet({ ...set, memberIds, excludedIds }, id, ancestorsOf),
+      );
+      excludedIds = [...excludedIds, ...stillInherited];
+    }
+
+    const membersChanged = memberIds.length !== set.memberIds.length
+      || memberIds.some((id, index) => id !== set.memberIds[index]);
+    const exclusionsChanged = excludedIds.length !== previousExcluded.length
+      || excludedIds.some((id, index) => id !== previousExcluded[index]);
+    if (membersChanged || exclusionsChanged) changed = true;
+
+    // A set emptied of members has nothing left to enclose.
+    if (memberIds.length === 0) { changed = true; continue; }
+    next.push({ ...set, memberIds, excludedIds });
+  }
+  return changed ? next : sets;
+}
+
 /** Whether `itemId` may be dropped at a position covered by `regionSetIds`.
  *
  * Two rules, and a shared item must satisfy both:

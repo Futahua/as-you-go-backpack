@@ -8,7 +8,18 @@
  * The mode owns only transient picking state — which sets are currently
  * chosen, and which items it opened over. Deciding what membership results
  * belongs to the pure model, and persisting it to the command layer. */
-import { setsContaining } from '../../sets-model.js';
+import { setsContaining, membershipMatrix } from '../../sets-model.js';
+
+/** What clicking a set does to its state.
+ *
+ * 'mixed' can be left alone but never chosen: the user cannot ask for "some
+ * of these", only leave a partial set as it was. Clicking a mixed set
+ * therefore resolves it — to 'all' first, since including is the likelier
+ * intent when you point at a set. */
+function nextState(state) {
+  if (state === 'all') return 'none';
+  return 'all';
+}
 
 export function createSetMembershipMode({
   getSets,
@@ -16,18 +27,28 @@ export function createSetMembershipMode({
   shareSelectionWithSets,
   render,
   setStatus,
+  ancestorsOf = null,
 }) {
   let active = false;
   let itemIds = [];
-  let chosen = new Set();
+  // The membership each set had when the mode opened, so an untouched set can
+  // be told apart from one the user deliberately emptied.
+  let original = new Map();
+  let current = new Map();
 
   function isActive() {
     return active;
   }
 
-  /** Sets currently chosen, for the renderer to light up. */
+  /** Sets currently wholly chosen, for the renderer to light up. */
   function chosenSetIds() {
-    return [...chosen];
+    return [...current].filter(([, state]) => state === 'all').map(([setId]) => setId);
+  }
+
+  /** Sets only some of the subjects belong to, so the renderer can show them
+   * as partial rather than pretending they are in or out. */
+  function mixedSetIds() {
+    return [...current].filter(([, state]) => state === 'mixed').map(([setId]) => setId);
   }
 
   /** The items the mode is editing, so the renderer can keep showing them as
@@ -36,56 +57,68 @@ export function createSetMembershipMode({
     return [...itemIds];
   }
 
-  /** Opens the mode over the current selection, pre-choosing the sets those
-   * items already belong to — so confirming immediately is a no-op rather
-   * than a surprise removal. */
+  /** Opens the mode over the current selection, capturing what each set's
+   * membership is right now.
+   *
+   * The capture is the point: it previously pre-chose the union of the
+   * selection's sets, which reads as "these are your sets" but means that
+   * confirming immediately adds every item to every set any one of them was
+   * in. Recording the real per-set state instead lets an untouched set be
+   * left alone. */
   function begin() {
     const ids = getSelectedIds();
     if (ids.length === 0) return false;
     active = true;
     itemIds = [...ids];
-    chosen = new Set();
-    for (const itemId of itemIds) {
-      for (const set of setsContaining(getSets(), itemId)) chosen.add(set.id);
-    }
+    original = membershipMatrix(getSets(), itemIds, ancestorsOf);
+    current = new Map(original);
     describe();
     render();
     return true;
   }
 
-  /** Clicking an item toggles the set it belongs to. A setless item has no
-   * set to toggle and is reported rather than silently ignored. */
+  /** Clicking an item cycles the state of the sets it belongs to. A setless
+   * item has no set to cycle and is reported rather than silently ignored. */
   function toggleFromItem(itemId) {
     if (!active) return;
-    const sets = setsContaining(getSets(), itemId);
+    const sets = setsContaining(getSets(), itemId, ancestorsOf);
     if (sets.length === 0) {
       setStatus('That item is in no set. Click an item inside the set you want.');
       return;
     }
     for (const set of sets) {
-      if (chosen.has(set.id)) chosen.delete(set.id);
-      else chosen.add(set.id);
+      current.set(set.id, nextState(current.get(set.id) ?? 'none'));
     }
     describe();
     render();
   }
 
   function describe() {
-    const count = chosen.size;
+    const chosenCount = chosenSetIds().length;
+    const mixedCount = mixedSetIds().length;
     const subject = itemIds.length === 1 ? '1 item' : `${itemIds.length} items`;
-    setStatus(count === 0
-      ? `${subject}: no sets chosen — Enter removes them from every set, Escape cancels.`
-      : `${subject} in ${count} ${count === 1 ? 'set' : 'sets'} — Enter confirms, Escape cancels.`);
+    if (chosenCount === 0 && mixedCount === 0) {
+      setStatus(`${subject}: no sets chosen — Enter removes them from every set, Escape cancels.`);
+      return;
+    }
+    const parts = [];
+    if (chosenCount > 0) parts.push(`in ${chosenCount} ${chosenCount === 1 ? 'set' : 'sets'}`);
+    // Naming the partial sets matters: they are the ones Enter will leave
+    // alone, which is not obvious from an outline that is neither lit nor dark.
+    if (mixedCount > 0) parts.push(`${mixedCount} partly, left unchanged`);
+    setStatus(`${subject} ${parts.join(', ')} — Enter confirms, Escape cancels.`);
   }
 
-  /** Enter: applies the chosen sets. An empty choice is meaningful — it is
-   * how items are returned to setless — so it commits rather than cancelling. */
+  /** Enter: applies only the states the user actually changed. Setting every
+   * set to none is meaningful — it is how items are returned to setless — so
+   * it commits rather than cancelling. */
   async function confirm() {
     if (!active) return;
-    const setIds = [...chosen];
+    const before = new Map(original);
+    const after = new Map(current);
     const subjects = [...itemIds];
     close();
-    await shareSelectionWithSets(setIds, subjects);
+    await shareSelectionWithSets(after, subjects, before);
   }
 
   function cancel() {
@@ -97,9 +130,13 @@ export function createSetMembershipMode({
   function close() {
     active = false;
     itemIds = [];
-    chosen = new Set();
+    original = new Map();
+    current = new Map();
     render();
   }
 
-  return { isActive, begin, toggleFromItem, confirm, cancel, chosenSetIds, subjectIds };
+  return {
+    isActive, begin, toggleFromItem, confirm, cancel,
+    chosenSetIds, mixedSetIds, subjectIds,
+  };
 }

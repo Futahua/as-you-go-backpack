@@ -1,4 +1,11 @@
-import { selectAllScope, inverseScope, addItemSet, setMembership, removeItemSet } from '../sets-model.js';
+import {
+  selectAllScope,
+  inverseScope,
+  addItemSet,
+  setMembership,
+  applyMembershipChanges,
+  removeItemSet,
+} from '../sets-model.js';
 
 /** Application command layer. Commands are the named user-intent operations
  * that coordinate session mutation, persistence, and narrow rendering/host
@@ -101,10 +108,17 @@ export function createWorkspaceCommands({
     }
   }
 
-  /** Ctrl+G: replaces which sets the selection belongs to. An empty setIds
-   * regresses the items to setless, which is how something leaves every set.
-   * Sets left with no members are dropped. */
-  async function shareSelectionWithSets(setIds, itemIds = null) {
+  /** Ctrl+G: applies the picker's membership decision to the selection.
+   *
+   * `desired` and `before` are per-set state maps (all / none / mixed) rather
+   * than a list of chosen ids. The difference matters: a list cannot express
+   * "leave this set as it is", so applying one to a mixed selection edits sets
+   * the user never touched. Passing both maps means only the states that
+   * actually changed are applied.
+   *
+   * A plain array is still accepted, since `G` and the tests express "put
+   * these items in exactly these sets" and have no mixed state to preserve. */
+  async function shareSelectionWithSets(desired, itemIds = null, before = null) {
     // The membership mode captures its subjects when it opens, so clicking
     // around inside the mode cannot change what is being edited.
     const ids = itemIds ?? [...store.getSession().selected];
@@ -114,7 +128,9 @@ export function createWorkspaceCommands({
     // The ancestor chain is required, not optional: without it, removing an
     // item that belongs through its parent folder filters a list the item was
     // never in, and the removal silently does nothing.
-    const next = setMembership(current, ids, setIds, ancestorsOf);
+    const next = desired instanceof Map
+      ? applyMembershipChanges(current, ids, before ?? new Map(), desired, ancestorsOf)
+      : setMembership(current, ids, desired, ancestorsOf);
     if (next === current) return;
     try {
       await store.commit(setItemSets(snapshot, next));

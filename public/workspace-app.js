@@ -526,6 +526,9 @@ My request:
     function drawSetShapes() {
       if (setShapes.size === 0) return;
       const chosen = new Set(setMembershipMode.chosenSetIds());
+      // Partial sets are neither in nor out: Enter leaves them exactly as they
+      // are, so they must not read as either.
+      const mixed = new Set(setMembershipMode.mixedSetIds?.() ?? []);
       const picking = setMembershipMode.isActive();
 
       // Every node on screen, member or not. Non-members are obstacles: a
@@ -563,6 +566,7 @@ My request:
         shape.path.setAttribute('d', region?.svgPath ?? '');
         shape.path.classList.toggle('set-picking', picking);
         shape.path.classList.toggle('set-chosen', picking && chosen.has(shape.setId));
+        shape.path.classList.toggle('set-partial', picking && mixed.has(shape.setId));
       }
     }
 
@@ -1626,7 +1630,12 @@ My request:
   const setMembershipMode = createSetMembershipMode({
     getSets: () => state.view?.itemSets ?? [],
     getSelectedIds: () => [...store.getSession().selected],
-    shareSelectionWithSets: (setIds, itemIds) => commands.shareSelectionWithSets(setIds, itemIds),
+    shareSelectionWithSets: (desired, itemIds, before) =>
+      commands.shareSelectionWithSets(desired, itemIds, before),
+    // Without the ancestor chain the picker cannot see that an item belongs to
+    // a set through its parent folder, so it would offer to add it to a set it
+    // is already in and silently fail to remove it.
+    ancestorsOf: (itemId) => ancestorFolderIds(state, itemId),
     render: () => render(),
     setStatus,
   });

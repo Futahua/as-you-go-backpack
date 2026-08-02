@@ -108,6 +108,15 @@
   stroke-width: 3;
   stroke-dasharray: none;
 }
+/* Only some of the picked items are in this set. Enter leaves it exactly as
+ * it is, so it must read as neither chosen nor rejected — solid enough to be
+ * present, dashed to say "still undecided". */
+.graph-set-outline.set-picking.set-partial {
+  fill: rgba(76, 114, 90, 0.08);
+  stroke: rgba(76, 114, 90, 0.55);
+  stroke-width: 2;
+  stroke-dasharray: 2 4;
+}
 .graph-edge {
   fill: none;
   stroke: #b9b3a6;
