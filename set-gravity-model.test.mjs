@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { centreOfMass, forceSetGravity } from './public/set-gravity-model.js';
+import { centreOfMass, forceSetGravity, forceSetExclusion } from './public/set-gravity-model.js';
 
 function node(id, x, y) {
   return { id, x, y, vx: 0, vy: 0 };
@@ -142,4 +142,93 @@ test('the gathering settles instead of collapsing or oscillating', () => {
       `${n.id} came to rest rather than oscillating (speed ${Math.hypot(n.vx, n.vy).toFixed(2)})`,
     );
   }
+});
+
+// ===========================================================================
+// Exclusion. A boundary can only exclude what lies outside the region its
+// members occupy: a bystander resting BETWEEN two members is interior however
+// the outline is drawn. So the layout has to express membership too, not just
+// the drawing.
+// ===========================================================================
+
+test('a non-member sitting among the members is pushed out of the cloud', () => {
+  const members = [
+    { id: 'a', x: 0, y: -150 },
+    { id: 'b', x: 0, y: 0 },
+    { id: 'c', x: 0, y: 150 },
+  ];
+  // Right in the middle of them, where no closed curve around the members can
+  // leave it out.
+  const outsider = { id: 'x', x: 40, y: 0 };
+  const nodes = [...members, outsider];
+
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'x' ? [] : ['s1']),
+    membersOf: () => members,
+  });
+  force.initialize(nodes);
+  const nearestBefore = Math.min(...members.map((m) => Math.hypot(outsider.x - m.x, outsider.y - m.y)));
+
+  for (let i = 0; i < 300; i += 1) {
+    force(0.3);
+    outsider.vx *= 0.6;
+    outsider.vy *= 0.6;
+    outsider.x += outsider.vx;
+    outsider.y += outsider.vy;
+  }
+
+  const nearestAfter = Math.min(...members.map((m) => Math.hypot(outsider.x - m.x, outsider.y - m.y)));
+  assert.ok(
+    nearestAfter > nearestBefore,
+    `the outsider did not move away (${nearestBefore.toFixed(0)} -> ${nearestAfter.toFixed(0)})`,
+  );
+  assert.ok(nearestAfter > 100, `it is still among the members at ${nearestAfter.toFixed(0)}px`);
+});
+
+test('members are never pushed by the exclusion force', () => {
+  // They are gathered by forceSetGravity; a force shoving them apart would be
+  // arguing with it, and the set would never settle.
+  const members = [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 60, y: 0 }];
+  const force = forceSetExclusion({ setsOf: () => ['s1'], membersOf: () => members });
+  force.initialize(members);
+  force(1);
+  for (const member of members) {
+    assert.equal(member.vx ?? 0, 0, `${member.id} was pushed`);
+    assert.equal(member.vy ?? 0, 0, `${member.id} was pushed`);
+  }
+});
+
+test('a held item is left where the user is putting it', () => {
+  const members = [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 0, y: 120 }];
+  const dragged = { id: 'x', x: 0, y: 60 };
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'x' ? [] : ['s1']),
+    membersOf: () => members,
+    isHeld: (id) => id === 'x',
+  });
+  force.initialize([...members, dragged]);
+  force(1);
+  assert.equal(dragged.vx ?? 0, 0, 'a drag is not fought');
+  assert.equal(dragged.vy ?? 0, 0, 'a drag is not fought');
+});
+
+test('an item already clear of the set is left alone', () => {
+  const members = [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 0, y: 100 }];
+  const distant = { id: 'x', x: 600, y: 50 };
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'x' ? [] : ['s1']),
+    membersOf: () => members,
+  });
+  force.initialize([...members, distant]);
+  force(1);
+  assert.equal(distant.vx ?? 0, 0, 'nothing to correct');
+});
+
+test('an item belonging to the set is not treated as a trespasser', () => {
+  const members = [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 0, y: 120 }, { id: 'c', x: 20, y: 60 }];
+  const force = forceSetExclusion({ setsOf: () => ['s1'], membersOf: () => members });
+  force.initialize(members);
+  force(1);
+  const middle = members.find((m) => m.id === 'c');
+  assert.equal(middle.vx ?? 0, 0, 'a member in the middle of its own set stays');
 });

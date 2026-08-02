@@ -115,3 +115,91 @@ export function forceSetGravity({
 
   return force;
 }
+
+/** Pushes non-members out of the sets they have wandered into.
+ *
+ * The ring cannot do this on its own. A boundary is a closed curve, so it can
+ * only exclude what lies outside the region its members occupy — a bystander
+ * that comes to rest *between* two members is inside the cloud, and no convex
+ * outline can enclose the members while leaving it out. Measured on a
+ * six-member set: two foreign items sat 92 and 100px from their nearest
+ * member, comfortably interior, and the ring had no choice but to contain
+ * them.
+ *
+ * So the layout is what has to express membership, not just the drawing. A
+ * foreign item inside a set is pushed away from that set's centre until it is
+ * clear of the members, which is the same instinct as spitting a trespasser
+ * out on release, applied continuously so it never settles there at all.
+ *
+ * Members are never pushed — they are pulled together by forceSetGravity, and
+ * a force that shoved them apart would be arguing with it. Held items are
+ * exempt too: while the user is dragging something, it goes where they put it.
+ */
+export function forceSetExclusion({
+  setsOf,
+  membersOf,
+  isHeld = () => false,
+  strength = 0.35,
+  // How far outside the member cloud a foreign item is pushed. Comfortably
+  // more than a tile, so the gap reads as deliberate rather than as a near
+  // miss, and enough that the ring's own padding does not swallow it again.
+  clearance = 150,
+} = {}) {
+  let nodes = [];
+
+  function force(alpha) {
+    for (const node of nodes) {
+      if (node.ring) continue;
+      if (isHeld(node.id)) continue;
+      const own = new Set(setsOf(node.id) ?? []);
+
+      for (const setId of setIdsInPlay(nodes, setsOf)) {
+        if (own.has(setId)) continue;
+        const members = (membersOf(setId) ?? []).filter((member) => member.id !== node.id);
+        if (members.length === 0) continue;
+
+        // Distance to the nearest member, not to the centre: a set is a cloud
+        // rather than a disc, and what makes an item look like it belongs is
+        // sitting close to the things in it.
+        let nearest = Infinity;
+        for (const member of members) {
+          nearest = Math.min(nearest, Math.hypot(node.x - member.x, node.y - member.y));
+        }
+        if (nearest >= clearance) continue;
+
+        // Away from the centre of mass, so the escape route leads out of the
+        // cloud rather than deeper between two of its members.
+        const centre = centreOfMass(members);
+        let dx = node.x - centre.x;
+        let dy = node.y - centre.y;
+        let distance = Math.hypot(dx, dy);
+        if (distance < 1e-6) {
+          // Sitting exactly on the centre gives no direction to leave along.
+          // Any fixed one will do, and a deterministic choice keeps the layout
+          // reproducible rather than depending on floating-point noise.
+          dx = 1;
+          dy = 0;
+          distance = 1;
+        }
+        const push = ((clearance - nearest) / clearance) * strength * alpha;
+        // Defaulted rather than assumed: d3 seeds vx/vy when it owns the nodes,
+        // but a caller passing plain objects would otherwise turn the whole
+        // layout into NaN on the first tick, silently and unrecoverably.
+        node.vx = (node.vx ?? 0) + ((dx / distance) * push * clearance);
+        node.vy = (node.vy ?? 0) + ((dy / distance) * push * clearance);
+      }
+    }
+  }
+
+  force.initialize = (value) => { nodes = value ?? []; };
+  return force;
+}
+
+/** Every set that has at least one node on screen. */
+function setIdsInPlay(nodes, setsOf) {
+  const ids = new Set();
+  for (const node of nodes) {
+    for (const setId of setsOf(node.id) ?? []) ids.add(setId);
+  }
+  return ids;
+}

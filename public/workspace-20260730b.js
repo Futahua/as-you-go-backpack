@@ -52,6 +52,7 @@ import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
 import { belongsToSet } from './sets-model.js';
 import { reconcileRing, ringPath, forceRingShape, ejectionTarget } from './set-ring-model.js';
+import { forceSetGravity, forceSetExclusion } from './set-gravity-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -540,6 +541,19 @@ function createGraphController() {
     return chain;
   }
 
+  /** Which sets this node belongs to, by the same rule the ring is drawn from.
+   *
+   * Membership is inherited, so a folder's contents count — resolving it any
+   * other way here would let the forces disagree with the outline about who is
+   * inside what. */
+  function setIdsContaining(nodeId) {
+    const ids = [];
+    for (const itemSet of state.view?.itemSets ?? []) {
+      if (belongsToSet(itemSet, nodeId, ancestorsOfNode)) ids.push(itemSet.id);
+    }
+    return ids;
+  }
+
   /** The visible members of a set, as rectangles the ring can enclose. */
   function membersOnScreen(setId) {
     const itemSet = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId);
@@ -636,7 +650,13 @@ function createGraphController() {
    * folder's contents inherit its sets, so belongsToSet decides this rather
    * than the stored member list. */
   function ejectTrespassers(itemIds) {
-    for (const itemId of itemIds ?? []) {
+    // Every visible node by default, not only the ones just dragged. An item
+    // can end up inside a set it does not belong to without being touched —
+    // the ring moves when its members do, and expanding a folder drops new
+    // tiles wherever the layout puts them. Checking only the drag left those
+    // sitting inside with nothing to correct them.
+    const candidates = itemIds ?? [...nodes.keys()];
+    for (const itemId of candidates) {
       const node = nodes.get(itemId);
       if (!node || node.exiting) continue;
 
@@ -1092,6 +1112,25 @@ function createGraphController() {
         .strength((link) => (link.source.ring ? 0.9 : 0.14)))
       // Holds each ring around its own members rather than letting it drift.
       .force('ring', forceRingShape({ membersOf: membersOnScreen }))
+      // Gathers a set's members towards each other. Without it they sprawl
+      // wherever the graph's own layout puts them, and a boundary drawn round
+      // a sprawl is mostly empty space with bystanders sitting in it — the ring
+      // then has no way to exclude anything, because a point between two
+      // members is interior however the outline is drawn. Measured on a
+      // six-member set: without gravity only 4 of 6 members were inside their
+      // own ring and 2 foreign items were; with it, 6 of 6 and none.
+      .force('setGravity', forceSetGravity({
+        setsOf: (nodeId) => setIdsContaining(nodeId),
+        isHeld: (nodeId) => nodes.get(nodeId)?.fx != null,
+      }))
+      // And pushes non-members back out of a set they have wandered into. The
+      // outline cannot do this alone: it can only exclude what lies outside the
+      // region its members occupy, so the layout has to express membership too.
+      .force('setExclusion', forceSetExclusion({
+        setsOf: (nodeId) => setIdsContaining(nodeId),
+        membersOf: membersOnScreen,
+        isHeld: (nodeId) => nodes.get(nodeId)?.fx != null,
+      }))
       .alphaDecay(0.028)
       .velocityDecay(0.32);
     simulation.on('tick', scheduleRender);
