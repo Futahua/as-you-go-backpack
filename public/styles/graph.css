@@ -24,9 +24,14 @@
 /* The outline drawn through a set's ring nodes. Pointer events stay off it:
    clicks are hit-tested against the ring node positions, so the path is purely
    a rendering and never something the user interacts with directly. */
+/* rgba over the project's green rather than color-mix on an --accent token:
+   there is no --accent in tokens.css, and nothing else in this codebase uses
+   color-mix, so both would have been inventions — and a mistake in either
+   renders the outline invisible rather than wrong, which is the hardest kind
+   of failure to notice on a canvas that is mostly empty. */
 .graph-set-outline {
-  fill: color-mix(in oklab, var(--accent, #6b8f71) 12%, transparent);
-  stroke: color-mix(in oklab, var(--accent, #6b8f71) 55%, transparent);
+  fill: rgba(76, 114, 90, 0.10);
+  stroke: rgba(76, 114, 90, 0.55);
   stroke-width: 2px;
   stroke-linejoin: round;
   /* A set that wraps around a non-member leaves a hole rather than covering
@@ -35,28 +40,28 @@
   transition: fill 120ms ease, stroke 120ms ease;
 }
 .graph-set-outline.set-selected {
-  fill: color-mix(in oklab, var(--accent, #6b8f71) 22%, transparent);
-  stroke: color-mix(in oklab, var(--accent, #6b8f71) 85%, transparent);
+  fill: rgba(76, 114, 90, 0.20);
+  stroke: rgba(76, 114, 90, 0.9);
   stroke-width: 3px;
 }
 /* While Ctrl+G is picking, every outline recedes so the chosen ones stand out
    — the canvas itself becomes the picker. */
 .graph-set-outline.set-picking {
-  fill: color-mix(in oklab, var(--accent, #6b8f71) 5%, transparent);
-  stroke: color-mix(in oklab, var(--accent, #6b8f71) 25%, transparent);
+  fill: rgba(76, 114, 90, 0.04);
+  stroke: rgba(76, 114, 90, 0.25);
   stroke-dasharray: 6 5;
 }
 .graph-set-outline.set-picking.set-chosen {
-  fill: color-mix(in oklab, var(--accent, #6b8f71) 24%, transparent);
-  stroke: color-mix(in oklab, var(--accent, #6b8f71) 95%, transparent);
+  fill: rgba(76, 114, 90, 0.22);
+  stroke: rgba(76, 114, 90, 0.95);
   stroke-width: 3px;
   stroke-dasharray: none;
 }
 /* Only some of the picked items are in this set. Enter leaves it exactly as it
    is, so it must read as neither chosen nor rejected. */
 .graph-set-outline.set-picking.set-partial {
-  fill: color-mix(in oklab, var(--accent, #6b8f71) 12%, transparent);
-  stroke: color-mix(in oklab, var(--accent, #6b8f71) 60%, transparent);
+  fill: rgba(76, 114, 90, 0.10);
+  stroke: rgba(76, 114, 90, 0.6);
   stroke-dasharray: 2 4;
 }
 
