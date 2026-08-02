@@ -34,7 +34,7 @@ before adding code so new work lands in the right place.
 npm test
 ```
 
-572 tests, all passing at handoff. There is no build step and no framework —
+600 tests, all passing at handoff. There is no build step and no framework —
 plain ES modules served as static files inside the Papers host.
 
 To see it running, launch Papers and open this Backpack. **Nothing in this
@@ -52,8 +52,10 @@ graph view.
   later join the set automatically. A child can be taken back out with an
   exclusion, without expanding the folder into its contents.
 - Sets store no position or size. The outline is derived from where members
-  currently are — recomputed when they move, not on a timer — so a member that
-  moves reshapes its own set rather than crossing a boundary it cannot cross.
+  currently are — recomputed when they move, not on a timer — so the shape
+  tracks its members over time rather than crossing a boundary it cannot
+  cross. Movement is judged against the regions frozen at drag start (see the
+  movement note below), not against a region the drag itself is reshuffling.
   Any living edge belongs in CSS on the static path, where it cannot deform the
   tested boundary.
 - Names are optional — the user navigates visually, and sets are picked by
@@ -163,10 +165,15 @@ got wrong. Two traps this work fell into and had to climb out of:
   the user asked to revisit it once outlines were visible. With three or more
   overlapping sets it may be too restrictive.
 
-  Worth knowing before you judge it: because a region is derived from live
-  member positions, a member's own set follows it and never blocks it. Sets
-  have no fixed boundary to escape. The rule only bites on a setless item
-  entering a set, and on a shared item leaving the intersection.
+  Worth knowing before you judge it: the drag rules are judged against the
+  regions frozen when the drag began, not against the live geometry. During the
+  drag the item's own motion reheats the simulation and recomputes the live
+  regions with the item at its new position, so judging against those would
+  make the verdict depend on whether a redraw had run — a quick and a slow
+  release could disagree. Freezing the regions at drag start makes the outcome
+  deterministic. The rule only bites on a setless item entering a set, and on a
+  shared item leaving the intersection; a member cannot be moved outside its
+  drag-start set region.
 - **Right-click-drag to multi-select sets is not bound**, and sets have no
   visible name or delete affordance beyond the `Delete` key.
 
@@ -187,7 +194,33 @@ above:
 - **Movement rules enforced.** `canDropInsideRegions()` is called on release.
   Blocked destinations are previewed during the drag and reverted on release,
   per item, so one blocked item does not veto a multi-item drag. Bin and folder
-  drops are deliberately exempt.
+  drops are deliberately exempt. Judgement is against the regions frozen at
+  drag start: the drag's own motion reheats the simulation, so validating
+  against the live regions would make the verdict depend on whether a redraw
+  had run. A member cannot leave its drag-start set region, a shared member
+  must stay inside the drag-start intersection of all its sets, and a setless
+  item cannot enter a set.
+
+## Two further fixes on top of the review plan
+
+- **Linked-shortcut inheritance across hidden placements.** `ancestorsOfNode()`
+  originally walked the visible graph node's `parentIds` — a *visibility*
+  structure, not the authoritative placement list. A linked shortcut with an
+  active placement inside a collapsed folder inherited nothing from it. It now
+  resolves shortcut records through `shortcutAncestorFolderIds()` in
+  `workspace-model-20260730b.js`, which walks the ancestor chain from every
+  active (non-binned) placement and deduplicates. A collapsed folder's
+  placement contributes its sets; a binned placement contributes none; several
+  hidden placements contribute the union of their chains. Groups keep their
+  normal folder ancestry.
+- **Stale set regions cleared synchronously.** `setRegions` was cleared only
+  later, inside `drawSetShapes()`. The empty-view branch of `renderGraph`
+  calls `syncSetShapes()` and returns before any frame, so the previous view's
+  polygons stayed answerable to clicking, sweeping and drag-start snapshots
+  after their paths were gone. `syncSetShapes()` now enforces the invariant
+  itself: if no set path is drawable, `setRegions` is empty before control
+  returns to event handling, and a set whose shape was just removed is pruned
+  even while other sets keep rendering.
 
 ## How this work is expected to be done
 
