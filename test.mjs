@@ -90,7 +90,9 @@ test('the local project owns its exact interface, pickup prompt and prepared act
 });
 
 test('the entry composes the command layer after its graph and closeMenu consts', async () => {
-  const script = await read('public/workspace-20260730b.js');
+  // The composition lives in workspace-app.js; the file the browser loads is
+  // now just the call into it.
+  const script = await read('public/workspace-app.js');
   const commandsIndex = script.indexOf('const commands = createWorkspaceCommands');
   const graphIndex = script.indexOf('const graph = createGraphController');
   const closeMenuIndex = script.indexOf('const closeMenu = () => menu.closeMenu()');
