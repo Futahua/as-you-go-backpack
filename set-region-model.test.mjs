@@ -909,6 +909,50 @@ test('a partial blend is worse than none, so the default is past closure', () =>
   assert.ok(cornerAt(100) < 20, 'and the default is in the flat part of the curve');
 });
 
+test('the concavity closing is grid-dependent, which is why it is off', () => {
+  // A morphological closing fills the concave bites between members, and on a
+  // three-member L it takes solidity against the convex hull from 0.68 to 0.86.
+  // It is off anyway, and this records the reason so it is not switched on
+  // again by someone who only measures the shape.
+  //
+  // The chamfer transform underneath it is grid-aligned, so at the radii that
+  // actually change the silhouette it bridges lobes differently depending on
+  // where the layout falls on the sampling grid. The failure is erratic rather
+  // than a threshold — some radii survive a shift and their neighbours do not —
+  // so no value is safe on an arbitrary layout.
+  const offset = { x: 13.7, y: -29.2 };
+  const base = [tile('a1', 0, 0), tile('b1', 210, 0), tile('a2', 420, 0), tile('b2', 630, 0)];
+  const shifted = base.map((item) => ({ ...item, x: item.x + offset.x, y: item.y + offset.y }));
+  const sets = [{ id: 'sa', memberIds: ['a1', 'a2'] }, { id: 'sb', memberIds: ['b1', 'b2'] }];
+
+  const centroid = (region) => {
+    const points = region.polygons.flat();
+    return {
+      x: points.reduce((total, p) => total + p.x, 0) / points.length,
+      y: points.reduce((total, p) => total + p.y, 0) / points.length,
+    };
+  };
+  const driftAt = (surfaceTension) => {
+    const before = buildSetRegions({ sets, visibleItems: base, surfaceTension });
+    const after = buildSetRegions({ sets, visibleItems: shifted, surfaceTension });
+    let worst = 0;
+    for (const setId of ['sa', 'sb']) {
+      const from = centroid(before.get(setId));
+      const to = centroid(after.get(setId));
+      worst = Math.max(worst, Math.abs((to.y - from.y) - offset.y));
+    }
+    return worst;
+  };
+
+  // The shipped setting translates cleanly.
+  assert.ok(driftAt(0) < 4, `with the closing off the geometry translates (drift ${driftAt(0).toFixed(1)})`);
+  // A radius large enough to matter does not.
+  assert.ok(
+    driftAt(150) > 20,
+    `a closing radius that changes the silhouette breaks translation (drift ${driftAt(150).toFixed(1)})`,
+  );
+});
+
 test('smoothing does not let two exclusive sets meet', () => {
   // A wider blend claims more space, so the guarantee has to be re-checked at
   // the setting actually shipped rather than only at blend zero.

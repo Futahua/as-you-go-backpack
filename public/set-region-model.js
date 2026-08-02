@@ -573,8 +573,14 @@ export function buildMembraneField(options) {
   const displacement = reserved
     ? Math.max(0, ...reserved.map((segment) => segment.radius)) + neckRadius + gap
     : 0;
+  // The closing pass dilates by `surfaceTension` before eroding back, and that
+  // dilation needs room on the grid. Without the reserve it runs into the
+  // border, which the distance transform reads as outside — so the erode pulls
+  // the concavity open again and the closing quietly does nothing at exactly
+  // the radii where it matters most.
+  const tensionReserve = (options.surfaceTension ?? 0) + cellSize * 2;
   const initialExtraMargin = options.initialExtraMargin
-    ?? (neckRadius + displacement + cellSize * 2);
+    ?? (neckRadius + displacement + tensionReserve + cellSize * 2);
 
   let extraMargin = initialExtraMargin;
   let attempts = 0;
@@ -619,6 +625,7 @@ function buildMembraneFieldOnGrid({
   cellSize,
   blend = 0,
   cornerRadius = 0,
+  surfaceTension = 0,
 }, neckRadius, extraMargin) {
   const field = sampleField(memberRects, obstacleRects, {
     padding, gap, cellSize, exclusiveRects, extraMargin, blend, cornerRadius,
@@ -814,6 +821,12 @@ function buildMembraneFieldOnGrid({
   for (let index = 0; index < size; index += 1) field.inside[index] = values[index] >= 0 ? 1 : 0;
   const forbidden = new Uint8Array(size);
   for (let index = 0; index < size; index += 1) forbidden[index] = neckSpaceAllowed[index] ? 0 : 1;
+  // Surface tension, before the void fill. A droplet has no concave bites: the
+  // tension pulls its boundary taut across any crook tighter than its own
+  // curvature, and that is what makes it read as one body rather than as a
+  // cluster of joined lumps. The icons sit on that surface rather than shaping
+  // it.
+  closeConcavities(field, forbidden, surfaceTension);
   fillCosmeticVoids(field, forbidden);
 
   // Connectivity is read off the membrane that was actually built, not off
@@ -868,6 +881,130 @@ function buildMembraneFieldOnGrid({
  * Filled cells are given a small positive value rather than a large one, so
  * the closed patch still interpolates smoothly into the membrane around it
  * instead of introducing a step the contour would trace as a notch. */
+/** Fills the concave bites out of the silhouette, so a set reads as one body.
+ *
+ * Blending the members smooths the *boundary* but does not make the shape
+ * convex: wherever three members sit in an L, the space in the crook stays
+ * outside and the outline tucks into it. Those inward bites are what stop a set
+ * reading as one potato — the edge is curved, but the silhouette is still a
+ * cluster of connected lumps.
+ *
+ * A morphological closing removes them. Dilating by `radius` swallows every
+ * concavity narrower than that, and eroding by the same amount pulls the outer
+ * boundary back to where it started — so the extent is unchanged and only the
+ * bites are filled. This is done on the scalar field rather than on the
+ * occupancy mask so the result is still a smooth field the contour can be
+ * interpolated from; a mask-level closing would put stepped edges back.
+ *
+ * The trade this makes is deliberate and was asked for: a filled crook may
+ * contain a non-member, and the boundary now claims that space rather than
+ * tucking around it. The shape wins over the other icons' positions. What the
+ * closing must never do is claim space belonging to a set this one shares no
+ * member with, so `forbidden` clamps it — the separation guarantee is not
+ * negotiable, and it is checked on the result by the exclusive sweeps.
+ *
+ * Both passes use a chamfer distance transform, which is linear in the grid
+ * rather than quadratic in the radius. At the radii this needs, a direct
+ * disc-shaped pass would dominate the whole build. */
+function closeConcavities(field, forbidden, radius) {
+  const { values, inside, columns, rows, cellSize } = field;
+  if (radius <= 0) return;
+  const size = columns * rows;
+
+  // Distance in cells from the region, and from its complement. Two chamfer
+  // sweeps each: forward then backward.
+  const transform = (seedInside) => {
+    const distance = new Float32Array(size);
+    const far = columns + rows;
+    for (let index = 0; index < size; index += 1) {
+      distance[index] = (inside[index] === 1) === seedInside ? 0 : far;
+    }
+    const orthogonal = 1;
+    const diagonal = Math.SQRT2;
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const index = row * columns + column;
+        if (distance[index] === 0) continue;
+        let best = distance[index];
+        if (row > 0) best = Math.min(best, distance[index - columns] + orthogonal);
+        if (column > 0) best = Math.min(best, distance[index - 1] + orthogonal);
+        if (row > 0 && column > 0) best = Math.min(best, distance[index - columns - 1] + diagonal);
+        if (row > 0 && column < columns - 1) best = Math.min(best, distance[index - columns + 1] + diagonal);
+        distance[index] = best;
+      }
+    }
+    for (let row = rows - 1; row >= 0; row -= 1) {
+      for (let column = columns - 1; column >= 0; column -= 1) {
+        const index = row * columns + column;
+        if (distance[index] === 0) continue;
+        let best = distance[index];
+        if (row < rows - 1) best = Math.min(best, distance[index + columns] + orthogonal);
+        if (column < columns - 1) best = Math.min(best, distance[index + 1] + orthogonal);
+        if (row < rows - 1 && column < columns - 1) best = Math.min(best, distance[index + columns + 1] + diagonal);
+        if (row < rows - 1 && column > 0) best = Math.min(best, distance[index + columns - 1] + diagonal);
+        distance[index] = best;
+      }
+    }
+    return distance;
+  };
+
+  const radiusCells = radius / cellSize;
+  // Dilate: everything within `radius` of the region joins it.
+  const toRegion = transform(true);
+  const dilated = new Uint8Array(size);
+  for (let index = 0; index < size; index += 1) {
+    dilated[index] = toRegion[index] <= radiusCells ? 1 : 0;
+  }
+
+  // Erode: anything within `radius` of the dilated shape's *outside* leaves it
+  // again. A concavity narrower than 2*radius was closed over by the dilation
+  // and has no outside left nearby, so it survives — which is the whole point.
+  const outsideDistance = new Float32Array(size);
+  {
+    const far = columns + rows;
+    for (let index = 0; index < size; index += 1) outsideDistance[index] = dilated[index] ? far : 0;
+    const orthogonal = 1;
+    const diagonal = Math.SQRT2;
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const index = row * columns + column;
+        if (outsideDistance[index] === 0) continue;
+        let best = outsideDistance[index];
+        if (row > 0) best = Math.min(best, outsideDistance[index - columns] + orthogonal);
+        if (column > 0) best = Math.min(best, outsideDistance[index - 1] + orthogonal);
+        if (row > 0 && column > 0) best = Math.min(best, outsideDistance[index - columns - 1] + diagonal);
+        if (row > 0 && column < columns - 1) best = Math.min(best, outsideDistance[index - columns + 1] + diagonal);
+        outsideDistance[index] = best;
+      }
+    }
+    for (let row = rows - 1; row >= 0; row -= 1) {
+      for (let column = columns - 1; column >= 0; column -= 1) {
+        const index = row * columns + column;
+        if (outsideDistance[index] === 0) continue;
+        let best = outsideDistance[index];
+        if (row < rows - 1) best = Math.min(best, outsideDistance[index + columns] + orthogonal);
+        if (column < columns - 1) best = Math.min(best, outsideDistance[index + 1] + orthogonal);
+        if (row < rows - 1 && column < columns - 1) best = Math.min(best, outsideDistance[index + columns + 1] + diagonal);
+        if (row < rows - 1 && column > 0) best = Math.min(best, outsideDistance[index + columns - 1] + diagonal);
+        outsideDistance[index] = best;
+      }
+    }
+  }
+
+  for (let index = 0; index < size; index += 1) {
+    if (inside[index]) continue;
+    // Closed by the operation, and allowed to be.
+    if (outsideDistance[index] <= radiusCells) continue;
+    if (forbidden[index]) continue;
+    inside[index] = 1;
+    // The field value is the true distance to the closed shape's edge, so the
+    // interpolated contour runs through the patch as smoothly as it does
+    // anywhere else rather than meeting it at a step.
+    const depth = (outsideDistance[index] - radiusCells) * cellSize;
+    if (depth > values[index]) values[index] = depth;
+  }
+}
+
 function fillCosmeticVoids(field, forbidden) {
   const { values, inside, columns, rows, cellSize } = field;
   const size = columns * rows;
@@ -1322,6 +1459,25 @@ export function buildSetRegions({
   // percentile, against 56 and 9 for the unblended shape.
   blend = 100,
   cornerRadius = 22,
+  // How taut the surface is: the radius of the crook a droplet's own tension
+  // would pull flat. Off by default, and the reason is worth recording.
+  //
+  // A morphological closing does fill the concave bites — solidity against the
+  // convex hull went 0.68 to 0.86 on a three-member L, and the isolated
+  // algorithm is correct. But the chamfer transform it runs on is grid-aligned,
+  // so at the radii that actually change the silhouette the closing bridges
+  // lobes differently depending on where the layout happens to fall on the
+  // sampling grid. Translating a scene by (13.7, -29.2) moved one region's
+  // centroid by +38 in y where it should have moved -29, with the area
+  // unchanged to within 0.4% — the shape was not wobbling, its topology was
+  // flipping.
+  //
+  // And the failure is erratic rather than a threshold: 60 and 120 survive the
+  // translation check while 90 and 150 break it, so no value is safe on an
+  // arbitrary layout. A set whose outline changes discontinuously when the
+  // graph drifts a pixel is worse than one that is merely lumpy, so this stays
+  // off until the closing is done in a grid-independent way.
+  surfaceTension = 0,
   initialExtraMargin,
   marginGrowthStep,
   maxMarginGrowthAttempts,
@@ -1379,6 +1535,7 @@ export function buildSetRegions({
       cellSize,
       blend,
       cornerRadius,
+      surfaceTension,
       ...(neckRadius == null ? {} : { neckRadius }),
       ...(initialExtraMargin == null ? {} : { initialExtraMargin }),
       ...(marginGrowthStep == null ? {} : { marginGrowthStep }),
