@@ -10,6 +10,7 @@ import test from 'node:test';
 import {
   ringNodeCount,
   enclosingCircle,
+  enclosingEllipse,
   ringPositions,
   reconcileRing,
   ringPath,
@@ -108,14 +109,61 @@ test('the ring settles around its members, not on top of them', () => {
     }
   }
 
-  const circle = enclosingCircle(members, 40);
+  // Against the ellipse, not a circle: the boundary is oriented along how the
+  // members are spread, so "on the rim" means the ellipse equation is satisfied
+  // rather than every node being one radius from the centre.
+  const ellipse = enclosingEllipse(members, 40);
   for (const node of nodes) {
-    const distance = Math.hypot(node.x - circle.x, node.y - circle.y);
+    const dx = node.x - ellipse.x;
+    const dy = node.y - ellipse.y;
+    const cos = Math.cos(-ellipse.angle);
+    const sin = Math.sin(-ellipse.angle);
+    const local = { x: (dx * cos) - (dy * sin), y: (dx * sin) + (dy * cos) };
+    const onRim = Math.hypot(local.x / ellipse.a, local.y / ellipse.b);
     assert.ok(
-      Math.abs(distance - circle.radius) < 12,
-      `a ring node settled on the rim (${distance.toFixed(0)} vs ${circle.radius.toFixed(0)})`,
+      Math.abs(onRim - 1) < 0.15,
+      `a ring node settled off the rim (${onRim.toFixed(2)}, 1.0 is exactly on it)`,
     );
   }
+});
+
+test('the boundary stretches along the drag rather than growing radially', () => {
+  // A circle has one radius and so no way to express direction: pulling two
+  // members apart along one axis inflated the boundary on both. Measured, two
+  // 72px tiles 800px apart gave a ring 982px tall where it should stay ~182.
+  const across = [];
+  for (const separation of [0, 200, 400, 800]) {
+    const members = [tile('a', -separation / 2, 0), tile('b', separation / 2, 0)];
+    const ellipse = enclosingEllipse(members, 40);
+    across.push(2 * ellipse.b);
+    // The long axis follows the spread.
+    assert.ok(
+      2 * ellipse.a >= separation,
+      `at ${separation} apart the boundary was only ${(2 * ellipse.a).toFixed(0)} long`,
+    );
+  }
+  // The short axis does not: it stays put however far apart they are dragged.
+  const widest = Math.max(...across);
+  const narrowest = Math.min(...across);
+  assert.ok(
+    widest - narrowest < 5,
+    `the boundary ballooned across the drag: heights ${across.map((v) => v.toFixed(0)).join(', ')}`,
+  );
+});
+
+test('the boundary orients along whichever way the members lie', () => {
+  const horizontal = enclosingEllipse([tile('a', -200, 0), tile('b', 200, 0)], 40);
+  const vertical = enclosingEllipse([tile('a', 0, -200), tile('b', 0, 200)], 40);
+  const diagonal = enclosingEllipse([tile('a', -141, -141), tile('b', 141, 141)], 40);
+
+  const degrees = (radians) => ((radians * 180) / Math.PI + 360) % 180;
+  assert.ok(Math.abs(degrees(horizontal.angle) - 0) < 2, 'horizontal spread lies flat');
+  assert.ok(Math.abs(degrees(vertical.angle) - 90) < 2, 'vertical spread stands up');
+  assert.ok(Math.abs(degrees(diagonal.angle) - 45) < 2, 'diagonal spread leans');
+
+  // A lone member has no spread to point along, so it stays a circle.
+  const single = enclosingEllipse([tile('a', 0, 0)], 40);
+  assert.ok(Math.abs(single.a - single.b) < 1, 'one member gives a circle');
 });
 
 test('the drawn path passes through every ring node', () => {
@@ -163,7 +211,10 @@ function settle(members, extra = [], links = [], ticks = 200) {
   const simulation = forceSimulation(nodes).alpha(1).stop()
     .force('charge', forceManyBody().strength((n) => (n.ring ? 0 : -280)))
     .force('collide', forceCollide()
-      .radius((n) => (n.ring ? 18 : Math.max(n.width, n.height) / 2 + 20))
+      // 36 matches RING_NODE_RADIUS in the app: half a tile, so a ring node is
+      // as substantial as the thing it resists. At 18 a pinned foreign tile
+      // pushed through.
+      .radius((n) => (n.ring ? 30 : Math.max(n.width, n.height) / 2 + 20))
       .strength(0.9))
     .force('link', forceLink(links).id((d) => d.id)
       .distance((l) => (l.source.ring ? 60 : 145))
@@ -236,8 +287,14 @@ test('a dragged outsider is stopped by the ring', () => {
   const simulation = settle(members, [outsider, ...ring], links, 200);
 
   for (let x = 700; x >= 70; x -= 40) {
+    // fx/fy AND x/y, plus a reheat, because that is what pointer-controller
+    // does on every drag move. Pinning fx alone and letting the simulation go
+    // cold measures d3's alpha decay rather than the boundary.
     outsider.fx = x;
     outsider.fy = 0;
+    outsider.x = x;
+    outsider.y = 0;
+    simulation.alpha(0.12);
     for (let i = 0; i < 12; i += 1) simulation.tick();
   }
   assert.ok(!insideRing(ring, outsider), 'the outsider never got inside');
@@ -288,4 +345,66 @@ test('the ring follows a member that is dragged away', () => {
     `the ring collapsed from ${settledSize.w.toFixed(0)}x${settledSize.h.toFixed(0)} `
     + `to ${dragged.w.toFixed(0)}x${dragged.h.toFixed(0)}`,
   );
+});
+
+test('a foreign item is never admitted, even pinned at the set centre', () => {
+  // The strongest form of the containment claim, and the one the screenshots
+  // asked for: not merely that a moving outsider is slowed, but that a foreign
+  // item held anywhere inside the boundary's reach stays outside the outline.
+  //
+  // Pinning is what makes it hard. A dragged node has its position set rather
+  // than nudged, so collision cannot push back on it — the ring has to give way
+  // and close behind instead.
+  const members = [tile('a', 0, 0), tile('b', 0, 150)];
+  const foreign = tile('f', 300, 75);
+  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
+  const simulation = settle(members, [foreign, ...ring], links, 300);
+
+  const half = 36;
+  const corners = (x, y) => [[-half, -half], [half, -half], [half, half], [-half, half]]
+    .map(([dx, dy]) => ({ x: x + dx, y: y + dy }));
+
+  for (const x of [300, 220, 160, 120, 80, 40, 0]) {
+    foreign.fx = x;
+    foreign.fy = 75;
+    foreign.x = x;
+    foreign.y = 75;
+    // Reheated per step, because pointer-controller reheats on every drag move.
+    // Without it the simulation is stone cold by this point and the ring cannot
+    // react at all — the outsider then walks in, which measures d3's alpha
+    // decay rather than anything about the boundary.
+    simulation.alpha(0.12);
+    for (let i = 0; i < 60; i += 1) simulation.tick();
+
+    assert.ok(!insideRing(ring, { x, y: 75 }), `the foreign item got in at x=${x}`);
+    for (const corner of corners(x, 75)) {
+      assert.ok(!insideRing(ring, corner), `a corner of the foreign item got in at x=${x}`);
+    }
+  }
+});
+
+test('a member is still enclosed while a foreign item presses on the wall', () => {
+  // The other half: keeping an outsider out must not cost the set its own
+  // members. A boundary that solved exclusion by shrinking away would pass the
+  // test above and be useless.
+  const members = [tile('a', 0, 0), tile('b', 0, 150)];
+  const foreign = tile('f', 120, 75);
+  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
+  const simulation = settle(members, [foreign, ...ring], links, 300);
+
+  // Both fx/fy and x/y, which is what pointer-controller sets on a drag. Pinning
+  // fx alone leaves the node's current position to be resolved on the next
+  // tick, and the ring gets a free tick to react that a real drag never gives
+  // it — an earlier version of these tests did that and measured a boundary
+  // more permeable than the app's.
+  foreign.fx = 120;
+  foreign.fy = 75;
+  foreign.x = 120;
+  foreign.y = 75;
+  for (let i = 0; i < 200; i += 1) simulation.tick();
+
+  for (const member of members) {
+    assert.ok(insideRing(ring, member), `member ${member.id} was pushed out of its own set`);
+  }
+  assert.ok(!insideRing(ring, foreign), 'and the foreign item is still outside');
 });

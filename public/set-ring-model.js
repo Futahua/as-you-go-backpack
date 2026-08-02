@@ -63,6 +63,73 @@ export function enclosingCircle(members, padding) {
   return { ...centre, radius: radius + padding };
 }
 
+/** The ellipse that encloses these members, oriented along how they are spread.
+ *
+ * A circle has one radius and so no way to express direction: dragging two
+ * members apart along one axis inflates the boundary on both. Measured, two
+ * 72px tiles 800px apart gave a ring 982px tall, when it should have stayed
+ * about 112 — the set ballooned across the drag instead of stretching along it.
+ *
+ * The orientation comes from the members' own covariance, so the long axis is
+ * whichever way they actually lie rather than a fixed one. A single member, or
+ * several stacked in a perfect line, degenerates to a circle, which is right:
+ * there is no spread to point along. */
+export function enclosingEllipse(members, padding) {
+  if (!members || members.length === 0) return null;
+  const count = members.length;
+  let cx = 0;
+  let cy = 0;
+  for (const member of members) { cx += member.x; cy += member.y; }
+  cx /= count;
+  cy /= count;
+
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  for (const member of members) {
+    const dx = member.x - cx;
+    const dy = member.y - cy;
+    sxx += dx * dx;
+    syy += dy * dy;
+    sxy += dx * dy;
+  }
+  sxx /= count;
+  syy /= count;
+  sxy /= count;
+
+  // Eigenvalues of the 2x2 covariance give the spread along each principal
+  // axis; the eigenvector angle gives which way those axes point.
+  const mean = (sxx + syy) / 2;
+  const delta = Math.sqrt(Math.max(0, ((sxx - syy) / 2) ** 2 + (sxy * sxy)));
+  const angle = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+
+  // Every member must fit, so the tile's own half-diagonal is added to each
+  // axis rather than assuming the centres are the extent.
+  let half = 0;
+  for (const member of members) {
+    half = Math.max(half, Math.hypot(member.width ?? 0, member.height ?? 0) / 2);
+  }
+  return {
+    x: cx,
+    y: cy,
+    a: Math.sqrt(mean + delta) + half + padding,
+    b: Math.sqrt(Math.max(0, mean - delta)) + half + padding,
+    angle,
+  };
+}
+
+/** A point on the ellipse at the given parameter angle, in world space. */
+export function ellipsePoint(ellipse, t) {
+  const cos = Math.cos(ellipse.angle);
+  const sin = Math.sin(ellipse.angle);
+  const ex = Math.cos(t) * ellipse.a;
+  const ey = Math.sin(t) * ellipse.b;
+  return {
+    x: ellipse.x + (ex * cos) - (ey * sin),
+    y: ellipse.y + (ex * sin) + (ey * cos),
+  };
+}
+
 /** Positions for a ring of `count` nodes around a circle.
  *
  * Evenly spaced and starting at a fixed angle, so a ring that is rebuilt lands
@@ -216,14 +283,14 @@ export function forceRingShape({
   let nodes = [];
 
   function force(alpha) {
-    const circles = new Map();
+    const shapes = new Map();
     for (const node of nodes) {
       if (!node.ring) continue;
-      if (!circles.has(node.setId)) {
-        circles.set(node.setId, enclosingCircle(membersOf(node.setId) ?? [], padding));
+      if (!shapes.has(node.setId)) {
+        shapes.set(node.setId, enclosingEllipse(membersOf(node.setId) ?? [], padding));
       }
-      const circle = circles.get(node.setId);
-      if (!circle) continue;
+      const shape = shapes.get(node.setId);
+      if (!shape) continue;
 
       // Towards this node's own slot on the rim, as a point.
       //
@@ -244,11 +311,10 @@ export function forceRingShape({
       // floor alone reddens three tests, and the exact split of credit between
       // them is NOT established.
       const angle = (2 * Math.PI * (node.ringIndex ?? 0)) / Math.max(1, node.ringCount ?? 1);
-      const targetX = circle.x + Math.cos(angle) * circle.radius;
-      const targetY = circle.y + Math.sin(angle) * circle.radius;
+      const target = ellipsePoint(shape, angle);
       const pull = strength * Math.max(alpha, minAlpha);
-      node.vx += (targetX - node.x) * pull;
-      node.vy += (targetY - node.y) * pull;
+      node.vx += (target.x - node.x) * pull;
+      node.vy += (target.y - node.y) * pull;
     }
   }
 

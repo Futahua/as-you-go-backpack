@@ -332,11 +332,20 @@ function createGraphController() {
   // members' positions.
   const setShapes = new Map();
   const setRings = new Map();
-  // A ring node's collision radius. Small enough that neighbours pack shoulder
-  // to shoulder into a solid boundary, large enough that an icon cannot slip
-  // between two of them — an icon is stopped by the pair it meets, so this only
-  // has to exceed half the spacing.
-  const RING_NODE_RADIUS = 18;
+  // A ring node's collision radius.
+  //
+  // This was 18, reasoned as "only has to exceed half the spacing, since an
+  // icon is stopped by the pair of nodes it meets". That holds for an icon the
+  // simulation is free to move, and fails for a dragged one: a drag pins the
+  // node's position outright, so the ring must physically occupy the space
+  // rather than push back. Measured with a foreign tile pinned and walked to
+  // the set centre, 18 was breached at x=20 and 26 at x=0.
+  //
+  // 36 is half a tile, so a ring node is as substantial as the thing it is
+  // resisting, and the boundary holds at every position. Tighter spacing
+  // (linkDistance 40, radius 26) also works but costs 50% more ring nodes for
+  // the same result.
+  const RING_NODE_RADIUS = 30;
   const RING_LINK_DISTANCE = 60;
   let nodeLayer = null;
   let svg = null;
