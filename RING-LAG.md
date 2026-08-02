@@ -1,9 +1,16 @@
-# Why this branch was retired: the ring tangles
+# Why branch 3 was retired: the ring did not follow its members
 
 Snapshot of the ring-as-physics build at the point where a live run in Papers
-found a fault the unit tests could not. Everything here works except the
-behaviour below. **533 tests pass**, which is exactly the problem — the tests
-never move a member far enough or fast enough to trigger it.
+found a fault the unit tests could not. 533 tests passed, which is exactly the
+problem: none of them dragged a member the way a user does.
+
+**Corrected on branch 4.** The first diagnosis written here — that the ring
+tangles, crossing itself into a lens — was WRONG. It came from reproducing the
+drag as one large jump, which does tangle the ring but is not what dragging
+does. Under the real pattern (many small steps, each pinning fx/fy and
+reheating to 0.12) the ring never tangles. It simply falls behind and shrinks.
+The section below is kept because what was ruled out is still useful; the
+tangle claim is not.
 
 ## What was seen
 
@@ -13,46 +20,53 @@ stayed there. The user reported it "followed briefly, then stopped".
 
 ## What it actually is
 
-Not lag, and not a tuning problem. **The ring turns itself inside out.**
+**Lag.** The ring falls behind its member and shrinks as it goes, and a small
+collapsed loop drawn as a spline reads as the lens seen on screen.
 
-Measured on a single-member set, ten ring nodes, angles measured around the
-member:
-
-```
-settled      0  36  72 108 144 180 216 252 288 324     even, 36 deg apart
-after drag 102  59  88 121 161 204 178 209 179 140     order destroyed
-gaps       317  29  33  40  43 334  31 330 321 322     five backward jumps
-```
-
-A gap of 317 degrees between neighbours means the chain crosses itself. Drawn
-as a spline, a self-crossing loop renders as the lens that appeared on screen.
-
-Every node is still the right distance from the member — 82 to 117px against a
-target radius of 91 — so the shape force is working. What fails is that nothing
-preserves **angular order**. The links hold neighbours ~60px apart and the
-shape force holds everyone ~91px from the centre, and a tangled ring satisfies
-both constraints exactly as well as an untangled one. When the member jumps,
-each node takes the shortest path to the new circle and slides past its
-neighbours on the way.
-
-The ring then reaches equilibrium in the wrong place and stops:
+Measured on the drag pattern pointer-controller actually performs — steps of
+20px, each pinning fx/fy and reheating to 0.12:
 
 ```
-ticks   ring centre    lag from member
-   30      326,-244        92
-   60      338,-253        77
-  120      343,-261        69
-  240      344,-262        68
-  480      344,-262        67     converged, permanently wrong
+                        lag behind member    ring width
+original                        205          197 -> 122
+fixed (branch 4)                 42          182 -> 201
 ```
+
+Two things were wrong in `forceRingShape`, and they could not be separated:
+
+1. **The correction was scaled by alpha alone.** d3 decays alpha towards zero,
+   so the force faded out exactly as the graph settled — and a member dragged
+   after that walked away from a ring that had stopped chasing it.
+2. **The correction was purely radial.** `(radius - distance)` applied along
+   each node's own outward unit vector can only move a node in or out along the
+   line it already sits on, never around the circle. The ring could resize in
+   place but could not redistribute to follow.
+
+Removing the alpha floor alone reddens three tests. The exact split of credit
+between the two is not established, and the fix says so rather than guessing.
+
+### What the wrong diagnosis cost, and how to avoid repeating it
+
+The first reading here was that the ring tangled. It came from moving the
+member in one 500px jump, which genuinely does tangle it — spacing goes from an
+even 36 degrees to gaps over 300, the chain crosses itself. But that is not
+dragging, and under a real drag the order is never disturbed.
+
+Several isolation runs then disagreed with each other, because they used
+`forceCollide` at its default strength where the app uses 0.9, and because one
+run measured a file that a `git checkout` had already reverted. Four
+conclusions in a row were wrong.
+
+The lesson is about the harness, not the physics: reproduce the gesture the
+user makes, with the constants the app ships, and check the file on disk is the
+one being measured.
 
 ## What it is not
 
 Ruled out by measurement, so as not to be re-diagnosed:
 
-- **Not the alpha decay.** The `* alpha` in forceRingShape does weaken the
-  force as the simulation cools, and flooring it improves the lag from 67 to
-  45px — but the tangle survives, so it is a contributor and not the cause.
+- **The alpha decay was one of the two real causes**, not a red herring. This
+  entry originally dismissed it on the strength of the jump reproduction.
 - **Not the links or the collision.** Removing either makes it *worse*: with
   both stripped the ring collapses to 20x26. They are holding the shape
   together, not fighting it.
@@ -98,20 +112,13 @@ drawn through them) is the spec. Reading it decides the fix:
    boundary stretches along the drag instead of ballooning across it.
 4. **Two rings crossing is an overlap**, with no special case.
 
-Panel 2 is the tangle case, and it rules out the cheap fix:
+Neither of the two fixes proposed here was the one that worked. The lag was
+fixed by flooring alpha and aiming each node at its slot as a point rather than
+correcting it radially — see "What it actually is" above.
 
-**A — carry the ring with its members** (translate every node by the centroid
-delta before the forces run) cannot tangle, because it never chases. But it
-makes the ring *translate* rigidly, which destroys panel 2: a member pushed
-into the wall would move the whole boundary instead of denting it.
-
-**B — an angular restoring force.** Pull each node towards its own slot angle,
-from `ringIndex / ringCount`, both already stored on the node. This preserves
-order — which is precisely what failed — while staying a soft pull, so a member
-pressing on the boundary still dents it locally (panel 2) and the ring still
-grows while ordered (panel 3).
-
-**B is the fix.** A was the first instinct and is wrong for this spec.
+The user has since said the boundary **does not need to dent**, so panel 2's
+concave bite is not a requirement. Panel 3 remains one: growth must be
+directional, and still is not.
 
 ## The other thing measured here
 
