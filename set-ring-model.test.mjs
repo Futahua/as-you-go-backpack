@@ -15,6 +15,8 @@ import {
   reconcileRing,
   ringPath,
   forceRingShape,
+  ejectionTarget,
+  pointInsideRing,
 } from './public/set-ring-model.js';
 // The real forces, so containment is measured against the configuration the
 // app actually runs rather than an idealised one.
@@ -272,33 +274,6 @@ test('the ring holds an outsider out however hard it is pushed', () => {
   assert.equal(pullInside(0.05), false, 'and a very hard one');
 });
 
-test('a dragged outsider is stopped by the ring', () => {
-  // Dragging is the worst case and the one the user will actually do:
-  // pointer-controller pins fx/fy, which sets position outright, so collision
-  // has nothing to push back against and this used to pass straight through.
-  // It no longer does — the ring deforms around the drag instead of opening.
-  //
-  // This is the architecture's original claim finally holding: containment as
-  // a consequence of nodes not being able to walk through each other, with no
-  // rule in the drag code.
-  const members = [tile('a', 0, 0), tile('b', 140, 0)];
-  const outsider = tile('out', 700, 0);
-  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
-  const simulation = settle(members, [outsider, ...ring], links, 200);
-
-  for (let x = 700; x >= 70; x -= 40) {
-    // fx/fy AND x/y, plus a reheat, because that is what pointer-controller
-    // does on every drag move. Pinning fx alone and letting the simulation go
-    // cold measures d3's alpha decay rather than the boundary.
-    outsider.fx = x;
-    outsider.fy = 0;
-    outsider.x = x;
-    outsider.y = 0;
-    simulation.alpha(0.12);
-    for (let i = 0; i < 12; i += 1) simulation.tick();
-  }
-  assert.ok(!insideRing(ring, outsider), 'the outsider never got inside');
-});
 
 test('the ring follows a member that is dragged away', () => {
   // The fault that retired the previous branch: the outline stayed behind and
@@ -347,41 +322,6 @@ test('the ring follows a member that is dragged away', () => {
   );
 });
 
-test('a foreign item is never admitted, even pinned at the set centre', () => {
-  // The strongest form of the containment claim, and the one the screenshots
-  // asked for: not merely that a moving outsider is slowed, but that a foreign
-  // item held anywhere inside the boundary's reach stays outside the outline.
-  //
-  // Pinning is what makes it hard. A dragged node has its position set rather
-  // than nudged, so collision cannot push back on it — the ring has to give way
-  // and close behind instead.
-  const members = [tile('a', 0, 0), tile('b', 0, 150)];
-  const foreign = tile('f', 300, 75);
-  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
-  const simulation = settle(members, [foreign, ...ring], links, 300);
-
-  const half = 36;
-  const corners = (x, y) => [[-half, -half], [half, -half], [half, half], [-half, half]]
-    .map(([dx, dy]) => ({ x: x + dx, y: y + dy }));
-
-  for (const x of [300, 220, 160, 120, 80, 40, 0]) {
-    foreign.fx = x;
-    foreign.fy = 75;
-    foreign.x = x;
-    foreign.y = 75;
-    // Reheated per step, because pointer-controller reheats on every drag move.
-    // Without it the simulation is stone cold by this point and the ring cannot
-    // react at all — the outsider then walks in, which measures d3's alpha
-    // decay rather than anything about the boundary.
-    simulation.alpha(0.12);
-    for (let i = 0; i < 60; i += 1) simulation.tick();
-
-    assert.ok(!insideRing(ring, { x, y: 75 }), `the foreign item got in at x=${x}`);
-    for (const corner of corners(x, 75)) {
-      assert.ok(!insideRing(ring, corner), `a corner of the foreign item got in at x=${x}`);
-    }
-  }
-});
 
 test('a member is still enclosed while a foreign item presses on the wall', () => {
   // The other half: keeping an outsider out must not cost the set its own
@@ -407,4 +347,64 @@ test('a member is still enclosed while a foreign item presses on the wall', () =
     assert.ok(insideRing(ring, member), `member ${member.id} was pushed out of its own set`);
   }
   assert.ok(!insideRing(ring, foreign), 'and the foreign item is still outside');
+});
+
+// ===========================================================================
+// Ejection. The ring cannot win an argument with a drag — a dragged node has
+// its position set outright, so collision has nothing to push back against.
+// Stiffening the boundary enough to resist one made the whole set convulse and
+// foreign items still got in. So the drag is left alone and the trespasser is
+// moved out once the gesture is over.
+// ===========================================================================
+
+test('a trespasser is put down just outside the boundary', () => {
+  const members = [tile('a', 0, 0), tile('b', 0, 200)];
+  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
+  settle(members, ring, links, 400);
+
+  // Several places inside, including right on top of a member.
+  for (const point of [{ x: 0, y: 100 }, { x: 0, y: 0 }, { x: -60, y: 180 }]) {
+    assert.ok(pointInsideRing(point, ring), 'the test point starts inside');
+    const target = ejectionTarget(point, ring);
+    assert.ok(target, 'an inside point gets somewhere to go');
+    assert.ok(!pointInsideRing(target, ring), `ejecting from ${JSON.stringify(point)} left it inside`);
+  }
+});
+
+test('an item already outside is left exactly where it is', () => {
+  // Returning a target for everything would nudge settled layouts on every
+  // tick, which is its own kind of convulsing.
+  const members = [tile('a', 0, 0), tile('b', 0, 200)];
+  const { nodes: ring, links } = reconcileRing({ setId: 's1', members });
+  settle(members, ring, links, 400);
+  assert.equal(ejectionTarget({ x: 400, y: 100 }, ring), null);
+});
+
+test('ejection takes the shortest way out, not the way through the middle', () => {
+  // From the waist of a long thin set the near edge is sideways; pushing away
+  // from a centre would drag the item the whole length of the boundary.
+  //
+  // The ring is built by hand rather than settled, because two members left to
+  // the simulation do not stay in a line — charge pushes them apart and the
+  // boundary comes out nearly round, where "sideways" means nothing. This is
+  // about the geometry, so the geometry is what is supplied.
+  const ring = [];
+  const count = 40;
+  for (let i = 0; i < count; i += 1) {
+    const t = (2 * Math.PI * i) / count;
+    ring.push({ ringIndex: i, ringCount: count, x: Math.cos(t) * 600, y: Math.sin(t) * 80 });
+  }
+
+  const target = ejectionTarget({ x: 0, y: 0 }, ring);
+  assert.ok(target, 'the waist is inside');
+  assert.ok(
+    Math.abs(target.y) > Math.abs(target.x),
+    `ejected the long way, to (${target.x.toFixed(0)}, ${target.y.toFixed(0)})`,
+  );
+  assert.ok(!pointInsideRing(target, ring), 'and it landed outside');
+});
+
+test('a degenerate ring cannot eject anything', () => {
+  assert.equal(ejectionTarget({ x: 0, y: 0 }, []), null);
+  assert.equal(ejectionTarget({ x: 0, y: 0 }, [{ x: 0, y: 0, ringIndex: 0 }]), null);
 });

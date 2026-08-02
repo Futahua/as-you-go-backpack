@@ -78,11 +78,15 @@ function createHarness({ binMode = false } = {}) {
     releaseDraggedNodes: (input) => { commandCalls.push(['release', input]); },
   };
   const graphNodes = new Map();
-  const effects = { reheat: [], decay: 0, close: 0, suppressGraph: [], suppressBlank: [] };
+  const effects = { reheat: [], decay: 0, close: 0, suppressGraph: [], suppressBlank: [], ejected: [] };
   const graph = {
     _getNode: (id) => graphNodes.get(id) ?? null,
     reheat: (a) => { effects.reheat.push(a); },
     _setSimulationDecay: () => { effects.decay += 1; },
+    // Required, not optional: an absent method reached through `?.` would make
+    // ejection silently never happen, which is the shape of two bugs already
+    // found on this branch.
+    ejectTrespassers: (ids) => { effects.ejected.push([...ids]); },
   };
   let marqueeActivePointer = null;
   const marquee = {
@@ -333,4 +337,51 @@ test('clientToWorld is exported for set hit-testing', () => {
   // With an identity transform and no viewport, client coordinates pass
   // through — enough to prove the conversion is wired, not merely present.
   assert.deepEqual(h.controller.clientToWorld(100, 50), { x: 100, y: 50 });
+});
+
+// ===========================================================================
+// Ejection on release. The ring cannot stop a drag, so the drag is left alone
+// and anything that landed inside a set it does not belong to is moved out
+// once the gesture is over.
+// ===========================================================================
+
+function dragTile(h, id, from, to) {
+  const tile = fakeNode();
+  tile.dataset = { id, kind: 'shortcut' };
+  tile.closest = (sel) => (sel === '.icon-item' || sel === '.graph-node-shell' ? tile : null);
+  h.store.setSelection([id]);
+  h.grid._dispatch('pointerdown', pointerEvent(1, from.x, from.y, { target: tile }));
+  h.grid._dispatch('pointermove', pointerEvent(1, to.x, to.y));
+}
+
+test('releasing a drag ejects anything that trespassed', () => {
+  const h = createHarness();
+  h.graphNodes.set('s1', node('s1', 100, 100));
+  dragTile(h, 's1', { x: 10, y: 10 }, { x: 60, y: 40 });
+  h.grid._dispatch('pointerup', pointerEvent(1, 60, 40));
+  assert.deepEqual(h.effects.ejected, [['s1']], 'the dragged item was checked');
+});
+
+test('ejection runs before the pinned positions are read', () => {
+  // Order matters: pinning first would save the trespassing position and the
+  // correction would be undone on the next load.
+  const h = createHarness();
+  h.graphNodes.set('s1', node('s1', 100, 100));
+  dragTile(h, 's1', { x: 10, y: 10 }, { x: 60, y: 40 });
+  h.grid._dispatch('pointerup', pointerEvent(1, 60, 40, { shiftKey: true }));
+
+  assert.deepEqual(h.effects.ejected, [['s1']], 'ejection happened');
+  const pinCall = h.commandCalls.find(([name]) => name === 'pin');
+  assert.ok(pinCall, 'and the positions were pinned');
+});
+
+test('a drop into the Bin or a folder is not an ejection', () => {
+  // Those are deliberate destinations, not accidents of where the pointer
+  // happened to be — the item is leaving the canvas either way.
+  const bin = createHarness();
+  bin.graphNodes.set('s1', node('s1', 100, 100));
+  dragTile(bin, 's1', { x: 10, y: 10 }, { x: 60, y: 40 });
+  bin.binButton.contains = () => true;
+  bin.grid._dispatch('pointerup', pointerEvent(1, 60, 40));
+  assert.deepEqual(bin.effects.ejected, [], 'the Bin drop was left alone');
 });

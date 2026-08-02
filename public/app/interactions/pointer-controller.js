@@ -289,6 +289,14 @@ export function createPointerController({
             folderId: hitFolderId,
           });
         } else if (dragCopy.pinOnRelease) {
+          // Before the positions are read, so an item dragged inside a set it
+          // does not belong to is pinned where it is put down rather than where
+          // it trespassed. The ring cannot stop a drag — a dragged node's
+          // position is set outright, so there is nothing for collision to push
+          // against — and making it stiff enough to try only made the whole set
+          // convulse. Correcting on release costs nothing during the gesture
+          // and leaves the settled screen showing the true relationship.
+          graph.ejectTrespassers(dragCopy.itemIds);
           const positions = {};
           for (const id of dragCopy.itemIds) {
             const node = graph._getNode(id);
@@ -297,6 +305,7 @@ export function createPointerController({
           commands.pinDraggedNodes({ positions });
           graph._setSimulationDecay();
         } else {
+          graph.ejectTrespassers(dragCopy.itemIds);
           commands.releaseDraggedNodes({ itemIds: dragCopy.itemIds });
           for (const id of dragCopy.itemIds) {
             const node = graph._getNode(id);

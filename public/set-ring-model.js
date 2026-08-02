@@ -118,6 +118,17 @@ export function enclosingEllipse(members, padding) {
   };
 }
 
+/** Ellipse perimeter, by Ramanujan's approximation.
+ *
+ * There is no closed form, and the error here is under 1e-5 for any shape a
+ * set will take — far below the precision the node count needs. */
+export function ellipsePerimeter(ellipse) {
+  if (!ellipse) return 0;
+  const { a, b } = ellipse;
+  const h = ((a - b) ** 2) / ((a + b) ** 2);
+  return Math.PI * (a + b) * (1 + ((3 * h) / (10 + Math.sqrt(4 - (3 * h)))));
+}
+
 /** A point on the ellipse at the given parameter angle, in world space. */
 export function ellipsePoint(ellipse, t) {
   const cos = Math.cos(ellipse.angle);
@@ -175,14 +186,22 @@ export function reconcileRing({
   const circle = enclosingCircle(members, padding);
   if (!circle) return { nodes: [], links: [], circle: null };
 
-  const perimeter = 2 * Math.PI * circle.radius;
-  const wanted = ringNodeCount(perimeter, linkDistance);
+  // Sized from the ellipse the shape force actually pulls onto, not from the
+  // circle. Sizing from the circle over-counts badly as a set is stretched —
+  // two members 600px apart gave 41 nodes for a boundary needing 28 — and the
+  // surplus has nowhere to go but to bunch, which is what made the outline
+  // spiky and the set convulse.
+  const ellipse = enclosingEllipse(members, padding);
+  const wanted = ringNodeCount(ellipsePerimeter(ellipse), linkDistance);
 
   const nodes = existing.slice(0, wanted);
   if (nodes.length < wanted) {
     // Only the positions for the slots being filled, so existing nodes are not
-    // dragged onto the ideal circle every time the count changes.
-    const positions = ringPositions(circle, wanted);
+    // dragged onto the ideal boundary every time the count changes. Seeded on
+    // the ellipse, so a new node lands where the shape force is going to hold
+    // it rather than being pulled across the set on its first tick.
+    const positions = Array.from({ length: wanted }, (unused, i) => (
+      ellipsePoint(ellipse, (2 * Math.PI * i) / wanted)));
     for (let i = nodes.length; i < wanted; i += 1) {
       nodes.push({
         id: `${setId}:ring:${i}`,
@@ -320,4 +339,74 @@ export function forceRingShape({
 
   force.initialize = (value) => { nodes = value ?? []; };
   return force;
+}
+
+/** Where a trespassing item should be put down, just outside the boundary.
+ *
+ * The ring cannot win an argument with a drag. A dragged node has its position
+ * set outright rather than nudged, so collision has nothing to push back
+ * against — making the boundary stiff enough to resist one only made the whole
+ * set convulse, and foreign items still ended up inside.
+ *
+ * So this does not fight the drag at all. The item goes wherever it is put, and
+ * once the gesture is over anything sitting inside a set it does not belong to
+ * is moved out along the shortest path. What the user sees while dragging is
+ * free; what they see when they let go is correct.
+ *
+ * Returns null when the item is already outside, so callers can leave settled
+ * layouts alone rather than nudging everything every tick.
+ */
+export function ejectionTarget(point, ringNodes, { clearance = 24 } = {}) {
+  const ring = [...ringNodes]
+    .filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y))
+    .sort((a, b) => a.ringIndex - b.ringIndex);
+  if (ring.length < 3) return null;
+  if (!pointInsideRing(point, ring)) return null;
+
+  // The nearest point on the boundary itself, not on the line to some centre:
+  // a set with an elongated or dented outline has no centre worth pushing away
+  // from, and the shortest way out of a long thin shape is sideways.
+  let best = null;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const closest = closestPointOnSegment(point, ring[j], ring[i]);
+    const distance = Math.hypot(point.x - closest.x, point.y - closest.y);
+    if (!best || distance < best.distance) best = { ...closest, distance };
+  }
+  if (!best) return null;
+
+  // Push past the edge rather than onto it, so the item lands clear of the
+  // outline instead of resting on it where the next tick might take it back in.
+  const dx = best.x - point.x;
+  const dy = best.y - point.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-6) return { x: best.x + clearance, y: best.y };
+  return {
+    x: best.x + (dx / length) * clearance,
+    y: best.y + (dy / length) * clearance,
+  };
+}
+
+function closestPointOnSegment(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = (dx * dx) + (dy * dy);
+  if (lengthSquared === 0) return { x: a.x, y: a.y };
+  let t = (((point.x - a.x) * dx) + ((point.y - a.y) * dy)) / lengthSquared;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + (t * dx), y: a.y + (t * dy) };
+}
+
+/** Ray casting in ringIndex order — the node array is only a polygon when it is
+ * walked around the loop. */
+export function pointInsideRing(point, ringNodes) {
+  const ring = [...ringNodes].sort((a, b) => a.ringIndex - b.ringIndex);
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const a = ring[i];
+    const b = ring[j];
+    if ((a.y > point.y) === (b.y > point.y)) continue;
+    const crossX = a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x);
+    if (point.x < crossX) inside = !inside;
+  }
+  return inside;
 }

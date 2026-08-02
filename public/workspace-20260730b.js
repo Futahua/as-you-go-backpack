@@ -51,7 +51,7 @@ import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
 import { belongsToSet } from './sets-model.js';
-import { reconcileRing, ringPath, forceRingShape } from './set-ring-model.js';
+import { reconcileRing, ringPath, forceRingShape, ejectionTarget } from './set-ring-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -620,6 +620,42 @@ function createGraphController() {
       hits.push({ setId, area: ringArea(ring.nodes) });
     }
     return hits.sort((a, b) => a.area - b.area).map((hit) => hit.setId);
+  }
+
+  /** Moves any of these items that ended up inside a set they do not belong to
+   * back outside it, along the shortest path.
+   *
+   * Called when a drag is released, not while it runs. The ring cannot stop a
+   * drag: a dragged node's position is set outright rather than nudged, so
+   * collision has nothing to push back against, and stiffening the boundary
+   * enough to try made the whole set convulse while foreign items still got in.
+   * Letting the gesture do whatever it likes and correcting afterwards means
+   * the screen the user is left looking at states the true relationship.
+   *
+   * Members are exempt: an item inside its own set is where it should be. A
+   * folder's contents inherit its sets, so belongsToSet decides this rather
+   * than the stored member list. */
+  function ejectTrespassers(itemIds) {
+    for (const itemId of itemIds ?? []) {
+      const node = nodes.get(itemId);
+      if (!node || node.exiting) continue;
+
+      for (const [setId, ring] of setRings) {
+        if (ring.nodes.length < 3) continue;
+        const itemSet = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId);
+        if (!itemSet) continue;
+        if (belongsToSet(itemSet, itemId, ancestorsOfNode)) continue;
+
+        const target = ejectionTarget({ x: node.x, y: node.y }, ring.nodes);
+        if (!target) continue;
+        node.x = target.x;
+        node.y = target.y;
+        // The pinned coordinates too, or the next tick puts it straight back
+        // where it was — a drag leaves fx/fy set, and they win over x/y.
+        if (node.fx != null) node.fx = target.x;
+        if (node.fy != null) node.fy = target.y;
+      }
+    }
   }
 
   /** Ray casting against the ring's nodes.
@@ -1204,6 +1240,7 @@ function createGraphController() {
     fitGraph,
     ancestorsOfNode,
     setIdsAtPoint,
+    ejectTrespassers,
     _getNode: (id) => nodes.get(id) ?? null,
     _setOnDragCancel(callback) { onDragCancel = callback; },
     _setSimulationDecay() {
