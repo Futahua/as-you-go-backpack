@@ -909,6 +909,61 @@ test('a partial blend is worse than none, so the default is past closure', () =>
   assert.ok(cornerAt(100) < 20, 'and the default is in the flat part of the curve');
 });
 
+test('every member is inside its own set, whatever the shape is doing', () => {
+  // The invariant the shape exists to serve, and it was missing. Every other
+  // measurement here is about how the outline looks — how smooth, how round,
+  // how separated — and none of them notice a set that has stopped containing
+  // its own members.
+  //
+  // That gap let a concavity-closing pass ship that pinched a waist shut across
+  // the middle of a set and left two members straddling the boundary. It scored
+  // well on solidity against the convex hull the whole time, because solidity
+  // measures how round a blob is and not whether the blob still holds what it
+  // is for.
+  const layouts = [
+    { name: 'a line', items: [tile('a', 0, 0), tile('b', 200, 0), tile('c', 400, 0)] },
+    { name: 'an L', items: [tile('a', 0, 0), tile('b', 200, 0), tile('c', 0, 200)] },
+    { name: 'a ring', items: [0, 1, 2, 3, 4, 5].map((i) => tile(
+      `m${i}`,
+      Math.round(140 * Math.cos((2 * Math.PI * i) / 6)),
+      Math.round(140 * Math.sin((2 * Math.PI * i) / 6)),
+    )) },
+    { name: 'far apart', items: [tile('a', 0, 0), tile('b', 700, 0)] },
+    { name: 'a tight cluster', items: [tile('a', 0, 0), tile('b', 110, 0), tile('c', 55, 100)] },
+  ];
+
+  for (const layout of layouts) {
+    const memberIds = layout.items.map((item) => item.id);
+    const region = buildSetRegions({
+      sets: [{ id: 's1', memberIds }],
+      visibleItems: layout.items,
+    }).get('s1');
+    assert.ok(region, `${layout.name}: a region was built`);
+
+    for (const member of layout.items) {
+      // The centre, and every corner of the tile. A member half in and half out
+      // is exactly the failure this is here to catch, so the centre alone would
+      // not be enough.
+      assert.equal(
+        regionContainsPoint(region, { x: member.x, y: member.y }),
+        true,
+        `${layout.name}: ${member.id}'s centre is inside its own set`,
+      );
+      for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        const corner = {
+          x: member.x + (dx * member.width) / 2,
+          y: member.y + (dy * member.height) / 2,
+        };
+        assert.equal(
+          regionContainsPoint(region, corner),
+          true,
+          `${layout.name}: ${member.id} corner (${dx}, ${dy}) is inside its own set`,
+        );
+      }
+    }
+  }
+});
+
 test('the concavity closing is grid-dependent, which is why it is off', () => {
   // A morphological closing fills the concave bites between members, and on a
   // three-member L it takes solidity against the convex hull from 0.68 to 0.86.

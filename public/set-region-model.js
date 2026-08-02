@@ -544,6 +544,28 @@ export function buildMembraneField(options) {
     padding,
     gap,
     cellSize,
+    // A neck is far too thin — 32px wide however large the members are — so a
+    // set reads as lumps joined by wire, and where a connector passes an
+    // unrelated icon the outline pinches to a waist beside it. Measured: two
+    // members 300px apart give a 26px waist, identical with and without a
+    // bystander present, so the thinness is the neck itself and not anything
+    // carving it.
+    //
+    // Widening it is not a one-line change, which is why this is still 16.
+    // Sweeping the radius against the sharpest corner and against translation
+    // invariance gives an alternating result:
+    //
+    //     neck      16    18    20    22    24    26
+    //     sharpest 135   180    91   180    91   180  degrees
+    //     drift    4.7  67.4   1.7  72.0   4.4  73.3  px
+    //
+    // Radii that do not land cleanly on the 4px cell produce degenerate
+    // contours — 180 degree fold-backs — and break the translation guard. The
+    // thickening writes a disc per route cell onto the same grid the contour is
+    // read from, so it is quantized twice, and the artefact is in that
+    // construction rather than in the value. Fixing it means building the neck
+    // as a distance field in continuous space, the same change the concavity
+    // closing needs.
     neckRadius = Math.max(cellSize, Math.min(padding * 0.55, 16)),
     reserved = null,
     marginGrowthStep = padding + neckRadius + gap + cellSize * 4,
@@ -1477,6 +1499,14 @@ export function buildSetRegions({
   // arbitrary layout. A set whose outline changes discontinuously when the
   // graph drifts a pixel is worse than one that is merely lumpy, so this stays
   // off until the closing is done in a grid-independent way.
+  //
+  // It also strands members. The dilate-then-erode reshapes the body with no
+  // knowledge of where the members are, so at a radius large enough to fill the
+  // crooks it pinches a waist closed across the middle of the set and leaves
+  // members sitting on the boundary or outside it entirely. Seen live: two
+  // members half in and half out of their own set. Solidity against the convex
+  // hull cannot detect that — it measures how round the blob is, not whether
+  // the blob still contains what it is for.
   surfaceTension = 0,
   initialExtraMargin,
   marginGrowthStep,
