@@ -99,6 +99,11 @@
 .graph-set-layer { pointer-events: none; }
 .graph-set-outline {
   fill: rgba(122, 148, 128, 0.09);
+  /* Must match regionContainsPoint's even-odd counting. A region can enclose a
+   * hole — a non-member ringed by members — and if the fill rule and the hit
+   * test disagree about that hole, the user can click something the outline
+   * shows as outside the set. */
+  fill-rule: evenodd;
   stroke: rgba(92, 122, 100, 0.45);
   stroke-width: 2;
   stroke-linejoin: round;

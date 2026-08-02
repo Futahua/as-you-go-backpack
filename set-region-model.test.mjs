@@ -14,7 +14,10 @@ import {
   extractContours,
   sampleField,
   regionContainsPoint,
+  regionDistance,
   regionArea,
+  regionIntersectsRect,
+  polygonArea,
   polygonIntersectsRect,
 } from './public/set-region-model.js';
 
@@ -24,19 +27,18 @@ function tile(id, x, y) {
   return { id, x, y, ...TILE };
 }
 
-/** Smallest distance between any two points of two polygon collections. */
+/** Separation between two regions, as a real distance.
+ *
+ * An earlier version of this helper measured vertex-to-vertex distance, which
+ * cannot establish separation at all: two polygons can cross, overlap, or meet
+ * edge-to-edge without sharing a vertex. Two squares overlapping by half
+ * report 70.71 under that measure. Everything asserted with it — including a
+ * "406/406 clear" claim — was unproven.
+ *
+ * regionDistance tests crossing and containment outright and measures
+ * segment-to-segment, so 0 genuinely means touching or overlapping. */
 function polygonSeparation(a, b) {
-  let best = Infinity;
-  for (const ringA of a) {
-    for (const pointA of ringA) {
-      for (const ringB of b) {
-        for (const pointB of ringB) {
-          best = Math.min(best, Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y));
-        }
-      }
-    }
-  }
-  return best;
+  return regionDistance({ polygons: a }, { polygons: b });
 }
 
 test('a point inside a member is inside the region', () => {
@@ -100,6 +102,21 @@ test('a non-member between two members is not swallowed', () => {
   );
 });
 
+test('the separation helper detects overlap without shared vertices', () => {
+  // Guards the guard. The previous helper measured vertex-to-vertex distance
+  // and reported 70.71 for these two squares, which overlap by half — so every
+  // separation assertion built on it was vacuous.
+  const square = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+  const overlapping = [{ x: 50, y: -50 }, { x: 150, y: -50 }, { x: 150, y: 150 }, { x: 50, y: 150 }];
+  assert.equal(polygonSeparation([square], [overlapping]), 0, 'crossing edges are caught');
+
+  const enclosed = [{ x: 25, y: 25 }, { x: 75, y: 25 }, { x: 75, y: 75 }, { x: 25, y: 75 }];
+  assert.equal(polygonSeparation([square], [enclosed]), 0, 'containment with no crossing is caught');
+
+  const apart = [{ x: 200, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 100 }, { x: 200, y: 100 }];
+  assert.equal(polygonSeparation([square], [apart]), 100, 'a real gap is measured edge to edge');
+});
+
 test('exclusive sets never touch at any separation', () => {
   // An exhaustive sweep, not a sample. The randomized test below jitters
   // members off-axis and passed while aligned separations between 96 and 144
@@ -118,6 +135,79 @@ test('exclusive sets never touch at any separation', () => {
     if (polygonSeparation(regionA.polygons, regionB.polygons) <= 0) touching.push(separation);
   }
   assert.deepEqual(touching, [], `exclusive sets blended at separations: ${touching.join(', ')}`);
+});
+
+test('exclusive sets stay apart on the diagonal', () => {
+  // The axis-aligned sweep above steps one axis only. A diagonal offset puts
+  // the contested corridor at 45 degrees to the sampling grid, where the
+  // occupancy field quantizes differently.
+  const touching = [];
+  for (let separation = 95; separation <= 400; separation += 1) {
+    const offset = separation / Math.SQRT2;
+    const regions = buildSetRegions({
+      sets: [{ id: 'sa', memberIds: ['a'] }, { id: 'sb', memberIds: ['b'] }],
+      visibleItems: [tile('a', 0, 0), tile('b', offset, offset)],
+    });
+    const a = regions.get('sa');
+    const b = regions.get('sb');
+    if (!a || !b) continue;
+    if (polygonSeparation(a.polygons, b.polygons) <= 0) touching.push(separation);
+  }
+  assert.deepEqual(touching, [], `diagonal layouts blended at: ${touching.join(', ')}`);
+});
+
+test('exclusive sets stay apart with unequal member sizes', () => {
+  // A large member's region is larger, and the curve-era bug scaled with shape
+  // size, so mismatched sizes are where a size-dependent error would show.
+  const sizes = [[60, 60], [140, 60], [60, 200], [220, 220], [300, 90]];
+  for (const [width, height] of sizes) {
+    const regions = buildSetRegions({
+      sets: [{ id: 'sa', memberIds: ['a'] }, { id: 'sb', memberIds: ['b'] }],
+      visibleItems: [tile('a', 0, 0), { id: 'b', x: 260, y: 0, width, height }],
+    });
+    const distance = polygonSeparation(regions.get('sa').polygons, regions.get('sb').polygons);
+    assert.ok(distance > 0, `a ${width}x${height} member blended (${distance.toFixed(2)})`);
+  }
+});
+
+test('exclusive multi-member sets stay apart, including interleaved', () => {
+  const layouts = [
+    {
+      name: 'two rows',
+      items: [tile('a1', 0, 0), tile('a2', 0, 120), tile('b1', 190, 0), tile('b2', 190, 120)],
+      sets: [{ id: 'sa', memberIds: ['a1', 'a2'] }, { id: 'sb', memberIds: ['b1', 'b2'] }],
+    },
+    {
+      // Members alternating along a line: each set's lobes must thread between
+      // the other's without either claiming the space in between.
+      name: 'interleaved',
+      items: [tile('a1', 0, 0), tile('b1', 150, 0), tile('a2', 300, 0), tile('b2', 450, 0)],
+      sets: [{ id: 'sa', memberIds: ['a1', 'a2'] }, { id: 'sb', memberIds: ['b1', 'b2'] }],
+    },
+  ];
+  for (const layout of layouts) {
+    const regions = buildSetRegions({ sets: layout.sets, visibleItems: layout.items });
+    const distance = polygonSeparation(regions.get('sa').polygons, regions.get('sb').polygons);
+    assert.ok(distance > 0, `${layout.name} blended (${distance.toFixed(2)})`);
+  }
+});
+
+test('three mutually exclusive sets all stay apart', () => {
+  const regions = buildSetRegions({
+    sets: [
+      { id: 'sa', memberIds: ['a'] },
+      { id: 'sb', memberIds: ['b'] },
+      { id: 'sc', memberIds: ['c'] },
+    ],
+    visibleItems: [tile('a', 0, 0), tile('b', 150, 0), tile('c', 75, 140)],
+  });
+  const ids = ['sa', 'sb', 'sc'];
+  for (let i = 0; i < ids.length; i += 1) {
+    for (let j = i + 1; j < ids.length; j += 1) {
+      const distance = polygonSeparation(regions.get(ids[i]).polygons, regions.get(ids[j]).polygons);
+      assert.ok(distance > 0, `${ids[i]} and ${ids[j]} blended (${distance.toFixed(2)})`);
+    }
+  }
 });
 
 test('sets that share a member still overlap', () => {
@@ -145,18 +235,16 @@ test('sets that share a member still overlap', () => {
     'the shared tile is inside s2',
   );
 
-  // The regions buildSetRegions actually produced must each enclose the shared
+  // The regions buildSetRegions actually produced must each contain the shared
   // tile. Checking isInsideRegion alone is not enough — it bypasses the band,
   // so it stays true even when the band has stripped the shared tile out of
   // both regions, which is exactly what happens if the exemption is dropped.
-  const enclosesShared = (region) => region.polygons.some((ring) => {
-    const xs = ring.map((point) => point.x);
-    const ys = ring.map((point) => point.y);
-    return shared.x >= Math.min(...xs) && shared.x <= Math.max(...xs)
-      && shared.y >= Math.min(...ys) && shared.y <= Math.max(...ys);
-  });
-  assert.ok(enclosesShared(regions.get('s1')), 's1 encloses the shared tile');
-  assert.ok(enclosesShared(regions.get('s2')), 's2 encloses the shared tile');
+  //
+  // Containment, not a bounding box: a bounding-box check reports a hit for
+  // any point in the rectangle spanning a ring, including well outside a
+  // concave region, so it could claim overlap where none exists.
+  assert.ok(regionContainsPoint(regions.get('s1'), shared), 's1 contains the shared tile');
+  assert.ok(regionContainsPoint(regions.get('s2'), shared), 's2 contains the shared tile');
 });
 
 test('exclusive sets keep the requested gap across randomized layouts', () => {
@@ -355,6 +443,77 @@ test('a sweep wholly inside a region still catches it', () => {
     polygonIntersectsRect(ring, { left: -5, top: -5, right: 5, bottom: 5 }),
     true,
   );
+});
+
+// ===========================================================================
+// Holes: a non-member ringed by members is enclosed but not contained.
+// ===========================================================================
+
+/** Members arranged in a circle around a single non-member, close enough that
+ * the region closes around it and leaves an interior hole. */
+function surroundedLayout(memberCount = 6, radius = 110) {
+  const items = [];
+  for (let i = 0; i < memberCount; i += 1) {
+    const angle = (2 * Math.PI * i) / memberCount;
+    items.push(tile(`m${i}`, Math.round(radius * Math.cos(angle)), Math.round(radius * Math.sin(angle))));
+  }
+  items.push(tile('foreign', 0, 0));
+  return {
+    items,
+    sets: [{ id: 'S', memberIds: items.filter((item) => item.id !== 'foreign').map((item) => item.id) }],
+  };
+}
+
+test('a surrounded non-member leaves a real hole in the region', () => {
+  const { items, sets } = surroundedLayout();
+  const region = buildSetRegions({ sets, visibleItems: items }).get('S');
+  assert.equal(region.polygons.length, 2, 'an outer ring and an inner one');
+  const areas = region.polygons.map(polygonArea).sort((a, b) => b - a);
+  assert.ok(areas[1] > 0 && areas[1] < areas[0], 'the inner ring is a hole, not a second lobe');
+});
+
+test('a point inside a hole is not inside the set', () => {
+  const { items, sets } = surroundedLayout();
+  const region = buildSetRegions({ sets, visibleItems: items }).get('S');
+  // Counting rings with .some() reported this as inside, so clicking the very
+  // item the set was kept away from would have selected that set.
+  assert.equal(regionContainsPoint(region, { x: 0, y: 0 }), false, 'the hole is not the set');
+  assert.equal(regionContainsPoint(region, { x: 110, y: 0 }), true, 'a member still is');
+});
+
+test('a hole does not count towards a region area', () => {
+  const { items, sets } = surroundedLayout();
+  const region = buildSetRegions({ sets, visibleItems: items }).get('S');
+  const outer = Math.max(...region.polygons.map(polygonArea));
+  // Summing rings would exceed the outer ring; subtracting the hole cannot.
+  assert.ok(regionArea(region) < outer, 'the hole is subtracted, not added');
+});
+
+test('a sweep wholly inside a hole catches nothing', () => {
+  const { items, sets } = surroundedLayout();
+  const region = buildSetRegions({ sets, visibleItems: items }).get('S');
+  assert.equal(
+    regionIntersectsRect(region, { left: -8, top: -8, right: 8, bottom: 8 }),
+    false,
+    'a rectangle in the hole touches no filled space',
+  );
+  // But one that reaches out through the rim does cross the set.
+  assert.equal(
+    regionIntersectsRect(region, { left: -8, top: -8, right: 200, bottom: 8 }),
+    true,
+    'a sweep leaving the hole still catches the set',
+  );
+});
+
+test('a drop inside a hole is not a drop inside the set', () => {
+  const { items, sets } = surroundedLayout();
+  const region = buildSetRegions({ sets, visibleItems: items }).get('S');
+  // regionsAt is what the drag rules consult, so a hole reported as filled
+  // would block a setless item from a position the outline shows as free.
+  const regionsAtHole = [['S', region]]
+    .filter(([, candidate]) => regionContainsPoint(candidate, { x: 0, y: 0 }))
+    .map(([id]) => id);
+  assert.deepEqual(regionsAtHole, [], 'the hole belongs to no set');
 });
 
 test('the sampled field closes rather than running off the grid', () => {

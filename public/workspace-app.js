@@ -50,7 +50,7 @@ import {
   buildSetRegions,
   regionContainsPoint,
   regionArea,
-  polygonIntersectsRect,
+  regionIntersectsRect,
 } from './set-region-model.js';
 import { canDropInsideRegions } from './sets-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
@@ -1118,7 +1118,7 @@ My request:
     function setIdsIntersectingRect(rect) {
       const hits = [];
       for (const [setId, region] of setRegions) {
-        if (region.polygons.some((ring) => polygonIntersectsRect(ring, rect))) hits.push(setId);
+        if (regionIntersectsRect(region, rect)) hits.push(setId);
       }
       return hits;
     }

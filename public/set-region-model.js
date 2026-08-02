@@ -20,8 +20,9 @@
  * The boundary is then extracted from those cells, and that extracted polygon
  * is what gets rendered and what gets hit-tested. Nothing is drawn that was
  * not tested, so "two exclusive sets never blend" holds by construction rather
- * than by estimate. Verified exhaustively: every integer centre separation
- * from 95 to 500px keeps the two regions apart.
+ * than by estimate. Verified exhaustively with a real segment-intersection
+ * test — vertex distance cannot establish separation — across axis-aligned,
+ * diagonal, unequal-size and multi-member layouts.
  *
  * Sets that DO share a member are exempt from the band. That overlap is the
  * Venn the feature exists to show, and banding them apart removes the shared
@@ -253,14 +254,25 @@ export function pointInPolygon(point, polygon) {
   return inside;
 }
 
-/** True when the point falls inside any of a region's rings.
+/** True when the point falls inside a region, holes excluded.
  *
- * A region is several closed loops — one per lobe — so containment is per
- * ring, not over some merged outline. Testing the union of the rings is what
- * makes a click land only where the set is actually drawn, including the empty
- * space between two distant lobes. */
+ * A region is several closed loops, and they are not all lobes: a non-member
+ * ringed by members leaves an interior hole, which the contour extraction
+ * emits as its own closed loop. Counting rings with `.some()` treats such a
+ * hole as filled, so a click on the very item the set was kept away from would
+ * select that set — and the drop rules would judge it inside. That breaks the
+ * one property this design rests on, that the rendered polygon and the
+ * hit-tested polygon are the same shape.
+ *
+ * Even-odd counting is what makes the two agree: a point inside an odd number
+ * of rings is inside the region, an even number puts it in a hole. The SVG
+ * path is rendered with fill-rule: evenodd for exactly the same reason. */
 export function regionContainsPoint(region, point) {
-  return (region?.polygons ?? []).some((ring) => pointInPolygon(point, ring));
+  let crossings = 0;
+  for (const ring of region?.polygons ?? []) {
+    if (pointInPolygon(point, ring)) crossings += 1;
+  }
+  return crossings % 2 === 1;
 }
 
 /** Shoelace area of a ring, always positive. */
@@ -273,10 +285,29 @@ export function polygonArea(polygon) {
   return Math.abs(total) / 2;
 }
 
-/** A region's total area across its lobes, used to order overlapping hits so
- * the smallest — most specific — set wins a click. */
+/** A region's filled area, used to order overlapping hits so the smallest —
+ * most specific — set wins a click.
+ *
+ * Rings enclosed by an odd number of other rings are holes and are subtracted:
+ * counting a hole as area would make a set with a big hole in it rank as
+ * larger than it looks, and lose a click it should have won. */
 export function regionArea(region) {
-  return (region?.polygons ?? []).reduce((total, ring) => total + polygonArea(ring), 0);
+  const rings = region?.polygons ?? [];
+  let total = 0;
+  for (const ring of rings) {
+    const area = polygonArea(ring);
+    if (area === 0) continue;
+    // A ring's nesting depth decides whether it adds or subtracts. Testing one
+    // of its own points against the others is enough: rings from marching
+    // squares never cross.
+    let depth = 0;
+    for (const other of rings) {
+      if (other === ring) continue;
+      if (pointInPolygon(ring[0], other)) depth += 1;
+    }
+    total += depth % 2 === 0 ? area : -area;
+  }
+  return Math.max(0, total);
 }
 
 /** True when a rectangle touches a polygon at all: overlapping edges, or
@@ -296,6 +327,94 @@ export function polygonIntersectsRect(polygon, rect) {
   for (const corner of corners) {
     if (pointInPolygon(corner, polygon)) return true;
   }
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    for (let k = 0; k < 4; k += 1) {
+      if (segmentsIntersect(polygon[j], polygon[i], corners[k], corners[(k + 1) % 4])) return true;
+    }
+  }
+  return false;
+}
+
+/** Shortest distance from a point to a segment. */
+function pointSegmentDistance(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = (dx * dx) + (dy * dy);
+  if (lengthSquared === 0) return Math.hypot(point.x - a.x, point.y - a.y);
+  let t = (((point.x - a.x) * dx) + ((point.y - a.y) * dy)) / lengthSquared;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+}
+
+/** True minimum distance between two rings, and whether they intersect.
+ *
+ * Vertex-to-vertex distance is not enough to establish separation: two
+ * polygons can cross, overlap, or meet edge-to-edge without sharing a vertex,
+ * and a vertex measure reports a comfortable positive number for all three.
+ * Distance is therefore measured segment-to-segment, and crossing and
+ * containment are tested outright. */
+export function ringsIntersect(a, b) {
+  for (let i = 0, j = a.length - 1; i < a.length; j = i, i += 1) {
+    for (let k = 0, l = b.length - 1; k < b.length; l = k, k += 1) {
+      if (segmentsIntersect(a[j], a[i], b[l], b[k])) return true;
+    }
+  }
+  // No crossing edges still leaves one ring wholly inside the other.
+  return pointInPolygon(a[0], b) || pointInPolygon(b[0], a);
+}
+
+/** Smallest edge-to-edge distance between two rings; 0 when they touch or
+ * intersect. */
+export function ringDistance(a, b) {
+  if (ringsIntersect(a, b)) return 0;
+  let best = Infinity;
+  for (let i = 0, j = a.length - 1; i < a.length; j = i, i += 1) {
+    for (const point of b) best = Math.min(best, pointSegmentDistance(point, a[j], a[i]));
+  }
+  for (let k = 0, l = b.length - 1; k < b.length; l = k, k += 1) {
+    for (const point of a) best = Math.min(best, pointSegmentDistance(point, b[l], b[k]));
+  }
+  return best;
+}
+
+/** The true separation between two regions across every pair of their rings. */
+export function regionDistance(regionA, regionB) {
+  let best = Infinity;
+  for (const ringA of regionA?.polygons ?? []) {
+    for (const ringB of regionB?.polygons ?? []) {
+      best = Math.min(best, ringDistance(ringA, ringB));
+      if (best === 0) return 0;
+    }
+  }
+  return best;
+}
+
+/** True when a rectangle touches a region's filled area.
+ *
+ * Crossing any ring counts, hole or not — a sweep that clips the rim of a hole
+ * still crosses the set. What must not count is a rectangle sitting entirely
+ * within a hole, which touches no filled space at all, so that case is decided
+ * by even-odd containment rather than by ring membership. */
+export function regionIntersectsRect(region, rect) {
+  const rings = region?.polygons ?? [];
+  if (rings.length === 0) return false;
+  for (const ring of rings) {
+    if (ringCrossesRect(ring, rect)) return true;
+  }
+  // No edge crossed: the rectangle is wholly inside or wholly outside.
+  return regionContainsPoint(region, { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 });
+}
+
+/** Whether a rectangle's edges actually cross this ring. */
+function ringCrossesRect(polygon, rect) {
+  const { left, top, right, bottom } = rect;
+  for (const point of polygon) {
+    if (point.x >= left && point.x <= right && point.y >= top && point.y <= bottom) return true;
+  }
+  const corners = [
+    { x: left, y: top }, { x: right, y: top },
+    { x: right, y: bottom }, { x: left, y: bottom },
+  ];
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
     for (let k = 0; k < 4; k += 1) {
       if (segmentsIntersect(polygon[j], polygon[i], corners[k], corners[(k + 1) % 4])) return true;
