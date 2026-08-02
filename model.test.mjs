@@ -313,6 +313,7 @@ test('the local project preserves its explorer working position', () => {
     graphPositions: {},
     toolbarPositions: {},
     promptLibrary: [],
+    itemSets: [],
   });
 });
 
