@@ -46,10 +46,20 @@ export function createKeyboardController({
       // Called without optional chaining and with the rejection reported: an
       // async command whose promise is dropped fails silently, which is
       // indistinguishable from the key not being bound at all.
-      if (!event.ctrlKey && !event.altKey && key === 'g' && session.selected.size > 0) {
+      if (!event.ctrlKey && !event.altKey && key === 'g') {
         event.preventDefault();
+        // Reported rather than silently skipped. The guard used to be part of
+        // the condition above, so a G press with nothing selected fell through
+        // to the default and looked identical to the key not being bound.
+        if (session.selected.size === 0) {
+          commands.setStatus?.('Select items first, then press G to group them.');
+          return;
+        }
         Promise.resolve(commands.groupSelectionIntoSet()).catch((error) => {
-          commands.reportError?.(error);
+          // Surfaced where the user can see it. A dropped rejection here is
+          // what made a throwing command indistinguishable from an unbound key.
+          commands.setStatus?.(`Could not group: ${error?.message ?? error}`);
+          console.error('groupSelectionIntoSet failed', error);
         });
         return;
       }

@@ -78,15 +78,25 @@ export function createWorkspaceCommands({
    * then dragged apart keeps its membership while its boundary follows. */
   async function groupSelectionIntoSet() {
     const selected = [...store.getSession().selected];
-    if (selected.length === 0) return;
+    if (selected.length === 0) {
+      setStatus('Select items first, then press G to group them.');
+      return;
+    }
     // getSnapshot, not getState: the store exposes the former, and calling the
     // latter threw on every G press. The throw was invisible because the caller
     // used optional chaining and dropped the returned promise, so a broken
     // command and an unbound key looked identical.
     const state = store.getSnapshot();
-    await store.commit(
-      setItemSets(state, [...(state.view?.itemSets ?? []), createItemSet(selected)]),
-    );
+    const next = setItemSets(state, [
+      ...(state.view?.itemSets ?? []),
+      createItemSet(selected),
+    ]);
+    await store.commit(next);
+    // Confirmed where the user can see it. Without this a successful group and
+    // a silently failed one look the same until the outline happens to render,
+    // and the outline is the thing most likely to be broken.
+    const count = next.view?.itemSets?.length ?? 0;
+    setStatus(`Grouped ${selected.length} item${selected.length === 1 ? '' : 's'} (${count} set${count === 1 ? '' : 's'}).`);
   }
 
   /** Begins a marquee gesture. With preserveSelection, the current selection
@@ -461,6 +471,9 @@ export function createWorkspaceCommands({
     clearSelection,
     selectAllVisible,
     groupSelectionIntoSet,
+    // Exposed so controllers can report their own failures where the user can
+    // see them rather than dropping them.
+    setStatus,
     beginMarqueeSelection,
     updateMarqueeSelection,
     finishMarqueeSelection,

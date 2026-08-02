@@ -1,3 +1,9 @@
+// Build marker. Papers runs from a packaged copy, so the first question when a
+// change appears to have no effect is whether this file is the one running at
+// all. Logged once at module load: if this line is absent from the console, the
+// renderer is serving a different build and no amount of editing here will show.
+console.info('[as-you-go] workspace module loaded: set-gravity branch, rings enabled');
+
 import {
   ROOT_ID,
   binSelection,
@@ -517,7 +523,10 @@ function createGraphController() {
    * structural changes rather than every frame: the node count follows the
    * ring's perimeter, which only changes when members move appreciably. */
   function syncSetRings() {
-    if (!setLayer) return;
+    if (!setLayer) {
+      console.warn('[as-you-go] syncSetRings called with no set layer');
+      return;
+    }
     const wanted = new Set();
     for (const itemSet of (state.view?.itemSets ?? [])) {
       const members = membersOnScreen(itemSet.id);
@@ -545,6 +554,16 @@ function createGraphController() {
       setShapes.delete(setId);
       setRings.delete(setId);
     }
+
+    // One line per reconcile, so a set that exists in the data but never
+    // reaches the screen can be told apart from one that was never created.
+    // The three numbers are the three places it can go wrong: no sets stored,
+    // sets stored but no members matched on screen, or members matched but no
+    // ring built.
+    const stored = (state.view?.itemSets ?? []).length;
+    let ringNodes = 0;
+    for (const ring of setRings.values()) ringNodes += ring.nodes.length;
+    console.info(`[as-you-go] rings: ${stored} set(s) stored, ${setShapes.size} drawn, ${ringNodes} ring nodes`);
   }
 
   /** Redraws each outline through its ring nodes' current positions.
