@@ -63,6 +63,7 @@ import { createConfirmationDialog } from './app/components/confirmation-dialog.j
 import { createContextMenu } from './app/components/context-menu.js';
 import { createEditorDialog } from './app/components/editor-dialog.js';
 import { createBinControls } from './app/components/bin-controls.js';
+import { createSetMembershipMode } from './app/components/set-membership-mode.js';
 import { bootstrapWorkspace } from './app/bootstrap.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
@@ -653,10 +654,21 @@ function createGraphController() {
    * the ring: the expensive part is the simulation, which was already running.
    */
   function drawSetRings() {
+    // Read once per frame rather than per set: while the picker is open these
+    // are the same for every outline, and they are what makes the canvas the
+    // picker rather than a list.
+    const picking = setMembershipMode?.isActive() === true;
+    const chosen = picking ? new Set(setMembershipMode.chosenSetIds()) : null;
+    const partial = picking ? new Set(setMembershipMode.mixedSetIds()) : null;
     for (const [setId, shape] of setShapes) {
       const ring = setRings.get(setId);
       shape.path.setAttribute('d', ring ? ringPath(ring.nodes) : '');
       shape.path.classList.toggle('set-selected', session.selectedSets?.has(setId) === true);
+      shape.path.classList.toggle('set-picking', picking);
+      shape.path.classList.toggle('set-chosen', picking && chosen.has(setId));
+      // Neither in nor out: Enter leaves a partial set exactly as it is, so it
+      // must not read as either.
+      shape.path.classList.toggle('set-partial', picking && partial.has(setId));
     }
   }
 
@@ -1372,6 +1384,14 @@ elements.grid.addEventListener('click', (event) => {
       return;
     }
     if (tile.classList.contains('bin-origin-ghost')) return;
+    // While Ctrl+G is open a click picks the set the item belongs to, rather
+    // than changing the selection being edited — the subjects were captured
+    // when the mode opened, so changing selection underneath it would edit
+    // membership for items the user is no longer looking at.
+    if (setMembershipMode.isActive()) {
+      setMembershipMode.toggleFromItem(tile.dataset.id);
+      return;
+    }
     commands.selectItem(tile.dataset.id, {
       shiftKey: event.shiftKey,
       ctrlKey: event.ctrlKey,
@@ -1713,6 +1733,25 @@ const binControls = createBinControls({
   saveWorkspaceView,
 });
 
+/** Ctrl+G membership picking.
+ *
+ * Constructed before the keyboard controller, which needs it to route Enter
+ * and Escape while the mode is open. Sets are chosen by clicking their
+ * contents rather than from a list, so the mode also intercepts canvas clicks
+ * — see the graph click handler. */
+const setMembershipMode = createSetMembershipMode({
+  getSets: () => state.view?.itemSets ?? [],
+  getSelectedIds: () => [...store.getSession().selected],
+  shareSelectionWithSets: (desired, itemIds, before) =>
+    commands.shareSelectionWithSets(desired, itemIds, before),
+  // The graph's chain, matching how the ring decides membership. Resolving
+  // inheritance two different ways here would let the picker disagree with the
+  // outline about which items a folder set covers.
+  ancestorsOf: (itemId) => graph.ancestorsOfNode(itemId),
+  render: () => render(),
+  setStatus,
+});
+
 const keyboard = createKeyboardController({
   document,
   elements,
@@ -1721,6 +1760,9 @@ const keyboard = createKeyboardController({
   closeMenu,
   getVisibleItemIds: visibleItemIds,
   confirmDialog,
+  beginSetMembershipEdit: () => setMembershipMode.begin(),
+  setMembershipMode,
+  setStatus,
 });
 
 const promptLibrary = createPromptLibraryDialog({

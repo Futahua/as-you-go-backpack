@@ -560,3 +560,84 @@ test('deleting with no set selected does nothing at all', () => {
     assert.equal(h.effects.status.length, 0, 'no status, no commit');
   });
 });
+
+test('the Ctrl+G picker reaches the store and leaves untouched sets alone', async () => {
+  // End to end through the real picker, command and model. The module's own
+  // tests use a stubbed committer, so this is what proves the wiring carries a
+  // membership decision all the way to persisted state.
+  const { createSetMembershipMode } = await import('./public/app/components/set-membership-mode.js');
+  const h = createHarness({
+    groups: [{ id: 'i1', parentId: 'root', name: 'A' }, { id: 'i2', parentId: 'root', name: 'B' }],
+  });
+  await h.store.commit({
+    ...h.store.getSnapshot(),
+    view: {
+      ...h.store.getSnapshot().view,
+      itemSets: [
+        { id: 'A', type: 'set', title: 'A', memberIds: ['i1'], excludedIds: [] },
+        { id: 'B', type: 'set', title: 'B', memberIds: ['i2'], excludedIds: [] },
+      ],
+    },
+  });
+  h.store.setSelection(['i1', 'i2']);
+
+  const mode = createSetMembershipMode({
+    getSets: () => h.store.getSnapshot().view?.itemSets ?? [],
+    getSelectedIds: () => [...h.store.getSession().selected],
+    shareSelectionWithSets: (desired, ids, before) =>
+      h.commands.shareSelectionWithSets(desired, ids, before),
+    render: () => {},
+    setStatus: () => {},
+  });
+
+  mode.begin();
+  // i1 is only in A and i2 only in B, so neither set covers the whole
+  // selection and neither may be pre-chosen.
+  assert.deepEqual(mode.chosenSetIds(), [], 'nothing is wholly chosen on open');
+  assert.deepEqual(mode.mixedSetIds().sort(), ['A', 'B'], 'both are partial');
+
+  mode.toggleFromItem('i1');
+  assert.deepEqual(mode.chosenSetIds(), ['A'], 'clicking resolves A to all');
+
+  await mode.confirm();
+  const sets = h.store.getSnapshot().view.itemSets;
+  assert.deepEqual(sets.find((s) => s.id === 'A').memberIds, ['i1', 'i2'], 'A took the selection');
+  assert.deepEqual(
+    sets.find((s) => s.id === 'B').memberIds, ['i2'],
+    'B was left partial and is untouched — no cross-set contamination',
+  );
+});
+
+test('opening the picker and confirming immediately commits nothing', async () => {
+  const { createSetMembershipMode } = await import('./public/app/components/set-membership-mode.js');
+  const h = createHarness({
+    groups: [{ id: 'i1', parentId: 'root', name: 'A' }, { id: 'i2', parentId: 'root', name: 'B' }],
+  });
+  const itemSets = [
+    { id: 'A', type: 'set', title: 'A', memberIds: ['i1'], excludedIds: [] },
+    { id: 'B', type: 'set', title: 'B', memberIds: ['i2'], excludedIds: [] },
+  ];
+  await h.store.commit({
+    ...h.store.getSnapshot(),
+    view: { ...h.store.getSnapshot().view, itemSets },
+  });
+  h.store.setSelection(['i1', 'i2']);
+
+  const mode = createSetMembershipMode({
+    getSets: () => h.store.getSnapshot().view?.itemSets ?? [],
+    getSelectedIds: () => [...h.store.getSession().selected],
+    shareSelectionWithSets: (desired, ids, before) =>
+      h.commands.shareSelectionWithSets(desired, ids, before),
+    render: () => {},
+    setStatus: () => {},
+  });
+  mode.begin();
+  await mode.confirm();
+
+  // The union pre-choose this replaces would have added each item to the
+  // other's set here, which is a silent edit of membership nobody asked to
+  // change.
+  const after = h.store.getSnapshot().view.itemSets;
+  assert.deepEqual(after.find((s) => s.id === 'A').memberIds, ['i1']);
+  assert.deepEqual(after.find((s) => s.id === 'B').memberIds, ['i2']);
+});

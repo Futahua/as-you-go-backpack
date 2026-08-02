@@ -21,6 +21,45 @@
   pointer-events: none;
   z-index: 0;
 }
+/* The outline drawn through a set's ring nodes. Pointer events stay off it:
+   clicks are hit-tested against the ring node positions, so the path is purely
+   a rendering and never something the user interacts with directly. */
+.graph-set-outline {
+  fill: color-mix(in oklab, var(--accent, #6b8f71) 12%, transparent);
+  stroke: color-mix(in oklab, var(--accent, #6b8f71) 55%, transparent);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  /* A set that wraps around a non-member leaves a hole rather than covering
+     it, and the ring can cross itself while the physics settles. */
+  fill-rule: evenodd;
+  transition: fill 120ms ease, stroke 120ms ease;
+}
+.graph-set-outline.set-selected {
+  fill: color-mix(in oklab, var(--accent, #6b8f71) 22%, transparent);
+  stroke: color-mix(in oklab, var(--accent, #6b8f71) 85%, transparent);
+  stroke-width: 3px;
+}
+/* While Ctrl+G is picking, every outline recedes so the chosen ones stand out
+   — the canvas itself becomes the picker. */
+.graph-set-outline.set-picking {
+  fill: color-mix(in oklab, var(--accent, #6b8f71) 5%, transparent);
+  stroke: color-mix(in oklab, var(--accent, #6b8f71) 25%, transparent);
+  stroke-dasharray: 6 5;
+}
+.graph-set-outline.set-picking.set-chosen {
+  fill: color-mix(in oklab, var(--accent, #6b8f71) 24%, transparent);
+  stroke: color-mix(in oklab, var(--accent, #6b8f71) 95%, transparent);
+  stroke-width: 3px;
+  stroke-dasharray: none;
+}
+/* Only some of the picked items are in this set. Enter leaves it exactly as it
+   is, so it must read as neither chosen nor rejected. */
+.graph-set-outline.set-picking.set-partial {
+  fill: color-mix(in oklab, var(--accent, #6b8f71) 12%, transparent);
+  stroke: color-mix(in oklab, var(--accent, #6b8f71) 60%, transparent);
+  stroke-dasharray: 2 4;
+}
+
 .graph-node-layer {
   position: absolute;
   top: 0;
