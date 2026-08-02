@@ -145,6 +145,16 @@ export function createPointerController({
           pinOnRelease: event.shiftKey,
           moved: false,
           thresholdPassed: false,
+          // The regions exactly as drawn when the gesture began. The preview
+          // and the release check both judge against this snapshot rather than
+          // the live geometry: reheating the simulation on every pointer move
+          // recomputes regions with the dragged item at its new position, so
+          // the live answer would depend on whether a redraw happened to run
+          // between the drag and the release — a quick and a slow release could
+          // reach different verdicts at the same coordinates. Freezing them at
+          // drag start makes the outcome deterministic. undefined (no graph
+          // method) falls back to the live regions via setIdsAtPoint's default.
+          regionSnapshot: graph.getSetRegions?.(),
         };
         closeMenu();
         event.preventDefault();
@@ -230,7 +240,7 @@ export function createPointerController({
         // itself would read as the drag being broken.
         node.shell?.classList.toggle(
           'graph-move-blocked',
-          !mayMoveTo(id, { x: node.x, y: node.y }),
+          !mayMoveTo(id, { x: node.x, y: node.y }, drag.regionSnapshot),
         );
       }
       graph.reheat(0.12);
@@ -286,10 +296,13 @@ export function createPointerController({
    *
    * The destination regions come from the same polygons that are drawn, so the
    * rule is decided against what the user can see rather than against a
-   * separate idea of where the sets are. */
-  function mayMoveTo(itemId, position) {
+   * separate idea of where the sets are. The snapshot is the geometry captured
+   * when the drag began: during the drag the item's own motion reheats the
+   * simulation and recomputes the live regions, so judging against those would
+   * make the answer depend on whether a redraw has run yet. */
+  function mayMoveTo(itemId, position, regionSnapshot) {
     if (!canDropInsideRegions || !graph.setIdsAtPoint) return true;
-    return canDropInsideRegions(itemId, graph.setIdsAtPoint(position));
+    return canDropInsideRegions(itemId, graph.setIdsAtPoint(position, regionSnapshot));
   }
 
   /** Puts back every item whose destination its sets do not allow.
@@ -303,7 +316,7 @@ export function createPointerController({
       const node = graph._getNode(id);
       const initial = current.initialPositions.get(id);
       if (!node || !initial) continue;
-      if (mayMoveTo(id, { x: node.x, y: node.y })) continue;
+      if (mayMoveTo(id, { x: node.x, y: node.y }, current.regionSnapshot)) continue;
       node.x = initial.x;
       node.y = initial.y;
       node.fx = initial.fx;

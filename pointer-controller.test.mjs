@@ -81,13 +81,21 @@ function createHarness({ binMode = false } = {}) {
   const effects = { reheat: [], decay: 0, close: 0, suppressGraph: [], suppressBlank: [] };
   // Set regions the drag rules are judged against. Tests supply a predicate
   // over a world position; by default nothing is inside any set.
-  let regionsAtPoint = () => [];
+  // A drag freezes the regions at drag start via getSetRegions, so the mock
+  // answers the snapshot query separately from the live one: a test can let a
+  // mid-drag redraw change the live geometry while the snapshot — the thing
+  // the drag is actually judged against — stays fixed.
+  const snapshotToken = {};
+  let snapshotAtPoint = () => [];
+  let liveAtPoint = () => [];
   let dropRule = () => true;
   const graph = {
     _getNode: (id) => graphNodes.get(id) ?? null,
     reheat: (a) => { effects.reheat.push(a); },
     _setSimulationDecay: () => { effects.decay += 1; },
-    setIdsAtPoint: (point) => regionsAtPoint(point),
+    getSetRegions: () => snapshotToken,
+    setIdsAtPoint: (point, regions) =>
+      regions === snapshotToken ? snapshotAtPoint(point) : liveAtPoint(point),
   };
   let marqueeActivePointer = null;
   const marquee = {
@@ -120,7 +128,9 @@ function createHarness({ binMode = false } = {}) {
   });
   controller.mount();
   return {
-    setRegionsAtPoint: (fn) => { regionsAtPoint = fn; },
+    setRegionsAtPoint: (fn) => { snapshotAtPoint = fn; liveAtPoint = fn; },
+    setSnapshotRegionsAtPoint: (fn) => { snapshotAtPoint = fn; },
+    setLiveRegionsAtPoint: (fn) => { liveAtPoint = fn; },
     setDropRule: (fn) => { dropRule = fn; },
     controller, grid, binButton, store, commands, commandCalls, graphNodes, effects, windowListeners, marquee,
     getShells: () => shells,
@@ -422,6 +432,47 @@ test('each item in a multi-item drag is judged on its own', () => {
   // One blocked item must not veto the whole gesture.
   assert.equal(allowed.x, 290, 'the member kept its move');
   assert.equal(blocked.x, 100, 'the setless item went back');
+});
+
+test('release is judged against the regions frozen at drag start, not the live ones', () => {
+  const h = createHarness();
+  const n = node('loose', 100, 100);
+  h.graphNodes.set('loose', n);
+  // At drag start, anywhere past x=150 is inside set A, which 'loose' does not
+  // belong to — so the destination reads as blocked.
+  h.setSnapshotRegionsAtPoint((point) => (point.x > 150 ? ['A'] : []));
+  // A redraw part-way through the drag recomputes the live regions with the
+  // dragged item at its *new* position, where it carves a hole around itself
+  // and the same destination reads as allowed.
+  h.setLiveRegionsAtPoint(() => []);
+  h.setDropRule((itemId, regionSetIds) => regionSetIds.length === 0);
+
+  dragTile(h, 'loose', { x: 10, y: 10 }, { x: 200, y: 10 });
+  assert.equal(n.x, 290, 'it followed the cursor while dragging');
+
+  h.grid._dispatch('pointerup', pointerEvent(1, 200, 10));
+  // Judging against the live regions — which the drag itself just changed —
+  // would let the move stand; the snapshot makes the outcome deterministic.
+  assert.equal(n.x, 100, 'release still reverts the blocked move');
+  assert.equal(n.y, 100);
+});
+
+test('drag preview flags blocked moves against the frozen snapshot', () => {
+  const h = createHarness();
+  const n = node('loose', 100, 100);
+  h.graphNodes.set('loose', n);
+  h.setSnapshotRegionsAtPoint((point) => (point.x > 150 ? ['A'] : []));
+  // The live regions would carve a hole around the item at its destination and
+  // allow it, but the preview must agree with the release, so it is judged
+  // against the same snapshot.
+  h.setLiveRegionsAtPoint(() => []);
+  h.setDropRule((itemId, regionSetIds) => regionSetIds.length === 0);
+
+  dragTile(h, 'loose', { x: 10, y: 10 }, { x: 200, y: 10 });
+  assert.ok(
+    n.shell.classList.contains('graph-move-blocked'),
+    'the blocked destination is marked while dragging',
+  );
 });
 
 test('dropping into a folder is not governed by the set rules', () => {

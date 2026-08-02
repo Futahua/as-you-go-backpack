@@ -1147,10 +1147,16 @@ My request:
      *
      * Ordering by area matters for nested sets: clicking inside a small set
      * that sits within a larger one should pick the small one, which is the
-     * set the click is most specifically about. */
-    function setIdsAtPoint(point) {
+     * set the click is most specifically about.
+     *
+     * `regions` defaults to the live geometry so click and sweep always match
+     * what is on screen. A drag passes an explicit snapshot captured at drag
+     * start: reheating the simulation after each pointer move recomputes the
+     * live regions with the dragged item at its *new* position, so validating
+     * against them would let the drag's own motion change the verdict. */
+    function setIdsAtPoint(point, regions = setRegions) {
       const hits = [];
-      for (const [setId, region] of setRegions) {
+      for (const [setId, region] of regions) {
         if (!regionContainsPoint(region, point)) continue;
         hits.push({ setId, area: regionArea(region) });
       }
