@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createWorkspaceCommands } from './public/app/workspace-commands.js';
+import { setItemSets } from './public/workspace-model-20260730b.js';
+import { createItemSet } from './public/sets-model.js';
 
 function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
   let state = { groups, shortcuts, view: { currentGroupId: 'root' } };
@@ -40,6 +42,11 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     graphContextId: () => 'ctx',
     removeGraphPositions: (s, ctxId, ids) => ({ ...s, positionsRemoved: ids }),
     setGraphPositions: (s, ctxId, positions) => ({ ...s, pinned: positions }),
+    // The real implementations, not stubs: the point of the grouping test is
+    // that the command reaches the store and the model correctly, and a stub
+    // would pass whether or not it did.
+    setItemSets,
+    createItemSet,
     createWebLink: (s, input) => ({ ...s, webLink: input }),
     createDroppedShortcuts: (s, targets, destination) => ({
       ...s,
@@ -74,6 +81,47 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
   });
   return { store, commands, effects, base, graphNodes };
 }
+
+test('G groups the selection into a set that reaches the store', () => {
+  // This is here because the command silently did nothing in the real app: it
+  // called store.getState(), which the store does not expose, so every press
+  // threw. The throw was invisible because the caller used optional chaining
+  // and dropped the returned promise, making a broken command and an unbound
+  // key look identical. Asserting on the committed state is what distinguishes
+  // them — a stubbed model would have passed either way.
+  const h = createHarness({
+    groups: [{ id: 'g1', parentId: 'root', name: 'A' }, { id: 'g2', parentId: 'root', name: 'B' }],
+  });
+  h.store.setSelection(['g1', 'g2']);
+
+  return h.commands.groupSelectionIntoSet().then(() => {
+    const sets = h.store.getSnapshot().view.itemSets;
+    assert.equal(sets.length, 1, 'one set was created');
+    assert.deepEqual(sets[0].memberIds, ['g1', 'g2'], 'holding exactly the selection');
+  });
+});
+
+test('G with nothing selected creates no set', () => {
+  const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'A' }] });
+  return h.commands.groupSelectionIntoSet().then(() => {
+    assert.equal(h.store.getSnapshot().view?.itemSets ?? undefined, undefined, 'nothing committed');
+  });
+});
+
+test('grouping twice makes two sets rather than replacing the first', () => {
+  const h = createHarness({
+    groups: [{ id: 'g1', parentId: 'root', name: 'A' }, { id: 'g2', parentId: 'root', name: 'B' }],
+  });
+  h.store.setSelection(['g1']);
+  return h.commands.groupSelectionIntoSet().then(() => {
+    h.store.setSelection(['g2']);
+    return h.commands.groupSelectionIntoSet();
+  }).then(() => {
+    const sets = h.store.getSnapshot().view.itemSets;
+    assert.equal(sets.length, 2, 'both sets survive');
+    assert.deepEqual(sets.map((s) => s.memberIds), [['g1'], ['g2']]);
+  });
+});
 
 test('selectItem without modifiers selects just the item and sets the anchor', () => {
   const h = createHarness();  h.commands.selectItem('b', { shiftKey: false, ctrlKey: false, visibleItemIds: ['a', 'b', 'c'] });

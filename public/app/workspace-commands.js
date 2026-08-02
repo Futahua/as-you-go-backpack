@@ -79,7 +79,11 @@ export function createWorkspaceCommands({
   async function groupSelectionIntoSet() {
     const selected = [...store.getSession().selected];
     if (selected.length === 0) return;
-    const state = store.getState();
+    // getSnapshot, not getState: the store exposes the former, and calling the
+    // latter threw on every G press. The throw was invisible because the caller
+    // used optional chaining and dropped the returned promise, so a broken
+    // command and an unbound key looked identical.
+    const state = store.getSnapshot();
     await store.commit(
       setItemSets(state, [...(state.view?.itemSets ?? []), createItemSet(selected)]),
     );

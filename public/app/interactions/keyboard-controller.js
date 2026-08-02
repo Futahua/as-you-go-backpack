@@ -42,9 +42,15 @@ export function createKeyboardController({
       }
       // Plain G, not Ctrl+G: Ctrl+G is the browser's find-again, and grouping
       // is frequent enough to deserve a bare key.
+      //
+      // Called without optional chaining and with the rejection reported: an
+      // async command whose promise is dropped fails silently, which is
+      // indistinguishable from the key not being bound at all.
       if (!event.ctrlKey && !event.altKey && key === 'g' && session.selected.size > 0) {
         event.preventDefault();
-        commands.groupSelectionIntoSet?.();
+        Promise.resolve(commands.groupSelectionIntoSet()).catch((error) => {
+          commands.reportError?.(error);
+        });
         return;
       }
       if (event.ctrlKey && key === 'c') {
