@@ -171,9 +171,9 @@ got wrong. Two traps this work fell into and had to climb out of:
   regions with the item at its new position, so judging against those would
   make the verdict depend on whether a redraw had run — a quick and a slow
   release could disagree. Freezing the regions at drag start makes the outcome
-  deterministic. The rule only bites on a setless item entering a set, and on a
-  shared item leaving the intersection; a member cannot be moved outside its
-  drag-start set region.
+  deterministic. The rule blocks a setless item from entering a set, any member
+  from leaving its drag-start set region, and a shared member from leaving the
+  drag-start intersection of its sets.
 - **Right-click-drag to multi-select sets is not bound**, and sets have no
   visible name or delete affordance beyond the `Delete` key.
 
