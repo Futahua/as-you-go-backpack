@@ -95,6 +95,13 @@
   stroke-linejoin: round;
   transition: fill 180ms ease, stroke 180ms ease, stroke-width 180ms ease;
 }
+/* A selected set: Delete removes the grouping and leaves the items, so this
+ * has to read clearly outside the Ctrl+G picking mode as well. */
+.graph-set-outline.set-selected {
+  fill: rgba(76, 114, 90, 0.18);
+  stroke: #3f6a4f;
+  stroke-width: 3;
+}
 /* While Ctrl+G is picking, unchosen sets recede and chosen ones light up, so
  * the canvas itself is the picker. */
 .graph-set-outline.set-picking {

@@ -46,7 +46,12 @@ import {
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
-import { buildSetRegions } from './set-region-model.js';
+import {
+  buildSetRegions,
+  regionContainsPoint,
+  regionArea,
+  polygonIntersectsRect,
+} from './set-region-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -567,6 +572,9 @@ My request:
         shape.path.classList.toggle('set-picking', picking);
         shape.path.classList.toggle('set-chosen', picking && chosen.has(shape.setId));
         shape.path.classList.toggle('set-partial', picking && mixed.has(shape.setId));
+        // Selection is not a picking state: Delete acts on this, so it has to
+        // be visible outside the Ctrl+G mode too.
+        shape.path.classList.toggle('set-selected', session.selectedSets.has(shape.setId));
       }
     }
 
@@ -1080,6 +1088,40 @@ My request:
       });
     }
 
+    /** The regions exactly as last drawn, keyed by set id.
+     *
+     * Selection, marquee and the drop rules all read this rather than deriving
+     * geometry of their own. That is the whole point of extracting the region
+     * once: a second approximation could disagree with the outline on screen,
+     * and the user would be clicking something they cannot see. */
+    function getSetRegions() {
+      return setRegions;
+    }
+
+    /** Which sets' regions contain a point, innermost first.
+     *
+     * Ordering by area matters for nested sets: clicking inside a small set
+     * that sits within a larger one should pick the small one, which is the
+     * set the click is most specifically about. */
+    function setIdsAtPoint(point) {
+      const hits = [];
+      for (const [setId, region] of setRegions) {
+        if (!regionContainsPoint(region, point)) continue;
+        hits.push({ setId, area: regionArea(region) });
+      }
+      return hits.sort((a, b) => a.area - b.area).map((hit) => hit.setId);
+    }
+
+    /** Every set whose region the rectangle touches, so a sweep catches a set
+     * without having to enclose it. */
+    function setIdsIntersectingRect(rect) {
+      const hits = [];
+      for (const [setId, region] of setRegions) {
+        if (region.polygons.some((ring) => polygonIntersectsRect(ring, rect))) hits.push(setId);
+      }
+      return hits;
+    }
+
     return {
       createGraphView,
       updateGraphView,
@@ -1087,6 +1129,9 @@ My request:
       refreshSelection,
       reheat,
       fitGraph,
+      getSetRegions,
+      setIdsAtPoint,
+      setIdsIntersectingRect,
       _getNode: (id) => nodes.get(id) ?? null,
       _setOnDragCancel(callback) { onDragCancel = callback; },
       _setSimulationDecay() {
@@ -1315,6 +1360,20 @@ My request:
         suppressGraphClick = false;
         return;
       }
+      // A click that missed every tile can still be inside a set's region.
+      // Testing it against the rendered polygons — rather than against the
+      // path element — means the hit area is exactly the visible outline,
+      // including the empty space between two lobes, which belongs to
+      // neither.
+      const world = pointer.clientToWorld(event.clientX, event.clientY);
+      const hitSetIds = graph.setIdsAtPoint(world);
+      if (hitSetIds.length > 0 && !setMembershipMode.isActive()) {
+        // Innermost first, so a set nested inside another takes the click.
+        commands.selectSets([hitSetIds[0]], { additive: event.shiftKey || event.ctrlKey });
+        closeMenu();
+        return;
+      }
+      commands.clearSetSelection();
       store.clearSelection();
       store.setSelectionAnchor(null);
       syncSelection();
@@ -1553,6 +1612,11 @@ My request:
     elements,
     commands,
     itemsIntersectingMarquee,
+    setIdsIntersectingRect: (rect) => graph.setIdsIntersectingRect(rect),
+    // Late-bound: the pointer controller is constructed after this one, and
+    // both need to agree on the conversion, so the lookup happens at sweep
+    // time rather than at construction.
+    clientToWorld: (clientX, clientY) => pointer.clientToWorld(clientX, clientY),
   });
 
   const drop = createDropController({

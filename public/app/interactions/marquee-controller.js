@@ -6,6 +6,10 @@ export function createMarqueeController({
   elements,
   commands,
   itemsIntersectingMarquee,
+  // Optional so the controller can be constructed without a graph — the
+  // explorer view has tiles but no set regions to sweep.
+  setIdsIntersectingRect = null,
+  clientToWorld = null,
 }) {
   let drag = null;
 
@@ -44,6 +48,20 @@ export function createMarqueeController({
       ...drag.baseSelection,
       ...itemsIntersectingMarquee(tiles, bounds),
     ]);
+
+    // A sweep catches sets as well as items. The bounds are in client space
+    // and the regions are in graph space, so the corners are converted through
+    // the same helper dragging uses rather than by a second scaling of our
+    // own.
+    if (!setIdsIntersectingRect || !clientToWorld) return;
+    const topLeft = clientToWorld(bounds.left, bounds.top);
+    const bottomRight = clientToWorld(bounds.right, bounds.bottom);
+    commands.selectSets(setIdsIntersectingRect({
+      left: Math.min(topLeft.x, bottomRight.x),
+      top: Math.min(topLeft.y, bottomRight.y),
+      right: Math.max(topLeft.x, bottomRight.x),
+      bottom: Math.max(topLeft.y, bottomRight.y),
+    }), { additive: false });
   }
 
   function isActive(pointerId) {

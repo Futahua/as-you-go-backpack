@@ -13,6 +13,9 @@ import {
   pointRectDistance,
   extractContours,
   sampleField,
+  regionContainsPoint,
+  regionArea,
+  polygonIntersectsRect,
 } from './public/set-region-model.js';
 
 const TILE = { width: 90, height: 90 };
@@ -275,6 +278,83 @@ test('a set with no visible members yields no region', () => {
     visibleItems: [tile('a', 0, 0)],
   });
   assert.equal(regions.has('s1'), false);
+});
+
+// ===========================================================================
+// Hit testing: the same polygons that are drawn decide what a click catches.
+// ===========================================================================
+
+test('a point inside a region is caught, one outside is not', () => {
+  const regions = buildSetRegions({
+    sets: [{ id: 's1', memberIds: ['a'] }],
+    visibleItems: [tile('a', 0, 0)],
+  });
+  const region = regions.get('s1');
+  assert.equal(regionContainsPoint(region, { x: 0, y: 0 }), true, 'on the member');
+  assert.equal(regionContainsPoint(region, { x: 60, y: 0 }), true, 'in the padding');
+  assert.equal(regionContainsPoint(region, { x: 400, y: 0 }), false, 'well outside');
+});
+
+test('the space between two lobes belongs to neither', () => {
+  // The gap between distant members is not part of the set — it is exactly
+  // the space a convex hull would have wrongly claimed.
+  const regions = buildSetRegions({
+    sets: [{ id: 's1', memberIds: ['a', 'b'] }],
+    visibleItems: [tile('a', 0, 0), tile('b', 600, 0)],
+  });
+  const region = regions.get('s1');
+  assert.equal(region.polygons.length, 2, 'two lobes');
+  assert.equal(regionContainsPoint(region, { x: 300, y: 0 }), false, 'the gap is not the set');
+});
+
+test('regionArea orders nested sets innermost first', () => {
+  // A small set inside a larger one: a click in the overlap should be about
+  // the small one, so area is what breaks the tie.
+  const items = [tile('inner', 0, 0), tile('outer', 200, 0)];
+  const regions = buildSetRegions({
+    sets: [
+      { id: 'small', memberIds: ['inner'] },
+      { id: 'large', memberIds: ['inner', 'outer'] },
+    ],
+    visibleItems: items,
+  });
+  assert.ok(
+    regionArea(regions.get('small')) < regionArea(regions.get('large')),
+    'the one-member set is smaller',
+  );
+});
+
+test('a sweep catches a region it crosses without enclosing', () => {
+  const regions = buildSetRegions({
+    sets: [{ id: 's1', memberIds: ['a'] }],
+    visibleItems: [tile('a', 0, 0)],
+  });
+  const ring = regions.get('s1').polygons[0];
+  // A band crossing the middle of the region, taller than it is wide.
+  assert.equal(
+    polygonIntersectsRect(ring, { left: -10, top: -500, right: 10, bottom: 500 }),
+    true,
+    'crossing counts',
+  );
+  assert.equal(
+    polygonIntersectsRect(ring, { left: 300, top: 300, right: 400, bottom: 400 }),
+    false,
+    'a rectangle well clear does not',
+  );
+});
+
+test('a sweep wholly inside a region still catches it', () => {
+  const regions = buildSetRegions({
+    sets: [{ id: 's1', memberIds: ['a'] }],
+    visibleItems: [tile('a', 0, 0)],
+  });
+  const ring = regions.get('s1').polygons[0];
+  // Every corner is inside the region and no edge is crossed, so this only
+  // works if containment is tested as well as edge crossing.
+  assert.equal(
+    polygonIntersectsRect(ring, { left: -5, top: -5, right: 5, bottom: 5 }),
+    true,
+  );
 });
 
 test('the sampled field closes rather than running off the grid', () => {

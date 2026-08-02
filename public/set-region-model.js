@@ -238,6 +238,82 @@ function round(value) {
   return Math.round(value * 100) / 100;
 }
 
+/** True when the point lies inside the polygon (ray casting). */
+export function pointInPolygon(point, polygon) {
+  if (polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i];
+    const b = polygon[j];
+    const straddles = (a.y > point.y) !== (b.y > point.y);
+    if (!straddles) continue;
+    const crossX = a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x);
+    if (point.x < crossX) inside = !inside;
+  }
+  return inside;
+}
+
+/** True when the point falls inside any of a region's rings.
+ *
+ * A region is several closed loops — one per lobe — so containment is per
+ * ring, not over some merged outline. Testing the union of the rings is what
+ * makes a click land only where the set is actually drawn, including the empty
+ * space between two distant lobes. */
+export function regionContainsPoint(region, point) {
+  return (region?.polygons ?? []).some((ring) => pointInPolygon(point, ring));
+}
+
+/** Shoelace area of a ring, always positive. */
+export function polygonArea(polygon) {
+  if (polygon.length < 3) return 0;
+  let total = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    total += (polygon[j].x * polygon[i].y) - (polygon[i].x * polygon[j].y);
+  }
+  return Math.abs(total) / 2;
+}
+
+/** A region's total area across its lobes, used to order overlapping hits so
+ * the smallest — most specific — set wins a click. */
+export function regionArea(region) {
+  return (region?.polygons ?? []).reduce((total, ring) => total + polygonArea(ring), 0);
+}
+
+/** True when a rectangle touches a polygon at all: overlapping edges, or
+ * either shape wholly inside the other. Used to catch sets with a sweep rather
+ * than requiring them to be fully surrounded. */
+export function polygonIntersectsRect(polygon, rect) {
+  if (polygon.length === 0) return false;
+  const { left, top, right, bottom } = rect;
+  for (const point of polygon) {
+    if (point.x >= left && point.x <= right && point.y >= top && point.y <= bottom) return true;
+  }
+  const corners = [
+    { x: left, y: top }, { x: right, y: top },
+    { x: right, y: bottom }, { x: left, y: bottom },
+  ];
+  // A rectangle wholly inside the region touches it without sharing a point.
+  for (const corner of corners) {
+    if (pointInPolygon(corner, polygon)) return true;
+  }
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    for (let k = 0; k < 4; k += 1) {
+      if (segmentsIntersect(polygon[j], polygon[i], corners[k], corners[(k + 1) % 4])) return true;
+    }
+  }
+  return false;
+}
+
+function segmentsIntersect(p1, p2, p3, p4) {
+  const direction = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const d1 = direction(p3, p4, p1);
+  const d2 = direction(p3, p4, p2);
+  const d3 = direction(p1, p2, p3);
+  const d4 = direction(p1, p2, p4);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0))
+    && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
 /** Every set's region, keyed by set id.
  *
  * `sets` are records with `id`; `visibleItems` are `{ id, x, y, width, height }`.
