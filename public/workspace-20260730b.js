@@ -612,8 +612,15 @@ function createGraphController() {
     return hits.sort((a, b) => a.area - b.area).map((hit) => hit.setId);
   }
 
-  /** Ray casting against the ring's nodes. */
-  function pointInRing(point, ring) {
+  /** Ray casting against the ring's nodes.
+   *
+   * Walked in ringIndex order, not array order. They happen to agree today
+   * because reconcileRing appends and truncates, but a ray cast over a
+   * reordered loop is not a polygon at all — it reports points plainly inside
+   * the outline as outside, and the failure is silent. Sorting costs nothing
+   * next to a click and removes the dependency on that coincidence. */
+  function pointInRing(point, nodes) {
+    const ring = [...nodes].sort((a, b) => a.ringIndex - b.ringIndex);
     let inside = false;
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
       const a = ring[i];
@@ -626,7 +633,12 @@ function createGraphController() {
   }
 
   /** Shoelace area, used only to order overlapping hits. */
-  function ringArea(ring) {
+  /** Shoelace area, in ringIndex order for the same reason as pointInRing: the
+   * formula sums signed trapezoids around a loop, so a reordered node list
+   * gives a number that is not the area of anything, and nested sets would be
+   * ranked wrongly. */
+  function ringArea(nodes) {
+    const ring = [...nodes].sort((a, b) => a.ringIndex - b.ringIndex);
     let total = 0;
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
       total += (ring[j].x * ring[i].y) - (ring[i].x * ring[j].y);
@@ -1381,8 +1393,13 @@ elements.grid.addEventListener('click', (event) => {
     // canvas rather than an icon, so the outline is the only thing it could
     // have been about — and this has to come before clearing, or selecting a
     // set would immediately deselect it.
-    const world = pointer.clientToWorld?.(event.clientX, event.clientY);
-    const hitSets = world ? graph.setIdsAtPoint(world) : [];
+    // No optional chaining: while clientToWorld was missing from the pointer
+    // controller's exports, `?.` turned its absence into undefined, then into
+    // an empty hit list, and clicking inside a ring did nothing at all with no
+    // way to tell a missing function from a missed ring. A throw here would at
+    // least reach the status bar.
+    const world = pointer.clientToWorld(event.clientX, event.clientY);
+    const hitSets = graph.setIdsAtPoint(world);
     if (hitSets.length > 0) {
       commands.selectSets([hitSets[0]], { additive: event.ctrlKey === true });
       closeMenu();

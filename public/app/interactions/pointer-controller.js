@@ -374,5 +374,15 @@ export function createPointerController({
     cancelDrag();
   }
 
-  return { mount, destroy, cancelDrag };
+  // clientToWorld is exported so set hit-testing converts a click exactly the
+  // way dragging does. Two conversions that drifted apart would mean clicking a
+  // set somewhere other than where its outline is drawn — and while it was
+  // missing, the caller's optional chaining turned the absence into an empty
+  // hit list, so clicking inside a ring silently did nothing.
+  // clientToWorld is exported so set hit-testing converts a click exactly the
+  // way dragging does. Two conversions that drifted apart would mean clicking a
+  // set somewhere other than where its outline is drawn — and while it was
+  // missing, the caller's optional chaining turned the absence into an empty
+  // hit list, so clicking inside a ring silently did nothing.
+  return { mount, destroy, cancelDrag, clientToWorld };
 }

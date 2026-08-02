@@ -321,3 +321,16 @@ test('pointercancel restores node positions and cleans up', () => {
   assert.ok(h.effects.reheat.includes(0.2));
   assert.equal(h.getReleased(), 1);
 });
+
+test('clientToWorld is exported for set hit-testing', () => {
+  // Set click selection converts the click through this, and its caller used
+  // optional chaining: while the export was missing, `?.` turned the absence
+  // into undefined, then into an empty hit list, so clicking inside a ring did
+  // nothing and looked exactly like clicking outside one. Nothing failed and
+  // nothing was logged.
+  const h = createHarness();
+  assert.equal(typeof h.controller.clientToWorld, 'function');
+  // With an identity transform and no viewport, client coordinates pass
+  // through — enough to prove the conversion is wired, not merely present.
+  assert.deepEqual(h.controller.clientToWorld(100, 50), { x: 100, y: 50 });
+});
