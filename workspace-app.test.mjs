@@ -314,6 +314,109 @@ test('deleting a selected set removes the grouping and keeps the items', async (
   mounted.app.graph.destroyGraphView();
 });
 
+/** A folder F containing a shortcut S, with F in a set, plus a loose item. */
+function inheritanceState({ excludedIds = [] } = {}) {
+  return {
+    schemaVersion: 1,
+    groups: [{ id: 'F', parentId: 'root', name: 'F' }],
+    shortcuts: [
+      { id: 'S', name: 's', target: 'C:/s', placements: [{ id: 'pS', parentId: 'F', order: 0 }] },
+      { id: 'L', name: 'l', target: 'C:/l', placements: [{ id: 'pL', parentId: 'root', order: 1 }] },
+    ],
+    view: {
+      layout: 'graph',
+      itemSets: [{ id: 'setF', title: '', memberIds: ['F'], excludedIds }],
+      // Expanded, so the folder's contents are on screen as graph nodes —
+      // which is the only way inheritance has anything to apply to.
+      graphExpandedGroupIds: ['F'],
+      graphPositions: { root: { F: { x: 0, y: 0 }, S: { x: 120, y: 0 }, L: { x: 600, y: 0 } } },
+    },
+  };
+}
+
+test('a shortcut inside a member folder inherits its set', async () => {
+  const mounted = mount({ loadWorkspace: async () => inheritanceState() });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+
+  // Graph nodes are keyed by the shortcut's record id, which ancestorFolderIds
+  // cannot resolve — it returns no chain, so S used to inherit nothing.
+  assert.deepEqual(
+    mounted.app.graph.ancestorsOfNode('S'), ['F'],
+    'the graph resolves the shortcut to its folder',
+  );
+
+  const region = mounted.app.graph.getSetRegions().get('setF');
+  assert.ok(region, 'the folder set has a region');
+  assert.ok(
+    mounted.app.graph.setIdsAtPoint({ x: 120, y: 0 }).includes('setF'),
+    'the shortcut position is inside its folder set',
+  );
+  mounted.app.graph.destroyGraphView();
+});
+
+test('an excluded child is outside its folder set in the rendered region', async () => {
+  const mounted = mount({ loadWorkspace: async () => inheritanceState({ excludedIds: ['S'] }) });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+
+  // The renderer used to rebuild sets as {id, memberIds}, dropping excludedIds
+  // entirely, so an excluded child stayed inside the outline — and selection
+  // and the drop rules hit-test that same region.
+  assert.ok(
+    !mounted.app.graph.setIdsAtPoint({ x: 120, y: 0 }).includes('setF'),
+    'the excluded shortcut is not inside the set',
+  );
+  assert.ok(
+    mounted.app.graph.setIdsAtPoint({ x: 0, y: 0 }).includes('setF'),
+    'the folder itself still is',
+  );
+  mounted.app.graph.destroyGraphView();
+});
+
+test('a folder set survives navigating inside the member folder', async () => {
+  const mounted = mount({ loadWorkspace: async () => inheritanceState() });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+  assert.ok(mounted.app.graph.getSetRegions().has('setF'), 'drawn at the root');
+
+  // Inside F, the folder tile itself is no longer emitted by
+  // visibleGraphItems — only its contents are. Keying the shape on a visible
+  // *stored* member therefore made the set vanish exactly when the user was
+  // looking at the items it contains.
+  mounted.app.store.setNavigation({ currentId: 'F' });
+  mounted.app.render();
+  // Rendering reheats the simulation on a real timer, so the post-navigation
+  // drawSetShapes cannot have run yet — nothing below would observe the new
+  // state. Let the simulation tick, then drain the frames it scheduled.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(32);
+
+  // The folder tile stops being a *member* of the visible graph, though its
+  // node lingers briefly while it fades out.
+  assert.ok(mounted.app.graph._getNode('S'), 'its contents are on screen');
+  assert.ok(
+    mounted.app.graph.getSetRegions().has('setF'),
+    'the set is still drawn around the contents that inherit it',
+  );
+  assert.ok(
+    mounted.app.graph.setIdsAtPoint({ x: 120, y: 0 }).includes('setF'),
+    'and the inherited child is inside it',
+  );
+  mounted.app.graph.destroyGraphView();
+});
+
+test('a loose item outside the folder is not in the set', async () => {
+  const mounted = mount({ loadWorkspace: async () => inheritanceState() });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  mounted.window._runFrame(16);
+  assert.ok(
+    !mounted.app.graph.setIdsAtPoint({ x: 600, y: 0 }).includes('setF'),
+    'inheritance does not leak to siblings of the folder',
+  );
+  mounted.app.graph.destroyGraphView();
+});
+
 test('a failing state load still leaves the interface mounted', async () => {
   const { app } = mount({ loadWorkspace: async () => { throw new Error('host unavailable'); } });
   // bootstrapWorkspace mounts behaviour-only controllers before loading, so a

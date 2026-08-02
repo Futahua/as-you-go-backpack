@@ -52,7 +52,7 @@ import {
   regionArea,
   regionIntersectsRect,
 } from './set-region-model.js';
-import { canDropInsideRegions } from './sets-model.js';
+import { canDropInsideRegions, belongsToSet } from './sets-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -492,11 +492,19 @@ My request:
     function syncSetShapes() {
       if (!setLayer) return;
       const wanted = new Map();
+      const onScreen = [...nodes.entries()]
+        .filter(([, node]) => !node.exiting)
+        .map(([nodeId]) => nodeId);
       for (const itemSet of (state.view?.itemSets ?? [])) {
-        const members = itemSet.memberIds.filter((memberId) => {
-          const node = nodes.get(memberId);
-          return node && !node.exiting;
-        });
+        // Effective membership, not stored membership. Keying on a visible
+        // *stored* member made a set vanish as soon as the user navigated
+        // inside a member folder: the folder itself stops being emitted by
+        // visibleGraphItems, even though its contents — which belong to the
+        // set by inheritance — are exactly what fills the screen.
+        // belongsToSet is the one place membership is decided, so a shape is
+        // created whenever any *effective* member is on screen, and an
+        // excluded child cannot keep one alive on its own.
+        const members = onScreen.filter((nodeId) => belongsToSet(itemSet, nodeId, ancestorsOfNode));
         // A set with nothing on screen has no outline to draw; it still exists
         // in the data and reappears when its members do.
         if (members.length > 0) wanted.set(itemSet.id, members);
@@ -530,7 +538,15 @@ My request:
      * That also makes it the geometry hit-testing can use, instead of a second
      * approximation that could disagree with what is on screen. */
     function drawSetShapes() {
-      if (setShapes.size === 0) return;
+      // Nothing drawn means no region. Leaving the previous setRegions in place
+      // would make hit-testing answer against geometry that is no longer on
+      // screen: setIdsAtPoint would report a set whose outline was removed,
+      // which is exactly the "rendered vs tested region disagree" failure the
+      // whole module exists to prevent.
+      if (setShapes.size === 0) {
+        setRegions = new Map();
+        return;
+      }
       const chosen = new Set(setMembershipMode.chosenSetIds());
       // Partial sets are neither in nor out: Enter leaves them exactly as they
       // are, so they must not read as either.
@@ -546,25 +562,23 @@ My request:
         visibleItems.push({ id: nodeId, x: node.x, y: node.y, width: node.width, height: node.height });
       }
 
-      const sets = [...setShapes.values()].map((shape) => ({
-        id: shape.setId,
-        memberIds: shape.memberIds ?? [],
-      }));
-      const coverage = new Map(sets.map((set) => [set.id, new Set(set.memberIds)]));
+      // The persisted records, not a rebuilt {id, memberIds} pair. Rebuilding
+      // dropped excludedIds, so an excluded child was still drawn inside its
+      // folder's set — and since selection and the drop rules hit-test this
+      // same region, that was not merely a visual error.
+      const sets = (state.view?.itemSets ?? []).filter((set) => setShapes.has(set.id));
 
       setRegions = buildSetRegions({
         sets,
         visibleItems,
         // Coverage, not storage: a folder member's visible descendants are
         // part of its set's region, so the outline wraps what the user sees
-        // inside the folder rather than just the folder tile.
-        membersOf: (set) => {
-          const stored = coverage.get(set.id) ?? new Set();
-          return visibleItems
-            .filter((entry) => stored.has(entry.id)
-              || ancestorFolderIds(state, entry.id).some((ancestorId) => stored.has(ancestorId)))
-            .map((entry) => entry.id);
-        },
+        // inside the folder rather than just the folder tile. belongsToSet is
+        // the one place membership is decided, so inheritance and exclusions
+        // cannot drift apart from what the model says.
+        membersOf: (set) => visibleItems
+          .filter((entry) => belongsToSet(set, entry.id, ancestorsOfNode))
+          .map((entry) => entry.id),
       });
 
       for (const shape of setShapes.values()) {
@@ -1089,6 +1103,36 @@ My request:
       });
     }
 
+    /** Every folder a visible node sits inside, walked up to the root.
+     *
+     * ancestorFolderIds() cannot answer this for a shortcut: graph nodes are
+     * keyed by the shared record id, and that resolves neither a group nor a
+     * placement, so it returns an empty chain and a shortcut inside a member
+     * folder inherits nothing. The graph already knows the answer — parentIds
+     * on the node — so the chain is walked from there instead.
+     *
+     * A linked shortcut placed in several folders returns the union of all its
+     * chains: it is genuinely inside each of them, so it inherits from each. */
+    function ancestorsOfNode(nodeId) {
+      const node = nodes.get(nodeId);
+      const starts = node?.parentIds?.length ? node.parentIds : [node?.parentId];
+      const chain = [];
+      const seen = new Set();
+      const queue = starts.filter(Boolean);
+      while (queue.length > 0) {
+        const parentId = queue.shift();
+        if (!parentId || parentId === ROOT_ID || parentId === 'bin' || seen.has(parentId)) continue;
+        seen.add(parentId);
+        chain.push(parentId);
+        // Above the visible graph the folder tree is the only source, and it
+        // is keyed by group id, which ancestorFolderIds handles correctly.
+        const parentNode = nodes.get(parentId);
+        if (parentNode?.parentIds?.length) queue.push(...parentNode.parentIds);
+        else queue.push(...ancestorFolderIds(state, parentId));
+      }
+      return chain;
+    }
+
     /** The regions exactly as last drawn, keyed by set id.
      *
      * Selection, marquee and the drop rules all read this rather than deriving
@@ -1133,6 +1177,7 @@ My request:
       getSetRegions,
       setIdsAtPoint,
       setIdsIntersectingRect,
+      ancestorsOfNode,
       _getNode: (id) => nodes.get(id) ?? null,
       _setOnDragCancel(callback) { onDragCancel = callback; },
       _setSimulationDecay() {
@@ -1597,7 +1642,13 @@ My request:
     removeGraphPositions,
     setGraphPositions,
     setItemSets,
-    ancestorFolderIds,
+    // Prefer the graph's chain for anything on screen — a shortcut node keyed
+    // by its record id has no chain in the folder tree — and fall back to the
+    // stored tree for items that are not currently rendered.
+    ancestorFolderIds: (snapshot, itemId) => {
+      const fromGraph = graph.ancestorsOfNode(itemId);
+      return fromGraph.length > 0 ? fromGraph : ancestorFolderIds(snapshot, itemId);
+    },
     createWebLink,
     createDroppedShortcuts,
     syncSelection,
@@ -1638,11 +1689,14 @@ My request:
     zoomTransform,
     // The spatial rules: a setless item may not enter a set, a member may not
     // leave its own, and an item in several is confined to their intersection.
+    // The graph's own ancestor chain, not ancestorFolderIds: a shortcut node is
+    // keyed by its record id, which resolves no parent chain, so the drag rules
+    // would disagree with the region that was drawn for the same item.
     canDropInsideRegions: (itemId, regionSetIds) => canDropInsideRegions(
       state.view?.itemSets ?? [],
       itemId,
       regionSetIds,
-      (id) => ancestorFolderIds(state, id),
+      (id) => graph.ancestorsOfNode(id),
     ),
     group,
     visiblePlacementIdFor,
@@ -1707,8 +1761,13 @@ My request:
       commands.shareSelectionWithSets(desired, itemIds, before),
     // Without the ancestor chain the picker cannot see that an item belongs to
     // a set through its parent folder, so it would offer to add it to a set it
-    // is already in and silently fail to remove it.
-    ancestorsOf: (itemId) => ancestorFolderIds(state, itemId),
+    // is already in and silently fail to remove it. Resolved through the graph
+    // for items on screen, since ancestorFolderIds cannot answer for a
+    // shortcut node keyed by its record id.
+    ancestorsOf: (itemId) => {
+      const fromGraph = graph.ancestorsOfNode(itemId);
+      return fromGraph.length > 0 ? fromGraph : ancestorFolderIds(state, itemId);
+    },
     render: () => render(),
     setStatus,
   });
