@@ -24,6 +24,7 @@ import {
   selectSpanningRoutes,
   foreignSeedDistance,
   fieldHasOccupiedBorder,
+  regionFieldValue,
 } from './public/set-region-model.js';
 
 const TILE = { width: 90, height: 90 };
@@ -821,6 +822,108 @@ test('every extracted ring is closed, and an open field is rejected', () => {
     }
   }
   assert.throws(() => extractContours(open), /did not close/);
+});
+
+// ===========================================================================
+// Shape quality. The outlines were a union of padded rectangles: long
+// axis-aligned runs meeting at right angles, which reads as construction
+// rather than as one grown body.
+// ===========================================================================
+
+/** The sharpest direction change anywhere on a ring, in degrees. */
+function sharpestCorner(ring) {
+  let worst = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const before = ring[(i - 1 + ring.length) % ring.length];
+    const here = ring[i];
+    const after = ring[(i + 1) % ring.length];
+    const a = Math.atan2(here.y - before.y, here.x - before.x);
+    const b = Math.atan2(after.y - here.y, after.x - here.x);
+    let turn = Math.abs(b - a);
+    if (turn > Math.PI) turn = (2 * Math.PI) - turn;
+    worst = Math.max(worst, turn);
+  }
+  return (worst * 180) / Math.PI;
+}
+
+test('contour vertices are interpolated, not snapped to the grid', () => {
+  // The staircase came from placing every crossing at the midpoint of a grid
+  // edge, which quantizes each vertex to a half-cell. A boundary at a shallow
+  // angle to the grid then comes out as a flight of steps however fine the
+  // sampling is.
+  const region = buildSetRegions({
+    sets: [{ id: 's1', memberIds: ['a'] }],
+    visibleItems: [tile('a', 0, 0)],
+    cellSize: 4,
+  }).get('s1');
+
+  const onGrid = region.polygons[0].filter((point) => {
+    const halfCell = 2;
+    return Math.abs(point.x % halfCell) < 1e-6 && Math.abs(point.y % halfCell) < 1e-6;
+  });
+  assert.ok(
+    onGrid.length < region.polygons[0].length / 4,
+    `${onGrid.length} of ${region.polygons[0].length} vertices sit exactly on the sampling grid`,
+  );
+});
+
+test('a smooth field turns two nearby members into one body, not two boxes', () => {
+  // The waist between two members must fill. Unblended, the midpoint between
+  // them is well outside the region and the outline dips in to make a notch.
+  const members = [tile('a', 0, 0), tile('b', 160, 0)];
+  const waist = { x: 80, y: 0 };
+  const boxy = regionFieldValue(waist, members, [], { padding: 26, gap: 14 });
+  const smooth = regionFieldValue(waist, members, [], {
+    padding: 26, gap: 14, blend: 100, cornerRadius: 22,
+  });
+  assert.ok(boxy < 0, `unblended, the waist is outside the region (${boxy.toFixed(1)})`);
+  assert.ok(smooth > boxy, `blending fills the waist (${boxy.toFixed(1)} -> ${smooth.toFixed(1)})`);
+});
+
+test('the outline has no sharp corners', () => {
+  // The measurable form of "it should look grown rather than constructed".
+  // Unblended this layout turns 56 degrees at its sharpest; the defaults bring
+  // that under 20.
+  const region = buildSetRegions({
+    sets: [{ id: 's1', memberIds: ['a', 'b'] }],
+    visibleItems: [tile('a', 0, 0), tile('b', 160, 0)],
+  }).get('s1');
+  const worst = sharpestCorner(region.polygons[0]);
+  assert.ok(worst < 20, `sharpest corner is ${worst.toFixed(1)} degrees`);
+});
+
+test('a partial blend is worse than none, so the default is past closure', () => {
+  // Guards the default against being "tidied" to a smaller number. A blend that
+  // half-closes the waist makes the contour pinch through the remaining gap,
+  // which is a sharper corner than the notch it replaced — the sweep behind the
+  // chosen default runs 56, 59, 74, 24, 15, 15 degrees at blend 0/20/34/50/70/100.
+  const members = [tile('a', 0, 0), tile('b', 160, 0)];
+  const cornerAt = (blend) => sharpestCorner(buildSetRegions({
+    sets: [{ id: 's1', memberIds: ['a', 'b'] }],
+    visibleItems: members,
+    blend,
+    cornerRadius: 22,
+  }).get('s1').polygons[0]);
+
+  assert.ok(cornerAt(34) > cornerAt(100), 'a partial blend is sharper than a full one');
+  assert.ok(cornerAt(100) < 20, 'and the default is in the flat part of the curve');
+});
+
+test('smoothing does not let two exclusive sets meet', () => {
+  // A wider blend claims more space, so the guarantee has to be re-checked at
+  // the setting actually shipped rather than only at blend zero.
+  const touching = [];
+  for (let separation = 95; separation <= 400; separation += 1) {
+    const regions = buildSetRegions({
+      sets: [{ id: 'sa', memberIds: ['a'] }, { id: 'sb', memberIds: ['b'] }],
+      visibleItems: [tile('a', 0, 0), tile('b', separation, 0)],
+    });
+    const a = regions.get('sa');
+    const b = regions.get('sb');
+    if (!a || !b) continue;
+    if (polygonSeparation(a.polygons, b.polygons) <= 0) touching.push(separation);
+  }
+  assert.deepEqual(touching, [], `smoothed sets blended at: ${touching.join(', ')}`);
 });
 
 test('an occupied cell on any border is detected', () => {

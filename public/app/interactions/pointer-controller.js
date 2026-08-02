@@ -314,10 +314,6 @@ export function createPointerController({
         setSuppressGraphClick(true);
         clearDragVisuals();
         const { hitBin, hitFolderId } = hitTest(event);
-        // Settle the scene around where the items were dropped. Only a free
-        // move on the canvas needs it: dropping into the Bin or a folder is a
-        // different gesture, and the item is leaving this layout anyway.
-        if (!hitBin && !hitFolderId) settleAfterDrop(drag);
         const dragCopy = {
           itemIds: [...drag.itemIds],
           placementIds: drag.placementIds,
@@ -341,6 +337,7 @@ export function createPointerController({
           }
           commands.pinDraggedNodes({ positions });
           graph._setSimulationDecay();
+          settleAfterDrop(dragCopy);
         } else {
           commands.releaseDraggedNodes({ itemIds: dragCopy.itemIds });
           for (const id of dragCopy.itemIds) {
@@ -352,6 +349,12 @@ export function createPointerController({
             }
           }
           graph.reheat(0.25);
+          // After the release path, never before it. Settling pins the dropped
+          // items so the arrangement is built around them, and this branch
+          // clears fx/fy and reheats — so settling first would erase the pin it
+          // had just set, leaving the anchor free for the centring force to
+          // pull on.
+          settleAfterDrop(dragCopy);
         }
         return;
       }

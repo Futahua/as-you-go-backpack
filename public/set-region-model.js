@@ -98,6 +98,42 @@ export function pointRectDistance(point, rect) {
   return Math.hypot(dx, dy);
 }
 
+/** Distance to a rectangle with its corners rounded off by `radius`.
+ *
+ * A plain rectangle distance has flat faces, and an isoline of it is a rounded
+ * rectangle — so a set built from that metric is a union of padded boxes, which
+ * is exactly the blocky silhouette the outlines had. Shrinking the rectangle by
+ * the radius and measuring to that instead rounds the whole shape rather than
+ * only its corners, so the isoline is a capsule-ish blob with no flat runs.
+ *
+ * The radius is clamped to half the smaller side so a small icon degenerates to
+ * a circle rather than inverting. */
+export function pointRoundedRectDistance(point, rect, radius) {
+  const halfWidth = (rect.width ?? 0) / 2;
+  const halfHeight = (rect.height ?? 0) / 2;
+  const r = Math.max(0, Math.min(radius, halfWidth, halfHeight));
+  const dx = Math.max(0, Math.abs(point.x - rect.x) - (halfWidth - r));
+  const dy = Math.max(0, Math.abs(point.y - rect.y) - (halfHeight - r));
+  return Math.max(0, Math.hypot(dx, dy) - r);
+}
+
+/** A smooth minimum: like `Math.min`, but the two arguments blend over a band
+ * of width `k` instead of meeting at a crease.
+ *
+ * This is what turns two adjacent members into one bulge rather than two boxes
+ * with a notch between them. A hard `min` over the members makes the field
+ * piecewise, and every piece boundary is a crease that the contour traces as a
+ * corner — which is the other half of why the outlines looked constructed
+ * rather than grown. The polynomial form is used rather than the exponential
+ * one because it is exact outside the blend band, so a member far from any
+ * other keeps its true distance and the shape does not quietly inflate.
+ */
+export function smoothMin(a, b, k) {
+  if (k <= 0) return Math.min(a, b);
+  const h = Math.max(0, Math.min(1, 0.5 + (0.5 * (b - a)) / k));
+  return (b * (1 - h)) + (a * h) - (k * h * (1 - h));
+}
+
 /** The signed clearance of one point for one set: positive inside, negative
  * outside, zero exactly on the membrane.
  *
@@ -122,12 +158,36 @@ export function pointRectDistance(point, rect) {
  *
  * Returning a scalar rather than a boolean is what lets the contour be
  * extracted by interpolation instead of at fixed grid-edge midpoints — the
- * cause of the staircase edges. */
-export function regionFieldValue(point, memberRects, obstacleRects, { padding, gap, exclusiveRects = [] } = {}) {
+ * cause of the staircase edges.
+ *
+ * ## Why the member distance is smooth
+ *
+ * `ownDistance` is a *smooth* minimum over the members, measured to rounded
+ * rectangles rather than sharp ones. Both matter, and neither is cosmetic
+ * polish over a correct shape — they are what the shape is.
+ *
+ * A hard `min` of sharp rectangle distances makes the field piecewise: each
+ * member owns a region of space, and every boundary between two of them is a
+ * crease that the contour traces as a corner. Unioned padded boxes is exactly
+ * what that produces, and it reads as construction rather than growth. The
+ * smooth minimum blends adjacent members into one bulge, and the rounded metric
+ * removes the flat faces, so what comes out is a single continuous curve that
+ * eases between members instead of stepping around them.
+ *
+ * `blend` sets how wide that easing band is. Zero reproduces the old union of
+ * boxes exactly, which is what the geometry tests that predate this pin down. */
+export function regionFieldValue(point, memberRects, obstacleRects, {
+  padding, gap, exclusiveRects = [], blend = 0, cornerRadius = 0,
+} = {}) {
   let ownDistance = Infinity;
   for (const rect of memberRects) {
-    ownDistance = Math.min(ownDistance, pointRectDistance(point, rect));
-    if (ownDistance === 0) break;
+    const distance = cornerRadius > 0
+      ? pointRoundedRectDistance(point, rect, cornerRadius)
+      : pointRectDistance(point, rect);
+    ownDistance = ownDistance === Infinity
+      ? distance
+      : smoothMin(ownDistance, distance, blend);
+    if (ownDistance === 0 && blend <= 0) break;
   }
   let value = padding - ownDistance;
   for (const rect of obstacleRects) {
@@ -197,7 +257,9 @@ function fieldBounds(memberRects, padding, cellSize, extraMargin = 0) {
  *
  * `values` is the authoritative sample; `inside` is its sign, kept because the
  * masks and the closure tests read occupancy rather than magnitude. */
-export function sampleField(memberRects, obstacleRects, { padding, gap, cellSize, exclusiveRects = [], extraMargin = 0 }) {
+export function sampleField(memberRects, obstacleRects, {
+  padding, gap, cellSize, exclusiveRects = [], extraMargin = 0, blend = 0, cornerRadius = 0,
+}) {
   const bounds = fieldBounds(memberRects, padding, cellSize, extraMargin);
   const columns = Math.max(2, Math.ceil((bounds.maxX - bounds.minX) / cellSize) + 1);
   const rows = Math.max(2, Math.ceil((bounds.maxY - bounds.minY) / cellSize) + 1);
@@ -206,7 +268,9 @@ export function sampleField(memberRects, obstacleRects, { padding, gap, cellSize
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       const point = { x: bounds.minX + column * cellSize, y: bounds.minY + row * cellSize };
-      const value = regionFieldValue(point, memberRects, obstacleRects, { padding, gap, exclusiveRects });
+      const value = regionFieldValue(point, memberRects, obstacleRects, {
+        padding, gap, exclusiveRects, blend, cornerRadius,
+      });
       values[row * columns + column] = value;
       inside[row * columns + column] = value >= 0 ? 1 : 0;
     }
@@ -553,9 +617,11 @@ function buildMembraneFieldOnGrid({
   padding,
   gap,
   cellSize,
+  blend = 0,
+  cornerRadius = 0,
 }, neckRadius, extraMargin) {
   const field = sampleField(memberRects, obstacleRects, {
-    padding, gap, cellSize, exclusiveRects, extraMargin,
+    padding, gap, cellSize, exclusiveRects, extraMargin, blend, cornerRadius,
   });
   const { values, columns, rows, originX, originY } = field;
   const size = columns * rows;
@@ -849,16 +915,46 @@ function fillCosmeticVoids(field, forbidden) {
   }
 }
 
+/** Where along an edge the field crosses zero.
+ *
+ * The endpoint values say how far each corner is from the boundary, so the
+ * crossing is a linear interpolation between them rather than the edge's
+ * midpoint. Using the midpoint quantizes every contour vertex to a half-cell,
+ * which is the direct cause of staircase outlines — a boundary at a shallow
+ * angle to the grid comes out as a flight of steps however fine the sampling. */
+export function interpolateIsoPoint(p1, p2, v1, v2, iso = 0) {
+  const denominator = v2 - v1;
+  const t = Math.abs(denominator) < 1e-9
+    ? 0.5
+    : Math.max(0, Math.min(1, (iso - v1) / denominator));
+  return {
+    x: p1.x + (p2.x - p1.x) * t,
+    y: p1.y + (p2.y - p1.y) * t,
+  };
+}
+
 /** Traces the boundary of the occupied cells as closed polygons.
  *
  * Segments are emitted per cell and then chained head-to-tail. A normal set
  * yields one outer ring; further rings are interior holes, which only appear
- * where a hard obstacle or an exclusive set genuinely keeps the membrane out. */
+ * where a hard obstacle or an exclusive set genuinely keeps the membrane out.
+ *
+ * Each crossing is interpolated from the scalar field rather than placed at the
+ * midpoint of the grid edge. That is what makes the outline follow the shape
+ * instead of the grid — and it only pays off because the field itself is smooth
+ * (see `regionFieldValue`). Interpolating a field built from hard-min'd sharp
+ * rectangles would trace a tidy line around a fundamentally boxy shape. */
 export function extractContours(field) {
-  const { inside, columns, rows, originX, originY, cellSize } = field;
+  const { inside, values, columns, rows, originX, originY, cellSize } = field;
   const at = (column, row) => (column < 0 || row < 0 || column >= columns || row >= rows
     ? 0
     : inside[row * columns + column]);
+  // Outside the grid the field is unknown; the border is empty by construction,
+  // so treating it as one cell's worth of "outside" keeps the interpolation
+  // continuous with the occupancy test above.
+  const valueAt = (column, row) => (column < 0 || row < 0 || column >= columns || row >= rows
+    ? -cellSize
+    : (values ? values[row * columns + column] : (inside[row * columns + column] ? 1 : -1)));
 
   const segments = [];
   for (let row = 0; row < rows - 1; row += 1) {
@@ -872,14 +968,21 @@ export function extractContours(field) {
       if (edges.length === 0) continue;
       const x = originX + column * cellSize;
       const y = originY + row * cellSize;
-      const half = cellSize / 2;
-      const midpoint = (edge) => {
-        if (edge === 0) return { x: x + half, y };
-        if (edge === 1) return { x: x + cellSize, y: y + half };
-        if (edge === 2) return { x: x + half, y: y + cellSize };
-        return { x, y: y + half };
+
+      const corners = [
+        { point: { x, y }, value: valueAt(column, row) },
+        { point: { x: x + cellSize, y }, value: valueAt(column + 1, row) },
+        { point: { x: x + cellSize, y: y + cellSize }, value: valueAt(column + 1, row + 1) },
+        { point: { x, y: y + cellSize }, value: valueAt(column, row + 1) },
+      ];
+      // Edge n runs between corner n and corner n+1: 0=top, 1=right, 2=bottom,
+      // 3=left, which is the ordering the marching table is written against.
+      const crossing = (edge) => {
+        const a = corners[edge];
+        const b = corners[(edge + 1) % 4];
+        return interpolateIsoPoint(a.point, b.point, a.value, b.value);
       };
-      for (const [from, to] of edges) segments.push([midpoint(from), midpoint(to)]);
+      for (const [from, to] of edges) segments.push([crossing(from), crossing(to)]);
     }
   }
   return chainSegments(segments, cellSize);
@@ -1200,6 +1303,25 @@ export function buildSetRegions({
   gap = 14,
   cellSize = 4,
   neckRadius,
+  // How widely adjacent members blend into one another, and how far each
+  // member's own corners are rounded off. Together these decide whether the
+  // outline reads as a union of padded boxes or as one grown body; zero for
+  // both reproduces the old boxy shape exactly.
+  //
+  // The defaults are measured, not guessed, because the middle of the range is
+  // worse than either end. Sweeping blend against the sharpest corner in the
+  // outline for two members 160px apart:
+  //
+  //     blend    0   20   34   50   70  100
+  //     maxTurn 56   59   74   24   15   15  degrees
+  //
+  // A partial blend half-closes the waist between two members and the contour
+  // pinches through the remaining gap, which is a sharper corner than the notch
+  // it replaced. Past closure the waist fills and the corner collapses. 100
+  // with a 22 corner radius gives 15 degrees worst-case and 5 at the 95th
+  // percentile, against 56 and 9 for the unblended shape.
+  blend = 100,
+  cornerRadius = 22,
   initialExtraMargin,
   marginGrowthStep,
   maxMarginGrowthAttempts,
@@ -1255,6 +1377,8 @@ export function buildSetRegions({
       padding,
       gap,
       cellSize,
+      blend,
+      cornerRadius,
       ...(neckRadius == null ? {} : { neckRadius }),
       ...(initialExtraMargin == null ? {} : { initialExtraMargin }),
       ...(marginGrowthStep == null ? {} : { marginGrowthStep }),

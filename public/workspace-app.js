@@ -1267,13 +1267,20 @@ My request:
         if (!node) continue;
         node.x = position.x;
         node.y = position.y;
-        // An anchor stays pinned so the settling that follows cannot drift it
-        // off the spot the user chose. Everything else is released back to the
-        // simulation, which smooths out the corrections.
+        // An anchor is pinned, and stays pinned. The release path reheats the
+        // simulation right before this runs, so an unpinned anchor would be
+        // free for the centring force to pull on — and the drop has to be the
+        // fixed point the rest of the arrangement is built around, not another
+        // thing the layout gets a vote on.
         if (anchorIds.includes(nodeId)) {
           node.fx = position.x;
           node.fy = position.y;
           node.positioned = true;
+          // Zero the velocity too: a node carries the momentum of the drag, and
+          // d3 integrates that even while fx/fy hold the position, so the
+          // moment the pin is lifted it would spring away.
+          node.vx = 0;
+          node.vy = 0;
         }
       }
       // Geometry once, after the positions are final.
