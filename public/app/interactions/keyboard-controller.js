@@ -28,6 +28,13 @@ export function createKeyboardController({
         event.preventDefault();
         return;
       }
+      // A live set selection takes Escape first, so dismissing it does not also
+      // throw away the item selection underneath.
+      if (event.key === 'Escape' && session.selectedSets?.size > 0) {
+        closeMenu();
+        commands.clearSetSelection();
+        return;
+      }
       if (event.key === 'Escape') {
         // Close the menu before clearing/syncing/saving, matching the
         // original handler's sequence.
@@ -86,6 +93,17 @@ export function createKeyboardController({
       if (event.ctrlKey && (key === 'y' || (event.shiftKey && key === 'z'))) {
         event.preventDefault();
         commands.redo();
+        return;
+      }
+      // Delete on a selected set removes the grouping, not the items — and it
+      // is checked before the item branch so a live set selection wins. Binning
+      // a set's contents because a set was selected would be a bad surprise.
+      if (event.key === 'Delete' && session.selectedSets?.size > 0) {
+        event.preventDefault();
+        Promise.resolve(commands.deleteSelectedSets()).catch((error) => {
+          commands.setStatus?.(`Could not delete: ${error?.message ?? error}`);
+          console.error('deleteSelectedSets failed', error);
+        });
         return;
       }
       if (event.key === 'Delete' && session.selected.size > 0) {

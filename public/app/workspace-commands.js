@@ -28,6 +28,8 @@ export function createWorkspaceCommands({
   createDroppedShortcuts,
   setItemSets,
   createItemSet,
+  selectAllScope,
+  ancestorsOf,
   syncSelection,
   saveWorkspaceView,
   closeMenu,
@@ -64,8 +66,20 @@ export function createWorkspaceCommands({
     saveWorkspaceView();
   }
 
+  /** Ctrl+A, scoped to the set the last click was about.
+   *
+   * Inside a set it selects that set's members; outside every set it selects
+   * only the setless items. Selecting literally everything is rarely what is
+   * wanted once sets exist — the useful move is "the rest of this group", and
+   * selectAllScope decides which group that is from the anchor. */
   function selectAllVisible(visibleItemIds) {
-    store.setSelection(visibleItemIds);
+    const session = store.getSession();
+    const sets = store.getSnapshot().view?.itemSets ?? [];
+    store.setSelection(
+      selectAllScope
+        ? selectAllScope(sets, visibleItemIds, session.selectionAnchor, ancestorsOf)
+        : visibleItemIds,
+    );
     store.setSelectionAnchor(null);
     syncSelection();
     saveWorkspaceView();
@@ -97,6 +111,42 @@ export function createWorkspaceCommands({
     // and the outline is the thing most likely to be broken.
     const count = next.view?.itemSets?.length ?? 0;
     setStatus(`Grouped ${selected.length} item${selected.length === 1 ? '' : 's'} (${count} set${count === 1 ? '' : 's'}).`);
+  }
+
+  /** Selects sets rather than items. Sets and items are separate selections, so
+   * picking a set never disturbs what items are selected — and Delete means two
+   * different things depending on which one is live. */
+  function selectSets(setIds, { additive = false } = {}) {
+    const next = additive ? [...store.getSession().selectedSets, ...setIds] : setIds;
+    store.setSelectedSets(next);
+    render();
+  }
+
+  function clearSetSelection() {
+    if (store.getSession().selectedSets.size === 0) return;
+    store.clearSelectedSets();
+    render();
+  }
+
+  /** Delete on a selected set removes the grouping only.
+   *
+   * The items are untouched, which is the whole distinction from Delete on an
+   * item selection — so the status line says so rather than leaving the user to
+   * wonder what just happened to their files. */
+  async function deleteSelectedSets() {
+    const setIds = [...store.getSession().selectedSets];
+    if (setIds.length === 0) return;
+    const snapshot = store.getSnapshot();
+    const current = snapshot.view?.itemSets ?? [];
+    const next = current.filter((candidate) => !setIds.includes(candidate.id));
+    if (next.length === current.length) return;
+    store.clearSelectedSets();
+    try {
+      await store.commit(setItemSets(snapshot, next));
+      setStatus(`Deleted ${setIds.length} ${setIds.length === 1 ? 'set' : 'sets'}. The items are unchanged.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
   }
 
   /** Begins a marquee gesture. With preserveSelection, the current selection
@@ -471,6 +521,9 @@ export function createWorkspaceCommands({
     clearSelection,
     selectAllVisible,
     groupSelectionIntoSet,
+    selectSets,
+    clearSetSelection,
+    deleteSelectedSets,
     // Exposed so controllers can report their own failures where the user can
     // see them rather than dropping them.
     setStatus,

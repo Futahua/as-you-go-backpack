@@ -50,7 +50,7 @@ import {
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
-import { belongsToSet, createItemSet } from './sets-model.js';
+import { belongsToSet, createItemSet, selectAllScope } from './sets-model.js';
 import { reconcileRing, ringPath, forceRingShape } from './set-ring-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
@@ -593,6 +593,47 @@ function createGraphController() {
     console.info(`[as-you-go] rings: ${stored} set(s) stored, ${setShapes.size} drawn, ${ringNodes} ring nodes`);
   }
 
+  /** Which sets' rings enclose a point, smallest first.
+   *
+   * Tested against the ring nodes rather than the drawn path: the nodes are
+   * where the physics put them and the path is drawn through them, so the two
+   * agree by construction — there is no second geometry to fall out of step
+   * with what is on screen.
+   *
+   * Smallest first so clicking inside a small set nested in a larger one picks
+   * the small one, which is the set the click is most specifically about. */
+  function setIdsAtPoint(point) {
+    const hits = [];
+    for (const [setId, ring] of setRings) {
+      if (ring.nodes.length < 3) continue;
+      if (!pointInRing(point, ring.nodes)) continue;
+      hits.push({ setId, area: ringArea(ring.nodes) });
+    }
+    return hits.sort((a, b) => a.area - b.area).map((hit) => hit.setId);
+  }
+
+  /** Ray casting against the ring's nodes. */
+  function pointInRing(point, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+      const a = ring[i];
+      const b = ring[j];
+      if ((a.y > point.y) === (b.y > point.y)) continue;
+      const crossX = a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x);
+      if (point.x < crossX) inside = !inside;
+    }
+    return inside;
+  }
+
+  /** Shoelace area, used only to order overlapping hits. */
+  function ringArea(ring) {
+    let total = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+      total += (ring[j].x * ring[i].y) - (ring[i].x * ring[j].y);
+    }
+    return Math.abs(total) / 2;
+  }
+
   /** Redraws each outline through its ring nodes' current positions.
    *
    * Cheap enough for every frame — it reads positions and builds a path string,
@@ -1128,6 +1169,8 @@ function createGraphController() {
     refreshSelection,
     reheat,
     fitGraph,
+    ancestorsOfNode,
+    setIdsAtPoint,
     _getNode: (id) => nodes.get(id) ?? null,
     _setOnDragCancel(callback) { onDragCancel = callback; },
     _setSimulationDecay() {
@@ -1334,7 +1377,19 @@ elements.grid.addEventListener('click', (event) => {
       suppressGraphClick = false;
       return;
     }
+    // Blank space inside a set's ring selects that set. The click landed on the
+    // canvas rather than an icon, so the outline is the only thing it could
+    // have been about — and this has to come before clearing, or selecting a
+    // set would immediately deselect it.
+    const world = pointer.clientToWorld?.(event.clientX, event.clientY);
+    const hitSets = world ? graph.setIdsAtPoint(world) : [];
+    if (hitSets.length > 0) {
+      commands.selectSets([hitSets[0]], { additive: event.ctrlKey === true });
+      closeMenu();
+      return;
+    }
     store.clearSelection();
+    commands.clearSetSelection();
     store.setSelectionAnchor(null);
     syncSelection();
     closeMenu();
@@ -1551,6 +1606,11 @@ const commands = createWorkspaceCommands({
   createDroppedShortcuts,
   setItemSets,
   createItemSet,
+  selectAllScope,
+  // The graph's own ancestor chain, so inherited membership is resolved the
+  // same way the ring is drawn. A separate walk here would let the two disagree
+  // about which items a folder set covers.
+  ancestorsOf: (id) => graph.ancestorsOfNode(id),
   syncSelection,
   saveWorkspaceView,
   closeMenu,

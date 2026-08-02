@@ -374,5 +374,8 @@ export function createPointerController({
     cancelDrag();
   }
 
-  return { mount, destroy, cancelDrag };
+  // clientToWorld is exposed so set hit-testing converts click coordinates
+  // exactly the way dragging does. Two conversions that drift apart would mean
+  // clicking a set somewhere other than where its outline is drawn.
+  return { mount, destroy, cancelDrag, clientToWorld };
 }

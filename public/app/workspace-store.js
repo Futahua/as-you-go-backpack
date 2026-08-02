@@ -28,6 +28,10 @@ export function createWorkspaceStore({
     binCurrentId: 'bin',
     binMode: false,
     graphExpanded: new Set(),
+    // Sets are selected separately from items, so picking a set never disturbs
+    // what items are selected and Delete can mean two different things
+    // depending on which selection is live.
+    selectedSets: new Set(),
     clipboard: null,
     ...initialSession,
   };
@@ -102,6 +106,9 @@ export function createWorkspaceStore({
     },
     addToGraphExpanded: (id) => { session.graphExpanded.add(id); },
     removeFromGraphExpanded: (id) => { session.graphExpanded.delete(id); },
+    setSelectedSets: (ids) => { session.selectedSets = new Set(ids); },
+    addToSelectedSets: (id) => { session.selectedSets.add(id); },
+    clearSelectedSets: () => { session.selectedSets.clear(); },
     setClipboard: (clipboard) => { session.clipboard = clipboard; },
     canUndo: () => undoStack.length > 0,
     canRedo: () => redoStack.length > 0,
