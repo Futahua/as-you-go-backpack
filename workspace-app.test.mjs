@@ -136,6 +136,9 @@ async function renderGraph(options = {}) {
   // Tear the view down before the fit timer fires. destroyGraphView clears
   // fitPending, which the timer checks, so the pending fit becomes a no-op
   // rather than an unhandled rejection after the test has finished.
+  //
+  // Once the vendored-d3 bundle split is fixed and the fit no longer throws,
+  // this teardown can go and these tests can await the fit instead.
   mounted.app.graph.destroyGraphView();
   return { ...mounted, paths };
 }

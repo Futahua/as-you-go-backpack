@@ -16,7 +16,7 @@ need is inside it.
 - Pull request: **PR #6**
 - Branch: `feat/item-sets`
 - Base: `main` at `37542c92f467062a318a377b2fe06c6e5217b7b5`
-- Branch head at handoff: `52b209a`
+- Branch head at handoff: `fa80525`
 
 Related but **out of scope** — do not change unless a requirement genuinely
 forces it:
@@ -34,7 +34,7 @@ before adding code so new work lands in the right place.
 npm test
 ```
 
-551 tests, all passing at handoff. There is no build step and no framework —
+533 tests, all passing at handoff. There is no build step and no framework —
 plain ES modules served as static files inside the Papers host.
 
 To see it running, launch Papers and open this Backpack. **Nothing in this
@@ -71,85 +71,103 @@ on the graph view.
 | Responsibility | File |
 | --- | --- |
 | Pure set data: membership, scoping, drop rules | `public/sets-model.js` |
-| Pure outline geometry: hulls, clustering, wobble, hit tests | `public/set-hull-model.js` |
+| Pure region geometry: occupancy field, contours, hit tests | `public/set-region-model.js` |
 | Ctrl+G picking mode (transient state only) | `public/app/components/set-membership-mode.js` |
 | Commands: `G`, `Ctrl+G`, scoped `Ctrl+A`, set deletion | `public/app/workspace-commands.js` |
 | Key bindings | `public/app/interactions/keyboard-controller.js` |
-| Rendering, Alt+click, set layer | `public/workspace-20260730b.js` |
+| Rendering, Alt+click, set layer | `public/workspace-app.js` |
+| Browser entry (just calls `mountWorkspace`) | `public/workspace-20260730b.js` |
+| DOM stand-in for mounting the app in tests | `fake-dom.mjs` |
 | Outline styling and picking states | `public/styles/graph.css` |
 
 The two pure modules hold the real logic and are fully unit tested. Keep them
 free of DOM, store and host access.
 
-## THE UNFINISHED WORK — start here
+## The separation requirement — now met
 
 **Requirement: two sets that share no members must never blend into one shape.**
 If exclusive outlines merge, you cannot tell which items belong to which set.
 
-**This is not met.** Measured across member separations of 105–500px:
+**This is met**, and met by construction rather than by tuning. Verified
+exhaustively: every integer centre separation from 95 to 500px keeps the two
+regions apart, tightest observed gap 5px. Previously, separations below ~200px
+touched by 3–12px.
 
-| Separation | Result |
-| --- | --- |
-| ~200px and beyond | Clear, correct |
-| Below ~200px | Outlines still touch, by 3–12px |
+### How
 
-### What is already in place
+The old pipeline (`set-hull-model.js`, now removed) drew a Catmull-Rom curve
+through padded hull points. The curve bows past the points it passes through
+by an amount that scales with the shape, so the drawn edge was never the edge
+that had been checked. Six attempts at bounding that with constants each fixed
+some separations and broke others.
 
-- `safePadding()` in `set-hull-model.js` caps a set's padding by the distance
-  to items belonging to sets it shares nothing with.
-- Sets that **do** share a member are deliberately exempt — that overlap is the
-  Venn and must be preserved. The renderer computes the disjoint set for each
-  outline in `drawSetShapes()`.
-- `closedCurvePath()` takes a `smoothing` parameter; a constrained outline
-  reduces it to hug its hull more tightly.
+`public/set-region-model.js` decides membership per unit of space instead. A
+cell joins a set only when all three hold:
 
-Both help. Neither guarantees.
+1. it is within `padding` of one of the set's members;
+2. it is at least `gap` from every non-member;
+3. it is outside the **separation band** of any set this one shares no member
+   with.
 
-### Why the obvious fixes do not work
+The boundary is extracted from those cells with marching squares, and that
+extracted polygon is both what renders and what hit-testing will use. Nothing
+is drawn that was not tested.
 
-The drawn curve bows outward past the hull points it passes through, and **that
-bow scales with the shape's size** (measured: 12.5px on a small shape, 27px on
-a larger one). Consequences:
+Rule 3 is the part that finishes it, and it is easy to leave out — the first
+implementation here had only rules 1 and 2, and 13 aligned separations between
+96 and 144px still touched. Clearance from foreign *tiles* is not enough: the
+corridor between two close sets is within padding of both, so each claims it.
 
-- No fixed padding reserve or amplitude cap can bound it.
-- Clamping the hull *points* does not help, because the curve between two
-  clamped points still bulges outward. This was tried and does not work.
+Sets that **do** share a member are exempt from the band. That overlap is the
+Venn, and banding them apart removes the shared item from both regions.
 
-Four parameter-tuning attempts (padding floor, amplitude budget, a fixed bulge
-constant, a derived smoothing) each fixed some separations and broke others.
-**Do not continue down that path.**
+### If you change this code
 
-### Two approaches that should work
+Drive it from measurement, not from a formula — that is what the old approach
+got wrong. Two traps this work fell into and had to climb out of:
 
-1. Derive the outline from a true offset curve with a provable maximum
-   deviation, rather than a Catmull-Rom through hull points.
-2. Sample the finished curve and shrink until containment actually holds —
-   verify rather than predict.
-
-There is a ready-made harness for measuring this: the PR discussion contains a
-script that samples cubic segments and reports, for each separation, the
-maximum x of set A against the minimum x of set B. Reproduce it and drive the
-fix from measurement, not from a formula.
+- **A randomized test passed while the bug was live.** It jittered members
+  off-axis and never sampled the aligned separations that were failing. The
+  exhaustive integer sweep in `set-region-model.test.mjs` replaced it. Prefer
+  sweeps to sampling when the failure might be systematic.
+- **`cellSize` is a correctness parameter**, not a performance knob. Sample too
+  coarsely and the gap quantizes away. It is explicit in the API for that
+  reason, and guarded by a test across 2/4/8px.
 
 ## Other known gaps
 
-- **Nothing is verified in the live Papers app.** Outlines render and gestures
-  are wired, but this has not been driven by hand. `workspace-20260730b.js`
-  performs DOM queries at module load, so the composition root cannot be
-  imported by the test suite — everything in that file is verified by
-  inspection only. Several visual bugs in earlier work reached the user because
-  a green suite said nothing about them.
-- **Drop blocking is modelled but not wired.** `canDropInsideRegions()` and
-  `regionsAt()` decide it and are tested; the drag code does not call them yet,
-  so a non-member can still be dropped inside a set.
+- **Nothing is verified in the live Papers app.** The composition root is now
+  mountable in tests (`mountWorkspace()` in `public/workspace-app.js`, with a
+  DOM stand-in in `fake-dom.mjs`), and the rendered outline paths are asserted
+  on directly. But `fake-dom.mjs` models structure, attributes and listeners —
+  **not layout**. It catches wiring regressions and crashes; it cannot tell you
+  an outline looks right. Driving the real app by hand is still required before
+  any visual claim.
+- **The graph's zoom-to-fit throws**, in both motion modes, because the two
+  vendored d3 bundles each carry a private copy of `d3-selection`, so the
+  selection the app passes `d3-zoom` is missing `.transition` / `.interrupt`.
+  Pre-existing on `main` since the graph view landed (`a22fe9a`) and unrelated
+  to sets. **Being fixed separately** — if that work has landed, the
+  `destroyGraphView()` call in `renderGraph()` in `workspace-app.test.mjs` is
+  no longer needed to keep the fit timer from firing, and the render tests can
+  simply await it. Reproduce with the snippet in the commit message for
+  `fa80525`.
+- **Drop blocking is modelled but not wired.** `canDropInsideRegions()` decides
+  it and is tested; the drag code does not call it yet, so a non-member can
+  still be dropped inside a set. `graph.getSetRegions()` is the geometry it
+  should consult, so that hit-testing matches what is drawn.
+- **Inherited membership cannot be edited.** A child cannot leave a set it
+  inherits from its parent folder — the storage model has no `excludedIds`.
+- **Ctrl+G takes the union across a mixed selection**, so opening the picker
+  and pressing Enter immediately can change membership. It needs tri-state
+  (all / none / mixed) with only user-changed states applied.
 - **The intersection movement rule is untried.** An item in several sets is
   confined to their intersection, and a member cannot leave its own set region
   by dragging. The user asked to revisit this once the outlines were visible;
   that has not happened. With three or more overlapping sets it may feel too
   restrictive.
-- **Right-click-drag to multi-select sets is not bound.** The hit testing
-  exists (`setsIntersectingRect`), the gesture does not.
-- **Sets have no visible name or delete affordance** beyond the `Delete` key.
+- **Right-click-drag to multi-select sets is not bound**, and sets have no
+  visible name or delete affordance beyond the `Delete` key.
 
 ## How this work is expected to be done
 
