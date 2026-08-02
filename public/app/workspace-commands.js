@@ -1,4 +1,4 @@
-import { selectAllScope, inverseScope, addItemSet, setMembership } from '../sets-model.js';
+import { selectAllScope, inverseScope, addItemSet, setMembership, removeItemSet } from '../sets-model.js';
 
 /** Application command layer. Commands are the named user-intent operations
  * that coordinate session mutation, persistence, and narrow rendering/host
@@ -118,6 +118,40 @@ export function createWorkspaceCommands({
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  /** Deletes the selected sets. Only the grouping goes — the items inside are
+   * untouched and simply become setless, which is what makes this safe enough
+   * to bind to Delete without a confirmation. */
+  async function deleteSelectedSets() {
+    const setIds = [...store.getSession().selectedSets];
+    if (setIds.length === 0) return;
+    const snapshot = store.getSnapshot();
+    const current = snapshot.view?.itemSets ?? [];
+    const next = setIds.reduce((sets, setId) => removeItemSet(sets, setId), current);
+    if (next === current) return;
+    store.clearSelectedSets();
+    try {
+      await store.commit(setItemSets(snapshot, next));
+      const count = setIds.length;
+      setStatus(`Deleted ${count} ${count === 1 ? 'set' : 'sets'}. The items are unchanged.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Selects sets rather than items. Sets and items are separate selections,
+   * so picking a set never disturbs what items are selected. */
+  function selectSets(setIds, { additive = false } = {}) {
+    const next = additive ? [...store.getSession().selectedSets, ...setIds] : setIds;
+    store.setSelectedSets(next);
+    render();
+  }
+
+  function clearSetSelection() {
+    if (store.getSession().selectedSets.size === 0) return;
+    store.clearSelectedSets();
+    render();
   }
 
   /** The folders Alt+click acts on: the select-all scope minus the current
@@ -507,6 +541,9 @@ export function createWorkspaceCommands({
     groupSelectionIntoSet,
     shareSelectionWithSets,
     inverseSelectionScope,
+    deleteSelectedSets,
+    selectSets,
+    clearSetSelection,
     beginMarqueeSelection,
     updateMarqueeSelection,
     finishMarqueeSelection,

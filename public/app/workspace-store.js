@@ -28,6 +28,7 @@ export function createWorkspaceStore({
     binCurrentId: 'bin',
     binMode: false,
     graphExpanded: new Set(),
+    selectedSets: new Set(),
     clipboard: null,
     ...initialSession,
   };
@@ -100,6 +101,9 @@ export function createWorkspaceStore({
       if (session.graphExpanded.has(id)) session.graphExpanded.delete(id);
       else session.graphExpanded.add(id);
     },
+    setSelectedSets: (ids) => { session.selectedSets = new Set(ids); },
+    addToSelectedSets: (id) => { session.selectedSets.add(id); },
+    clearSelectedSets: () => { session.selectedSets.clear(); },
     addToGraphExpanded: (id) => { session.graphExpanded.add(id); },
     removeFromGraphExpanded: (id) => { session.graphExpanded.delete(id); },
     setClipboard: (clipboard) => { session.clipboard = clipboard; },

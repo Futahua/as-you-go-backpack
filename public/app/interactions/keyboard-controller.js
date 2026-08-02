@@ -50,6 +50,11 @@ export function createKeyboardController({
           return;
         }
       }
+      if (event.key === 'Escape' && session.selectedSets?.size > 0) {
+        closeMenu();
+        commands.clearSetSelection();
+        return;
+      }
       if (event.key === 'Escape') {
         // Close the menu before clearing/syncing/saving, matching the
         // original handler's sequence.
@@ -95,6 +100,13 @@ export function createKeyboardController({
       if (event.ctrlKey && (key === 'y' || (event.shiftKey && key === 'z'))) {
         event.preventDefault();
         commands.redo();
+        return;
+      }
+      // A set selection takes Delete: deleting a set only removes the
+      // grouping, so it must not be confused with binning its items.
+      if (event.key === 'Delete' && session.selectedSets?.size > 0) {
+        event.preventDefault();
+        void commands.deleteSelectedSets();
         return;
       }
       if (event.key === 'Delete' && session.selected.size > 0) {

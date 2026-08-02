@@ -11,6 +11,9 @@ import {
   wobble,
   closedCurvePath,
   setOutlinePath,
+  safePadding,
+  polygonIntersectsRect,
+  setsIntersectingRect,
   pointInPolygon,
   regionsAt,
 } from './public/set-hull-model.js';
@@ -236,4 +239,89 @@ test('a bigger reach merges what a smaller one separates', () => {
   const rects = [rect(0, 0), rect(400, 0)];
   assert.equal(clusterMembers(rects, 150).length, 2);
   assert.equal(clusterMembers(rects, 500).length, 1, 'reach is the tunable knob');
+});
+
+// ===========================================================================
+// Exclusive sets must never blend. Two sets sharing no members always keep a
+// visible gap, so you can see which items belong to which.
+// ===========================================================================
+
+/** Do two outlines overlap at all? */
+function outlinesOverlap(rectsA, paddingA, rectsB, paddingB) {
+  const a = convexHull(memberCorners(rectsA, paddingA));
+  const b = convexHull(memberCorners(rectsB, paddingB));
+  return a.some((point) => pointInPolygon(point, b))
+    || b.some((point) => pointInPolygon(point, a));
+}
+
+test('two disjoint sets with adjacent members do not blend', () => {
+  const a = [rect(0, 0)];
+  const b = [rect(130, 0)];
+  // Full padding would overlap: this is the bug the cap exists to prevent.
+  assert.equal(outlinesOverlap(a, 26, b, 26), true, 'unrestricted padding merges them');
+  const pa = safePadding(a, b);
+  const pb = safePadding(b, a);
+  assert.equal(outlinesOverlap(a, pa, b, pb), false, 'capped padding keeps them apart');
+});
+
+test('the gap between disjoint sets stays visible, not merely non-zero', () => {
+  const a = [rect(0, 0)];
+  const b = [rect(130, 0)];
+  const hullA = convexHull(memberCorners(a, safePadding(a, b)));
+  const hullB = convexHull(memberCorners(b, safePadding(b, a)));
+  const gap = Math.min(...hullB.map((p) => p.x)) - Math.max(...hullA.map((p) => p.x));
+  assert.ok(gap >= 10, `expected a readable gap, got ${gap}`);
+});
+
+test('padding yields entirely when there is no room for a halo', () => {
+  const touching = safePadding([rect(0, 0)], [rect(101, 0)]);
+  assert.equal(
+    touching, 0,
+    'keeping exclusive sets apart matters more than a minimum halo',
+  );
+});
+
+test('a far-away foreign item does not constrain padding at all', () => {
+  assert.equal(safePadding([rect(0, 0)], [rect(2000, 2000)]), 26, 'full padding when there is room');
+});
+
+test('no foreign items means no constraint', () => {
+  assert.equal(safePadding([rect(0, 0)], []), 26);
+});
+
+test('a constrained outline hugs its hull more tightly than a free one', () => {
+  const a = [rect(0, 0)];
+  const free = setOutlinePath(a, { id: 's', time: 0 });
+  const constrained = setOutlinePath(a, { id: 's', time: 0, foreignRects: [rect(130, 0)] });
+  const maxOf = (path) => Math.max(...(path.match(/-?\d+(\.\d+)?/g) ?? []).map(Number));
+  assert.ok(
+    maxOf(constrained) < maxOf(free),
+    'a neighbour pulls the outline in rather than being ignored',
+  );
+});
+
+test('setOutlinePath without foreign items is unchanged', () => {
+  const rects = [rect(0, 0), rect(120, 0)];
+  assert.equal(
+    setOutlinePath(rects, { id: 's', time: 1 }),
+    setOutlinePath(rects, { id: 's', time: 1, foreignRects: [] }),
+  );
+});
+
+test('a rectangle touching a polygon is detected however it overlaps', () => {
+  const square = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }];
+  assert.equal(polygonIntersectsRect(square, { left: 10, top: 10, right: 30, bottom: 30 }), true, 'corner overlap');
+  assert.equal(polygonIntersectsRect(square, { left: -5, top: -5, right: 25, bottom: 25 }), true, 'polygon inside rect');
+  assert.equal(polygonIntersectsRect(square, { left: 5, top: 5, right: 15, bottom: 15 }), true, 'rect inside polygon');
+  assert.equal(polygonIntersectsRect(square, { left: -20, top: 5, right: 40, bottom: 8 }), true, 'crossing band');
+  assert.equal(polygonIntersectsRect(square, { left: 50, top: 50, right: 60, bottom: 60 }), false, 'well clear');
+});
+
+test('a sweep catches every set outline it touches', () => {
+  const left = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }, { x: 0, y: 20 }];
+  const right = [{ x: 100, y: 0 }, { x: 120, y: 0 }, { x: 120, y: 20 }, { x: 100, y: 20 }];
+  const regions = [{ id: 'a', polygon: left }, { id: 'b', polygon: right }];
+  assert.deepEqual(setsIntersectingRect(regions, { left: 5, top: 5, right: 10, bottom: 10 }), ['a']);
+  assert.deepEqual(setsIntersectingRect(regions, { left: -10, top: -10, right: 200, bottom: 50 }), ['a', 'b'], 'a wide sweep takes both');
+  assert.deepEqual(setsIntersectingRect(regions, { left: 40, top: 40, right: 60, bottom: 60 }), [], 'empty space catches nothing');
 });

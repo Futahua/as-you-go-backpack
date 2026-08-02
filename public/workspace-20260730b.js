@@ -533,7 +533,29 @@ function createGraphController() {
         shape.path.setAttribute('d', '');
         continue;
       }
-      shape.path.setAttribute('d', setOutlinePath(rects, { id: shape.setId, time }));
+      // Only items belonging to sets this one shares nothing with, plus
+      // setless items, hold the outline back. Sets that share a member are
+      // meant to blend — that overlap is the Venn — so their exclusive items
+      // are deliberately not treated as foreign.
+      const own = new Set(shape.memberIds ?? []);
+      const disjoint = new Set();
+      for (const other of setShapes.values()) {
+        if (other.setId === shape.setId) continue;
+        const shares = (other.memberIds ?? []).some((memberId) => own.has(memberId));
+        if (!shares) for (const memberId of other.memberIds ?? []) disjoint.add(memberId);
+      }
+      const foreignRects = [];
+      for (const [nodeId, node] of nodes) {
+        if (own.has(nodeId) || node.exiting) continue;
+        // A setless item never blends anything, so it does not constrain.
+        if (!disjoint.has(nodeId)) continue;
+        foreignRects.push({ x: node.x, y: node.y, width: node.width, height: node.height });
+      }
+      shape.path.setAttribute('d', setOutlinePath(rects, {
+        id: shape.setId,
+        time,
+        foreignRects,
+      }));
       shape.path.classList.toggle('set-picking', picking);
       shape.path.classList.toggle('set-chosen', picking && chosen.has(shape.setId));
     }
