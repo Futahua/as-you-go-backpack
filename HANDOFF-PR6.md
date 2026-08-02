@@ -16,7 +16,7 @@ need is inside it.
 - Pull request: **PR #6**
 - Branch: `feat/item-sets`
 - Base: `main` at `37542c92f467062a318a377b2fe06c6e5217b7b5`
-- Branch head at handoff: `fa80525`
+- Branch head at handoff: `ed4f856`
 
 Related but **out of scope** — do not change unless a requirement genuinely
 forces it:
@@ -34,7 +34,7 @@ before adding code so new work lands in the right place.
 npm test
 ```
 
-533 tests, all passing at handoff. There is no build step and no framework —
+572 tests, all passing at handoff. There is no build step and no framework —
 plain ES modules served as static files inside the Papers host.
 
 To see it running, launch Papers and open this Backpack. **Nothing in this
@@ -42,17 +42,20 @@ branch has been verified that way** (see Known gaps).
 
 ## What the feature is
 
-**Sets** are named groupings over workspace items, drawn as animated outlines
-on the graph view.
+**Sets** are named groupings over workspace items, drawn as outlines on the
+graph view.
 
 - An item may belong to several sets (they overlap, forming a Venn) or to none.
 - Membership is independent of folder location.
 - Membership is *inherited through folders*: `G` on a folder covers its whole
   subtree, but only the folder id is stored, so items added to that folder
-  later join the set automatically.
-- Sets store no position or size. The outline is derived every frame from where
-  members are, so a member that moves reshapes its own set rather than crossing
-  a boundary it cannot cross.
+  later join the set automatically. A child can be taken back out with an
+  exclusion, without expanding the folder into its contents.
+- Sets store no position or size. The outline is derived from where members
+  currently are — recomputed when they move, not on a timer — so a member that
+  moves reshapes its own set rather than crossing a boundary it cannot cross.
+  Any living edge belongs in CSS on the static path, where it cannot deform the
+  tested boundary.
 - Names are optional — the user navigates visually, and sets are picked by
   clicking their contents rather than by reading a list.
 
@@ -61,9 +64,10 @@ on the graph view.
 | Gesture | Behaviour |
 | --- | --- |
 | `G` | Group the current selection into a new set |
-| `Ctrl+G` | Membership picker: click items to toggle their sets, `Enter` confirms, `Escape` cancels |
+| `Ctrl+G` | Membership picker: click items to cycle their sets, `Enter` applies only what changed, `Escape` cancels |
 | `Ctrl+A` | Scoped to the picked set (derived from the last clicked item); outside any set it selects only setless items |
 | `Alt+click` a folder | Batch-expand the inverse of the selection |
+| Click / sweep an outline | Select that set (innermost first where they nest) |
 | `Delete` | Delete selected sets — removes only the grouping, the items are untouched |
 
 ## Module map for this feature
@@ -143,31 +147,47 @@ got wrong. Two traps this work fell into and had to climb out of:
   **not layout**. It catches wiring regressions and crashes; it cannot tell you
   an outline looks right. Driving the real app by hand is still required before
   any visual claim.
-- **The graph's zoom-to-fit throws**, in both motion modes, because the two
-  vendored d3 bundles each carry a private copy of `d3-selection`, so the
-  selection the app passes `d3-zoom` is missing `.transition` / `.interrupt`.
-  Pre-existing on `main` since the graph view landed (`a22fe9a`) and unrelated
-  to sets. **Being fixed separately** — if that work has landed, the
-  `destroyGraphView()` call in `renderGraph()` in `workspace-app.test.mjs` is
-  no longer needed to keep the fit timer from firing, and the render tests can
-  simply await it. Reproduce with the snippet in the commit message for
-  `fa80525`.
-- **Drop blocking is modelled but not wired.** `canDropInsideRegions()` decides
-  it and is tested; the drag code does not call it yet, so a non-member can
-  still be dropped inside a set. `graph.getSetRegions()` is the geometry it
-  should consult, so that hit-testing matches what is drawn.
-- **Inherited membership cannot be edited.** A child cannot leave a set it
-  inherits from its parent folder — the storage model has no `excludedIds`.
-- **Ctrl+G takes the union across a mixed selection**, so opening the picker
-  and pressing Enter immediately can change membership. It needs tri-state
-  (all / none / mixed) with only user-changed states applied.
-- **The intersection movement rule is untried.** An item in several sets is
-  confined to their intersection, and a member cannot leave its own set region
-  by dragging. The user asked to revisit this once the outlines were visible;
-  that has not happened. With three or more overlapping sets it may feel too
-  restrictive.
+- ~~**The graph's zoom-to-fit throws**, in both motion modes~~ — **fixed.** The
+  vendored d3 was three standalone bundles that each inlined their own
+  `d3-selection`, so the selection the app passed `d3-zoom` was missing
+  `.transition` / `.interrupt`. `public/vendor/` is now a shared module graph
+  (`public/vendor/d3/`, regenerated by `npm run vendor:d3`) with exactly one
+  `d3-selection` instance, so the prototype patches d3-transition and d3-drag
+  install are visible to the app. Pre-existing on `main` since the graph view
+  landed (`a22fe9a`) and unrelated to sets. Covered by 'the initial graph fit
+  does not throw' (both motion modes) in `workspace-app.test.mjs`.
+  The `destroyGraphView()` call in `renderGraph()` there is now only about
+  keeping the set-outline tests focused, not about dodging a crash.
+- **The intersection movement rule has still not been judged by eye.** It is
+  wired and enforced now, but whether it *feels* right is the open question —
+  the user asked to revisit it once outlines were visible. With three or more
+  overlapping sets it may be too restrictive.
+
+  Worth knowing before you judge it: because a region is derived from live
+  member positions, a member's own set follows it and never blocks it. Sets
+  have no fixed boundary to escape. The rule only bites on a setless item
+  entering a set, and on a shared item leaving the intersection.
 - **Right-click-drag to multi-select sets is not bound**, and sets have no
   visible name or delete affordance beyond the `Delete` key.
+
+## What landed after the first handoff
+
+All six items of the review plan are done. Beyond the separation guarantee
+above:
+
+- **Exclusions.** Sets carry `excludedIds`, and `belongsToSet()` is the one
+  rule both lists are read through, so a child can leave a set it inherits from
+  its parent folder. Excluding a folder excludes its subtree.
+- **Tri-state Ctrl+G.** The picker captures the real all/none/mixed matrix on
+  open and applies only what changed, so opening it and pressing Enter is now a
+  true no-op. It also finally sees inherited membership.
+- **Set selection.** `selectSets()` previously had no caller at all — Delete
+  was bound to a selection nothing could populate. Clicking or sweeping an
+  outline now selects, hit-tested against the rendered polygons.
+- **Movement rules enforced.** `canDropInsideRegions()` is called on release.
+  Blocked destinations are previewed during the drag and reverted on release,
+  per item, so one blocked item does not veto a multi-item drag. Bin and folder
+  drops are deliberately exempt.
 
 ## How this work is expected to be done
 
