@@ -62,19 +62,39 @@ Ruled out by measurement, so as not to be re-diagnosed:
 - **Not the enclosing circle's size.** Links imply a radius of 95.5 against the
   shape force's 90.9. Real, but far too small to explain a 67px offset.
 
-## Two candidate fixes
+## The specification, and what it rules out
 
-**A — carry the ring with its members.** Translate the ring nodes by the
-members' centroid delta before the forces run each tick. The ring never has to
-chase, so it cannot tangle. Cheap, and closer to the physical intuition: a
-droplet moves with what is inside it rather than being dragged after it.
+The user's four-panel sketch ("Imagine" as beads, "Actually" as the smooth line
+drawn through them) is the spec. Reading it decides the fix:
+
+1. **A ring of beads around the members, a non-member outside it.** The left
+   column is drawn as discrete beads and the right as one smooth curve — the
+   chain is the construction, the curve is the rendering. That is why drawing a
+   spline through the nodes is legitimate here and was not on the geometry
+   branch: there is no second shape to disagree with.
+2. **Push a member into the wall and the boundary dents.** A smooth concave
+   bite, with the beads still in order around the loop. Local deformation, not
+   reordering.
+3. **Pull a member outward and the ring stretches, growing more beads.** "It
+   can get as big as needed" is literally more nodes. `reconcileRing` already
+   derives count from perimeter, so this half exists; what was never observed is
+   whether growth and reordering interact during a fast drag.
+4. **Two rings crossing is an overlap**, with no special case.
+
+Panel 2 is the tangle case, and it rules out the cheap fix:
+
+**A — carry the ring with its members** (translate every node by the centroid
+delta before the forces run) cannot tangle, because it never chases. But it
+makes the ring *translate* rigidly, which destroys panel 2: a member pushed
+into the wall would move the whole boundary instead of denting it.
 
 **B — an angular restoring force.** Pull each node towards its own slot angle,
-derived from `ringIndex / ringCount`, both of which are already stored on the
-node. Principled, and keeps spacing even under any disturbance, but it is
-another force to balance against the existing three.
+from `ringIndex / ringCount`, both already stored on the node. This preserves
+order — which is precisely what failed — while staying a soft pull, so a member
+pressing on the boundary still dents it locally (panel 2) and the ring still
+grows while ordered (panel 3).
 
-A first, B as a follow-up if slow drags still deform it.
+**B is the fix.** A was the first instinct and is wrong for this spec.
 
 ## The other thing measured here
 
