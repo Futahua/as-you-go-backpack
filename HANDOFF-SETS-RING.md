@@ -13,8 +13,11 @@ outside it — the Papers host source lives elsewhere and is out of scope, as is
 `state.json` (the user's real data, gitignored).
 
 - Repository: https://github.com/Futahua/as-you-go-backpack
-- Branch: `feat/sets-ring`, pushed. Base: `main` at `37542c9`.
-- Head at handoff: `0f4bfa6`. **555 tests passing**, working tree clean.
+- Branch: `feat/sets-ring`. Base: `main` at `37542c9`.
+- Head at handoff: `ee59878`. **565 tests passing**, working tree clean.
+
+**The head commit is a known-broken work in progress.** See "Start here" below.
+Everything before it (`5accc4d` and earlier) is sound.
 
 Three earlier attempts are pushed as snapshots and should be read, not merged:
 
@@ -24,10 +27,12 @@ Three earlier attempts are pushed as snapshots and should be read, not merged:
 | `retired/2-set-gravity` | sets as physics | right idea, wiring half-finished |
 | `retired/3-sets-ring-tangle` | the ring, first pass | outline lagged behind dragged members |
 
-`RING-LAG.md` on branch 3 records what was ruled out there by measurement, so it
-does not have to be re-diagnosed. It also carries a correction worth reading:
-its first diagnosis (that the ring tangles) was **wrong**, and came from
-reproducing a drag as one large jump instead of many small steps.
+The prior-art file on branch 3 is **`RING-TANGLE.md`**, at the repo root. (An
+earlier version of this handoff called it `RING-LAG.md`; there is no such file.)
+It records what was ruled out there by measurement, so it does not have to be
+re-diagnosed, and it carries a correction worth reading: its first diagnosis
+(that the ring tangles) was **wrong**, and came from reproducing a drag as one
+large jump instead of many small steps.
 
 ## Running it
 
@@ -48,7 +53,8 @@ which the outlines on screen were rendering from an earlier load.
 
 **The packaged build has no devtools**, so `console.log` is useless for
 diagnosis. Put diagnostics in the status bar — it is visible and already
-carries error text.
+carries error text. (`syncSetRings` still has a `console.info` on every
+reconcile that nobody can see; harmless, but do not add more.)
 
 ## What a set is
 
@@ -77,63 +83,90 @@ layer returns early before the workspace bindings are reached.
 
 ## The architecture
 
-**The outline is a ring of nodes in the simulation, not computed geometry.** A
-closed chain of small invisible nodes, linked to their neighbours, subject to
-the same charge and collision as the icons. What is drawn is a spline through
-where those nodes ended up.
+**The outline is a ring of nodes in the simulation, but what is drawn is the
+convex hull of those nodes.** A closed chain of small invisible nodes, linked to
+their neighbours and subject to the same collision as the icons; the hull is
+taken over where they ended up, and a spline is drawn through that.
 
-Four forces act, and all four are needed — this was measured, not assumed:
+The hull is not only a rendering choice. It is the single shape every consumer
+reads — drawing, click hit-testing, nesting order, ejection, and the exclusion
+force. That is deliberate: on the retired geometry branch the drawn shape and
+the hit-tested shape disagreed, and the user was interacting with something they
+could not see. **If you add a consumer, give it the hull.**
+
+Five forces act:
 
 | Force | What it does |
 | --- | --- |
 | `forceRingShape` | holds each ring on the ellipse enclosing its own members |
 | `forceSetGravity` | gathers a set's members towards their common centre |
 | `forceSetExclusion` | pushes non-members out of a set they are inside |
+| `forceSetSeparation` | keeps unrelated sets from crossing |
 | charge / collide / link | the graph's own layout, unchanged |
 
-On a seven-member set reproduced from a real screenshot:
+`forceSpeedLimit` exists in `set-ring-model.js`, tested, and is **still
+deliberately not wired**. Read `bda8229` before re-enabling it. Re-measured this
+session and it remains the wrong instrument: it does not behave monotonically —
+a cap of 6 or 16 holds where 8 diverges.
+
+## START HERE — the head commit is broken
+
+`ee59878` is a work in progress that **must not ship as is**.
+
+The user's report, with a screenshot: *"physics may not overlap anymore, but the
+rendering trick certainly does."* Two set outlines met along a shared border
+with nothing between them.
+
+The diagnosis is certain. `forceSetSeparation` pushes **ring nodes** apart, and
+what the user sees is the **hull** drawn around them. A hull spans outward
+across a concavity, so it occupies space no ring node is in — two rings whose
+every node is comfortably clear can still be *drawn* as two shapes that overlap.
+
+The direction of the fix is the user's own, and it is right: **make the force
+read the shape on screen.** Same principle as drawing and hit-testing the hull.
+
+`ee59878` adds that second pass, over the drawn hulls, using the separating axis
+theorem (exact for convex shapes, and a hull is convex). **The push direction is
+wrong for the second shape.** Measured on two 100x400 squares overlapping by
+20px in x, with nodes far enough apart that only the hull pass could act:
 
 ```
-forces enabled     members inside their ring   foreign items inside
-neither                    4/6                        2
-exclusion only             3/6                        0
-gravity only               4/6                        0
-both                       6/6                        0
+A pushed x: -15.0   correct, left
+B pushed x: -20.0   WRONG, should be positive — both sets driven the same way
+vertical leakage: 0.00   so the axis CHOICE is right, only its sign is wrong
 ```
 
-`forceSetGravity` existed on branch 2 with passing tests and had **never been
-wired into the app**. That was why members sprawled and bystanders fell into
-the gaps.
+The `flip` term in `hullOverlap` is the suspect. Fix that first, then:
 
-## THE OPEN PROBLEMS — start here
+- **There is no test for the hull pass.** The 565 passing tests say nothing
+  about it. Write one that fails against the current code.
+- **Cost is unmeasured.** The pass is O(sets²) in hull edges, which reasoning
+  says is small next to the node pass — but that is reasoning, not a
+  measurement. The node pass was 46% of a frame before bucketing, so measure.
+- **Check the Venn still forms** after any change here. Sets sharing a member
+  are exempt from separation on purpose; that exemption is what lets the
+  overlap the user wants exist at all.
 
-All four were seen live. They interact, and fixing them one force at a time has
-repeatedly traded one for another.
+If the fix does not come out clean, `git revert ee59878` returns to a sound
+state with problem 1 fixed at the physics level and only the rendering overlap
+outstanding.
 
-### 1. Disjoint sets overlap for no reason
-
-Two sets sharing no members settle with their outlines crossing, the lens
-between them containing no icons at all.
-
-Verified by inspection, and this part is certain: **no force acts between two
-sets**, and ring nodes are given **zero charge** (`workspace-20260730b.js`, the
-`charge` force). So one ring passes through another with nothing resisting.
-
-Not reproduced in isolation — a symmetric two-set layout settles apart
-correctly, so it needs the asymmetry of a real scene. Do not assume the cause
-is the global centre pull without measuring it.
+## The other open problems
 
 ### 2. Dragging a member extends the set the wrong way
 
 Pulling one member towards the bottom-right stretched its set up-and-left as
 well, sweeping over four foreign items and enclosing them.
 
-`enclosingEllipse` grows each axis until every member fits. A diagonal drag
-puts the outlier off both axes, so both grow — the boundary reaches sideways as
-well as along the drag. Exclusion did not clear the swept items, either because
-the boundary expanded faster than the force could move them, or because the
-push direction (away from the centre of mass) points a deeply enclosed item
-*through* more of the set.
+`enclosingEllipse` grows each axis until every member fits. A diagonal drag puts
+the outlier off both axes, so both grow — the boundary reaches sideways as well
+as along the drag. Exclusion did not clear the swept items, either because the
+boundary expanded faster than the force could move them, or because the push
+direction (away from the centre of mass) points a deeply enclosed item *through*
+more of the set.
+
+Untouched this session. Note that the hull now bridges concavities, which may
+change how this looks on screen without changing its cause.
 
 ### 3. Foreign items collect in the intersection
 
@@ -144,71 +177,60 @@ The likely mechanism, worth testing before fixing: in the overlap an item is
 pushed by both sets at once, and the two pushes roughly cancel, leaving it
 stranded exactly where the two boundaries cross.
 
+**Possibly improved, unverified.** `forceSetExclusion` now reads the hull, so it
+no longer silently fails to fire on a ring whose chain has reordered — which it
+did before, because a ray cast over a crossed loop reports interior points as
+outside. Whether that helps in practice was not measured.
+
 ### 4. A set can convulse until it pops
 
-Under heavy dragging the outline tears into angular spikes and lobes with a
-pinched neck, and members escape through the tear.
+**The rendering half is fixed and the physics half is not.** The drawn outline
+can no longer tear into spikes or lobes, because a hull cannot express them.
+That is by construction, not by tuning.
 
-The angular spikes are diagnostic: a smooth ring cannot produce them unless the
-ring nodes have been flung apart faster than the links can pull them back. That
-is a velocity blow-up.
+But nothing was done to the underlying agitation, and it was never reproduced in
+a harness matching the app. A calm-looking outline is now consistent with a ring
+that is still thrashing underneath. Do not read "it looks fine" as "it is fixed".
 
-`forceSpeedLimit` exists in `set-ring-model.js`, tested, and is **deliberately
-not wired**. Every reproduction attempted for it either failed to reproduce the
-explosion, or showed the cap making things *worse* (peak 14.4px capped against
-7.8px uncapped). Read the commit message on `bda8229` before re-enabling it —
-the honest state is that the convulsing is real but has never been reproduced
-in a harness that matches the app.
+## What was fixed this session
 
-## The direction the user wants
+| Commit | What |
+| --- | --- |
+| `092f47a` | Draw and hit-test the hull, not the chain. Kills the tearing at the rendering layer |
+| `7e03839` | Ease the outline across frames, and floor it at the members' own shape |
+| `c576ae6` | Let `forceRingShape` cool when nothing is held — a settled scene was pumping itself apart |
+| `5accc4d` | `forceSetSeparation`, so unrelated sets stop crossing |
+| `ee59878` | **Broken.** Hull-level separation, wrong push direction |
 
-> "I'd like for it to come up with a way that no matter what happens, it
-> retains its overall round shape, never trips over itself or looks like virus."
->
-> "like a rendering trick after the fact, physics stay the same"
+Two findings worth carrying forward:
 
-That is the right shape of fix, and it is much better than more force tuning:
-**leave the physics alone and stop drawing a spline through a chain that can
-knot itself.** Take the ring node positions as a point cloud and draw a
-guaranteed-simple shape around them.
+**A settled scene never settled.** `forceRingShape` floors its alpha so it never
+cools, which is what keeps a ring with a dragged member — but d3 cools
+everything else, so on a quiet scene it was the only force still injecting
+velocity, driving icons through the ring nodes' collision and chasing them as
+they moved. A set 10px tall stretched to 7495px over 4000 ticks. The floor is
+now gated on something actually being held. Its default is `() => true`, the old
+behaviour, so a caller that cannot see drag state keeps the floor rather than
+silently losing it.
 
-A convex hull of the ring nodes is the obvious candidate, and it is already
-measured:
-
-```
-a deliberately spiky ring, 24 nodes, radii 60..280
-  -> convex hull: 8 points, 0 self-intersections, all at radius 280
-```
-
-A hull cannot knot, by construction rather than by tuning. That kills problem 4
-outright at the rendering layer, and it does it without touching a single
-force.
-
-**The cost, measured:** a pure convex hull is convex, so a set whose members
-form two distant clusters becomes one blob. Two clusters 600px apart leave a
-foreigner at the midpoint reading as inside. That trades problem 4 for a milder
-version of problem 3, and is worth knowing before committing to it.
-
-Worth considering: a concave hull / alpha shape, which follows the cloud more
-closely while still being a simple closed curve; or a hull per cluster, giving
-one set several round lobes, which is what branch 3's notes say the user's
-sketch showed ("it can get as big as needed" is literally more nodes).
-
-Whatever is chosen, the invariant to hold is: **the drawn outline is always a
-simple closed curve, whatever the simulation does.**
+**The measured cost of the hull.** A set whose members form two distant clusters
+draws as one blob, and a foreigner at the midpoint reads as inside. Two clusters
+600px apart do this. If it shows on screen the answer is a hull per cluster —
+which is what branch 3's notes say the user's sketch showed — not abandoning the
+hull.
 
 ## Files
 
 | File | What |
 | --- | --- |
 | `public/sets-model.js` | membership, inheritance, exclusions, tri-state matrix. Pure |
-| `public/set-ring-model.js` | ring construction, enclosing ellipse, spline, shape force, ejection, speed limit |
-| `public/set-gravity-model.js` | set attraction and exclusion forces |
+| `public/set-ring-model.js` | ring construction, hull, resampling, easing, member floor, spline, shape force, ejection, speed limit |
+| `public/set-gravity-model.js` | set attraction, exclusion, and separation forces |
 | `public/app/components/set-membership-mode.js` | the Ctrl+G picker |
 | `public/app/workspace-commands.js` | `groupSelectionIntoSet`, `selectSets`, `deleteSelectedSets`, `shareSelectionWithSets` |
 | `public/app/interactions/keyboard-controller.js` | the bindings above |
 | `public/workspace-20260730b.js` | ring reconciliation, drawing, simulation wiring, hit testing |
-| `public/styles/graph.css` | `.graph-set-outline` and its picking states |
+| `public/styles/graph.css` | `.graph-set-outline` and its picking and retiring states |
 
 ## How this work is expected to be done
 
@@ -220,15 +242,23 @@ These are not general advice. Each one cost this branch real time.
   produced a completely wrong diagnosis that took a branch retirement to
   correct.
 - **Use the constants the app ships.** `forceCollide` at strength 0.9, ring
-  radius 30, link distance 60. A run at d3's defaults disagreed with the app and
-  sent two investigations the wrong way.
+  radius 30, link distance 60, charge −280 and 0 for ring nodes. A run at d3's
+  defaults disagreed with the app and sent two investigations the wrong way.
+- **Ablate before blaming.** The runaway looked exactly like a gravity fault.
+  Leave-one-out showed removing *any* single force stopped it — the signature of
+  a feedback loop, not of one force being wrong. Guessing would have "fixed"
+  gravity and left the loop.
+- **Do not tune your way out.** Both `minAlpha` and the speed cap behave
+  non-monotonically: `minAlpha` 0.10 settles at 216 where 0.05 gives 1795. A
+  threshold that works is working by luck. Find the mechanism.
 - **Check the file on disk is the one being measured.** A `git checkout` once
-  reverted a fix mid-investigation and the next measurement was of the old
-  code.
-- **Mutation-check every load-bearing rule**, and verify the mutation actually
-  applied. Several `sed`-style replacements silently failed against CRLF line
-  endings, reporting "the fix is not load-bearing" when nothing had changed.
-  Prefer an editor that errors when the pattern does not match.
+  reverted a fix mid-investigation and the next measurement was of the old code.
+- **Mutation-check every load-bearing rule**, and assert the mutation applied.
+  These files are **CRLF**, and `sed`-style replacements silently fail against
+  them, reporting "the fix is not load-bearing" when nothing changed. This
+  session a patch also injected three **NUL bytes** into template literals; the
+  code still worked, because a NUL is a consistent separator, which is exactly
+  how it would have shipped unnoticed. Grep for `\x00` after scripted edits.
 - **Write the test against a case that can fail.** A containment test passed
   with the feature disabled, because the proxy it replaced is sufficient in a
   small set — it took a large one to make the test mean anything.
