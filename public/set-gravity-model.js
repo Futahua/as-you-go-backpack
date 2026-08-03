@@ -31,6 +31,10 @@
  *
  * No DOM, store, or browser APIs. */
 
+// Exclusion has to ask "is this item inside the outline?" against the same
+// shape the user sees, or the force and the drawing disagree about who is in.
+import { ringHull } from './set-ring-model.js';
+
 /** The mean position of a set of nodes.
  *
  * Held nodes are included. A set's centre should follow the member the user is
@@ -157,6 +161,18 @@ export function forceSetExclusion({
   let nodes = [];
 
   function force(alpha) {
+    // One hull per set per tick. The ring nodes do not move within a tick, and
+    // building it inside the node loop would rebuild the same hull once per
+    // item per set — the exclusion test runs against every node on screen.
+    const hulls = new Map();
+    const hullOf = (setId) => {
+      if (!hulls.has(setId)) {
+        const ring = ringOf(setId);
+        hulls.set(setId, ring ? ringHull(ring) : null);
+      }
+      return hulls.get(setId);
+    };
+
     for (const node of nodes) {
       if (node.ring) continue;
       if (isHeld(node.id)) continue;
@@ -174,8 +190,8 @@ export function forceSetExclusion({
         // rather than a replacement: it catches an item pressing on the
         // boundary from outside, which the ring would otherwise have to be
         // deformed by before anything pushed back.
-        const ring = ringOf(setId);
-        const enclosed = ring ? pointInRing(node, ring) : false;
+        const hull = hullOf(setId);
+        const enclosed = hull ? pointInRing(node, hull) : false;
 
         let nearest = Infinity;
         for (const member of members) {
@@ -225,15 +241,18 @@ function setIdsInPlay(nodes, setsOf) {
   return ids;
 }
 
-/** Ray casting against a set's ring, walked in ringIndex order.
+/** Ray casting against a set's hull — the shape that is drawn.
  *
- * The node array is only a polygon when it is traversed around the loop; over
- * a reordered list a ray cast reports points plainly inside as outside, and
- * does it silently. */
+ * This walked the chain in ringIndex order, which is a polygon only while the
+ * loop stays ordered, and RING-TANGLE.md measured that it does not. Over a
+ * crossed loop a ray cast reports points plainly inside as outside, silently,
+ * and here that means exclusion simply fails to fire on an item the user can
+ * see sitting inside the outline.
+ *
+ * Accepts pre-hulled points as well as raw nodes: ringHull is idempotent, but
+ * callers in a per-tick loop should hoist it rather than rebuild per item. */
 function pointInRing(point, ringNodes) {
-  const ring = [...ringNodes]
-    .filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y))
-    .sort((a, b) => a.ringIndex - b.ringIndex);
+  const ring = ringHull(ringNodes);
   if (ring.length < 3) return false;
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {

@@ -259,6 +259,70 @@ export function reconcileRing({
   return { nodes, links, circle };
 }
 
+/** The convex hull of the ring nodes, counter-clockwise, by monotone chain.
+ *
+ * This exists because angular order around the loop is not preserved by
+ * anything. RING-TANGLE.md measured it on branch 3: after a drag, neighbouring
+ * ring nodes sat 317 degrees apart, five backward jumps around a ten-node ring.
+ * The links hold neighbours ~60px apart and the shape force holds them ~91px
+ * from the centre, and a tangled ring satisfies both constraints exactly as
+ * well as an untangled one — so nothing in the physics objects, and the fault
+ * only appears when the chain is drawn.
+ *
+ * A hull cannot self-intersect by construction rather than by tuning, so the
+ * spline through it is always a simple closed curve however badly the chain
+ * beneath it has knotted. That is the invariant, and it is held at the
+ * rendering layer without touching a single force.
+ *
+ * The order it returns is its own, not ringIndex: the hull is a shape derived
+ * from where the nodes are, and the chain's idea of its own sequence is exactly
+ * the thing that cannot be trusted here.
+ *
+ * The cost is real and was measured before choosing this: a hull is convex, so
+ * a set whose members fall into two distant clusters is drawn as one blob, and
+ * a foreign item at the midpoint reads as inside. Two clusters 600px apart do
+ * this. That is a known trade of a tear for a bulge, and if it shows on screen
+ * the answer is a hull per cluster rather than abandoning the hull. */
+export function ringHull(nodes) {
+  const points = (nodes ?? [])
+    .filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y))
+    .map((node) => ({ x: node.x, y: node.y }))
+    .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  if (points.length < 3) return points;
+
+  // Duplicate positions would put a zero-length edge on the hull, which makes
+  // the cross product below zero and the winding undecidable.
+  const unique = points.filter((point, i) => (
+    i === 0 || point.x !== points[i - 1].x || point.y !== points[i - 1].y));
+  if (unique.length < 3) return unique;
+
+  const cross = (o, a, b) => ((a.x - o.x) * (b.y - o.y)) - ((a.y - o.y) * (b.x - o.x));
+
+  // Monotone chain: sweep left to right for the lower boundary, then right to
+  // left for the upper, and the two joined nose to tail close the loop. Each
+  // half keeps only left turns, so a point that would make the boundary bend
+  // back on itself is popped — that is why the result cannot self-intersect.
+  //
+  // `>= 0` pops collinear points as well as reflex ones. Keeping them would put
+  // redundant nodes along a straight edge, and the spline would bow through
+  // them rather than running flat.
+  const build = (sequence) => {
+    const half = [];
+    for (const point of sequence) {
+      while (half.length >= 2 && cross(half[half.length - 2], half[half.length - 1], point) >= 0) {
+        half.pop();
+      }
+      half.push(point);
+    }
+    // The last point of each half is the first of the other, so it is dropped
+    // here rather than appearing twice in the closed loop.
+    half.pop();
+    return half;
+  };
+
+  return [...build(unique), ...build([...unique].reverse())];
+}
+
 /** A closed smooth path through the ring nodes.
  *
  * Catmull-Rom converted to cubic béziers, which passes exactly through every
@@ -272,7 +336,10 @@ export function reconcileRing({
  * Containment is ring nodes colliding with icons, so the curve is a pure
  * rendering of positions and has no second opinion to disagree with. */
 export function ringPath(nodes, { tension = 6 } = {}) {
-  const points = nodes.filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
+  // Through the hull, not the chain. A spline follows whatever order it is
+  // given, so drawing the raw chain after it has reordered is what rendered as
+  // the lens and the angular spikes; the hull has no order to lose.
+  const points = ringHull(nodes);
   if (points.length < 3) return '';
 
   const at = (i) => points[(i + points.length) % points.length];
@@ -383,9 +450,11 @@ export function forceRingShape({
  * layouts alone rather than nudging everything every tick.
  */
 export function ejectionTarget(point, ringNodes, { clearance = 24 } = {}) {
-  const ring = [...ringNodes]
-    .filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y))
-    .sort((a, b) => a.ringIndex - b.ringIndex);
+  // The hull's edges, so the item is put down outside the curve the user can
+  // see. Walking the chain here would measure the shortest way out of a shape
+  // that is not being drawn, and on a tangled ring that lands the item visibly
+  // inside the outline it was supposed to be ejected from.
+  const ring = ringHull(ringNodes);
   if (ring.length < 3) return null;
   if (!pointInsideRing(point, ring)) return null;
 
@@ -422,10 +491,22 @@ function closestPointOnSegment(point, a, b) {
   return { x: a.x + (t * dx), y: a.y + (t * dy) };
 }
 
-/** Ray casting in ringIndex order — the node array is only a polygon when it is
- * walked around the loop. */
+/** Ray casting against the hull — the same shape that is drawn.
+ *
+ * This used to walk the chain in ringIndex order, which is a polygon only while
+ * the loop has not reordered itself. RING-TANGLE.md measured that it does
+ * reorder, and a ray cast over a crossed loop reports points plainly inside the
+ * outline as outside, silently.
+ *
+ * Reading the hull instead is not just more robust, it is required for
+ * correctness of a different kind: the user clicks and drops against the curve
+ * they can see. If containment kept using the chain while the drawing used the
+ * hull, the two would disagree — which is precisely the fault that retired the
+ * geometry branch, where the drawn shape and the hit-tested shape were not the
+ * same thing. One shape, read by everyone. */
 export function pointInsideRing(point, ringNodes) {
-  const ring = [...ringNodes].sort((a, b) => a.ringIndex - b.ringIndex);
+  const ring = ringHull(ringNodes);
+  if (ring.length < 3) return false;
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
     const a = ring[i];

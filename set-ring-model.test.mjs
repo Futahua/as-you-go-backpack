@@ -14,6 +14,7 @@ import {
   ringPositions,
   reconcileRing,
   ringPath,
+  ringHull,
   forceRingShape,
   ejectionTarget,
   pointInsideRing,
@@ -170,9 +171,14 @@ test('the boundary orients along whichever way the members lie', () => {
   assert.ok(Math.abs(single.a - single.b) < 1, 'one member gives a circle');
 });
 
-test('the drawn path passes through every ring node', () => {
+test('the drawn path passes through every ring node of a settled ring', () => {
   // Catmull-Rom rather than a B-spline: the ring is where the physics put it,
   // so the drawing must not move it. Each node appears as a curve endpoint.
+  //
+  // "Settled" is load-bearing since the path became the hull. A ring that has
+  // not been deformed is convex, so every node lies on its own hull and this
+  // still holds exactly; a dented one drops the nodes in the bite, which is the
+  // documented cost and is asserted separately below.
   const { nodes } = reconcileRing({ setId: 's1', members: [tile('a', 0, 0), tile('b', 150, 0)] });
   const path = ringPath(nodes);
   assert.match(path, /^M .* Z$/, 'the path is closed');
@@ -181,6 +187,112 @@ test('the drawn path passes through every ring node', () => {
     const y = Math.round(node.y * 100) / 100;
     assert.ok(path.includes(`${x} ${y}`), `the path reaches node at ${x} ${y}`);
   }
+});
+
+/** Whether any two non-adjacent edges of a closed polygon cross.
+ *
+ * The property the outline has to hold is "simple closed curve", and that is
+ * only meaningful if it is tested directly rather than through a proxy. Proper
+ * crossings only: shared endpoints between neighbouring edges are how a closed
+ * loop is built, not a self-intersection. */
+function selfIntersects(points) {
+  const orient = (p, q, r) => Math.sign(((q.x - p.x) * (r.y - p.y)) - ((q.y - p.y) * (r.x - p.x)));
+  const crosses = (a, b, c, d) => {
+    const d1 = orient(a, b, c);
+    const d2 = orient(a, b, d);
+    const d3 = orient(c, d, a);
+    const d4 = orient(c, d, b);
+    return d1 !== d2 && d3 !== d4 && d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0;
+  };
+  const n = points.length;
+  for (let i = 0; i < n; i += 1) {
+    for (let j = i + 1; j < n; j += 1) {
+      // Adjacent edges share an endpoint by construction, and edge 0 wraps to
+      // edge n-1, so neither pair can be a genuine crossing.
+      if (j === i || j === (i + 1) % n || i === (j + 1) % n) continue;
+      if (crosses(points[i], points[(i + 1) % n], points[j], points[(j + 1) % n])) return true;
+    }
+  }
+  return false;
+}
+
+test('a tangled ring is still drawn as a simple closed curve', () => {
+  // The angles RING-TANGLE.md measured on branch 3 after a single drag: ten
+  // nodes whose order around the loop has been destroyed, with five backward
+  // jumps and a 317-degree gap between neighbours. Drawn as a chain this is the
+  // lens and the angular spikes that were seen on screen.
+  //
+  // This is the case that can fail. Walking these in ringIndex order self
+  // intersects — asserted first, so the test cannot quietly pass against a
+  // shape that was never tangled in the first place.
+  const measured = [102, 59, 88, 121, 161, 204, 178, 209, 179, 140];
+  const nodes = measured.map((degrees, i) => ({
+    id: `s1:ring:${i}`,
+    ringIndex: i,
+    ringCount: measured.length,
+    x: Math.cos((degrees * Math.PI) / 180) * 91,
+    y: Math.sin((degrees * Math.PI) / 180) * 91,
+  }));
+
+  assert.ok(selfIntersects(nodes), 'the reproduced chain really is tangled');
+  assert.ok(!selfIntersects(ringHull(nodes)), 'the hull drawn from it is not');
+
+  const path = ringPath(nodes);
+  assert.match(path, /^M .* Z$/, 'and it is still a closed path');
+});
+
+test('the hull survives a ring flung into spikes', () => {
+  // Problem 4: under heavy dragging the outline tears into angular spikes and
+  // lobes with a pinched neck. A hull cannot express any of those, by
+  // construction rather than by tuning, so radius no longer has to be bounded
+  // for the drawing to stay sane.
+  const nodes = Array.from({ length: 24 }, (unused, i) => {
+    const angle = (2 * Math.PI * i) / 24;
+    const radius = i % 2 === 0 ? 60 : 280;
+    return { id: `s1:ring:${i}`, ringIndex: i, x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+  });
+
+  const hull = ringHull(nodes);
+  assert.ok(!selfIntersects(hull), 'no self-intersections');
+  assert.ok(hull.length <= 12, `the spikes collapse to a few corners, got ${hull.length}`);
+  for (const point of hull) {
+    // Every surviving point is one of the long spikes: the short ones are
+    // interior and a hull cannot dip back in to reach them.
+    assert.ok(Math.hypot(point.x, point.y) > 270, 'the hull rides the outer radius');
+  }
+});
+
+test('containment and drawing agree about who is inside', () => {
+  // The fault that retired the geometry branch was the drawn shape and the
+  // hit-tested shape being two different things. Whatever the chain does, a
+  // point inside the hull must read as inside — including one in a bay that the
+  // tangled chain would have reported as outside.
+  const nodes = [102, 59, 88, 121, 161, 204, 178, 209, 179, 140].map((degrees, i) => ({
+    id: `s1:ring:${i}`,
+    ringIndex: i,
+    x: Math.cos((degrees * Math.PI) / 180) * 91,
+    y: Math.sin((degrees * Math.PI) / 180) * 91,
+  }));
+
+  // Those ten angles span only 150 degrees, so the ring really has collapsed to
+  // the crescent RING-TANGLE.md describes as "a flat lens" — it encloses no
+  // area around the member, and the origin is legitimately outside it. The hull
+  // reports that rather than inventing area the nodes do not enclose, and this
+  // is asserted so the geometry is not silently mistaken for a bug later.
+  assert.ok(!pointInsideRing({ x: 0, y: 0 }, nodes), 'a collapsed ring encloses nothing');
+
+  // A point genuinely within the crescent must read as inside, though — that is
+  // the agreement being tested, and a hull that reported everything as outside
+  // would pass the assertion above for the wrong reason.
+  const interior = { x: Math.cos((140 * Math.PI) / 180) * 85, y: Math.sin((140 * Math.PI) / 180) * 85 };
+  assert.ok(pointInsideRing(interior, nodes), 'a point within the crescent is inside');
+  assert.ok(!pointInsideRing({ x: 400, y: 400 }, nodes), 'a distant point is not');
+
+  // An ejected item must land outside the curve that is drawn, not outside some
+  // other polygon the user cannot see.
+  const target = ejectionTarget(interior, nodes);
+  assert.ok(target, 'an enclosed point is given somewhere to go');
+  assert.ok(!pointInsideRing(target, nodes), 'and it lands outside the drawn shape');
 });
 
 test('too few nodes yields no path rather than a degenerate one', () => {

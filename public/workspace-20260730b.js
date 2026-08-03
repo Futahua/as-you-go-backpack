@@ -51,7 +51,7 @@ import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
 import { belongsToSet } from './sets-model.js';
-import { reconcileRing, ringPath, forceRingShape, ejectionTarget } from './set-ring-model.js';
+import { reconcileRing, ringPath, ringHull, forceRingShape, ejectionTarget } from './set-ring-model.js';
 import { forceSetGravity, forceSetExclusion } from './set-gravity-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
@@ -678,15 +678,18 @@ function createGraphController() {
     }
   }
 
-  /** Ray casting against the ring's nodes.
+  /** Ray casting against the ring's hull — the shape actually on screen.
    *
-   * Walked in ringIndex order, not array order. They happen to agree today
-   * because reconcileRing appends and truncates, but a ray cast over a
-   * reordered loop is not a polygon at all — it reports points plainly inside
-   * the outline as outside, and the failure is silent. Sorting costs nothing
-   * next to a click and removes the dependency on that coincidence. */
+   * This walked the chain in ringIndex order, which assumed the loop stays
+   * ordered. It does not: RING-TANGLE.md measured neighbours 317 degrees apart
+   * after a drag, and a ray cast over a crossed loop reports points plainly
+   * inside the outline as outside, silently.
+   *
+   * A click has to select what the user pointed at, so this must read the same
+   * hull that drawSetRings draws. */
   function pointInRing(point, nodes) {
-    const ring = [...nodes].sort((a, b) => a.ringIndex - b.ringIndex);
+    const ring = ringHull(nodes);
+    if (ring.length < 3) return false;
     let inside = false;
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
       const a = ring[i];
@@ -698,13 +701,14 @@ function createGraphController() {
     return inside;
   }
 
-  /** Shoelace area, used only to order overlapping hits. */
-  /** Shoelace area, in ringIndex order for the same reason as pointInRing: the
-   * formula sums signed trapezoids around a loop, so a reordered node list
-   * gives a number that is not the area of anything, and nested sets would be
-   * ranked wrongly. */
+  /** Shoelace area of the hull, used only to order overlapping hits.
+   *
+   * Same reason as pointInRing: the formula sums signed trapezoids around a
+   * loop, so a reordered node list gives a number that is not the area of
+   * anything and nested sets get ranked wrongly. The hull is also the area the
+   * user perceives, which is what "smallest first where they nest" means. */
   function ringArea(nodes) {
-    const ring = [...nodes].sort((a, b) => a.ringIndex - b.ringIndex);
+    const ring = ringHull(nodes);
     let total = 0;
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
       total += (ring[j].x * ring[i].y) - (ring[i].x * ring[j].y);
