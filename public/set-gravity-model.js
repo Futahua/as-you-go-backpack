@@ -249,8 +249,20 @@ export function forceSetExclusion({
  * also does not behave monotonically — -20 and -120 separate the rings where -60
  * still crosses — so any value that worked would be working by luck.
  *
- * This acts only between ring nodes belonging to different sets, and only
- * within a clearance, so a settled pair of distant sets pays nothing.
+ * This acts between whole sets in two ways, because there are two things that
+ * can overlap and separating one does not separate the other.
+ *
+ * Ring nodes are pushed apart within a clearance, which keeps the physics from
+ * interpenetrating. But what the user sees is the hull drawn around those
+ * nodes, and a hull spans outward across any concavity — so two rings whose
+ * every node is comfortably clear can still be *drawn* as two shapes that
+ * overlap. Reported from a real scene: the physics no longer overlapped and the
+ * rendering plainly did.
+ *
+ * So the drawn hulls are separated too, on the shape actually on screen rather
+ * than on a proxy for it. That is the same principle as drawing and hit-testing
+ * the hull: whatever the user is looking at is the thing that has to be
+ * correct, so it is the thing the force reads.
  *
  * Sets that share a member are exempt, and that exemption is the point rather
  * than a special case: two sets with an item in common are *supposed* to
@@ -260,6 +272,9 @@ export function forceSetExclusion({
  * still overlaps and its lens contains exactly the shared item. */
 export function forceSetSeparation({
   setsOf,
+  // The drawn outline of a set, as a closed list of points. Given this, the
+  // force separates the shapes on screen as well as the nodes beneath them.
+  hullOf = () => null,
   // How far apart the rings of unrelated sets are held. Wider than the ring
   // link distance of 60, so the gap reads as deliberate rather than as two
   // boundaries resting against each other.
@@ -340,10 +355,97 @@ export function forceSetSeparation({
        }
       }
     }
+
+    // And now the shapes on screen. Ring nodes being clear of each other does
+    // not make the drawn hulls clear of each other: a hull bridges outward
+    // across a concavity, so it occupies space that no ring node is in.
+    const bySet = new Map();
+    for (const node of ring) {
+      if (!bySet.has(node.setId)) bySet.set(node.setId, []);
+      bySet.get(node.setId).push(node);
+    }
+    const hulls = new Map();
+    for (const [setId, members] of bySet) {
+      const hull = hullOf(setId, members);
+      if (hull && hull.length >= 3) hulls.set(setId, hull);
+    }
+
+    const ids = [...hulls.keys()];
+    for (let i = 0; i < ids.length; i += 1) {
+      for (let j = i + 1; j < ids.length; j += 1) {
+        if (related.has(`${ids[i]} ${ids[j]}`)) continue;
+        const overlap = hullOverlap(hulls.get(ids[i]), hulls.get(ids[j]));
+        if (!overlap) continue;
+
+        // Along the axis of least overlap, which is the shortest way to part
+        // two convex shapes — pushing along the line between centres instead
+        // would shove two long sets lying side by side end to end.
+        const push = overlap.depth * strength * alpha;
+        for (const node of bySet.get(ids[i])) {
+          node.vx = (node.vx ?? 0) - (overlap.x * push);
+          node.vy = (node.vy ?? 0) - (overlap.y * push);
+        }
+        for (const node of bySet.get(ids[j])) {
+          node.vx = (node.vx ?? 0) + (overlap.x * push);
+          node.vy = (node.vy ?? 0) + (overlap.y * push);
+        }
+      }
+    }
   }
 
   force.initialize = (value) => { nodes = value ?? []; };
   return force;
+}
+
+/** Whether two convex outlines overlap, and the shortest way to part them.
+ *
+ * The separating axis theorem: two convex shapes are disjoint exactly when some
+ * axis exists on which their projections do not meet, and it is enough to test
+ * the axes perpendicular to their edges. If none separates them they overlap,
+ * and the axis where the projections overlap least is the shortest way out.
+ *
+ * Returns a unit vector pointing from the first shape towards the second, with
+ * the depth to travel, or null when they are already apart. Convexity is what
+ * makes this exact rather than approximate, and the drawn outline is a hull, so
+ * it always holds here. */
+function hullOverlap(a, b) {
+  let best = null;
+  for (const shape of [a, b]) {
+    for (let i = 0; i < shape.length; i += 1) {
+      const p = shape[i];
+      const q = shape[(i + 1) % shape.length];
+      // The edge normal, normalised so depths from different axes compare.
+      const ex = q.x - p.x;
+      const ey = q.y - p.y;
+      const length = Math.hypot(ex, ey);
+      if (length < 1e-9) continue;
+      const axisX = -ey / length;
+      const axisY = ex / length;
+
+      let minA = Infinity; let maxA = -Infinity;
+      for (const point of a) {
+        const value = (point.x * axisX) + (point.y * axisY);
+        if (value < minA) minA = value;
+        if (value > maxA) maxA = value;
+      }
+      let minB = Infinity; let maxB = -Infinity;
+      for (const point of b) {
+        const value = (point.x * axisX) + (point.y * axisY);
+        if (value < minB) minB = value;
+        if (value > maxB) maxB = value;
+      }
+
+      // A gap on any axis proves them disjoint, so there is nothing to do.
+      const depth = Math.min(maxA - minB, maxB - minA);
+      if (depth <= 0) return null;
+      if (!best || depth < best.depth) {
+        // Oriented so it always points from a towards b.
+        const flip = (maxB - minA) < (maxA - minB) ? -1 : 1;
+        best = { depth, x: axisX * flip, y: axisY * flip };
+      }
+    }
+  }
+  return best;
 }
 
 /** Every set that has at least one node on screen. */
