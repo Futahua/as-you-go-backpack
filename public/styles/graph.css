@@ -34,10 +34,19 @@
   stroke: rgba(76, 114, 90, 0.55);
   stroke-width: 2px;
   stroke-linejoin: round;
-  /* A set that wraps around a non-member leaves a hole rather than covering
-     it, and the ring can cross itself while the physics settles. */
+  /* A set that wraps around a non-member leaves a hole rather than covering it.
+     The drawn outline is a hull and so cannot cross itself, which this rule
+     used to also cover. */
   fill-rule: evenodd;
-  transition: fill 120ms ease, stroke 120ms ease;
+  transition: fill 120ms ease, stroke 120ms ease, opacity 200ms ease;
+}
+/* A set whose members have all left the screen. Faded rather than cut: removing
+   the path outright made the outline vanish between two frames, which reads as
+   the set popping. The timeout that removes it matches this duration, and a set
+   whose members return mid-fade has the class taken off again. */
+.graph-set-outline.set-retiring {
+  opacity: 0;
+  pointer-events: none;
 }
 .graph-set-outline.set-selected {
   fill: rgba(76, 114, 90, 0.20);

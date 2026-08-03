@@ -51,7 +51,17 @@ import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
 import { belongsToSet } from './sets-model.js';
-import { reconcileRing, ringPath, ringHull, forceRingShape, ejectionTarget } from './set-ring-model.js';
+import {
+  reconcileRing,
+  ringPath,
+  ringHull,
+  resampleHull,
+  easeOutline,
+  floorOutline,
+  memberFloorHull,
+  forceRingShape,
+  ejectionTarget,
+} from './set-ring-model.js';
 import { forceSetGravity, forceSetExclusion } from './set-gravity-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
@@ -590,7 +600,15 @@ function createGraphController() {
       const ring = reconcileRing({ setId: itemSet.id, members, existing: previous });
       setRings.set(itemSet.id, ring);
 
-      if (!setShapes.has(itemSet.id)) {
+      const existingShape = setShapes.get(itemSet.id);
+      if (existingShape) {
+        // Back before the fade finished. Clearing the flag both restores the
+        // outline and tells the pending timer to leave it alone.
+        if (existingShape.retiring) {
+          existingShape.retiring = false;
+          existingShape.path?.classList.remove('set-retiring');
+        }
+      } else {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'graph-set-outline');
         path.dataset.setId = itemSet.id;
@@ -601,9 +619,25 @@ function createGraphController() {
 
     for (const [setId, shape] of setShapes) {
       if (wanted.has(setId)) continue;
-      shape.path?.remove();
-      setShapes.delete(setId);
-      setRings.delete(setId);
+      // Faded rather than cut. A set loses its ring whenever its members leave
+      // the screen, and removing the path outright made the outline disappear
+      // between two frames — indistinguishable, to the eye, from the set
+      // popping. The CSS transition carries it out; the node is removed when
+      // that finishes, so a set whose members come straight back reuses it.
+      if (!shape.retiring) {
+        shape.retiring = true;
+        shape.path?.classList.add('set-retiring');
+        setRings.delete(setId);
+        window.setTimeout(() => {
+          // Re-checked on landing. The members may have returned during the
+          // fade and cleared the flag, or the layer may have been rebuilt
+          // wholesale and this entry replaced — the identity check catches the
+          // second, which a flag alone would not.
+          if (setShapes.get(setId) !== shape || !shape.retiring) return;
+          shape.path?.remove();
+          setShapes.delete(setId);
+        }, 200);
+      }
     }
 
     // One line per reconcile, so a set that exists in the data but never
@@ -731,7 +765,22 @@ function createGraphController() {
     const partial = picking ? new Set(setMembershipMode.mixedSetIds()) : null;
     for (const [setId, shape] of setShapes) {
       const ring = setRings.get(setId);
-      shape.path.setAttribute('d', ring ? ringPath(ring.nodes) : '');
+
+      // The outline is eased towards the physics rather than snapped to it, and
+      // held open to a floor area. Recomputing the hull per frame is what made a
+      // set able to shrivel or blink out between frames when its ring collapsed
+      // or briefly degenerated; the drawn shape is its own state, so it settles
+      // instead of popping. A null target leaves the last good shape standing.
+      // The floor is the members' own tiles, so the outline can never shrink
+      // inside the items it is drawn around. Read live rather than cached: the
+      // members are what the floor is made of, and they move every frame.
+      // 40 matches reconcileRing's and forceRingShape's padding default, which
+      // is the gap the ring settles at: the floor has to agree with where the
+      // physics is already trying to hold the boundary, or the two fight.
+      const floor = ring ? memberFloorHull(membersOnScreen(setId), 40) : null;
+      const target = ring ? floorOutline(resampleHull(ringHull(ring.nodes)), floor) : null;
+      shape.outline = easeOutline(shape.outline, target);
+      shape.path.setAttribute('d', shape.outline ? ringPath(shape.outline, { hulled: true }) : '');
       shape.path.classList.toggle('set-selected', session.selectedSets?.has(setId) === true);
       shape.path.classList.toggle('set-picking', picking);
       shape.path.classList.toggle('set-chosen', picking && chosen.has(setId));

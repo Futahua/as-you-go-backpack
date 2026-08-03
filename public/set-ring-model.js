@@ -323,6 +323,158 @@ export function ringHull(nodes) {
   return [...build(unique), ...build([...unique].reverse())];
 }
 
+/** A hull resampled to a fixed number of points, evenly along its perimeter.
+ *
+ * The hull's point count changes as the physics moves — 8 points one frame, 14
+ * the next — and two outlines with different counts cannot be interpolated
+ * between, because there is no correspondence between their points. Resampling
+ * both to the same count gives every drawn outline the same shape of data, so
+ * one can be eased towards another.
+ *
+ * Walking by arc length rather than by vertex keeps the samples spread evenly
+ * around the outline instead of bunching wherever the hull happened to have
+ * corners, which is what stops the eased shape from swimming as corners appear
+ * and disappear. */
+export function resampleHull(hull, count = 48) {
+  if (!hull || hull.length < 3) return null;
+
+  const spans = [];
+  let perimeter = 0;
+  for (let i = 0; i < hull.length; i += 1) {
+    const a = hull[i];
+    const b = hull[(i + 1) % hull.length];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    spans.push(length);
+    perimeter += length;
+  }
+  if (perimeter < 1e-6) return null;
+
+  const points = [];
+  const step = perimeter / count;
+  let edge = 0;
+  let walked = 0;
+  for (let i = 0; i < count; i += 1) {
+    const distance = i * step;
+    while (edge < spans.length - 1 && walked + spans[edge] < distance) {
+      walked += spans[edge];
+      edge += 1;
+    }
+    const a = hull[edge];
+    const b = hull[(edge + 1) % hull.length];
+    const t = spans[edge] < 1e-6 ? 0 : (distance - walked) / spans[edge];
+    points.push({ x: a.x + ((b.x - a.x) * t), y: a.y + ((b.y - a.y) * t) });
+  }
+  return points;
+}
+
+/** Eases a drawn outline towards the shape the physics currently implies.
+ *
+ * The hull guarantees the outline is simple; it says nothing about it being
+ * steady. Each frame recomputes the hull from scratch, so a ring that collapses
+ * inward, loses nodes, or briefly degenerates makes the drawn shape shrink or
+ * blink out between one frame and the next — which reads as the set popping
+ * even though nothing about the membership changed.
+ *
+ * So the drawn outline is a state of its own, chased towards the target rather
+ * than replaced by it. `previous` is what was drawn last frame; the return
+ * value is what to draw now, and to pass back next frame.
+ *
+ * `rate` is per frame at 60fps. Low enough that a collapse becomes a settle
+ * rather than a snap, high enough that the outline still keeps up with a
+ * dragged member — the ring already lags by design, and stacking a slow ease on
+ * top of that would read as the outline being detached from its set.
+ *
+ * A null target means the physics has nothing to draw this frame — a
+ * degenerate ring, or members gone off screen. The previous shape is returned
+ * unchanged rather than blanked, so the outline holds its last good form
+ * instead of vanishing; the caller decides when a set is really gone. */
+export function easeOutline(previous, target, { rate = 0.25 } = {}) {
+  if (!target) return previous ?? null;
+  if (!previous || previous.length !== target.length) return target;
+
+  const eased = [];
+  for (let i = 0; i < target.length; i += 1) {
+    eased.push({
+      x: previous[i].x + ((target[i].x - previous[i].x) * rate),
+      y: previous[i].y + ((target[i].y - previous[i].y) * rate),
+    });
+  }
+  return eased;
+}
+
+/** The area a closed outline encloses, by the shoelace formula. */
+export function outlineArea(points) {
+  if (!points || points.length < 3) return 0;
+  let total = 0;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    total += (points[j].x * points[i].y) - (points[i].x * points[j].y);
+  }
+  return Math.abs(total) / 2;
+}
+
+/** The hull of the members' own tiles — the smallest an outline may ever be.
+ *
+ * Every corner of every member tile, hulled. A set's outline is a statement
+ * about which items are in it, so it can never be smaller than the items
+ * themselves: shrinking past them would draw a boundary that visibly excludes
+ * its own members, which is a false statement about the set rather than merely
+ * an ugly one.
+ *
+ * Corners rather than centres, because a tile is a rectangle and an outline
+ * that passed through the centres would cut every icon in half. */
+export function memberFloorHull(members, padding = 0) {
+  const corners = [];
+  for (const member of members ?? []) {
+    if (!Number.isFinite(member.x) || !Number.isFinite(member.y)) continue;
+    const halfWidth = ((member.width ?? 0) / 2) + padding;
+    const halfHeight = ((member.height ?? 0) / 2) + padding;
+    corners.push(
+      { x: member.x - halfWidth, y: member.y - halfHeight },
+      { x: member.x + halfWidth, y: member.y - halfHeight },
+      { x: member.x + halfWidth, y: member.y + halfHeight },
+      { x: member.x - halfWidth, y: member.y + halfHeight },
+    );
+  }
+  if (corners.length < 3) return null;
+  const hull = ringHull(corners);
+  return hull.length >= 3 ? hull : null;
+}
+
+/** Holds an outline out to at least the shape its own members occupy.
+ *
+ * A set whose members pile together has a ring with almost no area, and a hull
+ * of near-coincident points draws as a sliver or nothing at all. That is the
+ * collapse: the set still exists and still has members, but its outline has no
+ * room to be seen.
+ *
+ * The floor is the members' own hull rather than a fixed area, because what the
+ * outline must never do is dip inside the items it is drawn around — an outline
+ * smaller than its members states something false about the set, not merely
+ * something ugly. A constant cannot express that: too large for one small item,
+ * too small for ten big ones.
+ *
+ * The union of the two point sets, hulled. Radial projection was tried first
+ * and is wrong: it can only push a sample that already exists along a given
+ * direction, so a collapsed outline whose samples span 124 degrees leaves the
+ * rest of the circle with nothing to push, and the result stays thin — measured
+ * at 6441 against a floor of 32224. A hull over both sets has no such gap,
+ * because the floor's own corners are in the input.
+ *
+ * Both operands are convex, so their union's hull is exactly the smaller of the
+ * two shapes' envelope: an outline already clear of the floor is returned
+ * unchanged, and one that has fallen inside is lifted to the floor only where
+ * it had. */
+export function floorOutline(points, floor) {
+  if (!points || points.length < 3) return points;
+  if (!floor || floor.length < 3) return points;
+
+  const combined = ringHull([...points, ...floor]);
+  if (combined.length < 3) return points;
+  // Resampled back to the incoming count so the frame-to-frame easing still has
+  // point-for-point correspondence between one outline and the next.
+  return resampleHull(combined, points.length) ?? points;
+}
+
 /** A closed smooth path through the ring nodes.
  *
  * Catmull-Rom converted to cubic béziers, which passes exactly through every
@@ -335,11 +487,15 @@ export function ringHull(nodes) {
  * a shape they could not see. Here nothing is hit-tested against this path.
  * Containment is ring nodes colliding with icons, so the curve is a pure
  * rendering of positions and has no second opinion to disagree with. */
-export function ringPath(nodes, { tension = 6 } = {}) {
+export function ringPath(nodes, { tension = 6, hulled = false } = {}) {
   // Through the hull, not the chain. A spline follows whatever order it is
   // given, so drawing the raw chain after it has reordered is what rendered as
   // the lens and the angular spikes; the hull has no order to lose.
-  const points = ringHull(nodes);
+  //
+  // `hulled` is for callers that have already prepared the outline — resampled
+  // and eased across frames — where re-hulling would be wasted work and would
+  // also undo the even spacing that the easing depends on.
+  const points = hulled ? (nodes ?? []) : ringHull(nodes);
   if (points.length < 3) return '';
 
   const at = (i) => points[(i + points.length) % points.length];

@@ -15,6 +15,11 @@ import {
   reconcileRing,
   ringPath,
   ringHull,
+  resampleHull,
+  easeOutline,
+  floorOutline,
+  memberFloorHull,
+  outlineArea,
   forceRingShape,
   ejectionTarget,
   pointInsideRing,
@@ -293,6 +298,96 @@ test('containment and drawing agree about who is inside', () => {
   const target = ejectionTarget(interior, nodes);
   assert.ok(target, 'an enclosed point is given somewhere to go');
   assert.ok(!pointInsideRing(target, nodes), 'and it lands outside the drawn shape');
+});
+
+test('an outline never dips inside the items it is drawn around', () => {
+  // The floor is the members' own tiles: an outline smaller than its members
+  // states something false about the set. Every way a ring can degenerate has
+  // to still enclose every corner of every member tile.
+  const members = [tile('a', 0, 0), tile('b', 40, 20)];
+  const floor = memberFloorHull(members, 40);
+
+  const degenerate = {
+    'wholly collapsed': Array.from({ length: 48 }, () => ({ x: 20, y: 10 })),
+    // Samples spanning only 124 degrees. This is the case that defeated radial
+    // projection: over half the circle has no sample to push outward.
+    sliver: resampleHull(ringHull([{ x: -30, y: 0 }, { x: 30, y: 0 }, { x: 0, y: 1 }])),
+    // The flat lens RING-TANGLE.md measured, which encloses no area at all.
+    crescent: resampleHull(ringHull([102, 59, 88, 121, 161, 204, 178, 209, 179, 140]
+      .map((degrees) => ({
+        x: Math.cos((degrees * Math.PI) / 180) * 91,
+        y: Math.sin((degrees * Math.PI) / 180) * 91,
+      })))),
+  };
+
+  for (const [name, points] of Object.entries(degenerate)) {
+    const held = floorOutline(points, floor);
+    const indexed = held.map((point, i) => ({ ...point, ringIndex: i }));
+    for (const member of members) {
+      for (const [dx, dy] of [[-36, -36], [36, -36], [36, 36], [-36, 36]]) {
+        const corner = { x: member.x + dx, y: member.y + dy };
+        assert.ok(pointInsideRing(corner, indexed),
+          `${name}: member corner ${JSON.stringify(corner)} fell outside the outline`);
+      }
+    }
+    assert.ok(!selfIntersects(held), `${name}: the held outline is still simple`);
+  }
+});
+
+test('the floor lifts a collapsed outline without inflating a healthy one', () => {
+  // A floor, not a target. A set that is genuinely large must pass through
+  // untouched, or every outline would be dragged towards the same size.
+  const floor = memberFloorHull([tile('a', 0, 0)], 40);
+
+  const large = resampleHull(ringHull(Array.from({ length: 20 }, (unused, i) => ({
+    x: Math.cos((i * Math.PI) / 10) * 400,
+    y: Math.sin((i * Math.PI) / 10) * 400,
+  }))));
+  const untouched = floorOutline(large, floor);
+  // Resampling round-off only, well under a tenth of a percent.
+  assert.ok(Math.abs(outlineArea(untouched) - outlineArea(large)) / outlineArea(large) < 0.001,
+    'a large outline keeps its size');
+
+  const collapsed = Array.from({ length: 48 }, () => ({ x: 0, y: 0 }));
+  assert.ok(outlineArea(floorOutline(collapsed, floor)) > outlineArea(floor) * 0.95,
+    'a collapsed one is lifted to the floor');
+});
+
+test('the drawn outline eases towards the physics rather than snapping to it', () => {
+  // The hull guarantees the outline is simple; it says nothing about it being
+  // steady. Without easing, a ring that collapses between two frames takes the
+  // drawn shape with it, which reads as the set popping.
+  const from = resampleHull(ringHull(Array.from({ length: 16 }, (unused, i) => ({
+    x: Math.cos((i * Math.PI) / 8) * 300,
+    y: Math.sin((i * Math.PI) / 8) * 300,
+  }))));
+  const to = resampleHull(ringHull(Array.from({ length: 16 }, (unused, i) => ({
+    x: Math.cos((i * Math.PI) / 8) * 60,
+    y: Math.sin((i * Math.PI) / 8) * 60,
+  }))));
+
+  const stepped = easeOutline(from, to);
+  const before = outlineArea(from);
+  const after = outlineArea(stepped);
+  assert.ok(after < before, 'it moves towards the target');
+  assert.ok(after > outlineArea(to), 'but does not arrive in one frame');
+
+  // And it does arrive, rather than easing forever towards something it never
+  // reaches — a boundary that never settles would read as permanently adrift.
+  let current = from;
+  for (let frame = 0; frame < 120; frame += 1) current = easeOutline(current, to);
+  assert.ok(Math.abs(outlineArea(current) - outlineArea(to)) / outlineArea(to) < 0.01,
+    'and settles on the target');
+});
+
+test('a vanished ring holds its last shape rather than blanking', () => {
+  // A null target means the physics has nothing to draw this frame. Returning
+  // an empty path would make the outline disappear between two frames, which is
+  // exactly the abrupt vanishing this is meant to prevent; the caller decides
+  // when a set is really gone, and fades it.
+  const last = resampleHull(ringHull([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 50, y: 80 }]));
+  assert.deepEqual(easeOutline(last, null), last, 'the last good shape stands');
+  assert.equal(easeOutline(null, null), null, 'and nothing is invented from nothing');
 });
 
 test('too few nodes yields no path rather than a degenerate one', () => {
