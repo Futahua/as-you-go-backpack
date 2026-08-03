@@ -33,7 +33,7 @@
 
 // Exclusion has to ask "is this item inside the outline?" against the same
 // shape the user sees, or the force and the drawing disagree about who is in.
-import { ringHull } from './set-ring-model.js';
+import { ringHull, rayExitDistance, shortestValidEscape } from './set-ring-model.js';
 
 /** The mean position of a set of nodes.
  *
@@ -142,33 +142,58 @@ export function forceSetGravity({
 export function forceSetExclusion({
   setsOf,
   membersOf,
-  // The ring nodes of a set, so exclusion can ask the question that actually
-  // matters — is this item inside the outline? — rather than a proxy for it.
-  //
-  // Distance to the nearest member was the proxy, and it disagrees with the
-  // boundary exactly where leaks were reported: an item can be well clear of
-  // every member and still be inside the drawn ring, in the space between them
-  // or out towards the padding. Testing containment directly means the force
-  // and the outline cannot disagree about who is in.
-  ringOf = () => null,
+  // The visible outline of a set — the eased, resampled, member-floored shape
+  // the creator actually sees drawn. Exclusion asks "is this item inside the
+  // drawn set?" against the SAME shape separation uses, not the raw physics
+  // ring the outline eases towards: while the ease trails, the two disagree,
+  // and the force must not call something "out" that is visibly still inside.
+  // A null outline (nothing drawn yet this frame, or a retired set) is a safe
+  // no-op: with no visible outline the set cannot prove a visible violation,
+  // so it contributes nothing until the outline exists. Separation has the
+  // same source and the same fallback.
+  hullOf = () => null,
   isHeld = () => false,
   strength = 0.35,
   // How far outside the member cloud a foreign item is pushed once it is out.
   // Comfortably more than a tile, so the gap reads as deliberate rather than
   // as a near miss.
   clearance = 150,
+  // The effort the force keeps while a violation exists. d3 scales every
+  // force by alpha, so in a settled scene this push would otherwise fade to a
+  // few hundredths of a pixel per tick — far below what it takes to move an
+  // item through the ring and cluster collision that hold it (measured: with
+  // no floor the item strands in the lens for 6000+ ticks). The exclusion's
+  // job is to remove a violation, and it has no business giving up while the
+  // violation is still there; the moment the item leaves every forbidden hull
+  // (and clears the members) the force does nothing at all, so the floor is
+  // self-terminating rather than a standing push. The value was swept after
+  // the geometry corrections: the barrier yields down to a 0.005 floor
+  // (0.26px/tick, an 8.4s escape), and 0.05 is the smallest floor whose
+  // escape completes within about a second (0.8s measured) — the smallest
+  // floor that reads as a deliberate escape rather than a crawl, five times
+  // below the original 0.25.
+  minAlpha = 0.05,
+  // The velocity decay the simulation was configured with (the fraction of
+  // velocity lost per tick; the app passes 0.32, keeping 68%). The bounded
+  // response lands the item's velocity at its desired travel per tick despite
+  // this decay, and needs the value to do so.
+  velocityDecay = 0.32,
 } = {}) {
   let nodes = [];
 
   function force(alpha) {
-    // One hull per set per tick. The ring nodes do not move within a tick, and
-    // building it inside the node loop would rebuild the same hull once per
-    // item per set — the exclusion test runs against every node on screen.
+    // One hull per set per tick. The visible outline does not move within a
+    // tick, and building it inside the node loop would rebuild the same hull
+    // once per item per set — the exclusion test runs against every node on
+    // screen.
     const hulls = new Map();
-    const hullOf = (setId) => {
+    const hullFor = (setId) => {
       if (!hulls.has(setId)) {
-        const ring = ringOf(setId);
-        hulls.set(setId, ring ? ringHull(ring) : null);
+        const raw = hullOf(setId);
+        // ringHull is idempotent on a hull polygon (the visible outline passes
+        // through unchanged) and makes raw ring chains safe for the escape
+        // geometry, which assumes convex polygons.
+        hulls.set(setId, raw ? ringHull(raw) : null);
       }
       return hulls.get(setId);
     };
@@ -177,54 +202,134 @@ export function forceSetExclusion({
       if (node.ring) continue;
       if (isHeld(node.id)) continue;
       const own = new Set(setsOf(node.id) ?? []);
+      const forbidden = [];
 
       for (const setId of setIdsInPlay(nodes, setsOf)) {
         if (own.has(setId)) continue;
         const members = (membersOf(setId) ?? []).filter((member) => member.id !== node.id);
         if (members.length === 0) continue;
 
-        // Inside the outline, or close enough to the members to be about to be.
+        // Inside the visible outline, or close enough to the members to be
+        // about to be.
         //
-        // Containment is the real question and the ring is the real answer, so
-        // it is asked first. The proximity test stays as a second condition
-        // rather than a replacement: it catches an item pressing on the
-        // boundary from outside, which the ring would otherwise have to be
+        // Containment is the real question and the visible outline is the real
+        // answer, so it is asked first. The proximity test stays as a second
+        // condition rather than a replacement: it catches an item pressing on
+        // the boundary from outside, which the ring would otherwise have to be
         // deformed by before anything pushed back.
-        const hull = hullOf(setId);
-        const enclosed = hull ? pointInRing(node, hull) : false;
+        const hull = hullFor(setId);
+        if (!hull) continue;
+        const enclosed = pointInRing(node, hull);
 
         let nearest = Infinity;
         for (const member of members) {
           nearest = Math.min(nearest, Math.hypot(node.x - member.x, node.y - member.y));
         }
         if (!enclosed && nearest >= clearance) continue;
-
-        // Away from the centre of mass, so the escape route leads out of the
-        // cloud rather than deeper between two of its members.
-        const centre = centreOfMass(members);
-        let dx = node.x - centre.x;
-        let dy = node.y - centre.y;
-        let distance = Math.hypot(dx, dy);
-        if (distance < 1e-6) {
-          // Sitting exactly on the centre gives no direction to leave along.
-          // Any fixed one will do, and a deterministic choice keeps the layout
-          // reproducible rather than depending on floating-point noise.
-          dx = 1;
-          dy = 0;
-          distance = 1;
-        }
-        // An item that is genuinely inside gets the full push regardless of how
-        // far it happens to be from a member — being inside is the whole of the
-        // problem, and scaling by proximity would barely move one sitting in
-        // open space within the outline, which is where the leaks were.
-        const urgency = enclosed ? 1 : (clearance - nearest) / clearance;
-        const push = urgency * strength * alpha;
-        // Defaulted rather than assumed: d3 seeds vx/vy when it owns the nodes,
-        // but a caller passing plain objects would otherwise turn the whole
-        // layout into NaN on the first tick, silently and unrecoverably.
-        node.vx = (node.vx ?? 0) + ((dx / distance) * push * clearance);
-        node.vy = (node.vy ?? 0) + ((dy / distance) * push * clearance);
+        forbidden.push({ setId, members, hull, enclosed, nearest });
       }
+
+      if (forbidden.length === 0) continue;
+
+
+      // One coordinated response, not one push per set. The old route pushed
+      // the item away from each containing set's centre of mass, and in the
+      // lens of two related sets those vectors are equal and opposite — they
+      // cancel before summation, leaving the item stranded exactly where the
+      // boundaries cross (measured: the two contributions sum to zero). So
+      // every forbidding visible hull is collected first, and the item is
+      // pushed along the single shortest direction that leaves ALL of them —
+      // while staying inside the visible hulls of the sets it belongs to: an
+      // A-only item in the lens must be pushed out of B, not flung out of A
+      // by a route that happens to be shorter on the other side.
+      const urgency = Math.max(...forbidden.map((f) => (
+        f.enclosed ? 1 : (clearance - f.nearest) / clearance)));
+      const escape = shortestValidEscape(
+        node,
+        forbidden.map((f) => f.hull),
+        [...own].map((sid) => hullFor(sid)).filter(Boolean),
+      );
+      let dx;
+      let dy;
+      if (escape) {
+        dx = escape.x;
+        dy = escape.y;
+      } else {
+        // Outside every hull but still close to one, or no direction can exit
+        // the forbidden territory without leaving the allowed region: keep the
+        // old centre-away nudge from the closest set.
+        const closest = forbidden.reduce((a, b) => (b.nearest < a.nearest ? b : a));
+        const centre = centreOfMass(closest.members);
+        let ox = node.x - centre.x;
+        let oy = node.y - centre.y;
+        let distance = Math.hypot(ox, oy);
+        if (distance < 1e-6) { ox = 1; oy = 0; distance = 1; }
+        dx = ox / distance;
+        dy = oy / distance;
+      }
+      const push = urgency * strength * Math.max(alpha, minAlpha) * clearance;
+      // The desired per-tick travel, bounded by the remaining room so the item
+      // decelerates at the nearest valid point instead of being carried past
+      // it: the exit the item must clear (containment case), or the remaining
+      // clearance deficit to the member cloud (proximity case), and in both
+      // cases the distance to the item's own allowed boundary — the item must
+      // not be flung out of the sets it belongs to. The room is the ray's far
+      // crossing of every own hull along the direction: the point where the
+      // item would finally be outside its own region (zero when it already is
+      // and the direction points further out).
+      let desired;
+      if (escape) {
+        // The escape's own distance IS the destination: the helper returns the
+        // nearest point that is strictly outside every forbidden hull and
+        // strictly inside every allowed one, so the item must stop exactly
+        // there. Adding a further margin and then clipping it to the allowed
+        // boundary is what used to spend all the room and strand the item ON
+        // its own set's outline, where the boundary-inclusive containment
+        // predicate reads it as outside its own set (measured: the adverse
+        // A/B fixture settled at x=-0.0, reported "inside A: NO"). The travel
+        // is only limited by what the force can push this tick.
+        desired = Math.min(push, escape.distance);
+      } else {
+        // The proximity case has no computed destination — the item is outside
+        // every forbidden hull and merely too close. That is not a violation
+        // at all while the item is sitting inside a set it belongs to: nudging
+        // it then keeps pushing after the escape is complete and walks it out
+        // of its own set (measured on the adverse A/B fixture: the item reached
+        // its valid landing at x=9.5, then the nudge carried it on to A's outer
+        // boundary at x=0, where containment reads it as outside A). Only the
+        // proximity branch is skipped — an item a foreign hull still CONTAINS
+        // takes the escape branch above and is moved regardless.
+        const insideOwn = [...own].some((setId) => {
+          const hull = hullFor(setId);
+          return hull ? pointInRing(node, hull) : false;
+        });
+        if (insideOwn) continue;
+        // Otherwise it keeps the clearance deficit, bounded by the room to its
+        // own allowed boundary so the nudge cannot fling it out of a set.
+        let allowedBound = Infinity;
+        for (const setId of own) {
+          const hull = hullFor(setId);
+          if (!hull) continue;
+          const exit = rayExitDistance(hull, node, { x: dx, y: dy });
+          if (exit < allowedBound) allowedBound = exit;
+        }
+        const nearest = Math.min(...forbidden.map((f) => f.nearest));
+        desired = Math.min(push, Math.max(0, clearance - nearest), allowedBound);
+      }
+      // Land the item's velocity along the direction at exactly `desired` per
+      // tick despite the decay: d3 integrates x += vx * retained, so a plain
+      // impulse of `desired` would only move the item 0.68x as far, and a
+      // carried velocity would overshoot the room the moment it shrinks. The
+      // correction impulse both accelerates and brakes — the item never moves
+      // further in one tick than the room it has.
+      const retained = 1 - velocityDecay;
+      const vAlong = (node.vx ?? 0) * dx + (node.vy ?? 0) * dy;
+      const impulse = (desired / retained) - vAlong;
+      // Defaulted rather than assumed: d3 seeds vx/vy when it owns the nodes,
+      // but a caller passing plain objects would otherwise turn the whole
+      // layout into NaN on the first tick, silently and unrecoverably.
+      node.vx = (node.vx ?? 0) + (dx * impulse);
+      node.vy = (node.vy ?? 0) + (dy * impulse);
     }
   }
 
@@ -269,12 +374,43 @@ export function forceSetExclusion({
  * overlap, because the shared item is pulled towards both centres and has to sit
  * in the region belonging to both. Pushing those apart would break the Venn the
  * gravity force builds. Verified: with the exemption, a shared-member scene
- * still overlaps and its lens contains exactly the shared item. */
+ * still overlaps and its lens contains exactly the shared item.
+ *
+ * Separating the drawn hulls by moving ring nodes alone is not enough, and the
+ * reason is an invariant rather than a tuning gap: the outline drawn on screen
+ * is floored to enclose the members' own tiles, so when the members of two
+ * unrelated sets rest close enough for those floored regions to overlap — held
+ * there by graph links, or merely within the padding band — the visible shapes
+ * overlap no matter what the ring nodes do. Measured on a large/small unrelated
+ * pair with a graph link pinning the small set: the eased outline overlap
+ * persisted at 78.6px with the ring-only impulse, and reached 0.0px once the
+ * impulse also translated the members.
+ *
+ * So each set is treated as a droplet: the impulse moves the effective visible
+ * member nodes and the ring nodes together, one uniform per-set delta, so the
+ * collision response translates the droplet without changing its internal
+ * offsets, hull area, or outline geometry. The impulse fires only while the
+ * drawn outlines overlap and stops the moment they are disjoint, so it is
+ * non-penetration, not a standing repulsion: internal attraction (a set's own
+ * gravity) and external graph attraction (links, charge, exclusion) still act
+ * and may bring two sets to rest beside each other, but their regions never
+ * intersect.
+ *
+ * A set whose member is being dragged is anchored and takes no impulse at all —
+ * members and ring alike, because moving its ring alone would tear the outline
+ * away from the item under the pointer. The unheld droplet then absorbs the
+ * full separation. If both droplets are anchored the pair is skipped: the
+ * pointer wins, and the overlap persists only for as long as the drag does. */
 export function forceSetSeparation({
   setsOf,
   // The drawn outline of a set, as a closed list of points. Given this, the
   // force separates the shapes on screen as well as the nodes beneath them.
   hullOf = () => null,
+  // Whether an item is being dragged. A set with any held member is anchored:
+  // the pointer decides where it goes, so the force leaves the whole droplet
+  // alone and the other set absorbs the separation. Defaults to nothing held,
+  // which is the old behaviour for callers that cannot see drag state.
+  isHeld = () => false,
   // How far apart the rings of unrelated sets are held. Wider than the ring
   // link distance of 60, so the gap reads as deliberate rather than as two
   // boundaries resting against each other.
@@ -289,13 +425,27 @@ export function forceSetSeparation({
 
     // Which sets share at least one member, resolved once per tick. Membership
     // is read through setsOf rather than stored, so inheritance through folders
-    // is respected the same way the other set forces respect it.
+    // is respected the same way the other set forces respect it. The nodes are
+    // kept as objects, not ids: the hull pass has to push them, and it can only
+    // push what it holds.
     const membersBySet = new Map();
     for (const node of nodes) {
       if (node.ring) continue;
       for (const setId of setsOf(node.id) ?? []) {
         if (!membersBySet.has(setId)) membersBySet.set(setId, new Set());
-        membersBySet.get(setId).add(node.id);
+        membersBySet.get(setId).add(node);
+      }
+    }
+    // A droplet whose member is under the pointer is anchored: it takes no
+    // impulse at all, and the other set absorbs the separation. Computed once
+    // per tick because both passes need the same answer.
+    const anchored = new Set();
+    for (const [setId, members] of membersBySet) {
+      for (const member of members) {
+        if (isHeld(member.id)) {
+          anchored.add(setId);
+          break;
+        }
       }
     }
     const related = new Set();
@@ -304,8 +454,8 @@ export function forceSetSeparation({
       for (let j = i + 1; j < setIds.length; j += 1) {
         const a = membersBySet.get(setIds[i]);
         const b = membersBySet.get(setIds[j]);
-        for (const id of a) {
-          if (!b.has(id)) continue;
+        for (const member of a) {
+          if (!b.has(member)) continue;
           related.add(`${setIds[i]} ${setIds[j]}`);
           related.add(`${setIds[j]} ${setIds[i]}`);
           break;
@@ -336,6 +486,9 @@ export function forceSetSeparation({
         if (!(a.id < b.id)) continue;
         if (a.setId === b.setId) continue;
         if (related.has(`${a.setId} ${b.setId}`)) continue;
+        // An anchored droplet must not have its ring shoved around the item
+        // under the pointer; the hull pass below moves the other set whole.
+        if (anchored.has(a.setId) || anchored.has(b.setId)) continue;
 
         const dx = b.x - a.x;
         const dy = b.y - a.y;
@@ -380,14 +533,40 @@ export function forceSetSeparation({
         // Along the axis of least overlap, which is the shortest way to part
         // two convex shapes — pushing along the line between centres instead
         // would shove two long sets lying side by side end to end.
-        const push = overlap.depth * strength * alpha;
+        //
+        // The impulse goes to the members as well as the ring nodes, one
+        // uniform delta per set, because the visible outline is floored to
+        // enclose the members: moving only the ring leaves the drawn shapes
+        // overlapping exactly as much as the member regions do. A uniform delta
+        // translates the droplet without changing its internal offsets.
+        const anchoredI = anchored.has(ids[i]);
+        const anchoredJ = anchored.has(ids[j]);
+        // Both droplets under the pointer: nothing can move, so nothing is
+        // pushed. The overlap lasts only as long as the drag does.
+        if (anchoredI && anchoredJ) continue;
+        let pushI = overlap.depth * strength * alpha;
+        let pushJ = pushI;
+        // One side anchored: it takes no impulse (members or ring — pushing its
+        // ring would tear the outline away from the dragged item), and the
+        // unheld droplet absorbs both halves of the separation.
+        if (anchoredI) { pushI = 0; pushJ *= 2; }
+        if (anchoredJ) { pushJ = 0; pushI *= 2; }
+
         for (const node of bySet.get(ids[i])) {
-          node.vx = (node.vx ?? 0) - (overlap.x * push);
-          node.vy = (node.vy ?? 0) - (overlap.y * push);
+          node.vx = (node.vx ?? 0) - (overlap.x * pushI);
+          node.vy = (node.vy ?? 0) - (overlap.y * pushI);
+        }
+        for (const node of membersBySet.get(ids[i]) ?? []) {
+          node.vx = (node.vx ?? 0) - (overlap.x * pushI);
+          node.vy = (node.vy ?? 0) - (overlap.y * pushI);
         }
         for (const node of bySet.get(ids[j])) {
-          node.vx = (node.vx ?? 0) + (overlap.x * push);
-          node.vy = (node.vy ?? 0) + (overlap.y * push);
+          node.vx = (node.vx ?? 0) + (overlap.x * pushJ);
+          node.vy = (node.vy ?? 0) + (overlap.y * pushJ);
+        }
+        for (const node of membersBySet.get(ids[j]) ?? []) {
+          node.vx = (node.vx ?? 0) + (overlap.x * pushJ);
+          node.vy = (node.vy ?? 0) + (overlap.y * pushJ);
         }
       }
     }

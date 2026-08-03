@@ -1198,6 +1198,17 @@ function createGraphController() {
       // so the Venn that gravity builds is left alone.
       .force('setSeparation', forceSetSeparation({
         setsOf: (nodeId) => setIdsContaining(nodeId),
+        // The shape actually on screen, so the force parts what the creator
+        // sees rather than a proxy for it — the same rule drawing and
+        // hit-testing already follow. shape.outline is the eased, resampled,
+        // member-floored outline drawSetRings last put on screen; recomputing
+        // the hull from physics nodes would read a different shape. A null
+        // outline (not yet drawn, or retired) is a safe no-op: the node pass
+        // above covers the ring until a visible outline exists.
+        hullOf: (setId) => setShapes.get(setId)?.outline ?? null,
+        // A set whose member is under the pointer is anchored: it takes no
+        // separation impulse, and the other set absorbs the whole response.
+        isHeld: (nodeId) => nodes.get(nodeId)?.fx != null,
       }))
       // And pushes non-members back out of a set they have wandered into. The
       // outline cannot do this alone: it can only exclude what lies outside the
@@ -1205,10 +1216,13 @@ function createGraphController() {
       .force('setExclusion', forceSetExclusion({
         setsOf: (nodeId) => setIdsContaining(nodeId),
         membersOf: membersOnScreen,
-        // The drawn ring, so the force and the outline agree on who is inside.
-        // Proximity to a member is a proxy for that and disagrees with it in
-        // open space within the boundary, which is where foreign items leaked.
-        ringOf: (setId) => setRings.get(setId)?.nodes ?? null,
+        // The visible outline, so the force and the drawn shape agree on who is
+        // inside — the same source separation uses. Proximity to a member is a
+        // proxy for that and disagrees with it in open space within the
+        // boundary, which is where foreign items leaked. A null outline (not
+        // yet drawn, or retired) is a safe no-op: the set contributes nothing
+        // until its visible outline exists.
+        hullOf: (setId) => setShapes.get(setId)?.outline ?? null,
         isHeld: (nodeId) => nodes.get(nodeId)?.fx != null,
       }))
       .alphaDecay(0.028)

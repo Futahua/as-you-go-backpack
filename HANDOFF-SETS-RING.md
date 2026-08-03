@@ -14,10 +14,10 @@ outside it — the Papers host source lives elsewhere and is out of scope, as is
 
 - Repository: https://github.com/Futahua/as-you-go-backpack
 - Branch: `feat/sets-ring`. Base: `main` at `37542c9`.
-- Head at handoff: `ee59878`. **565 tests passing**, working tree clean.
-
-**The head commit is a known-broken work in progress.** See "Start here" below.
-Everything before it (`5accc4d` and earlier) is sound.
+- Accepted implementation: Assignments 001–003 are code-verified and
+  creator-approved. **595 tests passing** before the final commit.
+- `ee59878` is an incomplete historical snapshot; the later work on this branch
+  completes and corrects it. Do not deploy or cherry-pick that snapshot alone.
 
 Three earlier attempts are pushed as snapshots and should be read, not merged:
 
@@ -109,88 +109,144 @@ deliberately not wired**. Read `bda8229` before re-enabling it. Re-measured this
 session and it remains the wrong instrument: it does not behave monotonically —
 a cap of 6 or 16 holds where 8 diverges.
 
-## START HERE — the head commit is broken
+## Assignment 001 — visible set separation, fixed and creator-accepted
 
-`ee59878` is a work in progress that **must not ship as is**.
+`ee59878` is a work in progress that **must not ship as is** — but not for the
+reason its own message gives.
 
 The user's report, with a screenshot: *"physics may not overlap anymore, but the
 rendering trick certainly does."* Two set outlines met along a shared border
 with nothing between them.
 
-The diagnosis is certain. `forceSetSeparation` pushes **ring nodes** apart, and
-what the user sees is the **hull** drawn around them. A hull spans outward
-across a concavity, so it occupies space no ring node is in — two rings whose
-every node is comfortably clear can still be *drawn* as two shapes that overlap.
+The diagnosis of the *mechanism* is certain. `forceSetSeparation` pushes **ring
+nodes** apart, and what the user sees is the **hull** drawn around them. A hull
+spans outward across a concavity, so it occupies space no ring node is in — two
+rings whose every node is comfortably clear can still be *drawn* as two shapes
+that overlap.
 
 The direction of the fix is the user's own, and it is right: **make the force
 read the shape on screen.** Same principle as drawing and hit-testing the hull.
 
 `ee59878` adds that second pass, over the drawn hulls, using the separating axis
-theorem (exact for convex shapes, and a hull is convex). **The push direction is
-wrong for the second shape.** Measured on two 100x400 squares overlapping by
-20px in x, with nodes far enough apart that only the hull pass could act:
+theorem (exact for convex shapes, and a hull is convex). **The wrong-sign claim
+in its message was false.** Verified during Assignment 001:
 
-```
-A pushed x: -15.0   correct, left
-B pushed x: -20.0   WRONG, should be positive — both sets driven the same way
-vertical leakage: 0.00   so the axis CHOICE is right, only its sign is wrong
-```
+- The committed signs are correct. The scenario the message cites — two 100x400
+  hulls overlapping by 20px in x, nodes far apart so only the hull pass can act
+  — produces A.x = -10, B.x = +10: equal and opposite, with zero vertical
+  leakage. Driving both sets the same way is structurally impossible with the
+  committed force (set i subtracts the overlap direction, set j adds it).
+- The `-15/-20` "both driven the same way" reading matches a draft or harness
+  that subtracted the direction for **both** sets, not the committed code.
+  Mutating the B-side push sign reproduces it exactly ("B pushed x: -10").
+- The real defect was composition: the entry constructed `forceSetSeparation`
+  without `hullOf`, so the (correct) hull pass never ran. The current working
+  tree wires it to read `shape.outline` — the eased, resampled, member-floored
+  outline that is actually drawn — with a null outline as a safe no-op.
+- The first live check still overlapped. The outline is floored to enclose its
+  members, so moving ring nodes alone cannot separate two member floors held
+  together by graph attraction. The final correction translates each unrelated
+  set's visible members and ring nodes with one uniform per-set impulse. That
+  preserves the droplet's shape, stops when the outlines are disjoint, and
+  leaves internal and graph attraction intact. A set with a dragged member is
+  anchored; the other set absorbs the response. Shared-member Venn sets remain
+  exempt.
 
-The `flip` term in `hullOverlap` is the suspect. Fix that first, then:
+The pass is now regression-protected and measured:
 
-- **There is no test for the hull pass.** The 565 passing tests say nothing
-  about it. Write one that fails against the current code.
-- **Cost is unmeasured.** The pass is O(sets²) in hull edges, which reasoning
-  says is small next to the node pass — but that is reasoning, not a
-  measurement. The node pass was 46% of a frame before bucketing, so measure.
-- **Check the Venn still forms** after any change here. Sets sharing a member
-  are exempt from separation on purpose; that exemption is what lets the
-  overlap the user wants exist at all.
+- **Behavioral tests cover it** (`set-gravity-model.test.mjs`): opposite-sign
+  separation on the minimum-overlap axis with negligible orthogonal leakage,
+  uniform member-and-ring translation without shape change, held-set anchoring,
+  the shared-member Venn exemption (including inherited membership), attraction
+  settling adjacent without crossing, and disjoint hulls as a no-op. Both sign
+  rules and the member translation are mutation-checked.
+- **Cost is measured, not reasoned.** The pass is O(sets² × hull-edges²).
+  Medians of 1500 samples with 48-point hulls: 4 sets 0.004ms, 8 sets 0.017ms,
+  16 sets 0.078ms, 32 sets 0.311ms hull-only — at 32 sets it *exceeds* the
+  node pass (0.14ms), so "small next to the node pass" does not hold at scale.
+  Whole-force medians (48 ring nodes, 48 hull points per set): 4 sets 0.088ms,
+  8 sets 0.204ms, 16 sets 0.461ms, against a 16.7ms 60fps frame budget. The
+  expected ordinary set count is not documented in this repository.
+- **The screenshot-shaped full-force harness proves the mechanism.** With a
+  graph link holding the small set near the large one, ring-only separation
+  settled at 78.6px of visible overlap; member-and-ring translation settled at
+  0.0px. The added member impulse measured 0.0004–0.006ms per tick through 32
+  sets. Focused tests pass 25/25 and the full suite passes 574/574.
+- **Creator eye check accepted it.** After Ctrl+Shift+R, the large and small
+  droplets rested immediately beside one another without intersecting or losing
+  their shapes. The creator's verdict was “looks good enough.”
 
-If the fix does not come out clean, `git revert ee59878` returns to a sound
-state with problem 1 fixed at the physics level and only the rendering overlap
-outstanding.
+Assignment 001 is closed. Commit `ee59878` remains an incomplete historical
+snapshot and must not be deployed or cherry-picked without its later fixes.
 
 ## The other open problems
 
-### 2. Dragging a member extends the set the wrong way
+### 2. Dragging a member extends the set the wrong way — fixed and creator-accepted
 
-Pulling one member towards the bottom-right stretched its set up-and-left as
-well, sweeping over four foreign items and enclosing them.
+The cause was `enclosingEllipse`: while a member was dragged diagonally away,
+each axis grew symmetrically around the members' mean. A 240px bottom-right drag
+made the opposite side sweep 112.8px backward and enclose two deliberately
+placed foreign markers.
 
-`enclosingEllipse` grows each axis until every member fits. A diagonal drag puts
-the outlier off both axes, so both grow — the boundary reaches sideways as well
-as along the drag. Exclusion did not clear the swept items, either because the
-boundary expanded faster than the force could move them, or because the push
-direction (away from the centre of mass) points a deeply enclosed item *through*
-more of the set.
+During a drag, the ellipse is now sized per side and its centre shifts toward
+the outlier. The dragged-side supports extend while the stationary supports
+remain nearly fixed. When the drag ends it returns to the stable symmetric
+settled form; the one-sided centre is deliberately gated on drag state because
+letting it chase free members made an always-heated ring run away.
 
-Untouched this session. Note that the hull now bridges concavities, which may
-change how this looks on screen without changing its cause.
+The checked-in self-verifying harness reproduces both paths on the same scene:
+legacy sweeps 112.8px and catches `foreign0`/`foreign3`; corrected diagonal drag
+moves the opposite side inward by 0.8px and catches none. Across horizontal and
+vertical drags the corrected outward motion stays within 18.6px, pointer error
+is 0, and member tiles retain 28–46px of visible margin. Ring-node spacing and
+resampling may shave up to ~12px from the outer 40px padding at an extreme
+dragged corner; tiles remain inside. Focused tests pass 37/37 and the full suite
+passes 578/578.
+
+Creator eye check after Ctrl+Shift+R showed the droplet stretching cleanly from
+its stationary cluster to the far dragged folder without the reverse balloon.
+The creator's verdict was “beautiful.” Assignment 002 is closed.
 
 ### 3. Foreign items collect in the intersection
 
-With one item deliberately shared between two sets, the lens also held three
-items belonging to **neither**.
+**Fixed and creator-accepted.** The failure had two causes. The
+old exclusion added one centre-away push per containing set, so the two pushes
+cancelled exactly for a symmetric foreign item in the Venn lens. The remaining
+alpha-scaled effort then cooled below the collision barrier and could not finish
+an escape.
 
-The likely mechanism, worth testing before fixing: in the overlap an item is
-pushed by both sets at once, and the two pushes roughly cancel, leaving it
-stranded exactly where the two boundaries cross.
+`forceSetExclusion` now reads the exact visible outline, collects all forbidden
+hulls before responding, and follows one coordinated, allowed-region-aware
+route. `shortestValidEscape` computes the nearest point on the exposed boundary
+of the forbidden union rather than sampling centre directions or edge normals;
+an A-only item must leave B while remaining strictly inside A, and the mirrored
+B-only rule is the same. The response brakes at that destination, keeps a small
+measured `minAlpha` floor of 0.05 only while a violation exists, skips held
+items, and stops once the item is valid. Shared AB members remain exempt, so the
+Venn itself is preserved.
 
-**Possibly improved, unverified.** `forceSetExclusion` now reads the hull, so it
-no longer silently fails to fire on a ring whose chain has reordered — which it
-did before, because a ray cast over a crossed loop reports interior points as
-outside. Whether that helps in practice was not measured.
+The named Assignment 003 harness reproduces the legacy symmetric stranding and
+proves the corrected N, A-only, B-only, inherited-folder, AB, held/release,
+mirror, rotation, no-op, and re-entry cases. The adverse narrow-corridor case
+settles at (6.3, 50.0), strictly inside A and outside B. A seeded rotated-hull
+oracle audit and the former 2.3012x counterexample cover the geometry. Focused
+tests pass 79/79 and the full suite passes 595/595. Synthetic heavily
+overlapping hulls can have a genuine single-point pinch where the mathematical
+nearest exit is the boundary crossing itself; this did not occur in any
+app-shaped or membership-class run and remains a disclosed edge case.
 
-### 4. A set can convulse until it pops
+After Ctrl+Shift+R, the creator's live Papers check was “perfect.” Assignment
+003 is closed.
 
-**The rendering half is fixed and the physics half is not.** The drawn outline
-can no longer tear into spikes or lobes, because a hull cannot express them.
-That is by construction, not by tuning.
+### 4. A set can convulse until it pops — no longer an active problem
 
-But nothing was done to the underlying agitation, and it was never reproduced in
-a harness matching the app. A calm-looking outline is now consistent with a ring
-that is still thrashing underneath. Do not read "it looks fine" as "it is fixed".
+Removed from the agenda by the creator. The rendering half is fixed by
+construction — a hull cannot express spikes or lobes — but the underlying
+agitation was never reproduced in a harness matching the app. This section is
+historical: the convulsion must not be assigned, investigated, tuned, or used
+to expand current work unless the creator explicitly reopens it. The old
+caution — do not read "it looks fine" as "it is fixed" — is what suspended the
+investigation, not a claim that the agitation is gone.
 
 ## What was fixed this session
 
@@ -200,7 +256,7 @@ that is still thrashing underneath. Do not read "it looks fine" as "it is fixed"
 | `7e03839` | Ease the outline across frames, and floor it at the members' own shape |
 | `c576ae6` | Let `forceRingShape` cool when nothing is held — a settled scene was pumping itself apart |
 | `5accc4d` | `forceSetSeparation`, so unrelated sets stop crossing |
-| `ee59878` | **Broken.** Hull-level separation, wrong push direction |
+| `ee59878` | **Incomplete.** Hull-level separation (signs verified correct), pass left unwired and untested |
 
 Two findings worth carrying forward:
 
@@ -217,7 +273,8 @@ silently losing it.
 draws as one blob, and a foreigner at the midpoint reads as inside. Two clusters
 600px apart do this. If it shows on screen the answer is a hull per cluster —
 which is what branch 3's notes say the user's sketch showed — not abandoning the
-hull.
+hull. Conditional only, per the creator: do not promote this to active work
+unless the creator observes the behavior in real use.
 
 ## Files
 

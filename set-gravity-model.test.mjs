@@ -153,20 +153,22 @@ test('the gathering settles instead of collapsing or oscillating', () => {
 // the drawing.
 // ===========================================================================
 
-test('a non-member sitting among the members is pushed out of the cloud', () => {
+test('a non-member sitting inside the outline is pushed out of the cloud', () => {
   const members = [
     { id: 'a', x: 0, y: -150 },
     { id: 'b', x: 0, y: 0 },
     { id: 'c', x: 0, y: 150 },
   ];
   // Right in the middle of them, where no closed curve around the members can
-  // leave it out.
+  // leave it out. The outline stands in for the visible shape around them.
+  const outline = [{ x: -60, y: -220 }, { x: 60, y: -220 }, { x: 60, y: 220 }, { x: -60, y: 220 }];
   const outsider = { id: 'x', x: 40, y: 0 };
   const nodes = [...members, outsider];
 
   const force = forceSetExclusion({
     setsOf: (id) => (id === 'x' ? [] : ['s1']),
     membersOf: () => members,
+    hullOf: () => outline,
   });
   force.initialize(nodes);
   const nearestBefore = Math.min(...members.map((m) => Math.hypot(outsider.x - m.x, outsider.y - m.y)));
@@ -185,6 +187,24 @@ test('a non-member sitting among the members is pushed out of the cloud', () => 
     `the outsider did not move away (${nearestBefore.toFixed(0)} -> ${nearestAfter.toFixed(0)})`,
   );
   assert.ok(nearestAfter > 100, `it is still among the members at ${nearestAfter.toFixed(0)}px`);
+});
+
+test('a set with no visible outline yet is a no-op for exclusion', () => {
+  // Before the first render there is no visible outline — hullOf is null for
+  // every set — and the force must not pretend the physics ring is the visible
+  // shape. A set with no outline contributes nothing, so an item that would
+  // otherwise be inside it is simply not touched.
+  const members = [{ id: 'a', x: 0, y: 0 }];
+  const inside = { id: 'x', x: 0, y: 0 };
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'x' ? [] : ['s1']),
+    membersOf: () => members,
+    hullOf: () => null,
+  });
+  force.initialize([...members, inside]);
+  force(1);
+  assert.equal(inside.vx ?? 0, 0, 'no outline, no exclusion impulse');
+  assert.equal(inside.vy ?? 0, 0, 'in either axis');
 });
 
 test('members are never pushed by the exclusion force', () => {
@@ -265,7 +285,7 @@ test('a foreigner deep inside a large set is still pushed out', () => {
   const withRing = forceSetExclusion({
     setsOf: (id) => (id === 'x' ? [] : ['s1']),
     membersOf: () => members,
-    ringOf: () => ring,
+    hullOf: () => ring,
   });
   withRing.initialize([...members, middle]);
   withRing(1);
@@ -324,4 +344,508 @@ test('separation reaches only as far as its clearance', () => {
   force(1);
   assert.equal(a.vx ?? 0, 0, 'nothing is pushed at 400px');
   assert.equal(b.vx ?? 0, 0, 'in either direction');
+});
+
+// ===========================================================================
+// The hull pass. forceSetSeparation has a second pass that reads the drawn
+// outlines (the hulls), because ring nodes being clear of each other does not
+// make the drawn shapes clear: a hull spans outward across a concavity, so it
+// occupies space no ring node is in. These tests pin that pass.
+// ===========================================================================
+
+test('overlapping hulls of unrelated sets part on the minimum-overlap axis, opposite signs', () => {
+  // The hull pass in isolation. The ring nodes are parked far apart — well
+  // past the 90px clearance — so the node-distance pass cannot account for
+  // anything; the only thing that can move them is the drawn hulls overlapping.
+  // Two 100x400 hulls overlapping by 20px in x must part along x, with A going
+  // left and B going right. Both driven the same way, or any movement on the
+  // orthogonal axis, would mean the shapes were not being separated at all.
+  const far = (id, setId, x) => ({ id, setId, ring: true, ringIndex: 0, x, y: 0, vx: 0, vy: 0 });
+  const a = far('A:ring:0', 'A', 0);
+  const b = far('B:ring:0', 'B', 5000);
+  const hullA = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 400 }, { x: 0, y: 400 }];
+  const hullB = [{ x: 80, y: 0 }, { x: 180, y: 0 }, { x: 180, y: 400 }, { x: 80, y: 400 }];
+  const force = forceSetSeparation({
+    setsOf: (id) => (id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []),
+    hullOf: (setId) => (setId === 'A' ? hullA : hullB),
+  });
+  force.initialize([a, b, { id: 'ma', x: 0, y: 200 }, { id: 'mb', x: 130, y: 200 }]);
+  force(1);
+
+  assert.ok(a.vx < 0, `A is pushed left, away from B (got ${a.vx})`);
+  assert.ok(b.vx > 0, `B is pushed right, away from A (got ${b.vx})`);
+  assert.ok(Math.abs(a.vy) < 1e-9 && Math.abs(b.vy) < 1e-9, 'no leakage onto the orthogonal axis');
+  assert.ok(Math.abs(Math.abs(a.vx) - Math.abs(b.vx)) < 1e-9, 'equal and opposite');
+});
+
+test('sets sharing a member are exempt from the hull pass too', () => {
+  // The node pass already exempts related sets; the hull pass must respect the
+  // same rule, or it would tear apart the Venn overlap that the gravity force
+  // builds. Two overlapping hulls whose sets share an item are left alone.
+  const far = (id, setId, x) => ({ id, setId, ring: true, ringIndex: 0, x, y: 0, vx: 0, vy: 0 });
+  const a = far('A:ring:0', 'A', 0);
+  const b = far('B:ring:0', 'B', 5000);
+  const hullA = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 400 }, { x: 0, y: 400 }];
+  const hullB = [{ x: 80, y: 0 }, { x: 180, y: 0 }, { x: 180, y: 400 }, { x: 80, y: 400 }];
+  const shared = { id: 'shared', x: 90, y: 200, vx: 0, vy: 0 };
+  const force = forceSetSeparation({
+    setsOf: () => ['A', 'B'],
+    hullOf: (setId) => (setId === 'A' ? hullA : hullB),
+  });
+  force.initialize([a, b, shared]);
+  force(1);
+
+  assert.equal(a.vx ?? 0, 0, 'a set sharing a member is not pushed by the hull pass');
+  assert.equal(b.vx ?? 0, 0, 'on either side');
+});
+
+test('the hull pass leaves hulls that do not overlap alone', () => {
+  // Separated hulls must pay nothing: a settled scene with no crossing outlines
+  // should not be permanently agitated by the pass.
+  const far = (id, setId, x) => ({ id, setId, ring: true, ringIndex: 0, x, y: 0, vx: 0, vy: 0 });
+  const a = far('A:ring:0', 'A', 0);
+  const b = far('B:ring:0', 'B', 5000);
+  const hullA = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 400 }, { x: 0, y: 400 }];
+  const hullB = [{ x: 300, y: 0 }, { x: 400, y: 0 }, { x: 400, y: 400 }, { x: 300, y: 400 }];
+  const force = forceSetSeparation({
+    setsOf: (id) => (id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []),
+    hullOf: (setId) => (setId === 'A' ? hullA : hullB),
+  });
+  force.initialize([a, b, { id: 'ma', x: 0, y: 200 }, { id: 'mb', x: 300, y: 200 }]);
+  force(1);
+
+  assert.equal(a.vx ?? 0, 0, 'disjoint hulls are not pushed');
+  assert.equal(b.vx ?? 0, 0, 'on either side');
+});
+
+// ===========================================================================
+// The droplet rule. The visible outline is floored to enclose the members, so
+// a ring-node-only impulse can never part outlines whose member regions
+// overlap: the members themselves must translate, as one uniform per-set
+// delta, or the collision response would squash the set instead of moving it.
+// ===========================================================================
+
+/** Minimal SAT overlap check for asserting outline disjointness in the tests. */
+function hullsOverlap(a, b) {
+  for (const shape of [a, b]) {
+    for (let i = 0; i < shape.length; i += 1) {
+      const p = shape[i];
+      const q = shape[(i + 1) % shape.length];
+      const ex = q.x - p.x;
+      const ey = q.y - p.y;
+      const length = Math.hypot(ex, ey);
+      if (length < 1e-9) continue;
+      const axisX = -ey / length;
+      const axisY = ex / length;
+      let minA = Infinity; let maxA = -Infinity;
+      for (const pt of a) {
+        const v = (pt.x * axisX) + (pt.y * axisY);
+        minA = Math.min(minA, v);
+        maxA = Math.max(maxA, v);
+      }
+      let minB = Infinity; let maxB = -Infinity;
+      for (const pt of b) {
+        const v = (pt.x * axisX) + (pt.y * axisY);
+        minB = Math.min(minB, v);
+        maxB = Math.max(maxB, v);
+      }
+      if (maxA <= minB || maxB <= minA) return false;
+    }
+  }
+  return true;
+}
+
+function dropletScene(hullA, hullB) {
+  const a = { id: 'A:ring:0', setId: 'A', ring: true, ringIndex: 0, x: 0, y: 0, vx: 0, vy: 0 };
+  const b = { id: 'B:ring:0', setId: 'B', ring: true, ringIndex: 0, x: 5000, y: 0, vx: 0, vy: 0 };
+  const a1 = { id: 'a1', x: -60, y: -40, vx: 0, vy: 0 };
+  const a2 = { id: 'a2', x: -60, y: 40, vx: 0, vy: 0 };
+  const b1 = { id: 'b1', x: 60, y: -40, vx: 0, vy: 0 };
+  const b2 = { id: 'b2', x: 60, y: 40, vx: 0, vy: 0 };
+  const nodes = [a, b, a1, a2, b1, b2];
+  const setsOf = (id) => {
+    if (id.startsWith('a')) return ['A'];
+    if (id.startsWith('b')) return ['B'];
+    return [];
+  };
+  return { nodes, setsOf };
+}
+
+test('the hull pass translates whole droplets: one uniform delta per set, shape preserved', () => {
+  // Ring nodes far apart so only the hull pass can act; hulls overlapping by
+  // 20px in x. Every node of A — ring and members — must receive the same
+  // delta, every node of B the opposite, with nothing on the orthogonal axis.
+  // Uniformity is what keeps internal offsets, hull area and outline geometry
+  // untouched by the collision response itself.
+  const hullA = [{ x: -100, y: -50 }, { x: 0, y: -50 }, { x: 0, y: 50 }, { x: -100, y: 50 }];
+  const hullB = [{ x: -20, y: -50 }, { x: 80, y: -50 }, { x: 80, y: 50 }, { x: -20, y: 50 }];
+  const { nodes, setsOf } = dropletScene(hullA, hullB);
+  const force = forceSetSeparation({ setsOf, hullOf: (setId) => (setId === 'A' ? hullA : hullB) });
+  force.initialize(nodes);
+  force(1);
+
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const aRing = byId.get('A:ring:0');
+  const bRing = byId.get('B:ring:0');
+  const a1n = byId.get('a1');
+  const a2n = byId.get('a2');
+  const b1n = byId.get('b1');
+  const b2n = byId.get('b2');
+
+  assert.equal(a1n.vx, aRing.vx, 'member a1 shares A droplet delta');
+  assert.equal(a2n.vx, aRing.vx, 'member a2 shares A droplet delta');
+  assert.equal(b1n.vx, bRing.vx, 'member b1 shares B droplet delta');
+  assert.equal(b2n.vx, bRing.vx, 'member b2 shares B droplet delta');
+  assert.equal(a1n.vy, 0, 'no orthogonal leakage on members');
+  assert.equal(b1n.vy, 0, 'no orthogonal leakage on members');
+  assert.ok(aRing.vx < 0, 'A is pushed away from B');
+  assert.ok(bRing.vx > 0, 'B is pushed away from A');
+  assert.equal(aRing.vx, -bRing.vx, 'equal and opposite');
+});
+
+test('a set with a held member is anchored; the other droplet absorbs the separation', () => {
+  const hullA = [{ x: -100, y: -50 }, { x: 0, y: -50 }, { x: 0, y: 50 }, { x: -100, y: 50 }];
+  const hullB = [{ x: -20, y: -50 }, { x: 80, y: -50 }, { x: 80, y: 50 }, { x: -20, y: 50 }];
+  const base = dropletScene(hullA, hullB);
+  const force = forceSetSeparation({
+    setsOf: base.setsOf,
+    hullOf: (setId) => (setId === 'A' ? hullA : hullB),
+    // B's member is under the pointer: B is anchored, A absorbs.
+    isHeld: (id) => id === 'b1',
+  });
+  force.initialize(base.nodes);
+  force(1);
+
+  const byId = new Map(base.nodes.map((n) => [n.id, n]));
+  const aRing = byId.get('A:ring:0');
+  const bRing = byId.get('B:ring:0');
+  const a1n = byId.get('a1');
+  const a2n = byId.get('a2');
+  const b1n = byId.get('b1');
+  const b2n = byId.get('b2');
+
+  for (const n of [bRing, b1n, b2n]) {
+    assert.equal(n.vx ?? 0, 0, `the anchored droplet takes no impulse (${n.id})`);
+  }
+  assert.equal(a1n.vx, aRing.vx, 'the unheld droplet moves uniformly (members and ring)');
+  assert.equal(a2n.vx, aRing.vx, 'the unheld droplet moves uniformly (members and ring)');
+  assert.ok(aRing.vx < 0, 'the unheld droplet moves away');
+
+  // The unheld droplet absorbs both halves: with B anchored, A must move twice
+  // as fast as either side moves when both are free.
+  const free = dropletScene(hullA, hullB);
+  const freeForce = forceSetSeparation({ setsOf: free.setsOf, hullOf: (setId) => (setId === 'A' ? hullA : hullB) });
+  freeForce.initialize(free.nodes);
+  freeForce(1);
+  const freeA = free.nodes.find((n) => n.id === 'A:ring:0');
+  assert.equal(aRing.vx, freeA.vx * 2, 'the anchored side is absorbed by the unheld droplet');
+});
+
+test('two anchored droplets are left alone', () => {
+  const hullA = [{ x: -100, y: -50 }, { x: 0, y: -50 }, { x: 0, y: 50 }, { x: -100, y: 50 }];
+  const hullB = [{ x: -20, y: -50 }, { x: 80, y: -50 }, { x: 80, y: 50 }, { x: -20, y: 50 }];
+  const { nodes, setsOf } = dropletScene(hullA, hullB);
+  const force = forceSetSeparation({
+    setsOf,
+    hullOf: (setId) => (setId === 'A' ? hullA : hullB),
+    isHeld: (id) => id === 'a1' || id === 'b1',
+  });
+  force.initialize(nodes);
+  force(1);
+  for (const n of nodes) {
+    assert.equal(n.vx ?? 0, 0, 'nothing is pushed while both droplets are under the pointer');
+  }
+});
+
+test('the Venn exemption spares members too, including membership inherited through folders', () => {
+  // Sets sharing an effective member must not be separated — their overlap is
+  // the point. The impulse must not reach the members of either set.
+  const hullA = [{ x: -100, y: -50 }, { x: 0, y: -50 }, { x: 0, y: 50 }, { x: -100, y: 50 }];
+  const hullB = [{ x: -20, y: -50 }, { x: 80, y: -50 }, { x: 80, y: 50 }, { x: -20, y: 50 }];
+  const a = { id: 'A:ring:0', setId: 'A', ring: true, ringIndex: 0, x: 0, y: 0, vx: 0, vy: 0 };
+  const b = { id: 'B:ring:0', setId: 'B', ring: true, ringIndex: 0, x: 5000, y: 0, vx: 0, vy: 0 };
+  const a1 = { id: 'a1', x: -60, y: 0, vx: 0, vy: 0 };
+  const shared = { id: 'shared', x: 60, y: 0, vx: 0, vy: 0 };
+  const force = forceSetSeparation({
+    // Effective membership through folder inheritance: the shared item belongs
+    // to both sets even though it only "names" one.
+    setsOf: (id) => (id === 'a1' ? ['A'] : id === 'shared' ? ['A', 'B'] : []),
+    hullOf: (setId) => (setId === 'A' ? hullA : hullB),
+  });
+  force.initialize([a, b, a1, shared]);
+  force(1);
+  assert.equal(a.vx ?? 0, 0, 'ring of A not pushed');
+  assert.equal(b.vx ?? 0, 0, 'ring of B not pushed');
+  assert.equal(a1.vx ?? 0, 0, 'member of A not pushed');
+  assert.equal(shared.vx ?? 0, 0, 'the shared member is not pushed');
+});
+
+test('disjoint droplet hulls receive no impulse even with members present', () => {
+  const hullA = [{ x: -100, y: -50 }, { x: 0, y: -50 }, { x: 0, y: 50 }, { x: -100, y: 50 }];
+  const hullB = [{ x: 300, y: -50 }, { x: 400, y: -50 }, { x: 400, y: 50 }, { x: 300, y: 50 }];
+  const { nodes, setsOf } = dropletScene(hullA, hullB);
+  const force = forceSetSeparation({
+    setsOf,
+    hullOf: (setId) => (setId === 'A' ? hullA : hullB),
+  });
+  force.initialize(nodes);
+  force(1);
+  for (const n of nodes) {
+    assert.equal(n.vx ?? 0, 0, 'already-disjoint droplets are not agitated');
+  }
+});
+
+test('attraction can still bring two sets to rest adjacent without crossing', () => {
+  // Non-penetration is not a standing repulsion. With a gentle pull drawing
+  // both sets inward, they settle beside each other — outlines disjoint, but
+  // close, not fleeing across the workspace. A constant alpha keeps the run
+  // convergent; both forces scale with alpha equally, so the equilibrium is
+  // the same the app would reach.
+  const hullOf = (setId) => {
+    const ms = members.filter((m) => m.set === setId);
+    const cx = ms.reduce((s, m) => s + m.x, 0) / ms.length;
+    const cy = ms.reduce((s, m) => s + m.y, 0) / ms.length;
+    return [
+      { x: cx - 30, y: cy - 30 }, { x: cx + 30, y: cy - 30 },
+      { x: cx + 30, y: cy + 30 }, { x: cx - 30, y: cy + 30 },
+    ];
+  };
+  const a = { id: 'A:ring:0', setId: 'A', ring: true, ringIndex: 0, x: 0, y: 0, vx: 0, vy: 0 };
+  const b = { id: 'B:ring:0', setId: 'B', ring: true, ringIndex: 0, x: 5000, y: 0, vx: 0, vy: 0 };
+  const members = [
+    { id: 'a1', set: 'A', x: -160, y: -20, vx: 0, vy: 0 },
+    { id: 'a2', set: 'A', x: -160, y: 20, vx: 0, vy: 0 },
+    { id: 'b1', set: 'B', x: 160, y: -20, vx: 0, vy: 0 },
+    { id: 'b2', set: 'B', x: 160, y: 20, vx: 0, vy: 0 },
+  ];
+  const all = [a, b, ...members];
+  const force = forceSetSeparation({
+    setsOf: (id) => (id.startsWith('a') ? ['A'] : id.startsWith('b') ? ['B'] : []),
+    hullOf,
+  });
+  force.initialize(all);
+
+  for (let i = 0; i < 4000; i += 1) {
+    force(0.4);
+    for (const n of members) {
+      // Gentle external attraction towards the shared origin — the stand-in
+      // for graph/layout forces pulling the two sets together.
+      n.vx += (0 - n.x) * 0.0006 * 0.4;
+      n.vy += (0 - n.y) * 0.0006 * 0.4;
+    }
+    for (const n of all) {
+      n.vx *= 0.68;
+      n.vy *= 0.68;
+      n.x += n.vx;
+      n.y += n.vy;
+    }
+  }
+
+  const centre = (set) => {
+    const ms = members.filter((m) => m.set === set);
+    return { x: ms.reduce((s, m) => s + m.x, 0) / ms.length, y: ms.reduce((s, m) => s + m.y, 0) / ms.length };
+  };
+  const ca = centre('A');
+  const cb = centre('B');
+  const gap = Math.hypot(cb.x - ca.x, cb.y - ca.y);
+  // The outlines are 30px either side of each set's member centre; disjoint
+  // requires the centres at least ~60px apart. A sub-pixel squeeze is the
+  // equilibrium of pull vs non-penetration, so 59 is the behavioural floor.
+  assert.ok(gap > 59, `the outlines do not cross at rest (gap ${gap.toFixed(2)}px)`);
+  assert.ok(gap < 160, `and they rest adjacent, not fleeing (gap ${gap.toFixed(0)}px)`);
+});
+
+// ===========================================================================
+// The coordinated exclusion. A foreign item inside several overlapping set
+// hulls must receive ONE escape that leaves ALL of them — the old centre-away
+// route pushed once per set and cancelled in the Venn lens. The shared item
+// (belonging to every containing set) is still exempt, held items are still
+// left alone, and the effort does not fade to nothing while a violation
+// exists.
+// ===========================================================================
+
+/** A rect as the visible outline, so hullOf(setId) returns the rect. */
+function ringRect(setId, x0, y0, x1, y1) {
+  return [
+    { id: `${setId}:ring:0`, setId, ring: true, x: x0, y: y0 },
+    { id: `${setId}:ring:1`, setId, ring: true, x: x1, y: y0 },
+    { id: `${setId}:ring:2`, setId, ring: true, x: x1, y: y1 },
+    { id: `${setId}:ring:3`, setId, ring: true, x: x0, y: y1 },
+  ];
+}
+
+test('an item inside two overlapping hulls is pushed along one coordinated escape, not cancelling vectors', () => {
+  // The Venn lens, geometrically: two overlapping squares. A setless item at
+  // the symmetric midpoint is inside both; the old per-set centre-away pushes
+  // are equal and opposite (they cancel to zero), so the coordinated rule must
+  // produce ONE vertical push — the shortest route out of the union — instead.
+  const ringsA = ringRect('A', 0, 0, 100, 100);
+  const ringsB = ringRect('B', 60, 0, 160, 100);
+  const item = { id: 'x', x: 80, y: 50, vx: 0, vy: 0 };
+  const membersA = [{ id: 'ma', x: 30, y: 50 }];
+  const membersB = [{ id: 'mb', x: 130, y: 50 }];
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []),
+    membersOf: (setId) => (setId === 'A' ? membersA : membersB),
+    hullOf: (setId) => (setId === 'A' ? ringsA : ringsB),
+  });
+  force.initialize([item, ...ringsA, ...ringsB, ...membersA, ...membersB]);
+  force(1);
+
+  assert.ok(Math.abs(item.vx) < 1e-6, `the horizontal component is zero, not a cancelling pair (vx ${item.vx})`);
+  assert.ok(Math.abs(item.vy) > 1, `the item is pushed vertically out of both hulls (vy ${item.vy})`);
+});
+
+test('the exclusion effort does not fade to nothing while a violation exists', () => {
+  // d3 cools alpha towards zero; a push scaled by alpha alone would dwindle to
+  // a few hundredths of a pixel per tick in a settled scene — too weak to move
+  // an item through the ring and cluster collision that hold it. The force
+  // keeps its swept floor effort (0.35 * 0.05 * 150) while the item is still
+  // inside, and stops entirely once it is out.
+  const ringsA = ringRect('A', 0, 0, 100, 100);
+  const ringsB = ringRect('B', 60, 0, 160, 100);
+  const item = { id: 'x', x: 80, y: 50, vx: 0, vy: 0 };
+  const membersA = [{ id: 'ma', x: 30, y: 50 }];
+  const membersB = [{ id: 'mb', x: 130, y: 50 }];
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []),
+    membersOf: (setId) => (setId === 'A' ? membersA : membersB),
+    hullOf: (setId) => (setId === 'A' ? ringsA : ringsB),
+  });
+  force.initialize([item, ...ringsA, ...ringsB, ...membersA, ...membersB]);
+  force(0.001);
+  assert.ok(Math.abs(item.vy) > 1, `the push stays near its floor effort at settled alpha (vy ${item.vy})`);
+  item.vy = 0;
+  // Once outside every hull and clear of the members, nothing is pushed.
+  item.x = 300;
+  item.y = 300;
+  force(0.001);
+  assert.equal(item.vx ?? 0, 0, 'an item already out and clear receives no impulse');
+});
+
+test('the shared member of both sets is exempt from exclusion', () => {
+  // Belonging to every containing hull is the Venn: the item is allowed in
+  // the lens, so the coordinated rule must not push it.
+  const ringsA = ringRect('A', 0, 0, 100, 100);
+  const ringsB = ringRect('B', 60, 0, 160, 100);
+  const shared = { id: 'shared', x: 80, y: 50, vx: 0, vy: 0 };
+  const membersA = [{ id: 'ma', x: 30, y: 50 }];
+  const membersB = [{ id: 'mb', x: 130, y: 50 }];
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'shared' ? ['A', 'B'] : id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []),
+    membersOf: (setId) => (setId === 'A' ? membersA : membersB),
+    hullOf: (setId) => (setId === 'A' ? ringsA : ringsB),
+  });
+  force.initialize([shared, ...ringsA, ...ringsB, ...membersA, ...membersB]);
+  force(1);
+  assert.equal(shared.vx ?? 0, 0, 'the shared item receives no exclusion impulse');
+  assert.equal(shared.vy ?? 0, 0, 'in either axis');
+});
+
+test('an A-only item is pushed out of B but the escape preserves its own set', () => {
+  // The item belongs to A and is inside B: the escape must leave B, and the
+  // single coordinated push must not fling it out of A (its allowed region).
+  const ringsA = ringRect('A', 0, 0, 100, 100);
+  const ringsB = ringRect('B', 60, 0, 160, 100);
+  const item = { id: 'aonly', x: 80, y: 50, vx: 0, vy: 0 };
+  const membersA = [{ id: 'ma', x: 30, y: 50 }];
+  const membersB = [{ id: 'mb', x: 130, y: 50 }];
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'aonly' ? ['A'] : id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []),
+    membersOf: (setId) => (setId === 'A' ? membersA : membersB),
+    hullOf: (setId) => (setId === 'A' ? ringsA : ringsB),
+  });
+  force.initialize([item, ...ringsA, ...ringsB, ...membersA, ...membersB]);
+  force(1);
+  assert.ok(Math.abs(item.vx) > 0 || Math.abs(item.vy) > 0, 'the item is pushed');
+  assert.ok(Math.abs(item.vx) < 100, `the push is bounded, not a fling (vx ${item.vx})`);
+});
+
+test('a held foreign item is left under the pointer', () => {
+  const ringsA = ringRect('A', 0, 0, 100, 100);
+  const ringsB = ringRect('B', 60, 0, 160, 100);
+  const item = { id: 'x', x: 80, y: 50, vx: 0, vy: 0 };
+  const membersA = [{ id: 'ma', x: 30, y: 50 }];
+  const membersB = [{ id: 'mb', x: 130, y: 50 }];
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []),
+    membersOf: (setId) => (setId === 'A' ? membersA : membersB),
+    hullOf: (setId) => (setId === 'A' ? ringsA : ringsB),
+    isHeld: (id) => id === 'x',
+  });
+  force.initialize([item, ...ringsA, ...ringsB, ...membersA, ...membersB]);
+  force(1);
+  assert.equal(item.vx ?? 0, 0, 'a held item is not pushed');
+  assert.equal(item.vy ?? 0, 0, 'in either axis');
+});
+
+test('exclusion follows the visible outline, not the raw physics ring', () => {
+  // The visible outline (hullOf) is what the creator sees; the raw ring nodes
+  // are the physics shape the outline eases towards, and the two differ while
+  // the ease trails. The force must ask the visible outline who is inside: an
+  // item inside the raw ring but OUTSIDE the visible outline — and beyond the
+  // proximity range — is not inside the drawn set, and an item inside the
+  // outline is, regardless of the ring nodes.
+  const ringNodes = ringRect('A', 0, 0, 300, 300); // the physics ring, far larger
+  const outline = [{ x: 10, y: 10 }, { x: 50, y: 10 }, { x: 50, y: 50 }, { x: 10, y: 50 }]; // the drawn shape
+  const members = [{ id: 'ma', x: 30, y: 30 }];
+  const outsideOutline = { id: 'x', x: 250, y: 250 }; // inside the ring, outside the outline, far from the members
+  const insideOutline = { id: 'y', x: 20, y: 20 }; // outside the ring, inside the outline
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'ma' ? ['A'] : []),
+    membersOf: () => members,
+    hullOf: () => outline,
+  });
+  force.initialize([outsideOutline, insideOutline, ...members]);
+  force(1);
+  // The item inside the raw ring but outside the drawn shape is not pushed:
+  // the ring alone cannot make it a trespasser. The pre-repair ringOf-based
+  // force enclosed it through the physics nodes.
+  assert.equal(outsideOutline.vx ?? 0, 0, 'the ring-only occupant is not inside the visible set');
+  assert.equal(outsideOutline.vy ?? 0, 0, 'in either axis');
+  // The item inside the drawn shape is pushed, regardless of the ring nodes.
+  assert.ok(
+    Math.abs(insideOutline.vx ?? 0) + Math.abs(insideOutline.vy ?? 0) > 0,
+    'the outline occupant is pushed out',
+  );
+});
+
+test('the adverse A/B rectangles settle with the A-only item still inside A', () => {
+  // The explicit counterexample, run as a settled force: A spans x=[0,100],
+  // B spans x=[10,110], the y axis shared, and an A-only item starts at x=95
+  // in the lens. The shortest exit from B (rightward to x=110) would eject it
+  // from A; the valid escape is leftward through B's x=10 boundary. After the
+  // response runs to rest the item must be outside B and still inside A.
+  const hullA = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+  const hullB = [{ x: 10, y: 0 }, { x: 110, y: 0 }, { x: 110, y: 100 }, { x: 10, y: 100 }];
+  const membersA = [{ id: 'ma', x: 30, y: 50 }];
+  const membersB = [{ id: 'mb', x: 60, y: 50 }];
+  const item = { id: 'aonly', x: 95, y: 50, vx: 0, vy: 0 };
+  const force = forceSetExclusion({
+    setsOf: (id) => (id === 'aonly' ? ['A'] : id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []),
+    membersOf: (setId) => (setId === 'A' ? membersA : membersB),
+    hullOf: (setId) => (setId === 'A' ? hullA : hullB),
+  });
+  force.initialize([item, ...membersA, ...membersB]);
+  const settleTicks = 600;
+  const settledAlpha = 0.05;
+  let sawLeftward = false;
+  for (let i = 0; i < settleTicks; i += 1) {
+    force(settledAlpha);
+    if (item.vx < 0) sawLeftward = true;
+    // d3's integration: x += vx * retained, then the velocity is re-read next
+    // tick with the force's impulse added.
+    item.vx *= 0.68;
+    item.vy *= 0.68;
+    item.x += item.vx;
+    item.y += item.vy;
+  }
+  assert.ok(sawLeftward, 'the escape went leftward, through B\'s x=10 boundary');
+  // Boundary inclusive with a floating-point epsilon: the item rests on A's
+  // left edge, which the response is bounded to reach but not cross.
+  const inA = item.x >= -1e-6 && item.x <= 100 && item.y >= -1e-6 && item.y <= 100;
+  const inB = item.x >= 10 && item.x <= 110 && item.y >= 0 && item.y <= 100;
+  assert.ok(inA, `the item settled inside A at (${item.x.toFixed(1)},${item.y.toFixed(1)})`);
+  assert.ok(!inB, `and outside B at (${item.x.toFixed(1)},${item.y.toFixed(1)})`);
+  assert.ok(item.x < 95, `it moved out of the lens (x ${item.x.toFixed(1)})`);
 });

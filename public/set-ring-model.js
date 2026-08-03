@@ -73,8 +73,30 @@ export function enclosingCircle(members, padding) {
  * The orientation comes from the members' own covariance, so the long axis is
  * whichever way they actually lie rather than a fixed one. A single member, or
  * several stacked in a perfect line, degenerates to a circle, which is right:
- * there is no spread to point along. */
-export function enclosingEllipse(members, padding) {
+ * there is no spread to point along.
+ *
+ * The ellipse must reach one way without reaching the other. Growing each axis
+ * by the worst member, symmetrically around the members' mean, makes a
+ * diagonally dragged outlier extend the boundary backward as much as forward —
+ * measured, a 240px drag swept the opposite side 113px outward and enclosed
+ * foreign items there. So, while a member is being dragged (anchored), each
+ * axis is sized by the member demand on EACH side separately: the semi-axis
+ * spans half the two sides' demands (floored at the covariance estimate, which
+ * keeps a settled set's natural size), and the centre shifts toward the
+ * outlier by half the imbalance. The side opposite the outlier then sits
+ * exactly at the stationary members' extent plus padding, and stays there
+ * however far the drag goes.
+ *
+ * When nothing is held the ellipse returns to the symmetric mean-centred form.
+ * The shift is only stable while the outlier is pinned: if the ring's centre
+ * chased the members' own drift (no drag), the ring's collide shell would
+ * sweep free members outward — measured, the always-heated ring settle runs
+ * away with a shifted centre, and holds with the symmetric one. Dragging is
+ * exactly the case that needs the one-sided shape, so the two behaviours are
+ * the same code path with the anchor flag.
+ *
+ * @param anchored Whether the set is being dragged (a member is pinned). */
+export function enclosingEllipse(members, padding, { anchored = false } = {}) {
   if (!members || members.length === 0) return null;
   const count = members.length;
   let cx = 0;
@@ -118,16 +140,22 @@ export function enclosingEllipse(members, padding) {
   // covariance still decides the orientation and the ratio between the axes —
   // that is what makes the boundary stretch along the members rather than
   // ballooning — and this only fixes the scale.
-  let a = Math.sqrt(mean + delta) + half + padding;
-  let b = Math.sqrt(Math.max(0, mean - delta)) + half + padding;
+  const baseA = Math.sqrt(mean + delta) + half + padding;
+  const baseB = Math.sqrt(Math.max(0, mean - delta)) + half + padding;
+  const cos = Math.cos(-angle);
+  const sin = Math.sin(-angle);
+  // The reach each side of an axis demands: the members' offset on that side
+  // plus the tile half and the padding. Both sides always demand at least the
+  // tile-plus-padding reach, so a lone member keeps a circle centred on it.
   // Grown per axis, not uniformly. Scaling both by the worst overshoot makes a
   // set that only needed to reach further along one axis inflate all round —
   // two members 140px apart came out 455x257 — and a boundary bigger than its
   // contents is what lets bystanders sit inside it.
-  const cos = Math.cos(-angle);
-  const sin = Math.sin(-angle);
-  let needA = 0;
-  let needB = 0;
+  const reach = half + padding;
+  let needNegX = reach;
+  let needPosX = reach;
+  let needNegY = reach;
+  let needPosY = reach;
   for (const member of members) {
     const dx = member.x - cx;
     const dy = member.y - cy;
@@ -135,13 +163,55 @@ export function enclosingEllipse(members, padding) {
     // whole icon is enclosed rather than its centre.
     const localX = (dx * cos) - (dy * sin);
     const localY = (dx * sin) + (dy * cos);
-    needA = Math.max(needA, Math.abs(localX) + half + padding);
-    needB = Math.max(needB, Math.abs(localY) + half + padding);
+    if (localX < 0) needNegX = Math.max(needNegX, -localX + reach);
+    else needPosX = Math.max(needPosX, localX + reach);
+    if (localY < 0) needNegY = Math.max(needNegY, -localY + reach);
+    else needPosY = Math.max(needPosY, localY + reach);
   }
-  a = Math.max(a, needA);
-  b = Math.max(b, needB);
+  // Half the per-side span on each axis, floored at the covariance estimate.
+  // While the set is anchored the centre shifts by half the imbalance, so the
+  // side opposite the outlier is pinned at that side's stationary demand; when
+  // nothing is held the centre stays at the mean and each axis takes the worst
+  // single side (the settled form), because a ring chasing a drifting centre
+  // would sweep free members (measured).
+  //
+  // The anchored shape is sized to the members' demands exactly, which puts
+  // the tile-plus-padding corners tangent to the ellipse. The drawn outline is
+  // a polygon through the ring nodes resampled to 48 points, and a polygon
+  // cuts its own corners: at the sharpest exposed corners — the member floor's
+  // 90-degree corners, whose extent the per-side demands describe — the
+  // resample chords can remove part of a sample step. So the anchored ellipse
+  // gets a resolution allowance derived from half the floored outline's
+  // bounding-box perimeter divided across its 48 samples:
+  // (needNegX + needPosX + needNegY + needPosY) / 48. The bounding-box
+  // perimeter is a lower bound on the true perimeter, so this reduces rather
+  // than promises to eliminate corner shaving. It applies equally to both
+  // axes and therefore extends the nominal far side by the same allowance;
+  // the full-force harness measures that total world-side motion at no more
+  // than 18.6px, versus the legacy 112.8px sweep. Ring-node spacing and
+  // resample chords still cut the outer padding by up to ~12px during a drag;
+  // member tiles remain inside, and that residual is reported explicitly.
+  const a = anchored
+    ? Math.max(baseA, (needNegX + needPosX) / 2)
+    : Math.max(baseA, needNegX, needPosX);
+  const b = anchored
+    ? Math.max(baseB, (needNegY + needPosY) / 2)
+    : Math.max(baseB, needNegY, needPosY);
+  const margin = anchored
+    ? (needNegX + needPosX + needNegY + needPosY) / 48
+    : 0;
+  const finalA = a + margin;
+  const finalB = b + margin;
+  const shiftX = anchored ? (needPosX - needNegX) / 2 : 0;
+  const shiftY = anchored ? (needPosY - needNegY) / 2 : 0;
 
-  return { x: cx, y: cy, a, b, angle };
+  return {
+    x: cx + (shiftX * Math.cos(angle)) - (shiftY * Math.sin(angle)),
+    y: cy + (shiftX * Math.sin(angle)) + (shiftY * Math.cos(angle)),
+    a: finalA,
+    b: finalB,
+    angle,
+  };
 }
 
 /** Ellipse perimeter, by Ramanujan's approximation.
@@ -367,6 +437,321 @@ export function resampleHull(hull, count = 48) {
   return points;
 }
 
+/** The direction from an inside point to the nearest point on a convex hull's
+ * boundary — the shortest way out of that single hull.
+ *
+ * The nearest boundary point of a convex polygon from an interior point lies
+ * on an edge (the perpendicular foot), so walking the edges and keeping the
+ * closest projection is exact. Returns a unit direction, falling back to +x
+ * for a degenerate hull. */
+function nearestExitDirection(hull, point) {
+  let best = null;
+  let bestDist = Infinity;
+  for (let i = 0; i < hull.length; i += 1) {
+    const a = hull[i];
+    const b = hull[(i + 1) % hull.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lengthSquared = (dx * dx) + (dy * dy);
+    if (lengthSquared < 1e-12) continue;
+    let t = (((point.x - a.x) * dx) + ((point.y - a.y) * dy)) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+    const px = a.x + dx * t;
+    const py = a.y + dy * t;
+    const dist = Math.hypot(point.x - px, point.y - py);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = { x: (point.x - px) / dist, y: (point.y - py) / dist };
+    }
+  }
+  return best ?? { x: 1, y: 0 };
+}
+
+/** Whether `point` lies inside the simple polygon `hull` (boundary inclusive
+ * via the standard half-open ray cast: a point exactly on an edge reads as
+ * inside, which is why the escape response crosses the boundary rather than
+ * resting on it). */
+function pointInHull(hull, point) {
+  if (!hull || hull.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = hull.length - 1; i < hull.length; j = i, i += 1) {
+    const a = hull[i];
+    const b = hull[j];
+    if ((a.y > point.y) === (b.y > point.y)) continue;
+    const crossX = a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x);
+    if (point.x < crossX) inside = !inside;
+  }
+  return inside;
+}
+
+/** The distance at which a ray from `point` along the unit direction `d`
+ * crosses `hull`'s boundary — the actual ray-polygon crossing, not the
+ * support-plane distance.
+ *
+ * The support distance (how far the hull extends along `d`) overstates travel
+ * for every direction except an active edge normal: a ray from the centre of a
+ * 100x100 square along (0.8, 0.6) exits through x=100 at t=62.5, where the
+ * support formula reports 70. The shortest-escape claim needs the real
+ * crossing, so each edge is intersected with the ray and the forward crossings
+ * are collected. Infinity means the ray never crosses the hull (the point is
+ * outside it and the ray moves away). */
+function rayCrossings(hull, point, d) {
+  let near = Infinity;
+  let far = 0;
+  for (let i = 0; i < hull.length; i += 1) {
+    const a = hull[i];
+    const b = hull[(i + 1) % hull.length];
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const denom = d.x * ey - d.y * ex;
+    if (Math.abs(denom) < 1e-12) continue;
+    const t = ((a.x - point.x) * ey - (a.y - point.y) * ex) / denom;
+    if (t < -1e-9) continue;
+    const s = ((a.x - point.x) * d.y - (a.y - point.y) * d.x) / denom;
+    if (s < -1e-9 || s > 1 + 1e-9) continue;
+    if (t < near) near = t;
+    if (t > far) far = t;
+  }
+  return { near, far };
+}
+
+/** The distance along the unit direction `d` at which a ray from `point` is
+ * finally outside `hull` — the actual ray-polygon crossing, not the
+ * support-plane distance. For an interior point this is the single boundary
+ * crossing; from a point already outside it is the far side of the hull the
+ * ray runs through (or Infinity when the ray never crosses it). A point on the
+ * boundary crossing at t=0 counts, so an item resting exactly on its own
+ * outline has a zero allowed bound outward and cannot be flung out of its own
+ * set. */
+export function rayExitDistance(hull, point, d) {
+  return rayCrossings(hull, point, d).far;
+}
+
+/** Where an edge crosses another polygon, as parameters along that edge.
+ *
+ * Splitting an edge at every crossing is what makes the interval classification
+ * below sound: between two consecutive crossings the edge is wholly inside or
+ * wholly outside the other polygon, so one midpoint test decides the whole
+ * interval. */
+function edgeCutParameters(a, b, hull) {
+  const cuts = [];
+  const ex = b.x - a.x;
+  const ey = b.y - a.y;
+  for (let i = 0; i < hull.length; i += 1) {
+    const c = hull[i];
+    const d = hull[(i + 1) % hull.length];
+    const fx = d.x - c.x;
+    const fy = d.y - c.y;
+    const denom = (ex * fy) - (ey * fx);
+    if (Math.abs(denom) < 1e-12) continue;
+    const t = (((c.x - a.x) * fy) - ((c.y - a.y) * fx)) / denom;
+    const s = (((c.x - a.x) * ey) - ((c.y - a.y) * ex)) / denom;
+    if (t < -1e-9 || t > 1 + 1e-9) continue;
+    if (s < -1e-9 || s > 1 + 1e-9) continue;
+    cuts.push(Math.max(0, Math.min(1, t)));
+  }
+  return cuts;
+}
+
+/** The nearest point of a segment to `point`, and its distance. */
+function nearestOnSegment(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = (dx * dx) + (dy * dy);
+  let t = 0;
+  if (lengthSquared > 1e-12) {
+    t = (((point.x - a.x) * dx) + ((point.y - a.y) * dy)) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+  }
+  const q = { x: a.x + (dx * t), y: a.y + (dy * t) };
+  return { point: q, distance: Math.hypot(point.x - q.x, point.y - q.y) };
+}
+
+/** The shortest valid escape from a trespassed region: the nearest point that
+ * is outside every forbidden hull while still inside every allowed hull, and
+ * the direction to it.
+ *
+ * A trespasser must leave the sets it does not belong to without being thrown
+ * out of the sets it does. The nearest such point is what the response aims
+ * at; the direction alone is not enough, because a shortest direction found by
+ * sampling a candidate list can be far from optimal for a UNION of hulls: a
+ * minimax compromise direction between two overlapping hulls beats every
+ * individual edge normal and nearest-exit direction (a seeded audit found a
+ * 2.30x case, preserved as a regression fixture).
+ *
+ * So the answer is computed on the geometry instead of searched over
+ * directions. The valid region's boundary is made of pieces of the forbidden
+ * hulls' edges: leaving the forbidden union means reaching its exposed
+ * boundary — a part of some forbidden edge that is not buried inside another
+ * forbidden hull. Every forbidden edge is therefore split at its intersections
+ * with the other forbidden hulls and with the allowed hulls, each resulting
+ * interval is classified once by its midpoint (outside every OTHER forbidden
+ * hull, inside every allowed hull), and `point` is projected onto the surviving
+ * intervals. The nearest projection is the exact optimum: the closest point of
+ * the valid set lies on that set's boundary, and its boundary is exactly the
+ * union of those intervals (plus allowed-hull boundary pieces, which are never
+ * strictly better — a point there is also on a forbidden edge or already
+ * outside). Allowed-hull edges are split and tested the same way so a corridor
+ * that runs along the allowed boundary is still found.
+ *
+ * Returns { x, y, distance } — the unit direction to that nearest valid point
+ * and its distance — or null when the point is already outside every forbidden
+ * hull, or when no valid point exists (the allowed region is entirely buried in
+ * forbidden territory). */
+export function shortestValidEscape(
+  point,
+  forbiddenHulls,
+  allowedHulls = [],
+  { clearance = 0.5 } = {},
+) {
+  const forbidden = (forbiddenHulls ?? []).filter((hull) => hull && hull.length >= 3);
+  if (forbidden.length === 0) return null;
+  if (!forbidden.some((hull) => pointInHull(hull, point))) return null;
+  const allowed = (allowedHulls ?? []).filter((hull) => hull && hull.length >= 3);
+
+  // The classification epsilon: a candidate point is nudged off the boundary it
+  // sits on before being tested, so "on the edge of the hull I am leaving" does
+  // not read as still inside it. Small next to any on-screen distance, large
+  // next to the intersection arithmetic above.
+  const EPS = 1e-6;
+  const valid = (q, skipForbidden) => {
+    for (let i = 0; i < forbidden.length; i += 1) {
+      if (i === skipForbidden) continue;
+      if (pointInHull(forbidden[i], q)) return false;
+    }
+    for (const hull of allowed) {
+      if (!pointInHull(hull, q)) return false;
+    }
+    return true;
+  };
+
+  let best = null;
+  let bestDistance = Infinity;
+
+  // Every edge of every hull is a candidate carrier of the nearest valid point.
+  // A forbidden edge is skipped against its OWN hull (the whole edge lies on
+  // that hull's boundary, so testing containment against it is meaningless);
+  // an allowed edge is tested against all of them.
+  const carriers = [];
+  forbidden.forEach((hull, index) => carriers.push({ hull, own: index }));
+  allowed.forEach((hull) => carriers.push({ hull, own: -1 }));
+
+  for (const carrier of carriers) {
+    const { hull } = carrier;
+    for (let i = 0; i < hull.length; i += 1) {
+      const a = hull[i];
+      const b = hull[(i + 1) % hull.length];
+      const length = Math.hypot(b.x - a.x, b.y - a.y);
+      if (length < 1e-9) continue;
+
+      const cuts = [0, 1];
+      for (let k = 0; k < forbidden.length; k += 1) {
+        if (k === carrier.own) continue;
+        cuts.push(...edgeCutParameters(a, b, forbidden[k]));
+      }
+      for (const other of allowed) {
+        if (other === hull) continue;
+        cuts.push(...edgeCutParameters(a, b, other));
+      }
+      cuts.sort((p, q) => p - q);
+
+      for (let c = 0; c < cuts.length - 1; c += 1) {
+        const t0 = cuts[c];
+        const t1 = cuts[c + 1];
+        if (t1 - t0 < 1e-9) continue;
+        const mid = (t0 + t1) / 2;
+        const at = (t) => ({ x: a.x + ((b.x - a.x) * t), y: a.y + ((b.y - a.y) * t) });
+        // One midpoint decides the interval: it holds no crossing inside it.
+        // The midpoint is nudged along the carrier hull's outward edge normal
+        // so a forbidden edge reads as just outside the hull it bounds; for an
+        // allowed carrier the point is tested where it lies.
+        const m = at(mid);
+        const nx = (b.y - a.y) / length;
+        const ny = -(b.x - a.x) / length;
+        // Both sides of the carrier edge are probed, and the carrier's own hull
+        // is NOT exempted from the test. Exempting it would treat "resting on
+        // this hull's boundary" as having left it, which is false wherever the
+        // edge runs THROUGH the forbidden union rather than bounding it: in the
+        // adverse A/B fixture, B's own bottom edge would then read as a valid
+        // exit and the item would slide along it to y=0, still inside B,
+        // instead of leaving B at x=10. The EPS nudge is what distinguishes the
+        // two sides, so a genuine exit still reads as outside.
+        const probe = [
+          { x: m.x + (nx * EPS), y: m.y + (ny * EPS) },
+          { x: m.x - (nx * EPS), y: m.y - (ny * EPS) },
+        ];
+        if (!probe.some((q) => valid(q, -1))) continue;
+
+        // The exact optimum on this interval. The clearance is deliberately NOT
+        // applied here: insetting or lifting each interval before comparing
+        // them lets a fixed margin decide the geometry, which discards narrow
+        // but genuine corridors and picks far worse routes (measured: a 2.4px
+        // exit replaced by a 74px one). The geometry answers first and alone;
+        // the margin is added to the winner, along the escape direction, below.
+        const near = nearestOnSegment(point, at(t0), at(t1));
+        if (near.distance < bestDistance) {
+          bestDistance = near.distance;
+          best = near.point;
+        }
+      }
+    }
+  }
+
+  if (!best) return null;
+
+  // The item can be ON the nearest valid point already — resting exactly on the
+  // boundary of a hull that, by the boundary-inclusive containment predicate,
+  // still CONTAINS it. Returning null there would report "nothing to do" for an
+  // item the force still sees as trespassing, and it would sit on that edge for
+  // ever (measured: a B-only item stalled at margin -0.4 into A, escape null,
+  // desired 0.0, for the whole settled run). The route has no length but it
+  // does have a direction — the outward edge normal — so the clearance alone
+  // carries the item off the boundary.
+  if (bestDistance < 1e-9) {
+    const outward = nearestExitDirection(
+      forbidden.find((hull) => pointInHull(hull, point)) ?? forbidden[0],
+      point,
+    );
+    const q = {
+      x: point.x + (outward.x * clearance),
+      y: point.y + (outward.y * clearance),
+    };
+    if (!valid(q, -1)) return null;
+    return { x: outward.x, y: outward.y, distance: clearance, target: q };
+  }
+
+  // The optimum sits ON the boundary — of the hull being left, and where two
+  // forbidden boundaries cross, on both at once. A point there is not strictly
+  // outside the forbidden union, and an item resting on that knife edge is
+  // pushed straight back in by easing and collision (a seeded audit found
+  // 18/383 escapes landing on exactly such a pinch). The same is true of a
+  // corridor so narrow that spending all the room stops the item exactly on its
+  // own set's outer boundary, where containment then reads it as outside.
+  //
+  // So the margin is added ALONG the escape direction, past the boundary rather
+  // than sideways off it. This cannot leave the valid pocket the geometry just
+  // chose — it only travels further out of the forbidden union — so the route
+  // stays optimal while the landing becomes strictly clear. The margin shrinks
+  // when the room ahead is smaller than it, and a pocket with no room at all
+  // keeps the exact boundary point, which is still the true optimum.
+  const ux = (best.x - point.x) / bestDistance;
+  const uy = (best.y - point.y) / bestDistance;
+  let distance = bestDistance;
+  for (const scale of [1, 0.5, 0.25, 0.1]) {
+    const step = clearance * scale;
+    const q = { x: best.x + (ux * step), y: best.y + (uy * step) };
+    if (!valid(q, -1)) continue;
+    distance = bestDistance + step;
+    break;
+  }
+  return {
+    x: ux,
+    y: uy,
+    distance,
+    target: { x: point.x + (ux * distance), y: point.y + (uy * distance) },
+  };
+}
+
 /** Eases a drawn outline towards the shape the physics currently implies.
  *
  * The hull guarantees the outline is simple; it says nothing about it being
@@ -584,7 +969,11 @@ export function forceRingShape({
     for (const node of nodes) {
       if (!node.ring) continue;
       if (!shapes.has(node.setId)) {
-        shapes.set(node.setId, enclosingEllipse(membersOf(node.setId) ?? [], padding));
+        // While the set is being dragged the enclosing shape is one-sided —
+        // it reaches toward the held member without extending the opposite
+        // side. Settled, it is the symmetric form; a shifted centre that
+        // follows the members' own drift would sweep the free members.
+        shapes.set(node.setId, enclosingEllipse(membersOf(node.setId) ?? [], padding, { anchored: isDragging() }));
       }
       const shape = shapes.get(node.setId);
       if (!shape) continue;

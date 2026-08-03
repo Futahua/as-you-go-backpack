@@ -24,6 +24,8 @@ import {
   ejectionTarget,
   pointInsideRing,
   forceSpeedLimit,
+  shortestValidEscape,
+  rayExitDistance,
 } from './public/set-ring-model.js';
 // The real forces, so containment is measured against the configuration the
 // app actually runs rather than an idealised one.
@@ -434,7 +436,7 @@ test('a settled scene stops moving instead of pumping itself apart', () => {
     .force('setExclusion', forceSetExclusion({
       setsOf: (id) => setOf.get(id) ?? [],
       membersOf,
-      ringOf: (setId) => rings.get(setId)?.nodes ?? null,
+      hullOf: (setId) => rings.get(setId)?.nodes ?? null,
     }));
 
   const spreadOf = (list) => Math.max(...list.map((n) => n.y)) - Math.min(...list.map((n) => n.y));
@@ -804,4 +806,522 @@ test('growing to fit does not inflate the boundary all round', () => {
   const ellipse = enclosingEllipse([tile('a', 0, 0), tile('b', 140, 0)], 40);
   assert.ok(2 * ellipse.b < 200, `the short axis grew to ${(2 * ellipse.b).toFixed(0)}`);
   assert.ok(2 * ellipse.a > 2 * ellipse.b, 'and the long axis is still the long one');
+});
+
+// ===========================================================================
+// The coordinated, allowed-region-aware hull escape. A foreign item inside
+// several overlapping set hulls must receive ONE direction that leaves ALL of
+// them — the old route of one centre-away push per set cancels in the Venn
+// lens — and the direction must also preserve the item's own allowed region:
+// an A-only item in the lens must leave B without being flung out of A. The
+// helper is the geometry: among the directions whose endpoint is outside every
+// forbidden hull and inside every allowed hull, the one with the smallest
+// ray-polygon exit distance.
+// ===========================================================================
+
+function rect(x0, y0, x1, y1) {
+  return [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+}
+
+function contains(hull, point) {
+  let inside = false;
+  for (let i = 0, j = hull.length - 1; i < hull.length; j = i, i += 1) {
+    const a = hull[i];
+    const b = hull[j];
+    if ((a.y > point.y) === (b.y > point.y)) continue;
+    const crossX = a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x);
+    if (point.x < crossX) inside = !inside;
+  }
+  return inside;
+}
+
+// The margin shortestValidEscape puts between its landing and the boundary it
+// leaves, so the item is strictly outside the forbidden region rather than
+// resting on its outline (where the boundary-inclusive containment predicate
+// still reads it as inside). Mirrors the helper's own default.
+const ESCAPE_CLEARANCE = 0.5;
+
+test('the coordinated escape leaves every hull along the shortest route', () => {
+  // Two overlapping squares — the Venn lens. A point inside both must leave
+  // both: the union spans x [0,160] and y [0,100], so the shortest exit is
+  // vertical (50px) rather than horizontal (80px), and the direction must
+  // actually clear both hulls.
+  const A = rect(0, 0, 100, 100);
+  const B = rect(60, 0, 160, 100);
+  const point = { x: 80, y: 50 };
+  const escape = shortestValidEscape(point, [A, B]);
+  assert.ok(escape, 'an escape exists for an interior point');
+  assert.ok(Math.abs(escape.y) > 0.99, `the shortest exit is vertical, got (${escape.x.toFixed(2)},${escape.y.toFixed(2)})`);
+  assert.ok(Math.abs(escape.x) < 0.01, 'no horizontal drift in the vertical escape');
+  // The boundary is 50px away; the escape lands ESCAPE_CLEARANCE past it so the
+  // item is strictly outside rather than resting on the outline it is leaving.
+  assert.ok(
+    Math.abs(escape.distance - (50 + ESCAPE_CLEARANCE)) < 1e-6,
+    `the exit clears the union's nearest boundary (${escape.distance.toFixed(1)})`,
+  );
+  assert.ok(!contains(A, escape.target), 'the target is strictly outside A');
+  assert.ok(!contains(B, escape.target), 'the target is strictly outside B');
+});
+
+test('the escape distance is the actual ray crossing, not the support-plane distance', () => {
+  // From the centre of a 100x100 square the support-plane distance along a
+  // diagonal direction (0.8,0.6) reports 70, while the ray actually exits
+  // through x=100 at t=62.5. The exported crossing must report the ray
+  // distance; the escape's travel is built from it.
+  const A = rect(0, 0, 100, 100);
+  const crossing = rayExitDistance(A, { x: 50, y: 50 }, { x: 0.8, y: 0.6 });
+  assert.ok(Math.abs(crossing - 62.5) < 1e-6, `the ray exits at 62.5, got ${crossing.toFixed(3)}`);
+  // The shortest escape from the centre is 50 along a normal — the perpendicular
+  // distance, where the ray crossing and the support distance agree.
+  const escape = shortestValidEscape({ x: 50, y: 50 }, [A]);
+  assert.ok(
+    Math.abs(escape.distance - (50 + ESCAPE_CLEARANCE)) < 1e-6,
+    `the normal exit is 50 plus the clearance (${escape.distance.toFixed(1)})`,
+  );
+});
+
+test('the shortest exit is rejected when it would leave the item\'s allowed hull', () => {
+  // The adverse A/B rectangles: A spans x=[0,100], B spans x=[10,110], with
+  // the y axis shared, and an A-only item sits at x=95 in the lens. The
+  // unconstrained shortest way out of B is rightward to x=110 — which is
+  // outside A. The valid escape must go leftward through B's x=10 boundary,
+  // which is still inside A: the route that preserves the allowed membership
+  // is longer, and it is the one the helper must pick.
+  const A = rect(0, 0, 100, 100);
+  const B = rect(10, 0, 110, 100);
+  const point = { x: 95, y: 50 };
+  const escape = shortestValidEscape(point, [B], [A]);
+  assert.ok(escape, 'an escape exists');
+  assert.ok(escape.x < -0.99, `the valid escape is leftward through x=10, got (${escape.x.toFixed(2)},${escape.y.toFixed(2)})`);
+  assert.ok(Math.abs(escape.y) < 0.01, 'no vertical drift');
+  assert.ok(
+    Math.abs(escape.distance - (85 + ESCAPE_CLEARANCE)) < 1e-6,
+    `the route clears B's left boundary (${escape.distance.toFixed(1)})`,
+  );
+  // The landing itself — not an extrapolation past it — must be strictly
+  // outside the forbidden hull and strictly inside the allowed one. The
+  // previous form spent all the room and stopped ON A's boundary, which the
+  // product predicate reads as outside A.
+  assert.ok(!contains(B, escape.target), 'the target is outside the forbidden hull');
+  assert.ok(contains(A, escape.target), 'and inside the allowed hull');
+  assert.ok(escape.target.x > 0, `strictly inside A (x=${escape.target.x.toFixed(2)})`);
+  assert.ok(escape.target.x < 10, `strictly outside B (x=${escape.target.x.toFixed(2)})`);
+});
+
+test('the allowed-region-aware escape mirrors across the shared axis', () => {
+  // The mirror of the adverse scene: B shifted left of A, the item near A's
+  // left side. The unconstrained shortest exit from B is leftward to x=-10 —
+  // outside A; the valid escape goes rightward through B's x=90 boundary.
+  const A = rect(0, 0, 100, 100);
+  const B = rect(-10, 0, 90, 100);
+  const point = { x: 5, y: 50 };
+  const escape = shortestValidEscape(point, [B], [A]);
+  assert.ok(escape, 'an escape exists');
+  assert.ok(escape.x > 0.99, `the valid escape is rightward, got (${escape.x.toFixed(2)},${escape.y.toFixed(2)})`);
+  assert.ok(
+    Math.abs(escape.distance - (85 + ESCAPE_CLEARANCE)) < 1e-6,
+    `the route clears B's right boundary (${escape.distance.toFixed(1)})`,
+  );
+  assert.ok(!contains(B, escape.target), 'the target is outside the forbidden hull');
+  assert.ok(contains(A, escape.target), 'and inside the allowed hull');
+});
+
+test('the allowed-region-aware escape rotates with the scene', () => {
+  // The same adverse geometry rotated 90 degrees: B spans y=[10,110] with the
+  // x axis shared, the item at y=95. The shortest exit (down through y=110)
+  // leaves A; the valid escape goes up through B's y=10 boundary.
+  const A = rect(0, 0, 100, 100);
+  const B = rect(0, 10, 100, 110);
+  const point = { x: 50, y: 95 };
+  const escape = shortestValidEscape(point, [B], [A]);
+  assert.ok(escape, 'an escape exists');
+  assert.ok(escape.y < -0.99, `the valid escape is upward, got (${escape.x.toFixed(2)},${escape.y.toFixed(2)})`);
+  assert.ok(
+    Math.abs(escape.distance - (85 + ESCAPE_CLEARANCE)) < 1e-6,
+    `the route clears B's bottom boundary (${escape.distance.toFixed(1)})`,
+  );
+  assert.ok(!contains(B, escape.target), 'the target is outside the forbidden hull');
+  assert.ok(contains(A, escape.target), 'and inside the allowed hull');
+});
+
+test('the escape matches a dense angular oracle and lands at a valid endpoint', () => {
+  // The production picks among a sparse candidate set (nearest exits plus edge
+  // normals). The oracle here sweeps every 0.5 degree with its own
+  // ray-crossing implementation and the same endpoint validity rule, so the
+  // production's result is verified against an independent dense reference,
+  // not against its own candidate set or formula.
+  const scenes = [
+    { forbidden: [rect(0, 0, 100, 100), rect(60, 0, 160, 100)], allowed: [], point: { x: 80, y: 50 } },
+    { forbidden: [rect(10, 0, 110, 100)], allowed: [rect(0, 0, 100, 100)], point: { x: 95, y: 50 } },
+    { forbidden: [rect(-10, 0, 90, 100)], allowed: [rect(0, 0, 100, 100)], point: { x: 5, y: 50 } },
+    { forbidden: [rect(0, 10, 100, 110)], allowed: [rect(0, 0, 100, 100)], point: { x: 50, y: 95 } },
+    // a rotated pentagon, with no allowed hull
+    {
+      forbidden: [[
+        { x: 0, y: 40 }, { x: 38, y: 12 }, { x: 81, y: 24 }, { x: 95, y: 66 }, { x: 55, y: 100 },
+      ]],
+      allowed: [],
+      point: { x: 50, y: 55 },
+    },
+  ];
+  const oracleBest = (point, forbidden, allowed) => {
+    let best = Infinity;
+    const steps = 720;
+    for (let i = 0; i < steps; i += 1) {
+      const angle = (2 * Math.PI * i) / steps;
+      const u = { x: Math.cos(angle), y: Math.sin(angle) };
+      let exit = 0;
+      for (const hull of forbidden) {
+        let far = 0;
+        for (let e = 0; e < hull.length; e += 1) {
+          const a = hull[e];
+          const b = hull[(e + 1) % hull.length];
+          const ex = b.x - a.x;
+          const ey = b.y - a.y;
+          const denom = u.x * ey - u.y * ex;
+          if (Math.abs(denom) < 1e-12) continue;
+          const t = ((a.x - point.x) * ey - (a.y - point.y) * ex) / denom;
+          if (t <= 1e-9) continue;
+          const s = ((a.x - point.x) * u.y - (a.y - point.y) * u.x) / denom;
+          if (s < -1e-9 || s > 1 + 1e-9) continue;
+          if (t > far) far = t;
+        }
+        if (far > exit) exit = far;
+      }
+      const endpoint = {
+        x: point.x + u.x * (exit + 1e-6),
+        y: point.y + u.y * (exit + 1e-6),
+      };
+      if (allowed.some((h) => !contains(h, endpoint))) continue;
+      if (forbidden.some((h) => contains(h, endpoint))) continue;
+      if (exit < best) best = exit;
+    }
+    return best;
+  };
+  for (const scene of scenes) {
+    const production = shortestValidEscape(scene.point, scene.forbidden, scene.allowed);
+    assert.ok(production, `an escape exists for the scene at (${scene.point.x},${scene.point.y})`);
+    const oracle = oracleBest(scene.point, scene.forbidden, scene.allowed);
+    assert.ok(Number.isFinite(oracle), 'the oracle finds a valid route');
+    // Like for like: the oracle measures to the boundary, production lands
+    // ESCAPE_CLEARANCE past it. The production may be NEARER than the oracle by
+    // up to the oracle's angular resolution, which the sweep cannot represent.
+    assert.ok(
+      production.distance - (oracle + ESCAPE_CLEARANCE) < 1e-6,
+      `the production is no worse than the oracle (${production.distance.toFixed(3)} vs ${(oracle + ESCAPE_CLEARANCE).toFixed(3)})`,
+    );
+    // The landing itself is what must be valid, not a point extrapolated past
+    // it: the response stops the item at this target.
+    for (const hull of scene.forbidden) {
+      assert.ok(!contains(hull, production.target), 'the target is outside every forbidden hull');
+    }
+    for (const hull of scene.allowed) {
+      assert.ok(contains(hull, production.target), 'the target is inside every allowed hull');
+    }
+  }
+});
+
+test('the escape beats every edge normal and nearest-exit direction', () => {
+  // The BRAIN's stress-audit counterexample, preserved verbatim. Both
+  // quadrilaterals contain the origin. A candidate list of nearest-exit
+  // directions plus edge normals — the previous implementation — answers
+  // 92.43px here, while a minimax compromise direction BETWEEN the two hulls
+  // gets out in 40.17px: 2.3012x shorter. The optimum for a union of convex
+  // hulls simply is not spanned by the individual hulls' normals, which is why
+  // the helper computes the nearest valid point on the exposed boundary
+  // instead of sampling directions.
+  const F1 = [
+    { x: -29.045878924563322, y: -114.75461551837921 },
+    { x: 82.43126664711511, y: 60.16785006713818 },
+    { x: 24.58717318823913, y: 97.03157940797806 },
+    { x: -86.8899723834393, y: -77.89088617753933 },
+  ];
+  const F2 = [
+    { x: 102.28857427600677, y: -57.183630216717376 },
+    { x: 123.78578655365956, y: 12.508139656843014 },
+    { x: -84.11584030602035, y: 76.63774080745841 },
+    { x: -105.61305258367314, y: 6.945970933898025 },
+  ];
+  const escape = shortestValidEscape({ x: 0, y: 0 }, [F1, F2]);
+  assert.ok(escape, 'an escape exists');
+  // The old candidate-sampling answer was 92.43; the true optimum is 40.17.
+  // Allowing the clearance margin on top, anything near 92 is the old defect.
+  assert.ok(
+    escape.distance < 42,
+    `the escape takes the compromise direction, not a hull normal (${escape.distance.toFixed(2)})`,
+  );
+  assert.ok(!contains(F1, escape.target), 'the target is outside the first hull');
+  assert.ok(!contains(F2, escape.target), 'and outside the second');
+});
+
+test('the escape matches a dense oracle across seeded rotated-hull scenes', () => {
+  // One favourable scene proves nothing about a general claim, so this sweeps
+  // seeded rotated rectangle pairs and compares every answer against an
+  // independent dense angular reference. The oracle is written separately here
+  // — it binary-searches the smallest travel that lands outside every forbidden
+  // hull — so the production formula is never its own judge.
+  const mulberry = (seed) => {
+    let a = seed >>> 0;
+    return () => {
+      a += 0x6d2b79f5;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+  const rotatedRect = (rnd) => {
+    const cx = (rnd() - 0.5) * 160;
+    const cy = (rnd() - 0.5) * 160;
+    const w = 60 + rnd() * 120;
+    const h = 60 + rnd() * 120;
+    const angle = rnd() * Math.PI * 2;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]
+      .map(([x, y]) => ({ x: cx + (x * cos) - (y * sin), y: cy + (x * sin) + (y * cos) }));
+  };
+  const oracleDistance = (point, forbidden) => {
+    let best = Infinity;
+    const steps = 2880;
+    const clear = (t, u) => {
+      const q = { x: point.x + (u.x * t), y: point.y + (u.y * t) };
+      return !forbidden.some((hull) => contains(hull, q));
+    };
+    for (let i = 0; i < steps; i += 1) {
+      const angle = (2 * Math.PI * i) / steps;
+      const u = { x: Math.cos(angle), y: Math.sin(angle) };
+      let hi = 1;
+      while (hi < 2000 && !clear(hi, u)) hi *= 2;
+      if (hi >= 2000) continue;
+      let lo = 0;
+      for (let k = 0; k < 60; k += 1) {
+        const mid = (lo + hi) / 2;
+        if (clear(mid, u)) hi = mid; else lo = mid;
+      }
+      if (hi < best) best = hi;
+    }
+    return best;
+  };
+
+  const rnd = mulberry(20260803);
+  let scenes = 0;
+  let worstRatio = 0;
+  for (let n = 0; n < 120; n += 1) {
+    const F1 = rotatedRect(rnd);
+    const F2 = rotatedRect(rnd);
+    const point = { x: (rnd() - 0.5) * 60, y: (rnd() - 0.5) * 60 };
+    const forbidden = [F1, F2];
+    if (!forbidden.some((hull) => contains(hull, point))) continue;
+    scenes += 1;
+    const production = shortestValidEscape(point, forbidden);
+    assert.ok(production, `an escape exists for seeded scene ${n}`);
+    const oracle = oracleDistance(point, forbidden);
+    assert.ok(Number.isFinite(oracle), `the oracle finds a route for scene ${n}`);
+    // Production carries the clearance the oracle does not; beyond that it must
+    // never be longer than the dense reference.
+    const ratio = production.distance / (oracle + ESCAPE_CLEARANCE);
+    if (ratio > worstRatio) worstRatio = ratio;
+    assert.ok(
+      ratio <= 1 + 1e-6,
+      `scene ${n}: production ${production.distance.toFixed(3)} vs oracle ${oracle.toFixed(3)}`,
+    );
+  }
+  assert.ok(scenes >= 60, `enough seeded scenes were trespassing (${scenes})`);
+  assert.ok(worstRatio <= 1 + 1e-6, `worst ratio across ${scenes} scenes is ${worstRatio.toFixed(6)}`);
+});
+
+test('the coordinated escape is null when the point is already outside every hull', () => {
+  const A = rect(0, 0, 100, 100);
+  assert.equal(shortestValidEscape({ x: 300, y: 300 }, [A]), null);
+  assert.equal(shortestValidEscape({ x: 300, y: 300 }, []), null);
+  assert.equal(shortestValidEscape({ x: 300, y: 300 }, [A], [A]), null);
+});
+
+// ===========================================================================
+// The anchored (dragged) ellipse. When a member is dragged away, the set must
+// reach toward it without extending the opposite side — a symmetric ellipse
+// would sweep the far side outward over whatever sits there. While anchored
+// the ellipse is sized per side and shifted toward the outlier; settled, it is
+// the symmetric form (the tests above), because a shifted centre following the
+// members' own drift would sweep free members.
+// ===========================================================================
+
+/** The exact world-space bounding box of a rotated ellipse. The x half-extent
+ * is sqrt(a^2 cos^2(theta) + b^2 sin^2(theta)) and the y half-extent is
+ * sqrt(a^2 sin^2(theta) + b^2 cos^2(theta)); four axis endpoints alone would
+ * underestimate it. */
+function ellipseSides(ellipse) {
+  const cos = Math.cos(ellipse.angle);
+  const sin = Math.sin(ellipse.angle);
+  const hx = Math.sqrt((ellipse.a ** 2) * (cos * cos) + (ellipse.b ** 2) * (sin * sin));
+  const hy = Math.sqrt((ellipse.a ** 2) * (sin * sin) + (ellipse.b ** 2) * (cos * cos));
+  return {
+    minX: ellipse.x - hx, maxX: ellipse.x + hx,
+    minY: ellipse.y - hy, maxY: ellipse.y + hy,
+  };
+}
+
+test('the anchored ellipse reaches the dragged member without extending the opposite side', () => {
+  // A compact set with one member dragged 240px right. The anchored ellipse
+  // must cover the dragged member (the near side reaches it) while the far
+  // side stays at the stationary members' extent — it must not grow backward
+  // by the drag distance the way a symmetric ellipse does.
+  const members = [
+    tile('dragged', 300, 0),
+    tile('a', 0, -40), tile('b', 0, 0), tile('c', 0, 40),
+  ];
+  const anchored = ellipseSides(enclosingEllipse(members, 40, { anchored: true }));
+  const symmetric = ellipseSides(enclosingEllipse(members, 40));
+
+  assert.ok(anchored.maxX > 300, `the near side reaches the dragged member (maxX ${anchored.maxX.toFixed(0)})`);
+  const dragSweep = anchored.minX - symmetric.minX;
+  // The symmetric form sweeps the far side roughly as far left as the drag
+  // reaches right; the anchored form keeps the far side at the stationary
+  // members' extent, far short of that.
+  assert.ok(
+    dragSweep > 60,
+    `the anchored far side sits ${dragSweep.toFixed(0)}px short of the symmetric sweep`,
+  );
+});
+
+test('the anchored ellipse still contains every member with its padding', () => {
+  // What the ellipse itself guarantees: every member's centre, and its
+  // tile-plus-padding extent along each local axis, sit inside the anchored
+  // ellipse. (The ellipse's own equation cannot contain the diagonal padded
+  // corners — no ellipse centred this way can — so the full-corner claim is
+  // tested against the floored drawn outline in the test below.) Several
+  // seeded layouts rotate the outlier to different directions, so the rule is
+  // not proven by one orientation.
+  const layouts = [
+    [tile('dragged', 320, 180), tile('a', -50, -40), tile('b', 20, 30), tile('c', -20, 60)],
+    [tile('dragged', -320, -180), tile('a', -50, -40), tile('b', 20, 30), tile('c', -20, 60)],
+    [tile('dragged', 0, 320), tile('a', -60, -20), tile('b', 40, -30), tile('c', -30, 50)],
+    [tile('dragged', 260, -140), tile('a', -70, 10), tile('b', 10, -50), tile('c', -40, 40)],
+  ];
+  for (const members of layouts) {
+    const ellipse = enclosingEllipse(members, 40, { anchored: true });
+    const cos = Math.cos(-ellipse.angle);
+    const sin = Math.sin(-ellipse.angle);
+    for (const member of members) {
+      const dx = member.x - ellipse.x;
+      const dy = member.y - ellipse.y;
+      const centreUnits = Math.hypot(
+        ((dx * cos) - (dy * sin)) / ellipse.a,
+        ((dx * sin) + (dy * cos)) / ellipse.b,
+      );
+      assert.ok(centreUnits <= 1 + 1e-6, `${member.id} centre at ${centreUnits.toFixed(3)} units, outside its own set while dragged`);
+      // The tile-plus-padding extent along each local axis.
+      const localX = (dx * cos) - (dy * sin);
+      const localY = (dx * sin) + (dy * cos);
+      const half = Math.hypot(member.width ?? 72, member.height ?? 72) / 2;
+      assert.ok(Math.abs(localX) + half + 40 <= ellipse.a + 1e-6, `${member.id} padded X extent exceeds the anchored ellipse`);
+      assert.ok(Math.abs(localY) + half + 40 <= ellipse.b + 1e-6, `${member.id} padded Y extent exceeds the anchored ellipse`);
+    }
+  }
+});
+
+test('the floored drawn outline keeps member tiles inside and bounds padding loss while anchored', () => {
+  // The containment claim the assignment makes is about the visible outline:
+  // members, full tile corners plus padding, stay inside it during a drag.
+  // The drawn outline is the floored hull (ring nodes unioned with the member
+  // floor), and the floor is what carries the diagonal corners — the ellipse
+  // alone cannot. Build the real pipeline for the dragged layouts and check
+  // every tile corner and padded corner against the floored target with the
+  // boundary-inclusive convex margin.
+  //
+  // The tile corners must be strictly inside: a member's icon must never poke
+  // out of its set. The padded corners sit at the outline's extreme, where
+  // the drawn polygon's own resolution (the ring nodes spaced by the 60px
+  // link distance, plus the resample chords) cuts up to ~8px into the 40px
+  // buffer — a measured rendering bound, reported here rather than renamed.
+  const RING_RESOLUTION_CUT = 12;
+  const layouts = [
+    [tile('dragged', 320, 180), tile('a', -50, -40), tile('b', 20, 30), tile('c', -20, 60)],
+    [tile('dragged', -320, -180), tile('a', -50, -40), tile('b', 20, 30), tile('c', -20, 60)],
+    [tile('dragged', 0, 320), tile('a', -60, -20), tile('b', 40, -30), tile('c', -30, 50)],
+    [tile('dragged', 260, -140), tile('a', -70, 10), tile('b', 10, -50), tile('c', -40, 40)],
+  ];
+  for (const members of layouts) {
+    const ring = reconcileRing({ setId: 's1', members, existing: [], padding: 40, linkDistance: 60 });
+    const floor = memberFloorHull(members, 40);
+    const target = floorOutline(resampleHull(ringHull(ring.nodes)), floor);
+    assert.ok(target && target.length >= 3, 'a floored target exists');
+    for (const member of members) {
+      const half = (member.width ?? 72) / 2;
+      const tileCorners = [
+        { x: member.x - half, y: member.y - half }, { x: member.x + half, y: member.y - half },
+        { x: member.x + half, y: member.y + half }, { x: member.x - half, y: member.y + half },
+      ];
+      const paddedCorners = tileCorners.map((c) => ({
+        x: c.x + Math.sign(c.x - member.x) * 40,
+        y: c.y + Math.sign(c.y - member.y) * 40,
+      }));
+      for (const corner of tileCorners) {
+        const margin = convexMargin(target, corner);
+        assert.ok(margin >= -0.5, `${member.id} tile corner (${corner.x.toFixed(0)},${corner.y.toFixed(0)}) is ${(-margin).toFixed(1)}px outside the floored outline`);
+      }
+      for (const corner of paddedCorners) {
+        const margin = convexMargin(target, corner);
+        assert.ok(
+          margin >= -RING_RESOLUTION_CUT,
+          `${member.id} padded corner (${corner.x.toFixed(0)},${corner.y.toFixed(0)}) is ${(-margin).toFixed(1)}px outside the floored outline, beyond the drawn polygon's resolution cut`,
+        );
+      }
+    }
+  }
+});
+
+/** Signed distance from a point to a convex polygon's boundary: positive
+ * inside, zero on the boundary, negative outside (boundary-inclusive, exact
+ * for convex polygons). */
+function convexMargin(poly, point) {
+  let area = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i, i += 1) {
+    area += (poly[j].x * poly[i].y) - (poly[i].x * poly[j].y);
+  }
+  const sign = area < 0 ? 1 : -1;
+  let minCross = Infinity;
+  for (let i = 0; i < poly.length; i += 1) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const len = Math.hypot(ex, ey);
+    if (len < 1e-12) continue;
+    minCross = Math.min(minCross, sign * ((point.x - a.x) * ey - (point.y - a.y) * ex) / len);
+  }
+  if (minCross >= 0) return minCross;
+  let nearest = Infinity;
+  for (let i = 0; i < poly.length; i += 1) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lengthSquared = (dx * dx) + (dy * dy);
+    if (lengthSquared < 1e-12) continue;
+    let t = (((point.x - a.x) * dx) + ((point.y - a.y) * dy)) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+    nearest = Math.min(nearest, Math.hypot(
+      point.x - (a.x + dx * t),
+      point.y - (a.y + dy * t),
+    ));
+  }
+  return -nearest;
+}
+
+test('a balanced set does not shift under the anchor flag', () => {
+  // When no side demands more room, the centre shift is zero — dragging must
+  // not tilt or translate a set that is not one-sided. The anchored semi-axes
+  // may still carry the explicit render-resolution allowance.
+  const members = [
+    tile('a', -60, -40), tile('b', 60, -40),
+    tile('c', -60, 40), tile('d', 60, 40),
+  ];
+  const settled = enclosingEllipse(members, 40);
+  const anchored = enclosingEllipse(members, 40, { anchored: true });
+  assert.ok(Math.abs(anchored.x - settled.x) < 1e-9, 'the centre does not move for a balanced set');
+  assert.ok(Math.abs(anchored.y - settled.y) < 1e-9, 'in either axis');
+  assert.ok(anchored.a >= settled.a && anchored.a - settled.a < 20, 'the long axis keeps its size plus the render margin');
+  assert.ok(anchored.b >= settled.b && anchored.b - settled.b < 20, 'the short axis keeps its size plus the render margin');
 });
