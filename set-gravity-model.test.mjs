@@ -7,7 +7,9 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { centreOfMass, forceSetGravity, forceSetExclusion } from './public/set-gravity-model.js';
+import {
+  centreOfMass, forceSetGravity, forceSetExclusion, forceSetSeparation,
+} from './public/set-gravity-model.js';
 
 function node(id, x, y) {
   return { id, x, y, vx: 0, vy: 0 };
@@ -271,4 +273,55 @@ test('a foreigner deep inside a large set is still pushed out', () => {
     Math.hypot(middle.vx ?? 0, middle.vy ?? 0) > 0,
     'asking the ring gets it moving',
   );
+});
+
+
+test('the rings of unrelated sets are pushed apart, but a shared set is not', () => {
+  // Two sets sharing no members settled with their outlines crossing and the
+  // lens between them empty. Nothing acted between two sets: ring nodes carry
+  // zero charge, and collision only separates node from node at 60px, which two
+  // rings satisfy while the curves drawn through them still overlap.
+  const ringNode = (id, setId, x, y) => ({ id, setId, ring: true, ringIndex: 0, x, y, vx: 0, vy: 0 });
+
+  // Two ring nodes of different sets, well inside the 90px clearance.
+  const a = ringNode('A:ring:0', 'A', 0, 0);
+  const b = ringNode('B:ring:0', 'B', 40, 0);
+  const memberA = { id: 'ma', x: -100, y: 0, vx: 0, vy: 0 };
+  const memberB = { id: 'mb', x: 140, y: 0, vx: 0, vy: 0 };
+
+  const apart = forceSetSeparation({
+    setsOf: (id) => (id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []),
+  });
+  apart.initialize([a, b, memberA, memberB]);
+  apart(1);
+  assert.ok(a.vx < 0, 'the left ring node is pushed left');
+  assert.ok(b.vx > 0, 'and the right one right');
+
+  // The same geometry, but the two sets share a member. That overlap is the
+  // Venn and has to survive: the shared item is pulled towards both centres and
+  // must sit in the region belonging to both.
+  const c = ringNode('A:ring:0', 'A', 0, 0);
+  const d = ringNode('B:ring:0', 'B', 40, 0);
+  const shared = { id: 'sh', x: 20, y: 0, vx: 0, vy: 0 };
+
+  const related = forceSetSeparation({ setsOf: () => ['A', 'B'] });
+  related.initialize([c, d, shared]);
+  related(1);
+  assert.equal(c.vx ?? 0, 0, 'sets sharing a member are left alone');
+  assert.equal(d.vx ?? 0, 0, 'on both sides');
+});
+
+test('separation reaches only as far as its clearance', () => {
+  // A settled pair of distant sets must pay nothing, or every scene with more
+  // than one set would be permanently agitated.
+  const far = (id, setId, x) => ({ id, setId, ring: true, ringIndex: 0, x, y: 0, vx: 0, vy: 0 });
+  const a = far('A:ring:0', 'A', 0);
+  const b = far('B:ring:0', 'B', 400);
+  const force = forceSetSeparation({
+    setsOf: (id) => (id === 'ma' ? ['A'] : ['B']),
+  });
+  force.initialize([a, b, { id: 'ma', x: -50, y: 0 }, { id: 'mb', x: 450, y: 0 }]);
+  force(1);
+  assert.equal(a.vx ?? 0, 0, 'nothing is pushed at 400px');
+  assert.equal(b.vx ?? 0, 0, 'in either direction');
 });

@@ -232,6 +232,120 @@ export function forceSetExclusion({
   return force;
 }
 
+/** Keeps the outlines of unrelated sets from crossing each other.
+ *
+ * Two sets sharing no members settled with their outlines crossing and the lens
+ * between them holding no icons at all — a boundary drawn through empty space,
+ * saying nothing true about either set.
+ *
+ * Nothing existed to prevent it. Ring nodes are given zero charge, so they do
+ * not repel; collision separates node from node at 60px, which two rings can
+ * satisfy while the curves drawn through them still overlap. No force acted
+ * between two sets at all.
+ *
+ * Ring charge was the obvious lever and is the wrong one. It is global: a
+ * charged ring node pushes on its own members and its own neighbours as well as
+ * on other sets, which is why it was set to zero to begin with. Measured, it
+ * also does not behave monotonically — -20 and -120 separate the rings where -60
+ * still crosses — so any value that worked would be working by luck.
+ *
+ * This acts only between ring nodes belonging to different sets, and only
+ * within a clearance, so a settled pair of distant sets pays nothing.
+ *
+ * Sets that share a member are exempt, and that exemption is the point rather
+ * than a special case: two sets with an item in common are *supposed* to
+ * overlap, because the shared item is pulled towards both centres and has to sit
+ * in the region belonging to both. Pushing those apart would break the Venn the
+ * gravity force builds. Verified: with the exemption, a shared-member scene
+ * still overlaps and its lens contains exactly the shared item. */
+export function forceSetSeparation({
+  setsOf,
+  // How far apart the rings of unrelated sets are held. Wider than the ring
+  // link distance of 60, so the gap reads as deliberate rather than as two
+  // boundaries resting against each other.
+  clearance = 90,
+  strength = 0.5,
+} = {}) {
+  let nodes = [];
+
+  function force(alpha) {
+    const ring = nodes.filter((node) => node.ring);
+    if (ring.length < 2) return;
+
+    // Which sets share at least one member, resolved once per tick. Membership
+    // is read through setsOf rather than stored, so inheritance through folders
+    // is respected the same way the other set forces respect it.
+    const membersBySet = new Map();
+    for (const node of nodes) {
+      if (node.ring) continue;
+      for (const setId of setsOf(node.id) ?? []) {
+        if (!membersBySet.has(setId)) membersBySet.set(setId, new Set());
+        membersBySet.get(setId).add(node.id);
+      }
+    }
+    const related = new Set();
+    const setIds = [...membersBySet.keys()];
+    for (let i = 0; i < setIds.length; i += 1) {
+      for (let j = i + 1; j < setIds.length; j += 1) {
+        const a = membersBySet.get(setIds[i]);
+        const b = membersBySet.get(setIds[j]);
+        for (const id of a) {
+          if (!b.has(id)) continue;
+          related.add(`${setIds[i]} ${setIds[j]}`);
+          related.add(`${setIds[j]} ${setIds[i]}`);
+          break;
+        }
+      }
+    }
+
+    // Bucketed on a grid of the clearance, so each node only considers the nine
+    // cells it could possibly reach into. The pairwise version was correct and
+    // unshippable: 688 ring nodes is 236k pairs, measured at 7.3ms per tick --
+    // 46% of a frame, against 0.2% for the whole of the set drawing.
+    const cells = new Map();
+    const key = (cx, cy) => `${cx},${cy}`;
+    for (const node of ring) {
+      const k = key(Math.floor(node.x / clearance), Math.floor(node.y / clearance));
+      if (!cells.has(k)) cells.set(k, []);
+      cells.get(k).push(node);
+    }
+
+    for (const a of ring) {
+      const ax = Math.floor(a.x / clearance);
+      const ay = Math.floor(a.y / clearance);
+      for (let ox = -1; ox <= 1; ox += 1) {
+       for (let oy = -1; oy <= 1; oy += 1) {
+        for (const b of cells.get(key(ax + ox, ay + oy)) ?? []) {
+        // Each unordered pair once. Both nodes are visited and each finds the
+        // other, so without this every pair would be pushed twice.
+        if (!(a.id < b.id)) continue;
+        if (a.setId === b.setId) continue;
+        if (related.has(`${a.setId} ${b.setId}`)) continue;
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance > clearance || distance < 1e-6) continue;
+
+        // Eases off as the gap closes on the clearance, so rings that are only
+        // just near each other are nudged rather than shoved.
+        const push = ((clearance - distance) / clearance) * strength * alpha * clearance;
+        const ux = dx / distance;
+        const uy = dy / distance;
+        a.vx = (a.vx ?? 0) - (ux * push);
+        a.vy = (a.vy ?? 0) - (uy * push);
+        b.vx = (b.vx ?? 0) + (ux * push);
+        b.vy = (b.vy ?? 0) + (uy * push);
+        }
+       }
+      }
+    }
+  }
+
+  force.initialize = (value) => { nodes = value ?? []; };
+  return force;
+}
+
 /** Every set that has at least one node on screen. */
 function setIdsInPlay(nodes, setsOf) {
   const ids = new Set();

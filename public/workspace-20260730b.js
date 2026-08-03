@@ -62,7 +62,7 @@ import {
   forceRingShape,
   ejectionTarget,
 } from './set-ring-model.js';
-import { forceSetGravity, forceSetExclusion } from './set-gravity-model.js';
+import { forceSetGravity, forceSetExclusion, forceSetSeparation } from './set-gravity-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -1190,6 +1190,14 @@ function createGraphController() {
       .force('setGravity', forceSetGravity({
         setsOf: (nodeId) => setIdsContaining(nodeId),
         isHeld: (nodeId) => nodes.get(nodeId)?.fx != null,
+      }))
+      // Keeps unrelated sets from drawing through each other. Nothing else
+      // acts between two sets: ring nodes carry zero charge, and collision only
+      // separates node from node at 60px, which two rings can satisfy while the
+      // curves drawn through them still cross. Sets sharing a member are exempt,
+      // so the Venn that gravity builds is left alone.
+      .force('setSeparation', forceSetSeparation({
+        setsOf: (nodeId) => setIdsContaining(nodeId),
       }))
       // And pushes non-members back out of a set they have wandered into. The
       // outline cannot do this alone: it can only exclude what lies outside the
