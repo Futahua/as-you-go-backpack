@@ -1129,6 +1129,10 @@ function createGraphController() {
       .force('setExclusion', forceSetExclusion({
         setsOf: (nodeId) => setIdsContaining(nodeId),
         membersOf: membersOnScreen,
+        // The drawn ring, so the force and the outline agree on who is inside.
+        // Proximity to a member is a proxy for that and disagrees with it in
+        // open space within the boundary, which is where foreign items leaked.
+        ringOf: (setId) => setRings.get(setId)?.nodes ?? null,
         isHeld: (nodeId) => nodes.get(nodeId)?.fx != null,
       }))
       .alphaDecay(0.028)

@@ -232,3 +232,43 @@ test('an item belonging to the set is not treated as a trespasser', () => {
   const middle = members.find((m) => m.id === 'c');
   assert.equal(middle.vx ?? 0, 0, 'a member in the middle of its own set stays');
 });
+
+test('a foreigner deep inside a large set is still pushed out', () => {
+  // Proximity to the nearest member is a proxy for "inside", and it fails
+  // exactly where a set is bigger than the clearance: eight members on a 320px
+  // radius leave an interior far wider than 150px, so an item parked in the
+  // middle is near nothing and the proxy says it is fine. Asking the ring
+  // whether the point is enclosed is the question that actually matters.
+  const members = [];
+  for (let i = 0; i < 8; i += 1) {
+    const angle = (i * Math.PI) / 4;
+    members.push({ id: `m${i}`, x: Math.cos(angle) * 320, y: Math.sin(angle) * 320 });
+  }
+  // A ring standing in for the drawn outline, comfortably outside the members.
+  const ring = [];
+  for (let i = 0; i < 40; i += 1) {
+    const angle = (2 * Math.PI * i) / 40;
+    ring.push({ ringIndex: i, x: Math.cos(angle) * 400, y: Math.sin(angle) * 400 });
+  }
+  const middle = { id: 'x', x: 0, y: 0 };
+
+  const withoutRing = forceSetExclusion({
+    setsOf: (id) => (id === 'x' ? [] : ['s1']),
+    membersOf: () => members,
+  });
+  withoutRing.initialize([...members, middle]);
+  withoutRing(1);
+  assert.equal(middle.vx ?? 0, 0, 'the proxy alone leaves it sitting there');
+
+  const withRing = forceSetExclusion({
+    setsOf: (id) => (id === 'x' ? [] : ['s1']),
+    membersOf: () => members,
+    ringOf: () => ring,
+  });
+  withRing.initialize([...members, middle]);
+  withRing(1);
+  assert.ok(
+    Math.hypot(middle.vx ?? 0, middle.vy ?? 0) > 0,
+    'asking the ring gets it moving',
+  );
+});

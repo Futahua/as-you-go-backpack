@@ -496,3 +496,42 @@ test('the cap tames several items dragged through a set at once', () => {
   // Three ticks per step, so the ceiling is three times the per-tick cap.
   assert.ok(peak < 30, `the ring still lurched ${peak.toFixed(0)}px in one step`);
 });
+
+test('the ellipse encloses every member, including outliers', () => {
+  // Covariance describes the *typical* spread — it is a standard deviation, so
+  // a member further out than average falls outside the ellipse it defines.
+  // Measured on a seven-member set after a folder was expanded, one member sat
+  // at 1.09 in ellipse units and another at 0.99: outside its own set,
+  // permanently, which is what was seen on screen.
+  const layouts = [
+    [tile('a', 0, 0), tile('b', 140, 0)],
+    [tile('a', -150, -150), tile('b', 150, 150)],
+    [tile('Letters', 0, -60), tile('Real', 150, 120), tile('Me', 30, 40),
+      tile('PDF', -90, 80), tile('Apps', -160, -90), tile('SKP', -110, -10), tile('Run', -20, -200)],
+  ];
+
+  for (const members of layouts) {
+    const ellipse = enclosingEllipse(members, 40);
+    const cos = Math.cos(-ellipse.angle);
+    const sin = Math.sin(-ellipse.angle);
+    for (const member of members) {
+      const dx = member.x - ellipse.x;
+      const dy = member.y - ellipse.y;
+      const units = Math.hypot(
+        ((dx * cos) - (dy * sin)) / ellipse.a,
+        ((dx * sin) + (dy * cos)) / ellipse.b,
+      );
+      assert.ok(units <= 1, `${member.id} sits at ${units.toFixed(2)}, outside its own set`);
+    }
+  }
+});
+
+test('growing to fit does not inflate the boundary all round', () => {
+  // Scaling both axes by the worst overshoot makes a set that only needed to
+  // reach further one way swell in every direction, and a boundary bigger than
+  // its contents is what lets bystanders sit inside it. Two members 140px apart
+  // came out 455x257 that way.
+  const ellipse = enclosingEllipse([tile('a', 0, 0), tile('b', 140, 0)], 40);
+  assert.ok(2 * ellipse.b < 200, `the short axis grew to ${(2 * ellipse.b).toFixed(0)}`);
+  assert.ok(2 * ellipse.a > 2 * ellipse.b, 'and the long axis is still the long one');
+});

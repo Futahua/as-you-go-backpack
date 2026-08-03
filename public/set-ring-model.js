@@ -103,19 +103,45 @@ export function enclosingEllipse(members, padding) {
   const delta = Math.sqrt(Math.max(0, ((sxx - syy) / 2) ** 2 + (sxy * sxy)));
   const angle = 0.5 * Math.atan2(2 * sxy, sxx - syy);
 
-  // Every member must fit, so the tile's own half-diagonal is added to each
-  // axis rather than assuming the centres are the extent.
   let half = 0;
   for (const member of members) {
     half = Math.max(half, Math.hypot(member.width ?? 0, member.height ?? 0) / 2);
   }
-  return {
-    x: cx,
-    y: cy,
-    a: Math.sqrt(mean + delta) + half + padding,
-    b: Math.sqrt(Math.max(0, mean - delta)) + half + padding,
-    angle,
-  };
+
+  // Covariance gives the *typical* spread, not the extent — it is a standard
+  // deviation, so members further out than average fall outside the ellipse it
+  // describes. Measured on a seven-member set after a folder was expanded, one
+  // member sat at 1.09 in ellipse units and another at 0.99: outside its own
+  // set's boundary, permanently, which is exactly what was seen on screen.
+  //
+  // So the axes are grown until every member is genuinely inside. The
+  // covariance still decides the orientation and the ratio between the axes —
+  // that is what makes the boundary stretch along the members rather than
+  // ballooning — and this only fixes the scale.
+  let a = Math.sqrt(mean + delta) + half + padding;
+  let b = Math.sqrt(Math.max(0, mean - delta)) + half + padding;
+  // Grown per axis, not uniformly. Scaling both by the worst overshoot makes a
+  // set that only needed to reach further along one axis inflate all round —
+  // two members 140px apart came out 455x257 — and a boundary bigger than its
+  // contents is what lets bystanders sit inside it.
+  const cos = Math.cos(-angle);
+  const sin = Math.sin(-angle);
+  let needA = 0;
+  let needB = 0;
+  for (const member of members) {
+    const dx = member.x - cx;
+    const dy = member.y - cy;
+    // Into the ellipse's own frame. The tile's half-diagonal is included so the
+    // whole icon is enclosed rather than its centre.
+    const localX = (dx * cos) - (dy * sin);
+    const localY = (dx * sin) + (dy * cos);
+    needA = Math.max(needA, Math.abs(localX) + half + padding);
+    needB = Math.max(needB, Math.abs(localY) + half + padding);
+  }
+  a = Math.max(a, needA);
+  b = Math.max(b, needB);
+
+  return { x: cx, y: cy, a, b, angle };
 }
 
 /** Ellipse perimeter, by Ramanujan's approximation.

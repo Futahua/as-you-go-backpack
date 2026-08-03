@@ -138,11 +138,20 @@ export function forceSetGravity({
 export function forceSetExclusion({
   setsOf,
   membersOf,
+  // The ring nodes of a set, so exclusion can ask the question that actually
+  // matters — is this item inside the outline? — rather than a proxy for it.
+  //
+  // Distance to the nearest member was the proxy, and it disagrees with the
+  // boundary exactly where leaks were reported: an item can be well clear of
+  // every member and still be inside the drawn ring, in the space between them
+  // or out towards the padding. Testing containment directly means the force
+  // and the outline cannot disagree about who is in.
+  ringOf = () => null,
   isHeld = () => false,
   strength = 0.35,
-  // How far outside the member cloud a foreign item is pushed. Comfortably
-  // more than a tile, so the gap reads as deliberate rather than as a near
-  // miss, and enough that the ring's own padding does not swallow it again.
+  // How far outside the member cloud a foreign item is pushed once it is out.
+  // Comfortably more than a tile, so the gap reads as deliberate rather than
+  // as a near miss.
   clearance = 150,
 } = {}) {
   let nodes = [];
@@ -158,14 +167,21 @@ export function forceSetExclusion({
         const members = (membersOf(setId) ?? []).filter((member) => member.id !== node.id);
         if (members.length === 0) continue;
 
-        // Distance to the nearest member, not to the centre: a set is a cloud
-        // rather than a disc, and what makes an item look like it belongs is
-        // sitting close to the things in it.
+        // Inside the outline, or close enough to the members to be about to be.
+        //
+        // Containment is the real question and the ring is the real answer, so
+        // it is asked first. The proximity test stays as a second condition
+        // rather than a replacement: it catches an item pressing on the
+        // boundary from outside, which the ring would otherwise have to be
+        // deformed by before anything pushed back.
+        const ring = ringOf(setId);
+        const enclosed = ring ? pointInRing(node, ring) : false;
+
         let nearest = Infinity;
         for (const member of members) {
           nearest = Math.min(nearest, Math.hypot(node.x - member.x, node.y - member.y));
         }
-        if (nearest >= clearance) continue;
+        if (!enclosed && nearest >= clearance) continue;
 
         // Away from the centre of mass, so the escape route leads out of the
         // cloud rather than deeper between two of its members.
@@ -181,7 +197,12 @@ export function forceSetExclusion({
           dy = 0;
           distance = 1;
         }
-        const push = ((clearance - nearest) / clearance) * strength * alpha;
+        // An item that is genuinely inside gets the full push regardless of how
+        // far it happens to be from a member — being inside is the whole of the
+        // problem, and scaling by proximity would barely move one sitting in
+        // open space within the outline, which is where the leaks were.
+        const urgency = enclosed ? 1 : (clearance - nearest) / clearance;
+        const push = urgency * strength * alpha;
         // Defaulted rather than assumed: d3 seeds vx/vy when it owns the nodes,
         // but a caller passing plain objects would otherwise turn the whole
         // layout into NaN on the first tick, silently and unrecoverably.
@@ -202,4 +223,25 @@ function setIdsInPlay(nodes, setsOf) {
     for (const setId of setsOf(node.id) ?? []) ids.add(setId);
   }
   return ids;
+}
+
+/** Ray casting against a set's ring, walked in ringIndex order.
+ *
+ * The node array is only a polygon when it is traversed around the loop; over
+ * a reordered list a ray cast reports points plainly inside as outside, and
+ * does it silently. */
+function pointInRing(point, ringNodes) {
+  const ring = [...ringNodes]
+    .filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y))
+    .sort((a, b) => a.ringIndex - b.ringIndex);
+  if (ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const a = ring[i];
+    const b = ring[j];
+    if ((a.y > point.y) === (b.y > point.y)) continue;
+    const crossX = a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x);
+    if (point.x < crossX) inside = !inside;
+  }
+  return inside;
 }
