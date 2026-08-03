@@ -1164,7 +1164,22 @@ function createGraphController() {
         .distance((link) => (link.source.ring ? RING_LINK_DISTANCE : 145))
         .strength((link) => (link.source.ring ? 0.9 : 0.14)))
       // Holds each ring around its own members rather than letting it drift.
-      .force('ring', forceRingShape({ membersOf: membersOnScreen }))
+      //
+      // The alpha floor inside it is gated on a drag being in progress. It
+      // refuses to cool, which is what keeps a ring with its member during a
+      // drag, but d3 cools everything else — so on a settled scene it was the
+      // only force still injecting velocity, driving icons through the ring
+      // nodes' collision and chasing them as they moved. Measured: two disjoint
+      // sets stretched without bound and their outlines crossed.
+      .force('ring', forceRingShape({
+        membersOf: membersOnScreen,
+        // Same test the other two set forces use for a held node, asked across
+        // the whole graph rather than about one id.
+        isDragging: () => {
+          for (const node of nodes.values()) if (node.fx != null) return true;
+          return false;
+        },
+      }))
       // Gathers a set's members towards each other. Without it they sprawl
       // wherever the graph's own layout puts them, and a boundary drawn round
       // a sprawl is mostly empty space with bystanders sitting in it — the ring

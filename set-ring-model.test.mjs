@@ -27,8 +27,10 @@ import {
 } from './public/set-ring-model.js';
 // The real forces, so containment is measured against the configuration the
 // app actually runs rather than an idealised one.
-import { forceSimulation, forceManyBody, forceCollide, forceLink } from './public/vendor/d3-force.js';
-import { forceSetExclusion } from './public/set-gravity-model.js';
+import {
+  forceSimulation, forceManyBody, forceCollide, forceLink, forceX, forceY,
+} from './public/vendor/d3-force.js';
+import { forceSetExclusion, forceSetGravity } from './public/set-gravity-model.js';
 
 function tile(id, x, y) {
   return { id, x, y, width: 72, height: 72 };
@@ -388,6 +390,67 @@ test('a vanished ring holds its last shape rather than blanking', () => {
   const last = resampleHull(ringHull([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 50, y: 80 }]));
   assert.deepEqual(easeOutline(last, null), last, 'the last good shape stands');
   assert.equal(easeOutline(null, null), null, 'and nothing is invented from nothing');
+});
+
+test('a settled scene stops moving instead of pumping itself apart', () => {
+  // forceRingShape floors its alpha so it never cools, which is what keeps a
+  // ring with a member being dragged. But d3 cools every other force, so on a
+  // settled scene it became the only one still injecting velocity — and ring
+  // nodes collide with icons at strength 0.9, so it drove them, they moved, the
+  // ring chased, and the loop pumped energy with nothing to damp it.
+  //
+  // Measured before the gate: a set whose members started 10px apart stretched
+  // to 7495px over 4000 ticks. The whole force stack is needed to show it, and
+  // removing any single force hid it, so this builds the real thing.
+  const members = {
+    A: [tile('a1', 400, 400), tile('a2', 470, 400), tile('a3', 435, 470),
+      tile('a4', 400, 330), tile('a5', 500, 340), tile('a6', 360, 430)],
+    B: [tile('b1', 700, 420), tile('b2', 760, 430)],
+  };
+  const setOf = new Map();
+  for (const [setId, list] of Object.entries(members)) {
+    for (const member of list) setOf.set(member.id, [setId]);
+  }
+  const all = [...members.A, ...members.B];
+  const membersOf = (setId) => members[setId] ?? [];
+
+  const rings = new Map(Object.keys(members).map((setId) => (
+    [setId, reconcileRing({ setId, members: membersOf(setId) })])));
+  const ringNodes = [...rings.values()].flatMap((ring) => ring.nodes);
+  const ringLinks = [...rings.values()].flatMap((ring) => ring.links);
+
+  const simulation = forceSimulation([...all, ...ringNodes]).alpha(1).stop()
+    .force('cx', forceX(600).strength(0.05))
+    .force('cy', forceY(400).strength(0.05))
+    .force('charge', forceManyBody().strength((n) => (n.ring ? 0 : -280)))
+    .force('collide', forceCollide()
+      .radius((n) => (n.ring ? 30 : Math.max(n.width, n.height) / 2 + 20)).strength(0.9))
+    .force('link', forceLink(ringLinks).id((n) => n.id)
+      .distance((l) => (l.source.ring ? 60 : 145))
+      .strength((l) => (l.source.ring ? 0.9 : 0.14)))
+    // Nothing is ever held here, so the gate must let this force cool.
+    .force('ring', forceRingShape({ membersOf, isDragging: () => false }))
+    .force('setGravity', forceSetGravity({ setsOf: (id) => setOf.get(id) ?? [] }))
+    .force('setExclusion', forceSetExclusion({
+      setsOf: (id) => setOf.get(id) ?? [],
+      membersOf,
+      ringOf: (setId) => rings.get(setId)?.nodes ?? null,
+    }));
+
+  const spreadOf = (list) => Math.max(...list.map((n) => n.y)) - Math.min(...list.map((n) => n.y));
+  for (let i = 0; i < 600; i += 1) simulation.tick();
+  const early = { A: spreadOf(members.A), B: spreadOf(members.B) };
+  for (let i = 0; i < 3400; i += 1) simulation.tick();
+  const late = { A: spreadOf(members.A), B: spreadOf(members.B) };
+
+  // The test that can fail: a cold scene must not keep growing. Ungated, B went
+  // from 427 at 600 ticks to 7495 at 4000.
+  for (const setId of ['A', 'B']) {
+    assert.ok(late[setId] < early[setId] + 50,
+      `set ${setId} grew from ${early[setId].toFixed(0)} to ${late[setId].toFixed(0)} while nothing was moving`);
+    assert.ok(Number.isFinite(late[setId]) && late[setId] < 1500,
+      `set ${setId} ended ${late[setId].toFixed(0)}px tall, which is a runaway`);
+  }
 });
 
 test('too few nodes yields no path rather than a degenerate one', () => {

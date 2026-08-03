@@ -547,10 +547,39 @@ export function forceRingShape({
   // small steps at reheat 0.12, which is what pointer-controller does), the
   // ring finished 205px behind its member and shrank from 183 wide to 120.
   minAlpha = 0.25,
+  // Whether the user is dragging anything right now.
+  //
+  // The floor above is what stops a ring lagging behind a member being pulled
+  // across the screen, and it does that by refusing to cool. But d3 cools
+  // everything else, so once a scene settles this force is the only one still
+  // injecting velocity — and ring nodes collide with icons at strength 0.9, so
+  // it drives the icons, they move, the ring chases them, and the loop pumps
+  // energy with nothing left to damp it.
+  //
+  // Measured on an asymmetric two-set scene, all forces at the app's constants:
+  // a set whose members started 10px apart stretched to 7495px over 4000 ticks,
+  // and both outlines crossed. Removing any single force stopped it, which is
+  // the signature of a feedback loop rather than one force being wrong; ring
+  // and collide together diverge (7495) where either alone is stable (100, 111).
+  //
+  // Tuning was tried first and rejected: neither the floor's value nor a speed
+  // cap behaves monotonically — minAlpha 0.10 settles at 216 while 0.05 gives
+  // 1795, and a cap of 6 or 16 holds where 8 diverges. A threshold that works by
+  // luck is not a fix.
+  //
+  // So the floor applies only while it is earning its keep. Nothing held means
+  // nothing to chase, and the force cools with the rest of the simulation.
+  //
+  // Defaulted to always-on, which is the old behaviour: a caller that cannot
+  // see the app's drag state must get the floor rather than silently lose it.
+  // Defaulting the other way makes the failure a ring that lags during drags —
+  // the exact fault the floor was added to fix, reintroduced quietly.
+  isDragging = () => true,
 } = {}) {
   let nodes = [];
 
   function force(alpha) {
+    const floor = isDragging() ? minAlpha : 0;
     const shapes = new Map();
     for (const node of nodes) {
       if (!node.ring) continue;
@@ -580,7 +609,7 @@ export function forceRingShape({
       // them is NOT established.
       const angle = (2 * Math.PI * (node.ringIndex ?? 0)) / Math.max(1, node.ringCount ?? 1);
       const target = ellipsePoint(shape, angle);
-      const pull = strength * Math.max(alpha, minAlpha);
+      const pull = strength * Math.max(alpha, floor);
       node.vx += (target.x - node.x) * pull;
       node.vy += (target.y - node.y) * pull;
     }
