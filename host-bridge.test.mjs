@@ -62,6 +62,74 @@ test('host bridge rejects when the host reports an error', async () => {
   await assert.rejects(promise, /disk full/);
 });
 
+test('host bridge reversibly wraps an unresolved shortcut so one bad target cannot block saving', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const state = {
+    schemaVersion: 1,
+    groups: [],
+    shortcuts: [
+      { id: 'valid', target: 'C:\\Apps\\valid.exe' },
+      { id: 'unresolved', target: 'relative.cmd' },
+    ],
+  };
+
+  const savePromise = host.saveWorkspace(JSON.stringify(state));
+  const saveRequest = mock.parent.messages[0].message;
+  const saved = JSON.parse(saveRequest.state);
+  assert.equal(saved.shortcuts[0].target, 'C:\\Apps\\valid.exe');
+  assert.equal(
+    saved.shortcuts[1].target,
+    'https://invalid.invalid/as-you-go/unresolved-shortcut',
+  );
+  assert.deepEqual(saved.shortcuts[1].__asYouGoUnresolvedTarget, {
+    version: 1,
+    target: 'relative.cmd',
+  });
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: saveRequest.requestId,
+    ok: true,
+  });
+  await savePromise;
+
+  const loadPromise = host.loadWorkspace();
+  const loadRequest = mock.parent.messages[1].message;
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: loadRequest.requestId,
+    ok: true,
+    state: JSON.stringify(saved),
+  });
+  assert.deepEqual(JSON.parse(await loadPromise), state);
+});
+
+test('host bridge never revives stale unresolved metadata after a target is repaired', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const state = {
+    schemaVersion: 1,
+    groups: [],
+    shortcuts: [{
+      id: 'repaired',
+      target: 'https://example.com',
+      __asYouGoUnresolvedTarget: { version: 1, target: 'old-relative.cmd' },
+    }],
+  };
+
+  const promise = host.saveWorkspace(JSON.stringify(state));
+  const sent = mock.parent.messages[0].message;
+  const saved = JSON.parse(sent.state);
+  assert.equal(saved.shortcuts[0].target, 'https://example.com');
+  assert.equal('__asYouGoUnresolvedTarget' in saved.shortcuts[0], false);
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: sent.requestId,
+    ok: true,
+  });
+  await promise;
+});
+
 test('host bridge unwraps the target+icon shape used by target picking', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);

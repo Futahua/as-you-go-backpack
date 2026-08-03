@@ -65,6 +65,7 @@ test('opening and confirming immediately applies nothing', async () => {
   // The state the picker reports back must be identical to what it captured,
   // so the command layer has nothing to apply.
   assert.deepEqual([...call.desired], [...call.before], 'no state changed');
+  assert.equal(h.calls.statuses.at(-1), '', 'the persistent mode instruction closes with Enter');
 });
 
 test('the picker sees membership inherited through a folder', () => {
@@ -166,6 +167,7 @@ test('Escape abandons the edit without committing', () => {
   h.mode.cancel();
   assert.equal(h.calls.shared.length, 0, 'nothing was applied');
   assert.equal(h.mode.isActive(), false);
+  assert.equal(h.calls.statuses.at(-1), '', 'the persistent mode instruction closes with Escape');
 });
 
 test('the subjects are captured at open, so clicking inside cannot change them', async () => {

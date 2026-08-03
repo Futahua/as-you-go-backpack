@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const graphCss = readFileSync(new URL('./public/styles/graph.css', import.meta.url), 'utf8');
 const dialogCss = readFileSync(new URL('./public/styles/dialogs.css', import.meta.url), 'utf8');
+const toolbarCss = readFileSync(new URL('./public/styles/toolbar.css', import.meta.url), 'utf8');
 
 test('graph node shells have a bounded width so long names wrap', () => {
   const shellRule = graphCss.match(/\.graph-node-shell\s*\{[^}]*\}/)?.[0] ?? '';
@@ -69,4 +70,14 @@ test('rows under a folder override take that override colour', () => {
     /\.prompt-batch-exclude \.prompt-prompt-title/.test(dialogCss),
     'descendants of an excluded folder must read red',
   );
+});
+
+test('workspace warnings are overlay toasts with a fade state', () => {
+  const statusRule = toolbarCss.match(/\.status\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/position:\s*fixed/.test(statusRule), 'warnings overlay the workspace instead of taking layout space');
+  assert.ok(/width:\s*max-content/.test(statusRule), 'the popup wraps its message rather than becoming a full-width bar');
+  assert.ok(/pointer-events:\s*none/.test(statusRule), 'a transient warning cannot block workspace controls');
+  assert.ok(/background:\s*rgb\([^)]*\/\s*50%\)/.test(statusRule), 'the popup surface is 50% transparent');
+  const fadingRule = toolbarCss.match(/\.status\.status-fading\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/opacity:\s*0/.test(fadingRule), 'the dismissal has a visible fade state');
 });

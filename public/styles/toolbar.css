@@ -76,36 +76,52 @@
 .breadcrumbs button:hover { background: #ece9e0; }
 .breadcrumbs span { color: #9b9589; }
 .status {
-  position: relative;
-  z-index: 5;
-  width: min(1120px, calc(100vw - 56px));
-  min-height: 18px;
-  margin: 6px auto 0;
-  padding: 3px 12px;
+  position: fixed;
+  top: 68px;
+  left: 50%;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
+  max-width: min(760px, calc(100vw - 32px));
+  margin: 0;
+  border: 1px solid rgb(223 176 166 / 50%);
+  border-radius: 12px;
+  background: rgb(255 246 243 / 50%);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 28px rgb(69 46 37 / 16%);
+  padding: 8px 13px;
   color: #8d3d31;
   font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  opacity: 1;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: status-toast-in 180ms ease-out;
 }
 .status:empty { display: none; }
-/* A copy confirmation is a success, but .status is otherwise an error line
- * (red and full width). The pill therefore shrink-wraps its text instead of
- * inheriting the 1120px bar, and gets its own green treatment. A shrink-wrapped
- * box cannot be centred by `margin: auto`, so it is centred with a translate
- * that does not depend on knowing its width. */
+.status.status-fading {
+  opacity: 0;
+  transform: translate(-50%, -6px);
+  transition: opacity 260ms ease, transform 260ms ease;
+}
+@keyframes status-toast-in {
+  from { opacity: 0; transform: translate(-50%, -6px); }
+  to { opacity: 1; transform: translateX(-50%); }
+}
+/* Copy confirmation uses the same overlay but keeps its success treatment. */
 .status.status-copied {
   display: flex;
-  left: 50%;
   align-items: center;
   gap: 7px;
-  width: max-content;
-  max-width: calc(100vw - 56px);
   border: 1px solid #b8d0be;
   border-radius: 999px;
-  background: #e8f2ea;
+  background: rgb(232 242 234 / 50%);
   padding: 5px 14px 5px 10px;
   color: #2f5c40;
   font-size: 13px;
   font-weight: 600;
-  transform: translateX(-50%);
 }
 .status.status-copied::before {
   flex: none;
@@ -118,4 +134,8 @@
   font-size: 10px;
   line-height: 15px;
   text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .status { animation-duration: 1ms; }
+  .status.status-fading { transition-duration: 1ms; }
 }

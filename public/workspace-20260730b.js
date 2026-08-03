@@ -68,6 +68,7 @@ import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
+import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
 import { resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
@@ -100,6 +101,7 @@ My request:
 [Describe what you want to experience.]`;
 
 const elements = getWorkspaceElements(document);
+const statusToast = createStatusToast({ element: elements.status });
 
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
@@ -123,11 +125,8 @@ let suppressBlankClick = false;
 let suppressGraphClick = false;
 let zoomTimer = null;
 
-function setStatus(text = '') {
-  elements.status.textContent = text;
-  // Any ordinary status drops the copy emphasis; confirmPickupCopy re-adds it
-  // immediately after its own call, so a stale confirmation cannot linger.
-  elements.status.classList.remove('status-copied');
+function setStatus(text = '', options) {
+  statusToast.show(text, options);
 }
 
 function escapeHtml(value) {
