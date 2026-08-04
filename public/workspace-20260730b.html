@@ -137,7 +137,7 @@
           </div>
           <div id="prompt-page-hotkeys" class="prompt-page hotkeys-page" hidden>
             <p id="hotkey-status" class="prompt-library-status" role="status" aria-live="polite"></p>
-            <section class="settings-preferences" aria-label="Visual opacity">
+            <section class="settings-preferences" aria-label="Visual preferences">
               <div class="settings-opacity-control">
                 <label id="edge-opacity-label" for="edge-opacity-slider">Connector opacity <output id="edge-opacity-value" for="edge-opacity-slider">50%</output></label>
                 <input id="edge-opacity-slider" type="range" min="0" max="1" step="0.05" value="0.5" />
@@ -149,6 +149,13 @@
               <div class="settings-opacity-control">
                 <label id="region-opacity-label" for="region-opacity-slider">Region fill opacity <output id="region-opacity-value" for="region-opacity-slider">100%</output></label>
                 <input id="region-opacity-slider" type="range" min="0" max="1" step="0.05" value="1" />
+              </div>
+              <div class="settings-opacity-control settings-theme-control">
+                <label for="theme-select">Theme</label>
+                <select id="theme-select" aria-label="Theme">
+                  <option value="light">Light paper</option>
+                  <option value="dark">Dark paper</option>
+                </select>
               </div>
             </section>
             <div id="hotkey-list" class="hotkey-list"></div>

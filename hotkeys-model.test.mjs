@@ -5,6 +5,7 @@ import {
   DEFAULT_EDGE_OPACITY,
   DEFAULT_OUTLINE_OPACITY,
   DEFAULT_REGION_OPACITY,
+  DEFAULT_THEME,
   HOTKEY_CATALOG,
   HOTKEY_SCOPE_PROMPTS,
   HOTKEY_SCOPE_WORKSPACE,
@@ -16,6 +17,7 @@ import {
   getEdgeOpacity,
   getOutlineOpacity,
   getRegionOpacity,
+  getTheme,
   findHotkeyConflict,
   normalizeHotkeyPreferences,
   normalizeEdgeOpacity,
@@ -28,6 +30,7 @@ import {
   setEdgeOpacity,
   setOutlineOpacity,
   setRegionOpacity,
+  setTheme,
 } from './public/app/hotkeys-model.js';
 
 test('the explicit catalog contains every current Backpack action exactly once', () => {
@@ -198,8 +201,20 @@ test('workspace state owns hotkeys under view.preferences and normalizes unknown
   });
 });
 
-test('normalizing view preferences removes an empty hotkeys container but keeps unrelated preferences', () => {
-  assert.deepEqual(normalizeViewPreferences({ hotkeys: { overrides: {} }, theme: 'paper' }), { theme: 'paper' });
+test('normalizing view preferences removes empty known containers and repairs malformed theme', () => {
+  assert.deepEqual(normalizeViewPreferences({ hotkeys: { overrides: {} }, theme: 'paper' }), {});
+});
+
+test('theme preference defaults to light, persists dark, removes light, and preserves unknown records', () => {
+  assert.equal(DEFAULT_THEME, 'light');
+  assert.equal(getTheme({}), 'light');
+  assert.equal(getTheme({ theme: 'invalid' }), 'light');
+  const dark = setTheme({ future: { keep: true } }, 'dark');
+  assert.deepEqual(dark, { future: { keep: true }, theme: 'dark' });
+  assert.equal(getTheme(dark), 'dark');
+  assert.deepEqual(setTheme(dark, 'light'), { future: { keep: true } });
+  assert.deepEqual(normalizeViewPreferences({ theme: 'dark', future: { keep: true } }), dark);
+  assert.deepEqual(normalizeViewPreferences({ theme: 'light', future: { keep: true } }), { future: { keep: true } });
 });
 
 test('edge opacity defaults safely and stores only a non-default view override', () => {

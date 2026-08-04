@@ -5,6 +5,9 @@ import { readFileSync } from 'node:fs';
 const graphCss = readFileSync(new URL('./public/styles/graph.css', import.meta.url), 'utf8');
 const dialogCss = readFileSync(new URL('./public/styles/dialogs.css', import.meta.url), 'utf8');
 const toolbarCss = readFileSync(new URL('./public/styles/toolbar.css', import.meta.url), 'utf8');
+const tokensCss = readFileSync(new URL('./public/styles/tokens.css', import.meta.url), 'utf8');
+const itemsCss = readFileSync(new URL('./public/styles/items.css', import.meta.url), 'utf8');
+const baseCss = readFileSync(new URL('./public/styles/base.css', import.meta.url), 'utf8');
 
 test('graph node shells have a bounded width so long names wrap', () => {
   const shellRule = graphCss.match(/\.graph-node-shell\s*\{[^}]*\}/)?.[0] ?? '';
@@ -54,7 +57,7 @@ test('folder exclude-all renders as a red box with a minus, not a green check', 
     /\.prompt-folder-checkbox\[data-batch-state="exclude"\]\s*\{[^}]*\}/,
   )?.[0] ?? '';
   assert.ok(/appearance:\s*none/.test(boxRule), 'the box must be drawn, not left as a native check');
-  assert.ok(/background:\s*#963d30/.test(boxRule), 'exclude must read red, distinct from the green accent');
+  assert.ok(/background:\s*var\(--danger\)/.test(boxRule), 'exclude must read red, distinct from the green accent');
   const minusRule = dialogCss.match(
     /\.prompt-folder-checkbox\[data-batch-state="exclude"\]::after\s*\{[^}]*\}/,
   )?.[0] ?? '';
@@ -98,17 +101,48 @@ test('set outlines and named-set glyphs share outline opacity, while selected re
   assert.ok(/calc\(24% \* var\(--graph-region-opacity,\s*1\)\)/.test(selectedRegion), 'selected fill remains 2x the base strength');
 });
 
-test('settings opacity controls share a three-column layout and wrap on narrow panels', () => {
+test('settings visual controls share a four-column layout and wrap on narrow panels', () => {
   const rule = dialogCss.match(/\.settings-preferences\s*\{[^}]*\}/)?.[0] ?? '';
-  assert.ok(/grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/.test(rule));
+  assert.ok(/grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/.test(rule));
   assert.ok(/@media\s*\(max-width:\s*560px\)/.test(dialogCss));
+});
+
+test('dark theme defines a warm palette and preserves the accent picking ladder', () => {
+  assert.match(tokensCss, /:root\[data-theme="dark"\]/);
+  assert.match(tokensCss, /--page-background:\s*#201e1a/);
+  const dark = tokensCss.slice(tokensCss.indexOf(':root[data-theme="dark"]'));
+  for (const token of ['--accent-wash-faint', '--accent-wash-partial', '--accent-fill-selected', '--accent-stroke-soft', '--accent-stroke-partial', '--accent-stroke-selected', '--item-accent-wash']) {
+    assert.match(dark, new RegExp(`${token}:`));
+  }
+  assert.notEqual(dark.match(/--accent-wash-faint:\s*[^;]+/)?.[0], dark.match(/--accent-fill-selected:\s*[^;]+/)?.[0]);
+});
+
+test('shortcut and folder artwork remains unfiltered and unrecoloured', () => {
+  const iconRule = itemsCss.match(/\.item-icon img\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(iconRule, 'the artwork rule must remain explicit');
+  assert.doesNotMatch(iconRule, /filter\s*:|opacity\s*:|mix-blend-mode\s*:/);
+  assert.doesNotMatch(itemsCss, /\.item-icon\s+img[^}]*\bfilter\s*:/);
+});
+
+test('workspace body uses a plain page surface without a square grid', () => {
+  const bodyRule = baseCss.match(/body\s*\{(?=[^}]*min-height:\s*100vh)[^}]*\}/)?.[0] ?? '';
+  assert.match(bodyRule, /background:\s*var\(--page-background\)/);
+  assert.doesNotMatch(bodyRule, /linear-gradient|background-size/);
+});
+
+test('floating surfaces use theme variables, including the breadcrumb handle', () => {
+  const breadcrumbRule = toolbarCss.match(/\.breadcrumbs\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(breadcrumbRule, /background:\s*var\(--paper\)/);
+  for (const source of [toolbarCss, dialogCss]) {
+    assert.doesNotMatch(source, /background:\s*#[0-9a-f]{3,8}\b/i, 'floating surfaces must not hide literal light backgrounds');
+  }
 });
 
 test('prompt modal separates navigation tabs from create actions', () => {
   const headerRule = dialogCss.match(/\.prompt-library-header\s*\{[^}]*\}/)?.[0] ?? '';
   assert.ok(/border-bottom:\s*1px solid/.test(headerRule), 'tabs get a dedicated header boundary');
   const tabsRule = dialogCss.match(/\.prompt-library-tabs\s*\{[^}]*\}/)?.[0] ?? '';
-  assert.ok(/background:\s*#f5f0df/.test(tabsRule), 'tabs have a navigation treatment');
+  assert.ok(/background:\s*var\(--surface-muted\)/.test(tabsRule), 'tabs have a navigation treatment');
   const actionRule = dialogCss.match(/\.prompt-library-add-actions\s*\{[^}]*\}/)?.[0] ?? '';
   assert.ok(/border-bottom:\s*1px solid/.test(actionRule), 'create actions get their own separation');
 });

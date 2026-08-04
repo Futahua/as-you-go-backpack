@@ -8,6 +8,11 @@ const square = [
   { x: 0, y: 0 }, { x: 240, y: 0 }, { x: 240, y: 240 }, { x: 0, y: 240 },
 ];
 
+const ellipse = (radiusX, radiusY, count = 96) => Array.from({ length: count }, (_, index) => {
+  const angle = -Math.PI / 2 + index * 2 * Math.PI / count;
+  return { x: radiusX * Math.cos(angle), y: radiusY * Math.sin(angle) };
+});
+
 test('untitled returns no decorative glyph border and named emits one compact path', () => {
   assert.deepEqual(layoutTitleGlyphs(square, '   ').placements, []);
   const named = layoutTitleGlyphs(square, 'As You Go');
@@ -25,6 +30,35 @@ test('named layout repeats complete titles, stays upright, and keeps bottom trav
   assert.ok(bottom.length >= 2);
   assert.deepEqual(bottom.slice(0, 3).map(({ char }) => char), ['A', 'B', 'C']);
   assert.equal(new Set(layout.placements.map(({ distance }) => distance)).size, layout.placements.length);
+});
+
+test('glyph spacing stays uniform across forward and reversed perimeter runs', () => {
+  for (const outline of [ellipse(150, 125), ellipse(350, 90), ellipse(90, 350)]) {
+    for (const title of ['A', 'AB', 'THINGS', 'LONGER TITLE']) {
+      const layout = layoutTitleGlyphs(outline, title);
+      const { placements } = layout;
+      const gaps = placements.slice(1).map((placement, index) => Math.hypot(
+        placement.x - placements[index].x,
+        placement.y - placements[index].y,
+      ));
+      const mean = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+      assert.ok(Math.max(...gaps) < mean * 1.2, `${title}: perimeter gap is discontinuous`);
+      assert.ok(placements.every((placement, index) => index === 0 || placement.distance > placements[index - 1].distance));
+
+      for (const half of ['top', 'bottom']) {
+        const halfPlacements = placements
+          .filter(({ y }) => half === 'top' ? y < 0 : y >= 0)
+          .sort((a, b) => a.x - b.x);
+        const halfGaps = halfPlacements.slice(1).map((placement, index) => Math.hypot(
+          placement.x - halfPlacements[index].x,
+          placement.y - halfPlacements[index].y,
+        ));
+        const halfMean = halfGaps.reduce((sum, gap) => sum + gap, 0) / halfGaps.length;
+        assert.ok(Math.max(...halfGaps) < halfMean * 1.2, `${title}: ${half} spacing is discontinuous`);
+      }
+      assert.ok(layout.completeRepeats >= 1);
+    }
+  }
 });
 
 test('top anchoring changes smoothly when a non-anchor vertex moves slightly', () => {

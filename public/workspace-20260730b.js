@@ -76,7 +76,7 @@ import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
 import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
-import { getEdgeOpacity, getOutlineOpacity, getRegionOpacity } from './app/hotkeys-model.js';
+import { getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme } from './app/hotkeys-model.js';
 import { resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
@@ -551,13 +551,19 @@ function createGraphController() {
       const source = nodes.get(edge.sourceId);
       const target = nodes.get(edge.targetId);
       if (!source || !target || !edge.path) return;
-      edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+      const d = edgePath(source.x, source.y, target.x, target.y);
+      if (edge.lastPathD === d) return;
+      edge.lastPathD = d;
+      edge.path.setAttribute('d', d);
     });
     originEdges.forEach((edge) => {
       const source = nodes.get(edge.sourceId);
       const target = nodes.get(edge.targetId);
       if (!source || !target || !edge.path) return;
-      edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+      const d = edgePath(source.x, source.y, target.x, target.y);
+      if (edge.lastPathD === d) return;
+      edge.lastPathD = d;
+      edge.path.setAttribute('d', d);
     });
   }
 
@@ -866,7 +872,11 @@ function createGraphController() {
       const floor = ring ? memberFloorHull(membersOnScreen(setId), 40) : null;
       const target = ring ? floorOutline(resampleHull(ringHull(ring.nodes)), floor) : null;
       shape.outline = easeOutline(shape.outline, target);
-      shape.path.setAttribute('d', shape.outline ? ringPath(shape.outline, { hulled: true }) : '');
+      const outlinePath = shape.outline ? ringPath(shape.outline, { hulled: true }) : '';
+      if (shape.lastPathD !== outlinePath) {
+        shape.lastPathD = outlinePath;
+        shape.path.setAttribute('d', outlinePath);
+      }
       const title = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId)?.title?.trim() ?? '';
       const named = title.length > 0 && Array.isArray(shape.outline);
       shape.path.classList.toggle('set-named', named);
@@ -1288,9 +1298,10 @@ function createGraphController() {
       if (!edge) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'graph-edge');
-        path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+        const d = edgePath(source.x, source.y, target.x, target.y);
+        path.setAttribute('d', d);
         edgeLayer.append(path);
-        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
+        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path, lastPathD: d };
         edges.set(key, edge);
       }
     }
@@ -1323,9 +1334,10 @@ function createGraphController() {
       if (!edge) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'graph-edge bin-origin-edge');
-        path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+        const d = edgePath(source.x, source.y, target.x, target.y);
+        path.setAttribute('d', d);
         edgeLayer.append(path);
-        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
+        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path, lastPathD: d };
         originEdges.set(key, edge);
       }
     }
@@ -1594,7 +1606,12 @@ function renderGraph(initialFit = false) {
   graph.updateGraphView(initialFit);
 }
 
+function applyTheme(preferences) {
+  document.documentElement.dataset.theme = getTheme(preferences);
+}
+
 function render() {
+  applyTheme(state.view?.preferences);
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
     // us (e.g. via the top-level Bin list or "Delete all") — fall back to
@@ -2203,7 +2220,8 @@ const promptLibrary = createPromptLibraryDialog({
   fallbackPrompt: PICKUP_PROMPT,
   copyText: (text) => host.copyText(text),
   setStatus,
-  onViewPreferencesChanged: () => {
+  onViewPreferencesChanged: (next) => {
+    applyTheme(next.view?.preferences);
     graph.refreshEdgeOpacity();
     render();
   },

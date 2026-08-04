@@ -253,6 +253,7 @@ function buildPromptLayerTree(nodes) {
     nodes['outline-opacity-value'],
     nodes['region-opacity-slider'],
     nodes['region-opacity-value'],
+    nodes['theme-select'],
     nodes['hotkey-list'],
     nodes['hotkey-reset-all'],
   );
@@ -280,7 +281,7 @@ const treeFixture = () => ({
   ] },
 });
 
-function createHarness({ initialView = null, copyFails = false, persist = async () => {}, hotkeyCatalog = createHotkeyCatalog() } = {}) {
+function createHarness({ initialView = null, copyFails = false, persist = async () => {}, hotkeyCatalog = createHotkeyCatalog(), onViewPreferencesChanged = null } = {}) {
   let state = initialView
     ? { groups: [], shortcuts: [], view: initialView }
     : { groups: [], shortcuts: [], view: { promptLibrary: [] } };
@@ -298,7 +299,7 @@ function createHarness({ initialView = null, copyFails = false, persist = async 
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
     'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
     'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
-    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'hotkey-reset-all',
+    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'hotkey-reset-all',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);
@@ -343,6 +344,7 @@ function createHarness({ initialView = null, copyFails = false, persist = async 
     },
     setStatus: (message) => statuses.push(message),
     hotkeyCatalog,
+    onViewPreferencesChanged,
   });
   dialog.mount();
   return {
@@ -509,6 +511,27 @@ test('visual opacity settings persist outline and region values independently', 
   assert.equal(h.getState().view.preferences.edgeOpacity, undefined);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(saves.at(-1).view.preferences.regionOpacity, 0.55);
+});
+
+test('Settings theme toggle updates immediately, persists, and removes the light default', async () => {
+  const saves = [];
+  const applied = [];
+  const h = createHarness({
+    persist: async (snapshot) => saves.push(JSON.parse(snapshot)),
+    initialView: { preferences: { theme: 'dark', future: { keep: true } } },
+    onViewPreferencesChanged: (next) => applied.push(next.view.preferences.theme ?? 'light'),
+  });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  assert.equal(h.nodes['theme-select'].value, 'dark');
+  h.nodes['theme-select'].value = 'light';
+  h.nodes['theme-select'].dispatch('change', { target: h.nodes['theme-select'] });
+  assert.equal(h.getState().view.preferences.theme, undefined);
+  assert.deepEqual(h.getState().view.preferences.future, { keep: true });
+  assert.equal(h.nodes['theme-select'].value, 'light');
+  assert.deepEqual(applied, ['light']);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(saves.at(-1).view.preferences.theme, undefined);
 });
 
 test('Copy Prompts bindings are scoped to the prompt page and replace Enter', () => {
@@ -1145,7 +1168,7 @@ test('a failed auto-save is surfaced and leaves the dialog open', async () => {
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
     'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
     'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
-    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'hotkey-reset-all',
+    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'hotkey-reset-all',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);

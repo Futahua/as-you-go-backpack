@@ -393,6 +393,25 @@ const OPACITY_DEFAULTS = Object.freeze({
   regionOpacity: DEFAULT_REGION_OPACITY,
 });
 
+export const DEFAULT_THEME = 'light';
+
+export function normalizeTheme(value) {
+  return value === 'dark' ? 'dark' : DEFAULT_THEME;
+}
+
+export function getTheme(rawPreferences) {
+  return normalizeTheme(rawPreferences?.theme);
+}
+
+/** Stores only a non-default creator choice, preserving unrelated preferences. */
+export function setTheme(rawPreferences, value) {
+  const next = isRecord(rawPreferences) ? cloneValue(rawPreferences) : {};
+  const theme = normalizeTheme(value);
+  if (theme === DEFAULT_THEME) delete next.theme;
+  else next.theme = theme;
+  return next;
+}
+
 function validOpacity(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
@@ -432,6 +451,11 @@ export function normalizeViewPreferences(rawPreferences, catalog = HOTKEY_CATALO
   const hotkeys = normalizeHotkeyPreferences(next.hotkeys, catalog);
   if (Object.keys(hotkeys).length > 0) next.hotkeys = hotkeys;
   else delete next.hotkeys;
+  if (Object.prototype.hasOwnProperty.call(next, 'theme')) {
+    const theme = normalizeTheme(next.theme);
+    if (theme === DEFAULT_THEME) delete next.theme;
+    else next.theme = theme;
+  }
   for (const [key, fallback] of Object.entries(OPACITY_DEFAULTS)) {
     if (!Object.prototype.hasOwnProperty.call(next, key)) continue;
     const opacity = normalizeOpacity(key, next[key]);

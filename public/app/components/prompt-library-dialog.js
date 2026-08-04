@@ -48,11 +48,13 @@ import {
   getEdgeOpacity,
   getOutlineOpacity,
   getRegionOpacity,
+  getTheme,
   resetAllHotkeyOverrides,
   resetHotkeyOverride,
   setEdgeOpacity,
   setOutlineOpacity,
   setRegionOpacity,
+  setTheme,
 } from '../hotkeys-model.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -145,6 +147,7 @@ export function createPromptLibraryDialog({
   const outlineOpacityValue = document.querySelector('#outline-opacity-value');
   const regionOpacitySlider = document.querySelector('#region-opacity-slider');
   const regionOpacityValue = document.querySelector('#region-opacity-value');
+  const themeSelect = document.querySelector('#theme-select');
   const addPromptButton = document.querySelector('#prompt-add-prompt');
   const addFolderButton = document.querySelector('#prompt-add-folder');
   const cardList = document.querySelector('#prompt-card-list');
@@ -411,6 +414,10 @@ export function createPromptLibraryDialog({
     }
   }
 
+  function renderThemeControl() {
+    if (themeSelect) themeSelect.value = getTheme(currentViewPreferences());
+  }
+
   function focusCapturedBinding() {
     if (!capturingActionId) return;
     hotkeyList?.querySelector(`[data-hotkey-binding="${capturingActionId}"]`)?.focus?.();
@@ -419,6 +426,7 @@ export function createPromptLibraryDialog({
   function renderHotkeys() {
     if (!hotkeyList) return;
     renderOpacityControls();
+    renderThemeControl();
     hotkeyList.textContent = '';
     const groups = [];
     const byGroup = new Map();
@@ -580,6 +588,15 @@ export function createPromptLibraryDialog({
       `${control.label} updated.`,
     );
     renderOpacityControls();
+  }
+
+  function onThemeChange(event) {
+    if (event.target !== themeSelect) return;
+    persistViewPreferences(
+      setTheme(currentViewPreferences(), themeSelect.value),
+      'Theme updated.',
+    );
+    renderThemeControl();
   }
 
   /** Copy selected is only meaningful with a selection, so it stays disabled until
@@ -1546,6 +1563,7 @@ export function createPromptLibraryDialog({
     hotkeysPage?.addEventListener('click', onHotkeyPageClick, { signal });
     hotkeysPage?.addEventListener('keydown', onHotkeyPageKeyDown, { signal });
     hotkeysPage?.addEventListener('input', onOpacityInput, { signal });
+    themeSelect?.addEventListener('change', onThemeChange, { signal });
     resetAllHotkeysButton?.addEventListener('click', resetAllHotkeys, { signal });
     copyButton.addEventListener('contextmenu', (event) => {
       event.preventDefault();

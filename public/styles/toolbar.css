@@ -1,14 +1,14 @@
 
 .toolbar-float {
   position: absolute;
-  box-shadow: 0 4px 16px rgba(59, 53, 43, 0.08);
+  box-shadow: 0 4px 16px var(--shadow);
   cursor: grab;
   touch-action: none;
 }
 .toolbar-float.toolbar-dragging {
   z-index: 20;
   cursor: grabbing;
-  box-shadow: 0 10px 28px rgba(59, 53, 43, 0.18);
+  box-shadow: 0 10px 28px var(--shadow);
 }
 .toolbar-float.icon-button {
   display: inline-flex;
@@ -22,8 +22,8 @@
  * definition over the button that was just clicked, and `.quiet-button:hover`
  * would otherwise repaint straight over the flash. */
 @keyframes pickup-copied-flash {
-  0%, 70% { background: #4c725a; border-color: #4c725a; color: #fffef9; }
-  100% { background: rgba(252, 251, 247, 0.9); border-color: #cec9bd; color: #2c2a25; }
+  0%, 70% { background: var(--accent); border-color: var(--accent); color: var(--surface-raised); }
+  100% { background: var(--paper); border-color: var(--border-strong); color: var(--text); }
 }
 .quiet-button.pickup-copied,
 .quiet-button.pickup-copied:hover {
@@ -45,13 +45,13 @@
 .toolbar-float[data-toolbar-key="delete-all-bin"] { top: 12px; right: 88px; }
 .toolbar-float[data-toolbar-key="restore-all-bin"] { top: 12px; right: 208px; }
 #delete-all-bin.selective {
-  background: #f2d7d7;
-  border-color: #a23b3b;
+  background: var(--toolbar-danger-surface);
+  border-color: var(--toolbar-danger-text);
 }
 #restore-all-bin.selective {
-  background: #d7e7d9;
-  border-color: #4c725a;
-  color: #4c725a;
+  background: var(--accent-selection);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .breadcrumbs {
@@ -73,8 +73,8 @@
   padding: 5px 7px;
   cursor: pointer;
 }
-.breadcrumbs button:hover { background: #ece9e0; }
-.breadcrumbs span { color: #9b9589; }
+.breadcrumbs button:hover { background: var(--selection); }
+.breadcrumbs span { color: var(--text-faint); }
 .status {
   position: fixed;
   top: 68px;
@@ -85,13 +85,13 @@
   width: max-content;
   max-width: min(760px, calc(100vw - 32px));
   margin: 0;
-  border: 1px solid #dfb0a6;
+  border: 1px solid var(--toolbar-danger-border);
   border-radius: 12px;
-  background: #fff6f3;
+  background: var(--toolbar-danger-surface);
   backdrop-filter: blur(8px);
-  box-shadow: 0 10px 28px rgb(69 46 37 / 16%);
+  box-shadow: 0 10px 28px var(--shadow);
   padding: 8px 13px;
-  color: #8d3d31;
+  color: var(--toolbar-danger-text);
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -115,11 +115,11 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  border: 1px solid #b8d0be;
+  border: 1px solid var(--accent-border-soft);
   border-radius: 999px;
-  background: #e8f2ea;
+  background: var(--success-surface);
   padding: 5px 14px 5px 10px;
-  color: #2f5c40;
+  color: var(--accent-strong);
   font-size: 13px;
   font-weight: 600;
 }
@@ -128,8 +128,8 @@
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  background: #4c725a;
-  color: #fffef9;
+  background: var(--accent);
+  color: var(--surface-raised);
   content: "✓";
   font-size: 10px;
   line-height: 15px;

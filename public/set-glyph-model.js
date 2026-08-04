@@ -110,14 +110,6 @@ function pointAt(outline, lengths, distance) {
   return { x, y, angle, rotation };
 }
 
-function reverseWithinEdge(lengths, distance) {
-  const perimeter = lengths[lengths.length - 1];
-  const d = ((distance % perimeter) + perimeter) % perimeter;
-  let index = 0;
-  while (index < lengths.length - 1 && lengths[index + 1] < d) index += 1;
-  return lengths[index] + lengths[index + 1] - d;
-}
-
 /** Layouts complete repeated titles around the current outline. `outline` is
  * decorative input only; it is not returned, cached, or passed to physics. */
 export function layoutTitleGlyphs(outline, title, { preferredHeight = 14, gap = 7 } = {}) {
@@ -141,18 +133,22 @@ export function layoutTitleGlyphs(outline, title, { preferredHeight = 14, gap = 
     const forwardDistance = phase + (i + 0.5) * perimeter / count;
     const forwardPoint = pointAt(outline, lengths, forwardDistance);
     const reversed = Math.cos(forwardPoint.angle * Math.PI / 180) < 0;
-    // On the downside, walk the perimeter in the opposite direction. The
-    // glyph sequence stays forward relative to that walk, so the two changes
-    // cancel in the creator's left-to-right reading direction. Glyph geometry
-    // itself is never mirrored.
-    const distance = reversed ? reverseWithinEdge(lengths, forwardDistance) : forwardDistance;
-    const point = reversed ? pointAt(outline, lengths, distance) : forwardPoint;
+    // Keep positions on one monotonic perimeter walk. On leftward runs, reverse
+    // only the character order so the screen-space reading direction stays
+    // left-to-right; glyph geometry itself is never mirrored.
+    const point = forwardPoint;
     const characterIndex = i % chars.length;
     placements.push({
       char: chars[characterIndex], x: point.x, y: point.y, rotation: point.rotation,
-      scale, distance: ((distance - phase) % perimeter + perimeter) % perimeter,
+      scale, distance: ((forwardDistance - phase) % perimeter + perimeter) % perimeter,
       reversed,
     });
+  }
+  for (let i = 0; i < placements.length; i += 1) {
+    if (!placements[i].reversed) continue;
+    let end = i;
+    while (end + 1 < placements.length && placements[end + 1].reversed) end += 1;
+    placements[i].char = chars[(end - i) % chars.length];
   }
   return { title: chars, scale, placements, perimeter, phase, completeRepeats: Math.floor(count / chars.length), needed: needed(scale) };
 }
