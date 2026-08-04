@@ -45,10 +45,17 @@ export function createItemSet(memberIds, overrides = {}) {
   return {
     id: typeof overrides.id === 'string' && overrides.id ? overrides.id : createId(),
     type: 'set',
-    title: typeof overrides.title === 'string' ? overrides.title : 'New set',
+    title: normalizeSetTitle(overrides.title),
     memberIds: uniqueIds(memberIds),
     excludedIds: uniqueIds(overrides.excludedIds),
   };
+}
+
+/** Untitled sets are represented by an empty title. The old placeholder was
+ * presentation text, not user data, so it migrates to the same empty value. */
+export function normalizeSetTitle(value) {
+  const title = typeof value === 'string' ? value.trim() : '';
+  return title === 'New set' ? '' : title;
 }
 
 function uniqueIds(ids) {
@@ -87,10 +94,13 @@ export function normalizeItemSets(raw, knownItemIds = null) {
     const excludedIds = uniqueIds(record.excludedIds)
       .filter((excludedId) => !setIds.has(excludedId))
       .filter((excludedId) => (known ? known.has(excludedId) : true));
+    const legacyTitle = typeof record.title === 'string'
+      ? record.title
+      : typeof record.name === 'string' ? record.name : '';
     sets.push({
       id,
       type: 'set',
-      title: typeof record.title === 'string' ? record.title : 'New set',
+      title: normalizeSetTitle(legacyTitle),
       memberIds,
       excludedIds,
     });

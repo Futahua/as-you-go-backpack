@@ -849,3 +849,19 @@ test('assignSpatialFolderHues produces a valid hue for every folder', () => {
     assert.ok(hue >= 0 && hue <= 360);
   }
 });
+
+test('folder and set namespaces remain separated, stable, and position-driven', () => {
+  const nodes = [
+    { id: 'folder:shared', x: 20, y: 0 },
+    { id: 'set:shared', x: 20, y: 0 },
+  ];
+  const colors = new Map();
+  for (let frame = 0; frame < 80; frame += 1) assignSpatialFolderHues(nodes, colors, folderCenter);
+  assert.ok(hueDistance(colors.get('folder:shared'), colors.get('set:shared')) >= MIN_HUE_SEPARATION);
+  const settled = new Map(colors);
+  for (let frame = 0; frame < 20; frame += 1) assignSpatialFolderHues([...nodes].reverse(), colors, folderCenter);
+  assert.ok(Math.abs(colors.get('folder:shared') - settled.get('folder:shared')) < 1e-6);
+  assert.ok(Math.abs(colors.get('set:shared') - settled.get('set:shared')) < 1e-6);
+  assignSpatialFolderHues([{ id: 'set:shared', x: 320, y: 0 }, { id: 'folder:shared', x: 20, y: 0 }], colors, folderCenter);
+  assert.notEqual(colors.get('set:shared'), settled.get('set:shared'));
+});

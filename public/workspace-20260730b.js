@@ -61,8 +61,10 @@ import {
   memberFloorHull,
   forceRingShape,
   ejectionTarget,
+  outlineCentroid,
 } from './set-ring-model.js';
 import { forceSetGravity, forceSetExclusion, forceSetSeparation } from './set-gravity-model.js';
+import { glyphPath, layoutTitleGlyphs } from './set-glyph-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -79,6 +81,7 @@ import { createSetMembershipMode } from './app/components/set-membership-mode.js
 import { bootstrapWorkspace } from './app/bootstrap.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
+import { resolveContextTarget } from './app/context-target-model.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
@@ -372,12 +375,19 @@ function createGraphController() {
   // Folder hues span the whole color spectrum (see assignSpatialFolderHues),
   // kept per folder id in a session map that carries the relaxation state, so
   // colors follow the folder positions and update as they are dragged.
-  const folderColors = new Map();
+  // One namespace is shared by folders and visible set outlines. Prefixing
+  // ids prevents a folder id and set id with the same text from colliding.
+  const spatialColors = new Map();
 
   function folderColor(id) {
-    const hue = folderColors.get(id);
+    const hue = spatialColors.get(`folder:${id}`);
     // OKLCH spacing tracks perceived difference better than HSL; 68% lightness
     // and 0.18 chroma read clearly on the warm paper background.
+    return typeof hue === 'number' ? `oklch(68% 0.18 ${hue}deg)` : null;
+  }
+
+  function setColor(id) {
+    const hue = spatialColors.get(`set:${id}`);
     return typeof hue === 'number' ? `oklch(68% 0.18 ${hue}deg)` : null;
   }
 
@@ -606,13 +616,18 @@ function createGraphController() {
         if (existingShape.retiring) {
           existingShape.retiring = false;
           existingShape.path?.classList.remove('set-retiring');
+          existingShape.glyphs?.classList.remove('set-retiring');
         }
       } else {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const glyphs = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'graph-set-outline');
+        glyphs.setAttribute('class', 'graph-set-glyphs');
         path.dataset.setId = itemSet.id;
+        glyphs.dataset.setId = itemSet.id;
         setLayer.append(path);
-        setShapes.set(itemSet.id, { setId: itemSet.id, path });
+        setLayer.append(glyphs);
+        setShapes.set(itemSet.id, { setId: itemSet.id, path, glyphs, glyphLayoutKey: null });
       }
     }
 
@@ -626,6 +641,7 @@ function createGraphController() {
       if (!shape.retiring) {
         shape.retiring = true;
         shape.path?.classList.add('set-retiring');
+        shape.glyphs?.classList.add('set-retiring');
         setRings.delete(setId);
         window.setTimeout(() => {
           // Re-checked on landing. The members may have returned during the
@@ -634,6 +650,7 @@ function createGraphController() {
           // second, which a flag alone would not.
           if (setShapes.get(setId) !== shape || !shape.retiring) return;
           shape.path?.remove();
+          shape.glyphs?.remove();
           setShapes.delete(setId);
         }, 200);
       }
@@ -780,12 +797,31 @@ function createGraphController() {
       const target = ring ? floorOutline(resampleHull(ringHull(ring.nodes)), floor) : null;
       shape.outline = easeOutline(shape.outline, target);
       shape.path.setAttribute('d', shape.outline ? ringPath(shape.outline, { hulled: true }) : '');
+      const title = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId)?.title?.trim() ?? '';
+      const named = title.length > 0 && Array.isArray(shape.outline);
+      shape.path.classList.toggle('set-named', named);
+      shape.glyphs?.classList.toggle('set-named', named);
+      // The outline is live while a ring moves, so every coordinate belongs in
+      // the key: caching a partial geometry key would visibly detach lettering
+      // from its body. Once the eased outline and title are unchanged, settled
+      // frames reuse the exact decorative path instead of rebuilding it.
+      const glyphLayoutKey = named
+        ? `${title}|${shape.outline.map(({ x, y }) => `${x},${y}`).join('|')}`
+        : '';
+      if (shape.glyphLayoutKey !== glyphLayoutKey) {
+        shape.glyphs?.setAttribute('d', named ? glyphPath(layoutTitleGlyphs(shape.outline, title)) : '');
+        shape.glyphLayoutKey = glyphLayoutKey;
+      }
       shape.path.classList.toggle('set-selected', session.selectedSets?.has(setId) === true);
       shape.path.classList.toggle('set-picking', picking);
       shape.path.classList.toggle('set-chosen', picking && chosen.has(setId));
       // Neither in nor out: Enter leaves a partial set exactly as it is, so it
       // must not read as either.
       shape.path.classList.toggle('set-partial', picking && partial.has(setId));
+      shape.glyphs?.classList.toggle('set-selected', session.selectedSets?.has(setId) === true);
+      shape.glyphs?.classList.toggle('set-picking', picking);
+      shape.glyphs?.classList.toggle('set-chosen', picking && chosen.has(setId));
+      shape.glyphs?.classList.toggle('set-partial', picking && partial.has(setId));
     }
   }
 
@@ -914,18 +950,27 @@ function createGraphController() {
     const folderNodes = [...nodes.values()].filter(
       (node) => !node.exiting && node.shell && node.candidate?.kind === 'group',
     );
-    if (folderNodes.length === 0) return;
     const center = {
       cx: (viewport?.clientWidth ?? 800) / 2,
       cy: (viewport?.clientHeight ?? 600) / 2,
     };
+    const spatialNodes = [
+      ...folderNodes.map((node) => ({ id: `folder:${node.id}`, x: node.x, y: node.y })),
+      ...[...setShapes.values()]
+        .filter((shape) => !shape.retiring)
+        .map((shape) => {
+          const point = outlineCentroid(shape.outline);
+          return point ? { id: `set:${shape.setId}`, ...point } : null;
+        })
+        .filter(Boolean),
+    ];
     assignSpatialFolderHues(
-      folderNodes.map((node) => ({ id: node.id, x: node.x, y: node.y })),
-      folderColors,
+      spatialNodes,
+      spatialColors,
       center,
     );
     for (const node of folderNodes) {
-      const hue = folderColors.get(node.id);
+      const hue = spatialColors.get(`folder:${node.id}`);
       if (node.appliedFolderHue === hue) continue;
       node.appliedFolderHue = hue;
       const iconItem = node.shell.querySelector('.icon-item');
@@ -939,6 +984,13 @@ function createGraphController() {
       edge.appliedStroke = stroke;
       edge.path.style.stroke = stroke;
     });
+    for (const shape of setShapes.values()) {
+      const color = setColor(shape.setId);
+      if (color) {
+        shape.path.style.setProperty('--set-color', color);
+        shape.glyphs?.style.setProperty('--set-color', color);
+      }
+    }
   }
 
   function refreshNodeContent(node) {
@@ -1372,6 +1424,7 @@ function createGraphController() {
     fitGraph,
     ancestorsOfNode,
     setIdsAtPoint,
+    setPathFor: (id) => setShapes.get(id)?.path ?? null,
     ejectTrespassers,
     _getNode: (id) => nodes.get(id) ?? null,
     _setOnDragCancel(callback) { onDragCancel = callback; },
@@ -1542,6 +1595,8 @@ async function runMenuAction(action) {
   if (action === 'restore') return confirmDialog.askRestoreConfirm([...session.selected]);
   if (action === 'delete-forever') return confirmDialog.askPermanentDelete();
   if (action === 'reset-graph-position') return commands.resetGraphPositions();
+  if (action === 'rename-set') return beginSetRename();
+  if (action === 'delete-sets') return commands.deleteSelectedSets();
 }
 
 elements.grid.addEventListener('click', (event) => {
@@ -1659,6 +1714,15 @@ elements.grid.addEventListener('contextmenu', (event) => {
   }
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
   if (!blank) return;
+  const world = pointer.clientToWorld(event.clientX, event.clientY);
+  const contextTarget = resolveContextTarget({
+    hitSetIds: graph.setIdsAtPoint(world),
+    selectedSetIds: session.selectedSets,
+  });
+  if (contextTarget.kind === 'set') {
+    openMenu(event.clientX, event.clientY);
+    return;
+  }
   if (session.binMode) {
     if (session.selected.size > 0) openMenu(event.clientX, event.clientY);
     return;
@@ -1786,6 +1850,9 @@ const menu = createContextMenu({
   getBinMode: () => session.binMode,
   getClipboard: () => session.clipboard,
   getSelectedItems: () => [...session.selected].map(item).filter(Boolean),
+  getSelectedSets: () => [...session.selectedSets]
+    .map((id) => (state.view?.itemSets ?? []).find((candidate) => candidate.id === id))
+    .filter(Boolean),
   isWebLink,
   onAction: runMenuAction,
 });
@@ -1830,6 +1897,47 @@ const commands = createWorkspaceCommands({
   render,
   setStatus,
 });
+
+let activeSetRename = null;
+function beginSetRename() {
+  const ids = [...store.getSession().selectedSets];
+  if (ids.length !== 1) {
+    setStatus('Select exactly one set to rename.');
+    return false;
+  }
+  const setId = ids[0];
+  const itemSet = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId);
+  const path = graph.setPathFor(setId);
+  if (!itemSet || !path) {
+    setStatus('That set is not visible here.');
+    return false;
+  }
+  activeSetRename?.cancel();
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'set-name-editor';
+  input.value = itemSet.title ?? '';
+  input.setAttribute('aria-label', 'Set name');
+  const rect = path.getBoundingClientRect();
+  input.style.left = `${rect.left + rect.width / 2 - 90}px`;
+  input.style.top = `${rect.top + rect.height / 2 - 18}px`;
+  document.body.append(input);
+  const finish = async (save) => {
+    if (!activeSetRename) return;
+    activeSetRename = null;
+    input.remove();
+    if (save) await commands.renameSet(setId, input.value);
+  };
+  activeSetRename = { cancel: () => { activeSetRename = null; input.remove(); } };
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); void finish(true); }
+    else if (event.key === 'Escape') { event.preventDefault(); void finish(false); }
+  });
+  input.addEventListener('blur', () => { void finish(true); }, { once: true });
+  input.focus();
+  input.select();
+  return true;
+}
 
 // Constructed after commands: the controller delegates session mutation and
 // persistence to the marquee commands.
@@ -1941,6 +2049,7 @@ const keyboard = createKeyboardController({
   beginSetMembershipEdit: () => setMembershipMode.begin(),
   setMembershipMode,
   setStatus,
+  beginSetRename,
 });
 
 const promptLibrary = createPromptLibraryDialog({

@@ -26,6 +26,7 @@ import {
   forceSpeedLimit,
   shortestValidEscape,
   rayExitDistance,
+  outlineCentroid,
 } from './public/set-ring-model.js';
 // The real forces, so containment is measured against the configuration the
 // app actually runs rather than an idealised one.
@@ -33,6 +34,11 @@ import {
   forceSimulation, forceManyBody, forceCollide, forceLink, forceX, forceY,
 } from './public/vendor/d3-force.js';
 import { forceSetExclusion, forceSetGravity } from './public/set-gravity-model.js';
+
+test('outline centroid uses the visible outline vertices', () => {
+  assert.deepEqual(outlineCentroid([{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 2 }]), { x: 8 / 3, y: 2 / 3 });
+  assert.equal(outlineCentroid([]), null);
+});
 
 function tile(id, x, y) {
   return { id, x, y, width: 72, height: 72 };

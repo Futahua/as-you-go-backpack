@@ -1,5 +1,6 @@
 import { normalizeItemSets } from './sets-model.js';
 import { normalizePromptLibrary } from './prompt-library-model.js';
+import { normalizeViewPreferences } from './app/hotkeys-model.js';
 
 export const ROOT_ID = 'root';
 export const DEFAULT_ICON_SIZE = 96;
@@ -28,6 +29,7 @@ export function emptyState() {
       promptLibrary: [],
       graphPositions: {},
       toolbarPositions: {},
+      preferences: {},
       itemSets: [],
     },
   };
@@ -334,6 +336,7 @@ export function normalizeState(raw) {
       layout: raw?.view?.layout === 'graph' ? 'graph' : 'explorer',
       graphPositions: normalizeGraphPositions(raw?.view?.graphPositions),
       toolbarPositions: normalizeFlatPositions(raw?.view?.toolbarPositions),
+      preferences: normalizeViewPreferences(raw?.view?.preferences),
       // promptLibrary replaces promptCards/pickupPrompt: the older shapes are
       // read here purely for migration (normalizePromptLibrary) and never
       // written again.

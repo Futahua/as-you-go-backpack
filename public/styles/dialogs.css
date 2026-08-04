@@ -103,6 +103,9 @@
   gap: 12px;
 }
 .prompt-library-header h2 { margin: 0; }
+.prompt-library-tabs { display: flex; gap: 6px; }
+.prompt-tab[aria-selected="true"] { background: #dfece1; color: #2f5c40; }
+.prompt-page { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .prompt-library-add-actions {
   display: flex;
   gap: 8px;
@@ -121,6 +124,20 @@
   color: #356648;
   font-size: 12px;
 }
+.hotkeys-page { overflow: hidden; }
+.hotkey-list { flex: 1 1 auto; min-height: 160px; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+.hotkey-group { margin: 0 0 14px; }
+.hotkey-group h3 { margin: 8px 0 5px; color: #756b5d; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.hotkey-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; border-top: 1px solid #e4ded2; padding: 9px 0; }
+.hotkey-row.hotkey-capturing { border-radius: 8px; background: #f5f0df; padding-inline: 8px; }
+.hotkey-details { display: grid; gap: 2px; min-width: 0; }
+.hotkey-label { color: #3d3932; font-size: 13px; }
+.hotkey-current { color: #2f5c40; font: 600 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.hotkey-defaults { color: #81786b; font-size: 11px; }
+.hotkey-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.hotkey-controls .paper-button { margin: 0; padding: 5px 8px; font-size: 11px; }
+.hotkey-status-error { color: #963d30; }
+.hotkey-reset-actions { justify-content: flex-end; margin-top: 6px; }
 /* A copy confirmation is the one status the user is actively waiting for, so
  * it reads as a notification rather than the usual quiet line. */
 .prompt-library-status.prompt-status-copied {

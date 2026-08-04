@@ -10,6 +10,7 @@ export function createContextMenu({
   getBinMode,
   getClipboard,
   getSelectedItems,
+  getSelectedSets = () => [],
   isWebLink,
   onAction,
 }) {
@@ -29,6 +30,7 @@ export function createContextMenu({
     const clipboard = getClipboard();
     const binMode = getBinMode();
     const selected = getSelectedItems();
+    const selectedSets = getSelectedSets();
     if (kind === 'blank') {
       content = [
         menuButton('new-folder', 'New folder'),
@@ -44,6 +46,12 @@ export function createContextMenu({
         menuButton('delete-forever', 'Delete permanently', true),
       ].join('');
     } else {
+      if (selectedSets.length > 0) {
+        content = [
+          selectedSets.length === 1 ? menuButton('rename-set', 'Rename set') : '',
+          menuButton('delete-sets', selectedSets.length > 1 ? 'Delete sets' : 'Delete set', true),
+        ].join('');
+      } else {
       const chosen = selected.filter(Boolean);
       const only = chosen.length === 1 ? chosen[0] : null;
       content = [
@@ -57,6 +65,7 @@ export function createContextMenu({
         '<hr />',
         menuButton('reset-graph-position', chosen.length > 1 ? 'Follow folders automatically' : 'Follow folder automatically'),
       ].join('');
+      }
     }
     elements.menu.innerHTML = content;
     elements.menu.hidden = false;

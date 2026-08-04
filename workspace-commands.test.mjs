@@ -608,6 +608,17 @@ test('the Ctrl+G picker reaches the store and leaves untouched sets alone', asyn
   );
 });
 
+test('renaming a set round-trips its title without changing membership', async () => {
+  const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'A' }] });
+  const original = { id: 'set-a', type: 'set', title: '', memberIds: ['g1'], excludedIds: [] };
+  h.store.replace({ ...h.store.getSnapshot(), view: { ...h.store.getSnapshot().view, itemSets: [original] } });
+  assert.equal(await h.commands.renameSet('set-a', ' Ideas '), true);
+  assert.deepEqual(h.store.getSnapshot().view.itemSets[0], { ...original, title: 'Ideas' });
+  assert.equal(await h.commands.renameSet('set-a', '   '), true);
+  assert.equal(h.store.getSnapshot().view.itemSets[0].title, '');
+  assert.deepEqual(h.store.getSnapshot().view.itemSets[0].memberIds, ['g1']);
+});
+
 test('opening the picker and confirming immediately commits nothing', async () => {
   const { createSetMembershipMode } = await import('./public/app/components/set-membership-mode.js');
   const h = createHarness({

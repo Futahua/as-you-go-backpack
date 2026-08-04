@@ -13,6 +13,7 @@ import {
   visibleDepthFirstIds,
 } from './prompt-tree-selection.js';
 import { selectedRootIds } from '../../prompt-library-model.js';
+import { HOTKEY_CATALOG, bindingMatchesAction } from '../hotkeys-model.js';
 
 const DRAG_THRESHOLD = 6;
 
@@ -37,6 +38,8 @@ export function createPromptTreeController({
   getExpandedFolders,
   getPromptEditorId,
   getRenamingFolderId,
+  getHotkeyPreferences = () => ({}),
+  isKeyboardActive = () => true,
   intents,
 }) {
   let abortController = null;
@@ -164,20 +167,28 @@ export function createPromptTreeController({
   // ---------------------------------------------------------------- keyboard
 
   function onKeyDown(event) {
+    if (!isKeyboardActive()) return;
     // Editable controls keep native text editing: never preventDefault here.
     if (isEditableTarget(event.target)) return;
-    const key = event.key;
     const accel = event.ctrlKey || event.metaKey;
+    const matches = (actionId) => bindingMatchesAction(
+      actionId,
+      event,
+      getHotkeyPreferences(),
+      HOTKEY_CATALOG,
+    );
     // The context menu owns its own arrow/Enter/Escape navigation. Let its keys
     // through untouched, but still allow the accelerators below to reach the
     // tree — those close the menu first so the operation applies to the tree.
     const inMenu = Boolean(event.target?.closest?.('[role="menu"]'));
     if (inMenu && !accel) return;
     if (inMenu && accel) intents.onCloseContextMenu?.();
-    if (key === 'ArrowDown' || key === 'ArrowUp') {
+    if (matches('copy-prompts.focus-down') || matches('copy-prompts.focus-up')) {
       const ids = visibleIds();
       const index = ids.indexOf(selection.focusedId);
-      const target = key === 'ArrowDown' ? ids[Math.min(ids.length - 1, index + 1)] : ids[Math.max(0, index - 1)];
+      const target = matches('copy-prompts.focus-down')
+        ? ids[Math.min(ids.length - 1, index + 1)]
+        : ids[Math.max(0, index - 1)];
       if (!target) return;
       event.preventDefault();
       if (event.shiftKey) {
@@ -191,13 +202,13 @@ export function createPromptTreeController({
       focusRow(target);
       return;
     }
-    if (key === 'ArrowRight' || key === 'ArrowLeft') {
+    if (matches('copy-prompts.navigate-right') || matches('copy-prompts.navigate-left')) {
       const id = selection.focusedId;
       if (!id) return;
       const node = findPromptNodeAt(getTree(), id);
       if (!node) return;
       event.preventDefault();
-      if (key === 'ArrowRight') {
+      if (matches('copy-prompts.navigate-right')) {
         if (node.type === 'folder') {
           if (getExpandedFolders().has(id)) {
             const ids = visibleIds();
@@ -227,7 +238,7 @@ export function createPromptTreeController({
       }
       return;
     }
-    if (key === 'Enter') {
+    if (matches('copy-prompts.open-or-toggle')) {
       const id = selection.focusedId;
       if (!id) return;
       const node = findPromptNodeAt(getTree(), id);
@@ -237,7 +248,7 @@ export function createPromptTreeController({
       else intents.onToggleFolder(id);
       return;
     }
-    if (key === 'F2') {
+    if (matches('copy-prompts.edit-or-rename')) {
       event.preventDefault();
       const id = selection.focusedId;
       if (id) {
@@ -247,52 +258,47 @@ export function createPromptTreeController({
       }
       return;
     }
-    if (key === 'Delete' || key === 'Backspace') {
+    if (matches('copy-prompts.delete')) {
       if (selection.selectedIds.size === 0) return;
       event.preventDefault();
       intents.onDelete([...selectedRootIds(getTree(), [...selection.selectedIds])]);
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && event.shiftKey && key.toLowerCase() === 'z') {
+    if (matches('copy-prompts.redo')) {
       event.preventDefault();
       intents.onRedo();
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'y') {
-      event.preventDefault();
-      intents.onRedo();
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && key.toLowerCase() === 'z') {
+    if (matches('copy-prompts.undo')) {
       event.preventDefault();
       intents.onUndo();
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'c') {
+    if (matches('copy-prompts.copy')) {
       event.preventDefault();
       if (selection.selectedIds.size > 0) {
         intents.onCopyNodes([...selectedRootIds(getTree(), [...selection.selectedIds])]);
       }
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'x') {
+    if (matches('copy-prompts.cut')) {
       event.preventDefault();
       if (selection.selectedIds.size > 0) {
         intents.onCutNodes([...selectedRootIds(getTree(), [...selection.selectedIds])]);
       }
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'v') {
+    if (matches('copy-prompts.paste')) {
       event.preventDefault();
       intents.onPaste();
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'a') {
+    if (matches('copy-prompts.select-all')) {
       event.preventDefault();
       setSelection(selectAllVisible(selection, visibleIds()));
       return;
     }
-    if (event.key === 'Escape') {
+    if (matches('copy-prompts.escape')) {
       intents.onEscape?.();
     }
   }

@@ -3,6 +3,7 @@ import {
   selectAllScope,
   setMembership,
   applyMembershipChanges,
+  normalizeSetTitle,
 } from '../sets-model.js';
 
 /** Application command layer. Commands are the named user-intent operations
@@ -145,6 +146,22 @@ export function createWorkspaceCommands({
     if (store.getSession().selectedSets.size === 0) return;
     store.clearSelectedSets();
     render();
+  }
+
+  async function renameSet(setId, title) {
+    const current = store.getSnapshot().view?.itemSets ?? [];
+    if (!current.some((candidate) => candidate.id === setId)) return false;
+    const next = current.map((candidate) => candidate.id === setId
+      ? { ...candidate, title: normalizeSetTitle(title) }
+      : candidate);
+    try {
+      await store.commit(setItemSets(store.getSnapshot(), next));
+      setStatus('');
+      return true;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      return false;
+    }
   }
 
   /** Delete on a selected set removes the grouping only.
@@ -564,6 +581,7 @@ export function createWorkspaceCommands({
     groupSelectionIntoSet,
     selectSets,
     clearSetSelection,
+    renameSet,
     deleteSelectedSets,
     shareSelectionWithSets,
     beginMarqueeSelection,

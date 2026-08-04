@@ -7,9 +7,10 @@ function fakeNode() {
   return { hidden: true };
 }
 
-function createHarness({ binMode = false, initialState = null, membershipMode = null } = {}) {
+function createHarness({ binMode = false, initialState = null, membershipMode = null, activeElement = null } = {}) {
   const listeners = [];
   const documentMock = {
+    activeElement,
     addEventListener(type, handler, options) {
       const entry = { type, handler, options };
       listeners.push(entry);
@@ -31,7 +32,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     initialSession: { binMode },
   });
   const called = {
-    close: 0, permanentDelete: 0, beginPicker: 0, pickerOpens: true, status: [],
+    close: 0, permanentDelete: 0, beginPicker: 0, beginRename: 0, pickerOpens: true, status: [],
   };
   const commandSpies = {};
   for (const name of [
@@ -59,6 +60,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     beginSetMembershipEdit: () => { called.beginPicker += 1; return called.pickerOpens; },
     setMembershipMode: membershipMode,
     setStatus: (text) => { called.status.push(text); },
+    beginSetRename: () => { called.beginRename += 1; return true; },
   });
   controller.mount();
   return { controller, store, elements, commandSpies, called, listeners };
@@ -221,6 +223,45 @@ test('G groups the selection', () => {
   h.store.setSelection(['a']);
   h.listeners[0].handler(key({ key: 'g' }));
   assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 1);
+});
+
+test('custom workspace bindings replace defaults and clearing disables the default', () => {
+  const h = createHarness({ initialState: {
+    view: { preferences: { hotkeys: { overrides: {
+      'workspace.group-selection': ['Ctrl+Shift+K'],
+      'workspace.copy': [],
+    } } } },
+  } });
+  h.listeners[0].handler(key({ key: 'g' }));
+  h.listeners[0].handler(key({ key: 'k', ctrlKey: true, shiftKey: true }));
+  h.listeners[0].handler(key({ key: 'c', ctrlKey: true }));
+  assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 1);
+  assert.equal(h.commandSpies['copySelection:calls'], 0);
+});
+
+test('set rename stays on the catalog action and does not use the old default after remapping', () => {
+  const h = createHarness({ initialState: {
+    view: { preferences: { hotkeys: { overrides: { 'sets.rename-selected': ['Ctrl+R'] } } } },
+  } });
+  h.listeners[0].handler(key({ key: 'F2' }));
+  h.listeners[0].handler(key({ key: 'r', ctrlKey: true }));
+  assert.equal(h.called.beginRename, 1);
+});
+
+test('rename editor keeps workspace hotkeys and native editing keys inert', () => {
+  const activeElement = { matches: (selector) => selector.includes('.set-name-editor') };
+  const h = createHarness({ activeElement });
+  const events = ['g', 'Delete', 'F2'].map((keyName) => {
+    let prevented = false;
+    const event = key({ key: keyName });
+    event.preventDefault = () => { prevented = true; };
+    h.listeners[0].handler(event);
+    return prevented;
+  });
+  assert.deepEqual(events, [false, false, false]);
+  assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 0);
+  assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0);
+  assert.equal(h.called.beginRename, 0);
 });
 
 test('G is a plain key, so Ctrl+G does not also group', () => {

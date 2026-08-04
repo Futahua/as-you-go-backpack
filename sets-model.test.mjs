@@ -18,9 +18,17 @@ import {
   removeItemSet,
   setMembership,
   forgetItems,
+  normalizeSetTitle,
 } from './public/sets-model.js';
 
 const set = (id, memberIds, title = 'S') => ({ id, type: 'set', title, memberIds });
+
+test('untitled sets use an empty title and migrate the legacy placeholder', () => {
+  assert.equal(createItemSet(['a']).title, '');
+  assert.equal(normalizeSetTitle(' New set '), '');
+  assert.equal(normalizeItemSets([{ id: 's', name: 'New set', memberIds: [] }])[0].title, '');
+  assert.equal(normalizeItemSets([{ id: 't', title: 'Ideas', memberIds: [] }])[0].title, 'Ideas');
+});
 
 test('createItemSet keeps first-seen order and drops duplicates', () => {
   const created = createItemSet(['b', 'a', 'b', '', null, 'c']);

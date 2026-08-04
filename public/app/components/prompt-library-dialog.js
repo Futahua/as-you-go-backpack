@@ -40,6 +40,14 @@ import {
   cancelPromptLibraryTransaction,
 } from './prompt-library-history.js';
 import { setPromptLibrary } from '../../workspace-model-20260730b.js';
+import {
+  HOTKEY_CATALOG,
+  assignHotkey,
+  clearHotkeyOverride,
+  effectiveBindings,
+  resetAllHotkeyOverrides,
+  resetHotkeyOverride,
+} from '../hotkeys-model.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -93,6 +101,7 @@ export function createPromptLibraryDialog({
   fallbackPrompt,
   copyText,
   setStatus,
+  hotkeyCatalog = HOTKEY_CATALOG,
 }) {
   let abortController = null;
   let history = createPromptLibraryHistory([]);
@@ -110,10 +119,19 @@ export function createPromptLibraryDialog({
    * validated against the live tree when a paste resolves. */
   let activeDestination = { type: 'root', nodeId: null };
   let copyFlashTimer = null;
+  let activePage = 'prompts';
+  let capturingActionId = null;
 
   const icon = (name) => createSvg(document, ICONS[name]);
 
   const layer = document.querySelector('#prompt-layer');
+  const promptsPage = document.querySelector('#prompt-page-prompts');
+  const hotkeysPage = document.querySelector('#prompt-page-hotkeys');
+  const promptsTab = document.querySelector('#prompt-tab-prompts');
+  const hotkeysTab = document.querySelector('#prompt-tab-hotkeys');
+  const hotkeyList = document.querySelector('#hotkey-list');
+  const hotkeyStatus = document.querySelector('#hotkey-status');
+  const resetAllHotkeysButton = document.querySelector('#hotkey-reset-all');
   const addPromptButton = document.querySelector('#prompt-add-prompt');
   const addFolderButton = document.querySelector('#prompt-add-folder');
   const cardList = document.querySelector('#prompt-card-list');
@@ -273,6 +291,8 @@ export function createPromptLibraryDialog({
     getExpandedFolders: () => expandedFolderIds,
     getPromptEditorId: () => expandedPromptId,
     getRenamingFolderId: () => editingFolderId,
+    getHotkeyPreferences: () => store.getSnapshot()?.view?.preferences?.hotkeys ?? {},
+    isKeyboardActive: () => activePage === 'prompts',
     intents,
   });
 
@@ -310,6 +330,199 @@ export function createPromptLibraryDialog({
   function statusMessage(message, { copied = false } = {}) {
     status.textContent = message;
     status.classList.toggle('prompt-status-copied', copied && message !== '');
+  }
+
+  function hotkeyStatusMessage(message, { error: isError = false } = {}) {
+    if (!hotkeyStatus) return;
+    hotkeyStatus.textContent = message;
+    hotkeyStatus.classList.toggle('hotkey-status-error', isError && message !== '');
+  }
+
+  function currentHotkeyPreferences() {
+    return store.getSnapshot()?.view?.preferences?.hotkeys ?? {};
+  }
+
+  function persistHotkeyPreferences(nextPreferences, message) {
+    const current = store.getSnapshot();
+    const next = {
+      ...current,
+      view: {
+        ...current.view,
+        preferences: {
+          ...(current.view?.preferences ?? {}),
+          hotkeys: nextPreferences,
+        },
+      },
+    };
+    store.replace(next);
+    hotkeyStatusMessage(message);
+    void store.save(next)
+      .then(() => hotkeyStatusMessage(message))
+      .catch((caught) => hotkeyStatusMessage(
+        caught instanceof Error ? caught.message : String(caught),
+        { error: true },
+      ));
+  }
+
+  function setActivePage(page) {
+    activePage = page === 'hotkeys' ? 'hotkeys' : 'prompts';
+    capturingActionId = null;
+    if (promptsPage) promptsPage.hidden = activePage !== 'prompts';
+    if (hotkeysPage) hotkeysPage.hidden = activePage !== 'hotkeys';
+    promptsTab?.setAttribute('aria-selected', String(activePage === 'prompts'));
+    hotkeysTab?.setAttribute('aria-selected', String(activePage === 'hotkeys'));
+    renderHotkeys();
+  }
+
+  function renderHotkeys() {
+    if (!hotkeyList) return;
+    hotkeyList.textContent = '';
+    const groups = [];
+    const byGroup = new Map();
+    for (const action of hotkeyCatalog) {
+      if (!byGroup.has(action.group)) {
+        byGroup.set(action.group, []);
+        groups.push(action.group);
+      }
+      byGroup.get(action.group).push(action);
+    }
+    for (const group of groups) {
+      const section = document.createElement('section');
+      section.className = 'hotkey-group';
+      const heading = document.createElement('h3');
+      heading.textContent = group;
+      section.append(heading);
+      for (const action of byGroup.get(group)) {
+        const row = document.createElement('div');
+        row.className = 'hotkey-row';
+        row.dataset.hotkeyAction = action.id;
+        if (capturingActionId === action.id) row.classList.add('hotkey-capturing');
+
+        const label = document.createElement('strong');
+        label.className = 'hotkey-label';
+        label.textContent = action.label;
+        const current = document.createElement('span');
+        current.className = 'hotkey-current';
+        const bindings = effectiveBindings(action.id, currentHotkeyPreferences(), hotkeyCatalog);
+        current.textContent = bindings.length > 0 ? bindings.join(' · ') : 'Unassigned';
+        const defaults = document.createElement('span');
+        defaults.className = 'hotkey-defaults';
+        defaults.textContent = `Default: ${action.defaults.join(' · ')}`;
+        const details = document.createElement('div');
+        details.className = 'hotkey-details';
+        details.append(label, current, defaults);
+
+        const controls = document.createElement('div');
+        controls.className = 'hotkey-controls';
+        if (capturingActionId === action.id) {
+          const cancel = document.createElement('button');
+          cancel.type = 'button';
+          cancel.className = 'paper-button';
+          cancel.dataset.hotkeyCancel = action.id;
+          cancel.textContent = 'Cancel';
+          controls.append(cancel);
+          current.textContent = 'Press shortcut…';
+        } else {
+          const change = document.createElement('button');
+          change.type = 'button';
+          change.className = 'paper-button';
+          change.dataset.hotkeyChange = action.id;
+          change.textContent = 'Change';
+          controls.append(change);
+        }
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.className = 'paper-button';
+        clear.dataset.hotkeyClear = action.id;
+        clear.textContent = 'Clear';
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'paper-button';
+        reset.dataset.hotkeyReset = action.id;
+        reset.textContent = 'Reset';
+        controls.append(clear, reset);
+        row.append(details, controls);
+        section.append(row);
+      }
+      hotkeyList.append(section);
+    }
+  }
+
+  function onHotkeyPageClick(event) {
+    const target = event.target;
+    const change = target.closest?.('[data-hotkey-change]');
+    const cancel = target.closest?.('[data-hotkey-cancel]');
+    const clear = target.closest?.('[data-hotkey-clear]');
+    const reset = target.closest?.('[data-hotkey-reset]');
+    if (change) {
+      capturingActionId = change.dataset.hotkeyChange;
+      hotkeyStatusMessage('Press shortcut…');
+      renderHotkeys();
+      return;
+    }
+    if (cancel) {
+      capturingActionId = null;
+      hotkeyStatusMessage('Shortcut change canceled.');
+      renderHotkeys();
+      return;
+    }
+    if (clear) {
+      capturingActionId = null;
+      persistHotkeyPreferences(
+        clearHotkeyOverride(currentHotkeyPreferences(), clear.dataset.hotkeyClear, hotkeyCatalog),
+        'Binding cleared.',
+      );
+      renderHotkeys();
+      return;
+    }
+    if (reset) {
+      capturingActionId = null;
+      persistHotkeyPreferences(
+        resetHotkeyOverride(currentHotkeyPreferences(), reset.dataset.hotkeyReset, hotkeyCatalog),
+        'Binding reset to its default.',
+      );
+      renderHotkeys();
+      return;
+    }
+    if (capturingActionId && !target.closest?.('[data-hotkey-action]')) {
+      capturingActionId = null;
+      hotkeyStatusMessage('Shortcut change canceled.');
+      renderHotkeys();
+    }
+  }
+
+  function onHotkeyPageKeyDown(event) {
+    if (activePage !== 'hotkeys' || !capturingActionId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const result = assignHotkey(
+      currentHotkeyPreferences(),
+      capturingActionId,
+      event,
+      hotkeyCatalog,
+    );
+    if (!result.ok) {
+      if (result.reason === 'conflict') {
+        hotkeyStatusMessage(`Already used by ${result.conflict.label}. Choose another shortcut.`, { error: true });
+      } else if (result.reason === 'incomplete-binding') {
+        hotkeyStatusMessage('Press a complete shortcut, not a modifier by itself.');
+      } else {
+        hotkeyStatusMessage('That shortcut could not be saved.', { error: true });
+      }
+      return;
+    }
+    capturingActionId = null;
+    persistHotkeyPreferences(result.preferences, 'Shortcut saved.');
+    renderHotkeys();
+  }
+
+  function resetAllHotkeys() {
+    capturingActionId = null;
+    persistHotkeyPreferences(
+      resetAllHotkeyOverrides(currentHotkeyPreferences(), hotkeyCatalog),
+      'All bindings reset to their defaults.',
+    );
+    renderHotkeys();
   }
 
   /** Copy selected is only meaningful with a selection, so it stays disabled until
@@ -571,6 +784,7 @@ export function createPromptLibraryDialog({
     }
     viewport.classList.toggle('prompt-root-target', activeDestination.type === 'root');
     renderDeleteConfirm();
+    renderHotkeys();
   }
 
   /** `inherited` is the nearest ancestor folder override ('include',
@@ -1192,6 +1406,7 @@ export function createPromptLibraryDialog({
     cutIds.clear();
     activeEditSession = null;
     activeDestination = { type: 'root', nodeId: null };
+    setActivePage('prompts');
     contextMenu.close();
     controller.setSelection(createTreeSelection());
     refreshCopySelected();
@@ -1210,6 +1425,8 @@ export function createPromptLibraryDialog({
     treeClipboard = null;
     cutIds.clear();
     activeEditSession = null;
+    capturingActionId = null;
+    setActivePage('prompts');
     statusMessage('');
     layer.hidden = true;
     error.textContent = '';
@@ -1267,6 +1484,11 @@ export function createPromptLibraryDialog({
     const signal = abortController.signal;
     contextMenu.mount();
     controller.mount();
+    promptsTab?.addEventListener('click', () => setActivePage('prompts'), { signal });
+    hotkeysTab?.addEventListener('click', () => setActivePage('hotkeys'), { signal });
+    hotkeysPage?.addEventListener('click', onHotkeyPageClick, { signal });
+    hotkeysPage?.addEventListener('keydown', onHotkeyPageKeyDown, { signal });
+    resetAllHotkeysButton?.addEventListener('click', resetAllHotkeys, { signal });
     copyButton.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       open();
@@ -1283,6 +1505,7 @@ export function createPromptLibraryDialog({
     cardList.addEventListener('change', onCheckboxChange, { signal });
     cardList.addEventListener('keydown', onRenameKeydown, { signal });
     cardList.addEventListener('focusout', onRenameFocusout, { signal });
+    setActivePage('prompts');
   }
 
   function destroy() {
@@ -1293,5 +1516,5 @@ export function createPromptLibraryDialog({
     contextMenu.destroy();
   }
 
-  return { mount, destroy, open, close, getBatchText, getSnapshotLibrary };
+  return { mount, destroy, open, close, getBatchText, getSnapshotLibrary, setActivePage };
 }

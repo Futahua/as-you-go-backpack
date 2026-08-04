@@ -28,6 +28,18 @@
  *
  * No DOM, store, or browser APIs. */
 
+/** The presentation anchor for a drawn outline: the arithmetic mean of its
+ * visible vertices. It is stable for the resampled/eased polygon and avoids
+ * inventing a second stored position for a set. */
+export function outlineCentroid(outline) {
+  if (!Array.isArray(outline) || outline.length === 0) return null;
+  const total = outline.reduce((sum, point) => ({
+    x: sum.x + point.x,
+    y: sum.y + point.y,
+  }), { x: 0, y: 0 });
+  return { x: total.x / outline.length, y: total.y / outline.length };
+}
+
 /** How many nodes a ring of this perimeter needs at the given link distance.
  *
  * Spacing is what keeps the ring gapless: too few nodes and the links stretch
