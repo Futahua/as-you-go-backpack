@@ -35,6 +35,8 @@ function visiblePlacementIdForNode(state, shortcutId, node) {
 
 import {
   visibleGraphItems,
+  directSetMemberIdsVisible,
+  inheritedSetMemberIdsVisible,
   graphEdges,
   binOriginEdges,
   seedPosition,
@@ -44,6 +46,7 @@ import {
   hueDistance,
   MIN_HUE_SEPARATION,
 } from './public/graph-model-20260730b.js';
+import { belongsToSet } from './public/sets-model.js';
 
 function makeFixtureState() {
   let state = createGroup(emptyState(), 'News');
@@ -695,6 +698,18 @@ test('forking from a placement in folder B (not the placement in folder A) forks
 
 const folderCenter = { cx: 0, cy: 0 };
 
+function positionHueAt(x, y) {
+  const colors = new Map();
+  assignSpatialFolderHues([{ id: 'position', x, y }], colors, folderCenter);
+  return colors.get('position');
+}
+
+function setPositionHueAt(x, y) {
+  const colors = new Map();
+  assignSpatialFolderHues([{ id: 'set:position', x, y }], colors, folderCenter, new Map());
+  return colors.get('set:position');
+}
+
 function assertPairInvariant(colors, folders) {
   for (let i = 0; i < folders.length; i += 1) {
     for (let j = i + 1; j < folders.length; j += 1) {
@@ -722,27 +737,109 @@ function cluster(n, radius = 40) {
   return folders;
 }
 
-test('assignSpatialFolderHues pulls an isolated folder toward its new position base', () => {
+test('folders retain the original angular mapping and easing', () => {
   const colors = new Map();
   assignSpatialFolderHues([{ id: 'F', x: 300, y: 0 }], colors, folderCenter);
-  const baseEast = 0 + (300 / 500) * 120; // 72
-  assert.equal(hueDistance(colors.get('F'), baseEast), 0, 'seeded from the east base');
-  // Moving to (0, 300): new base is 90 + 72 = 162. The hue must move toward it.
+  assert.equal(colors.get('F'), 72, 'east folder matches the recovered original value');
   assignSpatialFolderHues([{ id: 'F', x: 0, y: 300 }], colors, folderCenter);
-  const toward = hueDistance(colors.get('F'), 162);
-  assert.ok(toward < 90, `moved toward the new base (was 90° away, now ${toward.toFixed(2)})`);
-  for (let frame = 0; frame < 60; frame += 1) {
+  assert.ok(hueDistance(colors.get('F'), 85.5) < 1e-6, 'folder moves 15% from 72° toward the original 162° base');
+  for (let frame = 0; frame < 300; frame += 1) {
     assignSpatialFolderHues([{ id: 'F', x: 0, y: 300 }], colors, folderCenter);
   }
-  assert.ok(hueDistance(colors.get('F'), 162) < 1, 'converges onto the base');
+  assert.ok(hueDistance(colors.get('F'), 162) < 1, 'converges onto the original folder base');
+});
+
+test('set draw eligibility is direct-at-level while inherited membership remains intact', () => {
+  let state = createGroup(emptyState(), 'Feed');
+  const feed = state.groups[0];
+  state = createShortcut(state, { name: 'Inside feed', target: 'C:\\inside.exe', parentId: feed.id });
+  const inside = state.shortcuts[0];
+  const set = { id: 'letters', memberIds: [feed.id], excludedIds: [] };
+  const rootItems = visibleGraphItems(state, ROOT_ID, new Set(), false);
+  const nestedItems = visibleGraphItems(state, feed.id, new Set(), false);
+  assert.deepEqual(directSetMemberIdsVisible(set, rootItems.map((item) => item.id)), [feed.id]);
+  assert.deepEqual(directSetMemberIdsVisible(set, nestedItems.map((item) => item.id)), []);
+  assert.equal(belongsToSet(set, inside.id, () => [feed.id]), true, 'descendants still belong to the set');
+  assert.deepEqual(
+    inheritedSetMemberIdsVisible(set, [feed.id, inside.id], (id) => id === inside.id ? [feed.id] : []),
+    [feed.id, inside.id],
+    'the ring member list includes the folder and its inherited child',
+  );
+});
+
+test('inherited ring members keep exclusions while direct eligibility stays level-scoped', () => {
+  const set = { id: 'letters', memberIds: ['folder'], excludedIds: ['child-excluded'] };
+  const ids = inheritedSetMemberIdsVisible(
+    set,
+    ['folder', 'child-kept', 'child-excluded'],
+    (id) => id.startsWith('child-') ? ['folder'] : [],
+  );
+  assert.deepEqual(ids, ['folder', 'child-kept']);
+  assert.deepEqual(directSetMemberIdsVisible(set, ['child-kept', 'child-excluded']), []);
+  assert.deepEqual(directSetMemberIdsVisible(set, ['folder', 'child-kept']), ['folder']);
+});
+
+test('direct members in separate folders draw at each owning level', () => {
+  let state = createGroup(emptyState(), 'A');
+  state = createGroup(state, 'B');
+  const [a, b] = state.groups;
+  state = createShortcut(state, { name: 'A item', target: 'C:\\a.exe', parentId: a.id });
+  const aItem = state.shortcuts[0];
+  state = createShortcut(state, { name: 'B item', target: 'C:\\b.exe', parentId: b.id });
+  const bItem = state.shortcuts[1];
+  const set = { id: 'split', memberIds: [aItem.id, bItem.id], excludedIds: [] };
+  assert.deepEqual(directSetMemberIdsVisible(set, visibleGraphItems(state, a.id, new Set(), false).map((item) => item.id)), [aItem.id]);
+  assert.deepEqual(directSetMemberIdsVisible(set, visibleGraphItems(state, b.id, new Set(), false).map((item) => item.id)), [bItem.id]);
+});
+
+test('set hues seed independently at the same position and hold while stationary', () => {
+  const colors = new Map();
+  const state = new Map();
+  const samePlace = [{ id: 'set:alpha', x: 120, y: 80 }, { id: 'set:beta', x: 120, y: 80 }];
+  assignSpatialFolderHues(samePlace, colors, folderCenter, state);
+  assert.ok(hueDistance(colors.get('set:alpha'), colors.get('set:beta')) > 1, 'same-position sets have distinct seeds');
+  const before = new Map(colors);
+  for (let frame = 0; frame < 30; frame += 1) assignSpatialFolderHues(samePlace, colors, folderCenter, state);
+  assert.equal(colors.get('set:alpha'), before.get('set:alpha'), 'stationary alpha holds its hue');
+  assert.equal(colors.get('set:beta'), before.get('set:beta'), 'stationary beta holds its hue');
+});
+
+test('set hue drift follows travelled distance, not direction or absolute position', () => {
+  const run = (points) => {
+    const colors = new Map();
+    const state = new Map();
+    assignSpatialFolderHues([{ id: 'set:drift', ...points[0] }], colors, folderCenter, state);
+    const seed = colors.get('set:drift');
+    for (const point of points.slice(1)) assignSpatialFolderHues([{ id: 'set:drift', ...point }], colors, folderCenter, state);
+    return { seed, hue: colors.get('set:drift') };
+  };
+  const east = run([{ x: 0, y: 0 }, { x: 100, y: 0 }]);
+  const west = run([{ x: 400, y: 300 }, { x: 300, y: 300 }]);
+  assert.ok(hueDistance(east.seed, east.hue) > 0, 'travel changes hue');
+  assert.ok(Math.abs(hueDistance(east.seed, east.hue) - hueDistance(west.seed, west.hue)) < 0.1, 'equal distance changes equally');
+  const returned = run([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 0, y: 0 }]);
+  assert.ok(hueDistance(returned.seed, returned.hue) > 1, 'returning does not undo free drift');
+});
+
+test('seeded set hues spread across a realistic collection and projection still separates pairs', () => {
+  const sets = Array.from({ length: 12 }, (_, index) => ({ id: `set:S${index}`, x: 200, y: 180 }));
+  const colors = new Map();
+  assignSpatialFolderHues(sets, colors, folderCenter, new Map());
+  let minimum = 360;
+  for (let i = 0; i < sets.length; i += 1) for (let j = i + 1; j < sets.length; j += 1) {
+    minimum = Math.min(minimum, hueDistance(colors.get(sets[i].id), colors.get(sets[j].id)));
+  }
+  assert.ok(minimum >= 360 / 12 - 1e-6, `seeded/projection collection minimum is ${minimum}°`);
+  assert.ok(new Set(sets.map(({ id }) => Math.round(colors.get(id))).values()).size >= 8, 'seeds cover the wheel');
 });
 
 test('assignSpatialFolderHues responds to a small drag (no rounding dead zone)', () => {
   const colors = new Map();
-  assignSpatialFolderHues([{ id: 'F', x: 300, y: 0 }], colors, folderCenter);
-  const before = colors.get('F');
-  assignSpatialFolderHues([{ id: 'F', x: 320, y: 0 }], colors, folderCenter);
-  const after = colors.get('F');
+  const state = new Map();
+  assignSpatialFolderHues([{ id: 'set:F', x: 300, y: 0 }], colors, folderCenter, state);
+  const before = colors.get('set:F');
+  assignSpatialFolderHues([{ id: 'set:F', x: 320, y: 0 }], colors, folderCenter, state);
+  const after = colors.get('set:F');
   assert.notEqual(after, before, 'a 20px radial move changes the hue');
   assert.ok(Math.abs(after - before) > 0, 'nonzero floating-point change');
 });
@@ -850,18 +947,19 @@ test('assignSpatialFolderHues produces a valid hue for every folder', () => {
   }
 });
 
-test('folder and set namespaces remain separated, stable, and position-driven', () => {
+test('folder and set namespaces remain separated, with folder position and set drift', () => {
   const nodes = [
     { id: 'folder:shared', x: 20, y: 0 },
     { id: 'set:shared', x: 20, y: 0 },
   ];
   const colors = new Map();
-  for (let frame = 0; frame < 80; frame += 1) assignSpatialFolderHues(nodes, colors, folderCenter);
+  const state = new Map();
+  for (let frame = 0; frame < 80; frame += 1) assignSpatialFolderHues(nodes, colors, folderCenter, state);
   assert.ok(hueDistance(colors.get('folder:shared'), colors.get('set:shared')) >= MIN_HUE_SEPARATION);
   const settled = new Map(colors);
-  for (let frame = 0; frame < 20; frame += 1) assignSpatialFolderHues([...nodes].reverse(), colors, folderCenter);
+  for (let frame = 0; frame < 20; frame += 1) assignSpatialFolderHues([...nodes].reverse(), colors, folderCenter, state);
   assert.ok(Math.abs(colors.get('folder:shared') - settled.get('folder:shared')) < 1e-6);
   assert.ok(Math.abs(colors.get('set:shared') - settled.get('set:shared')) < 1e-6);
-  assignSpatialFolderHues([{ id: 'set:shared', x: 320, y: 0 }, { id: 'folder:shared', x: 20, y: 0 }], colors, folderCenter);
+  assignSpatialFolderHues([{ id: 'set:shared', x: 320, y: 0 }, { id: 'folder:shared', x: 20, y: 0 }], colors, folderCenter, state);
   assert.notEqual(colors.get('set:shared'), settled.get('set:shared'));
 });

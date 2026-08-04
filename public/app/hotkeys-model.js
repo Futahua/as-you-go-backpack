@@ -4,6 +4,9 @@
 
 export const HOTKEY_SCOPE_WORKSPACE = 'workspace';
 export const HOTKEY_SCOPE_PROMPTS = 'copy-prompts';
+export const DEFAULT_EDGE_OPACITY = 0.5;
+export const DEFAULT_OUTLINE_OPACITY = 1;
+export const DEFAULT_REGION_OPACITY = 1;
 
 const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift', 'Meta'];
 const MODIFIER_ALIASES = new Map([
@@ -384,6 +387,44 @@ export function normalizeHotkeyPreferences(rawPreferences, catalog = HOTKEY_CATA
   return normalizedPreferences(rawPreferences, catalog);
 }
 
+const OPACITY_DEFAULTS = Object.freeze({
+  edgeOpacity: DEFAULT_EDGE_OPACITY,
+  outlineOpacity: DEFAULT_OUTLINE_OPACITY,
+  regionOpacity: DEFAULT_REGION_OPACITY,
+});
+
+function validOpacity(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function normalizeOpacity(key, value) {
+  const fallback = OPACITY_DEFAULTS[key];
+  return validOpacity(value) ? value : fallback;
+}
+
+function getOpacity(rawPreferences, key) {
+  return normalizeOpacity(key, rawPreferences?.[key]);
+}
+
+/** Stores only a non-default creator choice, preserving unrelated preferences. */
+function setOpacity(rawPreferences, key, value) {
+  const next = isRecord(rawPreferences) ? cloneValue(rawPreferences) : {};
+  const opacity = normalizeOpacity(key, value);
+  if (opacity === OPACITY_DEFAULTS[key]) delete next[key];
+  else next[key] = opacity;
+  return next;
+}
+
+export const normalizeEdgeOpacity = (value) => normalizeOpacity('edgeOpacity', value);
+export const getEdgeOpacity = (rawPreferences) => getOpacity(rawPreferences, 'edgeOpacity');
+export const setEdgeOpacity = (rawPreferences, value) => setOpacity(rawPreferences, 'edgeOpacity', value);
+export const normalizeOutlineOpacity = (value) => normalizeOpacity('outlineOpacity', value);
+export const getOutlineOpacity = (rawPreferences) => getOpacity(rawPreferences, 'outlineOpacity');
+export const setOutlineOpacity = (rawPreferences, value) => setOpacity(rawPreferences, 'outlineOpacity', value);
+export const normalizeRegionOpacity = (value) => normalizeOpacity('regionOpacity', value);
+export const getRegionOpacity = (rawPreferences) => getOpacity(rawPreferences, 'regionOpacity');
+export const setRegionOpacity = (rawPreferences, value) => setOpacity(rawPreferences, 'regionOpacity', value);
+
 /** Normalizes the complete project-owned view/preferences object while leaving
  * unrelated future preference records untouched. */
 export function normalizeViewPreferences(rawPreferences, catalog = HOTKEY_CATALOG) {
@@ -391,6 +432,12 @@ export function normalizeViewPreferences(rawPreferences, catalog = HOTKEY_CATALO
   const hotkeys = normalizeHotkeyPreferences(next.hotkeys, catalog);
   if (Object.keys(hotkeys).length > 0) next.hotkeys = hotkeys;
   else delete next.hotkeys;
+  for (const [key, fallback] of Object.entries(OPACITY_DEFAULTS)) {
+    if (!Object.prototype.hasOwnProperty.call(next, key)) continue;
+    const opacity = normalizeOpacity(key, next[key]);
+    if (opacity === fallback) delete next[key];
+    else next[key] = opacity;
+  }
   return next;
 }
 

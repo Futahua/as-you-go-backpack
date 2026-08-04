@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { emptyState, normalizeState } from './public/workspace-model-20260730b.js';
 import {
+  DEFAULT_EDGE_OPACITY,
+  DEFAULT_OUTLINE_OPACITY,
+  DEFAULT_REGION_OPACITY,
   HOTKEY_CATALOG,
   HOTKEY_SCOPE_PROMPTS,
   HOTKEY_SCOPE_WORKSPACE,
@@ -10,12 +13,21 @@ import {
   clearHotkeyOverride,
   createHotkeyCatalog,
   effectiveBindings,
+  getEdgeOpacity,
+  getOutlineOpacity,
+  getRegionOpacity,
   findHotkeyConflict,
   normalizeHotkeyPreferences,
+  normalizeEdgeOpacity,
+  normalizeOutlineOpacity,
+  normalizeRegionOpacity,
   normalizeViewPreferences,
   resetAllHotkeyOverrides,
   resetHotkeyOverride,
   setHotkeyOverride,
+  setEdgeOpacity,
+  setOutlineOpacity,
+  setRegionOpacity,
 } from './public/app/hotkeys-model.js';
 
 test('the explicit catalog contains every current Backpack action exactly once', () => {
@@ -188,4 +200,47 @@ test('workspace state owns hotkeys under view.preferences and normalizes unknown
 
 test('normalizing view preferences removes an empty hotkeys container but keeps unrelated preferences', () => {
   assert.deepEqual(normalizeViewPreferences({ hotkeys: { overrides: {} }, theme: 'paper' }), { theme: 'paper' });
+});
+
+test('edge opacity defaults safely and stores only a non-default view override', () => {
+  assert.equal(DEFAULT_EDGE_OPACITY, 0.5);
+  assert.equal(normalizeEdgeOpacity(undefined), 0.5);
+  assert.equal(normalizeEdgeOpacity('0.8'), 0.5);
+  assert.equal(normalizeEdgeOpacity(-0.1), 0.5);
+  assert.equal(normalizeEdgeOpacity(1.1), 0.5);
+  assert.deepEqual(setEdgeOpacity({ theme: 'paper' }, 0.5), { theme: 'paper' });
+  assert.deepEqual(setEdgeOpacity({ theme: 'paper' }, 0.8), { theme: 'paper', edgeOpacity: 0.8 });
+  assert.deepEqual(setEdgeOpacity({ theme: 'paper', edgeOpacity: 0.8 }, 0.5), { theme: 'paper' });
+  assert.equal(getEdgeOpacity({ edgeOpacity: 0.8 }), 0.8);
+});
+
+test('visual opacity preferences normalize, persist, and remove defaults independently', () => {
+  assert.equal(DEFAULT_OUTLINE_OPACITY, 1);
+  assert.equal(DEFAULT_REGION_OPACITY, 1);
+  assert.equal(normalizeOutlineOpacity('bad'), 1);
+  assert.equal(normalizeRegionOpacity(2), 1);
+  assert.equal(getOutlineOpacity({ outlineOpacity: 0.35 }), 0.35);
+  assert.equal(getRegionOpacity({ regionOpacity: 0.65 }), 0.65);
+  assert.deepEqual(setOutlineOpacity({ edgeOpacity: 0.8, future: true }, 0.35), { edgeOpacity: 0.8, future: true, outlineOpacity: 0.35 });
+  assert.deepEqual(setRegionOpacity({ outlineOpacity: 0.35 }, 0.65), { outlineOpacity: 0.35, regionOpacity: 0.65 });
+  assert.deepEqual(setOutlineOpacity({ outlineOpacity: 0.35 }, 1), {});
+  assert.deepEqual(setRegionOpacity({ regionOpacity: 0.65 }, 1), {});
+});
+
+test('view preference normalization preserves unknown records and repairs edge opacity', () => {
+  assert.deepEqual(normalizeViewPreferences({ edgeOpacity: 0.75, future: { keep: true } }), {
+    edgeOpacity: 0.75,
+    future: { keep: true },
+  });
+  assert.deepEqual(normalizeViewPreferences({ edgeOpacity: 'bad', future: { keep: true } }), {
+    future: { keep: true },
+  });
+});
+
+test('view preference normalization repairs all opacity records while preserving unknowns', () => {
+  assert.deepEqual(normalizeViewPreferences({ edgeOpacity: 0.75, outlineOpacity: 'bad', regionOpacity: 0.25, future: { keep: true } }), {
+    edgeOpacity: 0.75,
+    regionOpacity: 0.25,
+    future: { keep: true },
+  });
 });

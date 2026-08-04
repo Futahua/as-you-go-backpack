@@ -16,6 +16,8 @@ export function createPointerController({
   group,
   visiblePlacementIdFor,
   closeMenu,
+  onDragTrail = () => {},
+  clearDragTrail = () => {},
   setSuppressGraphClick,
   setSuppressBlankClick,
   consumeSuppressGraphClick,
@@ -214,6 +216,7 @@ export function createPointerController({
         node.positioned = true;
       }
       graph.reheat(0.12);
+      onDragTrail(drag.itemIds);
 
       if (!session.binMode && elements.binButton) {
         const overBin = elements.binButton.contains(document.elementFromPoint(event.clientX, event.clientY));
@@ -270,6 +273,7 @@ export function createPointerController({
       if (drag.moved) {
         drag.pinOnRelease = event.shiftKey === true;
         removeShiftListeners();
+        clearDragTrail();
         setSuppressGraphClick(true);
         clearDragVisuals();
         const { hitBin, hitFolderId } = hitTest(event);
@@ -349,6 +353,7 @@ export function createPointerController({
         graph.reheat(0.2);
       }
       clearDragVisuals();
+      clearDragTrail();
       removeShiftListeners();
       drag = null;
       return;
@@ -364,6 +369,7 @@ export function createPointerController({
     if (!drag) return;
     removeShiftListeners();
     clearDragVisuals();
+    clearDragTrail();
     drag = null;
   }
 

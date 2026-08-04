@@ -245,7 +245,17 @@ function buildPromptLayerTree(nodes) {
     nodes['prompt-page-prompts'].appendChild(nodes[id]);
   }
   card.append(nodes['prompt-tab-prompts'], nodes['prompt-tab-hotkeys'], nodes['prompt-page-prompts'], nodes['prompt-page-hotkeys']);
-  nodes['prompt-page-hotkeys'].append(nodes['hotkey-status'], nodes['hotkey-list'], nodes['hotkey-reset-all']);
+  nodes['prompt-page-hotkeys'].append(
+    nodes['hotkey-status'],
+    nodes['edge-opacity-slider'],
+    nodes['edge-opacity-value'],
+    nodes['outline-opacity-slider'],
+    nodes['outline-opacity-value'],
+    nodes['region-opacity-slider'],
+    nodes['region-opacity-value'],
+    nodes['hotkey-list'],
+    nodes['hotkey-reset-all'],
+  );
   nodes['prompt-delete-confirm'].appendChild(nodes['prompt-delete-message']);
   nodes['prompt-delete-confirm'].appendChild(nodes['prompt-delete-ok']);
   nodes['prompt-delete-confirm'].appendChild(nodes['prompt-delete-cancel']);
@@ -287,7 +297,8 @@ function createHarness({ initialView = null, copyFails = false, persist = async 
     'prompt-error', 'prompt-cancel', 'prompt-copy-selected', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
     'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
-    'hotkey-list', 'hotkey-status', 'hotkey-reset-all',
+    'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
+    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'hotkey-reset-all',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);
@@ -414,11 +425,11 @@ test('Hotkeys page renders every injected catalog action and preserves prompt da
   assert.equal(h.getState().view.promptLibrary[0].title, 'Keep me');
 });
 
-test('Hotkeys page capture consumes the event, reports conflicts, and permits cross-scope reuse', () => {
+test('Settings binding capture consumes the event, reports conflicts, and permits cross-scope reuse', () => {
   const h = createHarness();
   open(h);
   h.dialog.setActivePage('hotkeys');
-  hotkeyButton(h, 'workspace.cut', 'change').dispatch('click', { target: hotkeyButton(h, 'workspace.cut', 'change') });
+  hotkeyButton(h, 'workspace.cut', 'binding').dispatch('click', { target: hotkeyButton(h, 'workspace.cut', 'binding') });
   let prevented = false;
   let stopped = false;
   keyFrom(h.nodes['prompt-page-hotkeys'], {
@@ -429,27 +440,75 @@ test('Hotkeys page capture consumes the event, reports conflicts, and permits cr
   assert.equal(prevented, true);
   assert.equal(stopped, true);
   assert.match(h.nodes['hotkey-status'].textContent, /Already used by/);
-  hotkeyButton(h, 'copy-prompts.copy', 'change').dispatch('click', { target: hotkeyButton(h, 'copy-prompts.copy', 'change') });
+  hotkeyButton(h, 'copy-prompts.copy', 'binding').dispatch('click', { target: hotkeyButton(h, 'copy-prompts.copy', 'binding') });
   keyFrom(h.nodes['prompt-page-hotkeys'], { key: 'c', ctrlKey: true, preventDefault, stopPropagation });
   assert.deepEqual(h.getState().view.preferences.hotkeys.overrides['copy-prompts.copy'], ['Ctrl+C']);
 });
 
-test('Hotkeys clear, reset, and reset-all persist preferences', async () => {
+test('Settings rows expose only binding and reset, and Backspace unassigns', async () => {
   const saves = [];
   const h = createHarness({ persist: async (snapshot) => saves.push(snapshot) });
   open(h);
   h.dialog.setActivePage('hotkeys');
-  hotkeyButton(h, 'workspace.copy', 'clear').dispatch('click', { target: hotkeyButton(h, 'workspace.copy', 'clear') });
+  const row = hotkeyRow(h, 'workspace.copy');
+  assert.equal(row.querySelector('.hotkey-defaults'), null);
+  assert.equal(row.querySelector('[data-hotkey-change]'), null);
+  assert.equal(row.querySelector('[data-hotkey-clear]'), null);
+  assert.ok(hotkeyButton(h, 'workspace.copy', 'reset'));
+  hotkeyButton(h, 'workspace.copy', 'binding').dispatch('click', { target: hotkeyButton(h, 'workspace.copy', 'binding') });
+  keyFrom(h.nodes['prompt-page-hotkeys'], { key: 'Backspace', preventDefault, stopPropagation });
   assert.deepEqual(h.getState().view.preferences.hotkeys.overrides['workspace.copy'], []);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.ok(saves.length > 0);
   hotkeyButton(h, 'workspace.copy', 'reset').dispatch('click', { target: hotkeyButton(h, 'workspace.copy', 'reset') });
   assert.equal(h.getState().view.preferences.hotkeys?.overrides, undefined);
-  hotkeyButton(h, 'workspace.copy', 'clear').dispatch('click', { target: hotkeyButton(h, 'workspace.copy', 'clear') });
-  hotkeyButton(h, 'workspace.undo', 'clear').dispatch('click', { target: hotkeyButton(h, 'workspace.undo', 'clear') });
+  hotkeyButton(h, 'workspace.copy', 'binding').dispatch('click', { target: hotkeyButton(h, 'workspace.copy', 'binding') });
+  keyFrom(h.nodes['prompt-page-hotkeys'], { key: 'k', altKey: true, preventDefault, stopPropagation });
+  assert.deepEqual(h.getState().view.preferences.hotkeys.overrides['workspace.copy'], ['Alt+K']);
   h.nodes['hotkey-reset-all'].dispatch('click', { target: h.nodes['hotkey-reset-all'] });
   assert.equal(h.getState().view.preferences.hotkeys?.overrides, undefined);
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+});
+
+test('Settings edge opacity slider persists, updates immediately, and keeps unknown preferences', async () => {
+  const saves = [];
+  const h = createHarness({
+    persist: async (snapshot) => saves.push(JSON.parse(snapshot)),
+    initialView: { preferences: { future: { keep: true } } },
+  });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  assert.equal(h.nodes['edge-opacity-slider'].value, '0.5');
+  assert.equal(h.nodes['edge-opacity-value'].textContent, '50%');
+  h.nodes['edge-opacity-slider'].value = '0.8';
+  h.nodes['edge-opacity-slider'].dispatch('input', { target: h.nodes['edge-opacity-slider'] });
+  assert.equal(h.getState().view.preferences.edgeOpacity, 0.8);
+  assert.deepEqual(h.getState().view.preferences.future, { keep: true });
+  assert.equal(h.nodes['edge-opacity-value'].textContent, '80%');
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(saves.at(-1).view.preferences.edgeOpacity, 0.8);
+});
+
+test('visual opacity settings persist outline and region values independently', async () => {
+  const saves = [];
+  const h = createHarness({
+    persist: async (snapshot) => saves.push(JSON.parse(snapshot)),
+    initialView: { preferences: { outlineOpacity: 0.4, regionOpacity: 0.7 } },
+  });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  assert.equal(h.nodes['outline-opacity-slider'].value, '0.4');
+  assert.equal(h.nodes['outline-opacity-value'].textContent, '40%');
+  assert.equal(h.nodes['region-opacity-slider'].value, '0.7');
+  h.nodes['outline-opacity-slider'].value = '0.25';
+  h.nodes['outline-opacity-slider'].dispatch('input', { target: h.nodes['outline-opacity-slider'] });
+  h.nodes['region-opacity-slider'].value = '0.55';
+  h.nodes['region-opacity-slider'].dispatch('input', { target: h.nodes['region-opacity-slider'] });
+  assert.equal(h.getState().view.preferences.outlineOpacity, 0.25);
+  assert.equal(h.getState().view.preferences.regionOpacity, 0.55);
+  assert.equal(h.getState().view.preferences.edgeOpacity, undefined);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(saves.at(-1).view.preferences.regionOpacity, 0.55);
 });
 
 test('Copy Prompts bindings are scoped to the prompt page and replace Enter', () => {
@@ -1085,7 +1144,8 @@ test('a failed auto-save is surfaced and leaves the dialog open', async () => {
     'prompt-error', 'prompt-cancel', 'prompt-copy-selected', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
     'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
-    'hotkey-list', 'hotkey-status', 'hotkey-reset-all',
+    'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
+    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'hotkey-reset-all',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);

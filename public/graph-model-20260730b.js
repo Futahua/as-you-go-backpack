@@ -1,4 +1,5 @@
 import { itemsIn, binnedItems, itemsInBinnedGroup, ROOT_ID } from './workspace-model-20260730b.js';
+import { belongsToSet } from './sets-model.js';
 
 /** A shortcut's identity for graph purposes is its shared shortcut record
  * (`shortcutId`), not any one placement — a linked shortcut visible from
@@ -71,6 +72,21 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin') {
 export function visibleGraphItems(state, parentId, expandedSet, binMode = false, binCurrentId = 'bin') {
   if (binMode) return collectVisibleBin(state, expandedSet, binCurrentId);
   return collectVisible(state, parentId, expandedSet);
+}
+
+/** Set outlines are owned by direct members visible at the current level.
+ * Inherited descendants still belong to the set, but they do not make its
+ * outline follow the user into a member folder. */
+export function directSetMemberIdsVisible(set, visibleIds) {
+  const direct = new Set(set?.memberIds ?? []);
+  return (Array.isArray(visibleIds) ? visibleIds : []).filter((id) => direct.has(id));
+}
+
+/** Once a set is eligible to draw at a level, its ring encloses every visible
+ * member, including descendants inherited through a member folder. */
+export function inheritedSetMemberIdsVisible(set, visibleIds, ancestorsOfNode) {
+  return (Array.isArray(visibleIds) ? visibleIds : [])
+    .filter((id) => belongsToSet(set, id, ancestorsOfNode));
 }
 
 /** Walks every currently-visible folder (the current one, plus every
@@ -203,20 +219,25 @@ const FOLDER_DISTANCE = 220;
  * 45° is a perceptual, not just numeric, step apart on the color wheel. */
 export const MIN_HUE_SEPARATION = 45;
 
-/** Bounded fraction each hue moves toward its position base per call. */
+/** Original folder easing. Folders are small outlines and retain their accepted
+ * pre-Assignment-015 colour response. */
 const BASE_MOVE = 0.15;
+/** Sets fill a large area, so their hue follows position gently over time. */
+const SET_BASE_MOVE = 0.03;
 
 /** Projection treats separations within this of MIN_HUE_SEPARATION as done. */
 const PROJECTION_EPSILON = 1e-6;
 
 /** Max projection passes over the near-pair list per call. */
-const MAX_PROJECTION_PASSES = 20;
+const MAX_PROJECTION_PASSES = 100;
 
-/** A folder this far from the canvas center gets the full radius hue shift. */
+/** Original folder radius colour terms, retained exactly. */
 const RADIUS_SPAN = 500;
-
-/** Degrees of hue added to the base at the radius span. */
 const RADIUS_WEIGHT = 120;
+
+/** Set hue drift in degrees per pixel travelled. A 600px/s drag produces a
+ * 72°/s target change, then the 0.03 easing limits the rendered change. */
+const SET_DRIFT_DEGREES_PER_PIXEL = 0.12;
 
 /** Angular distance between two hues on the 0..360 circle, in degrees. */
 export function hueDistance(a, b) {
@@ -234,12 +255,28 @@ function signedAngle(from, to) {
   return d > 180 ? d - 360 : d;
 }
 
-/** Position-derived base hue: the angle around `center` plus a radius term, so
- * any drag direction changes the base. */
+/** Original folder position-derived base hue: the angle around `center` plus a
+ * radius term, restored byte-for-byte from the pre-015 implementation. */
 function positionBase(x, y, center) {
   const angle = wrapDeg((Math.atan2(y - center.cy, x - center.cx) * 180) / Math.PI);
   const radius = Math.hypot(x - center.cx, y - center.cy);
   return wrapDeg(angle + (radius / RADIUS_SPAN) * RADIUS_WEIGHT);
+}
+
+function baseFor(entity, center) {
+  return positionBase(entity.x, entity.y, center);
+}
+
+function moveRateFor(entity) {
+  return entity.id.startsWith('set:') ? SET_BASE_MOVE : BASE_MOVE;
+}
+
+function seedHueFor(id) {
+  return (hashString(id) / 0x100000000) * 360;
+}
+
+function distanceTravelled(previous, current) {
+  return Math.hypot(current.x - previous.x, current.y - previous.y);
 }
 
 /** Deterministic hue-space direction for a pair whose hues are identical:
@@ -315,7 +352,7 @@ function greedySlotColoring(nodes, adjacency, k) {
  * component with the fewest slots that work (largest-first greedy) and pick
  * the slot rotation that best matches the folders' position bases, so the
  * effective minimum separation is 360 / slotCount rather than oscillating. */
-function slotColorComponent(componentIds, folderById, colors, center) {
+function slotColorComponent(componentIds, folderById, colors, center, hueState) {
   const ids = [...componentIds].sort();
   const nodes = ids.map((id) => folderById.get(id));
   const adjacency = new Map(ids.map((id) => [id, []]));
@@ -338,13 +375,17 @@ function slotColorComponent(componentIds, folderById, colors, center) {
   let bestCost = Infinity;
   for (const candidate of ids) {
     const rotation = wrapDeg(
-      positionBase(folderById.get(candidate).x, folderById.get(candidate).y, center)
+      folderById.get(candidate).id.startsWith('set:')
+        ? (hueState.get(candidate)?.target ?? colors.get(candidate))
+        : baseFor(folderById.get(candidate), center)
       - slots.get(candidate) * gap,
     );
     let cost = 0;
     for (const id of ids) {
       const hue = wrapDeg(rotation + slots.get(id) * gap);
-      const base = positionBase(folderById.get(id).x, folderById.get(id).y, center);
+      const base = folderById.get(id).id.startsWith('set:')
+        ? (hueState.get(id)?.target ?? colors.get(id))
+        : baseFor(folderById.get(id), center);
       cost += Math.abs(signedAngle(base, hue));
     }
     if (cost < bestCost) {
@@ -358,11 +399,8 @@ function slotColorComponent(componentIds, folderById, colors, center) {
 }
 
 /**
- * Re-derives every folder's hue from its current absolute position on the
- * canvas as a warm-started constraint solver, so colors are never static:
- * position is an objective, minimum separation is a constraint. Each call
- * moves every hue a bounded amount toward its position base (angle around
- * `center` plus a radius term, so any drag direction re-colors it), then
+ * Updates folder hues from their original position mapping and set hues from
+ * stable-id seeds plus accumulated travel distance, then
  * projects every pair within FOLDER_DISTANCE apart until no pair is closer
  * than MIN_HUE_SEPARATION. Pair traversal alternates forward/reverse between
  * passes to reduce solver-order bias; ties use a deterministic direction.
@@ -371,10 +409,11 @@ function slotColorComponent(componentIds, folderById, colors, center) {
  * more than eight colors), the affected component is re-colored with the fewest
  * slots that work, for an effective minimum separation of 360 / slotCount.
  *
- * `folders` is an array of { id, x, y }; `colors` is the id -> hue map that is
- * mutated in place (it carries the warm-start state between calls).
+ * `folders` is an array of { id, x, y }; `colors` is the id -> displayed hue
+ * map. `hueState` is session-only set state: callers keep it alive while a set
+ * may disappear and reappear, and never persist it.
  */
-export function assignSpatialFolderHues(folders, colors, center) {
+export function assignSpatialFolderHues(folders, colors, center, hueState = new Map()) {
   const list = [...folders].sort((a, b) => a.id.localeCompare(b.id));
   const folderById = new Map(list.map((folder) => [folder.id, folder]));
   const nearPairs = [];
@@ -386,16 +425,32 @@ export function assignSpatialFolderHues(folders, colors, center) {
     }
   }
 
-  // Warm start missing hues, then move every hue a bounded amount toward its
-  // position-derived base so isolated folders track their canvas position.
+  // Folders retain their position mapping. Sets seed from stable identity and
+  // advance only by distance travelled; absolute coordinates never enter this
+  // target after the initial seed.
   for (const folder of list) {
-    const base = positionBase(folder.x, folder.y, center);
     const current = colors.get(folder.id);
+    if (folder.id.startsWith('set:')) {
+      let state = hueState.get(folder.id);
+      if (!state) {
+        state = { x: folder.x, y: folder.y, target: seedHueFor(folder.id) };
+        hueState.set(folder.id, state);
+      } else {
+        state.target = wrapDeg(state.target + distanceTravelled(state, folder) * SET_DRIFT_DEGREES_PER_PIXEL);
+        state.x = folder.x;
+        state.y = folder.y;
+      }
+      const target = state.target;
+      if (typeof current !== 'number') colors.set(folder.id, target);
+      else colors.set(folder.id, wrapDeg(current + signedAngle(current, target) * SET_BASE_MOVE));
+      continue;
+    }
+    const base = baseFor(folder, center);
     if (typeof current !== 'number') {
       colors.set(folder.id, base);
       continue;
     }
-    colors.set(folder.id, wrapDeg(current + signedAngle(current, base) * BASE_MOVE));
+    colors.set(folder.id, wrapDeg(current + signedAngle(current, base) * moveRateFor(folder)));
   }
 
   // Hard projection: fully resolve every violating pair (never damped).
@@ -433,7 +488,7 @@ export function assignSpatialFolderHues(folders, colors, center) {
   }
   if (violatedIds.size > 0) {
     for (const component of componentsNearViolations(nearPairs, [...violatedIds])) {
-      slotColorComponent(component, folderById, colors, center);
+      slotColorComponent(component, folderById, colors, center, hueState);
     }
   }
 

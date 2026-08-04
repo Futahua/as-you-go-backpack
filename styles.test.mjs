@@ -81,3 +81,34 @@ test('workspace warnings are overlay toasts with a fade state', () => {
   const fadingRule = toolbarCss.match(/\.status\.status-fading\s*\{[^}]*\}/)?.[0] ?? '';
   assert.ok(/opacity:\s*0/.test(fadingRule), 'the dismissal has a visible fade state');
 });
+
+test('graph connector opacity is controlled by one container variable with the accepted default', () => {
+  const edgeRule = graphCss.match(/\.graph-edge\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/opacity:\s*var\(--graph-edge-opacity,\s*\.5\)/.test(edgeRule));
+});
+
+test('set outlines and named-set glyphs share outline opacity, while selected regions stay stronger', () => {
+  const outlineRule = graphCss.match(/\.graph-set-outline\s*\{[^}]*\}/)?.[0] ?? '';
+  const glyphRule = graphCss.match(/\.graph-set-glyphs\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/opacity:\s*var\(--graph-outline-opacity,\s*1\)/.test(outlineRule));
+  assert.ok(/opacity:\s*var\(--graph-outline-opacity,\s*1\)/.test(glyphRule), 'named set glyphs follow outline opacity');
+  const baseRegion = graphCss.match(/\.graph-set-region\s*\{[^}]*\}/)?.[0] ?? '';
+  const selectedRegion = graphCss.match(/\.graph-set-region\.region-selected\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/calc\(12% \* var\(--graph-region-opacity,\s*1\)\)/.test(baseRegion));
+  assert.ok(/calc\(24% \* var\(--graph-region-opacity,\s*1\)\)/.test(selectedRegion), 'selected fill remains 2x the base strength');
+});
+
+test('settings opacity controls share a three-column layout and wrap on narrow panels', () => {
+  const rule = dialogCss.match(/\.settings-preferences\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/.test(rule));
+  assert.ok(/@media\s*\(max-width:\s*560px\)/.test(dialogCss));
+});
+
+test('prompt modal separates navigation tabs from create actions', () => {
+  const headerRule = dialogCss.match(/\.prompt-library-header\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/border-bottom:\s*1px solid/.test(headerRule), 'tabs get a dedicated header boundary');
+  const tabsRule = dialogCss.match(/\.prompt-library-tabs\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/background:\s*#f5f0df/.test(tabsRule), 'tabs have a navigation treatment');
+  const actionRule = dialogCss.match(/\.prompt-library-add-actions\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/border-bottom:\s*1px solid/.test(actionRule), 'create actions get their own separation');
+});

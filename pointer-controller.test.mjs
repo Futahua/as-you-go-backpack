@@ -78,7 +78,7 @@ function createHarness({ binMode = false } = {}) {
     releaseDraggedNodes: (input) => { commandCalls.push(['release', input]); },
   };
   const graphNodes = new Map();
-  const effects = { reheat: [], decay: 0, close: 0, suppressGraph: [], suppressBlank: [], ejected: [] };
+  const effects = { reheat: [], decay: 0, close: 0, suppressGraph: [], suppressBlank: [], ejected: [], trails: [], trailClear: 0 };
   const graph = {
     _getNode: (id) => graphNodes.get(id) ?? null,
     reheat: (a) => { effects.reheat.push(a); },
@@ -108,6 +108,8 @@ function createHarness({ binMode = false } = {}) {
     group: () => null,
     visiblePlacementIdFor: (id) => `p-${id}`,
     closeMenu: () => { effects.close += 1; },
+    onDragTrail: (ids) => { effects.trails.push([...ids]); },
+    clearDragTrail: () => { effects.trailClear += 1; },
     setSuppressGraphClick: (v) => { effects.suppressGraph.push(v); },
     setSuppressBlankClick: (v) => { effects.suppressBlank.push(v); },
     consumeSuppressGraphClick: () => {
@@ -176,6 +178,29 @@ test('pointermove beyond threshold moves the dragged nodes', () => {
   assert.equal(n.fx, 110); // startWorld derived from client coords with identity transform
   assert.equal(n.fy, 105);
   assert.ok(h.effects.reheat.length > 0);
+  assert.deepEqual(h.effects.trails.at(-1), ['s1']);
+});
+
+test('many-small-step drag keeps pointer tracking error exactly zero', () => {
+  const h = createHarness();
+  const n = node('s1', 100, 100);
+  h.graphNodes.set('s1', n);
+  h.store.setSelection(['s1']);
+  const tile = fakeNode();
+  tile.dataset = { id: 's1', kind: 'shortcut' };
+  tile.closest = (sel) => (sel === '.icon-item' ? tile : sel === '.graph-node-shell' ? tile : null);
+  h.grid._dispatch('pointerdown', pointerEvent(1, 10, 10, { target: tile }));
+  h.grid._dispatch('pointermove', pointerEvent(1, 20, 15));
+  let trackingError = 0;
+  for (let step = 1; step <= 120; step += 1) {
+    const clientX = 20 + step * 0.75;
+    const clientY = 15 + step * 0.5;
+    h.grid._dispatch('pointermove', pointerEvent(1, clientX, clientY));
+    trackingError += Math.abs(n.x - (110 + step * 0.75)) + Math.abs(n.y - (105 + step * 0.5));
+  }
+  assert.equal(trackingError, 0);
+  assert.equal(h.effects.trails.length, 121);
+  assert.equal(h.effects.reheat.filter((value) => value === 0.12).length, 121);
 });
 
 test('pointerup on the Bin routes dragDropToBin', () => {
@@ -227,6 +252,7 @@ test('pointerup without pin routes releaseDraggedNodes', () => {
   const releaseCall = h.commandCalls.find(([name]) => name === 'release');
   assert.ok(releaseCall);
   assert.deepEqual(releaseCall[1].itemIds, ['s1']);
+  assert.equal(h.effects.trailClear, 1);
 });
 
 test('pointerdown on blank starts the marquee', () => {
@@ -249,6 +275,7 @@ test('cancelDrag removes shift listeners and clears visuals', () => {
   h.grid._dispatch('pointermove', pointerEvent(1, 20, 15));
   assert.ok(h.windowListeners.length > 0);
   h.controller.cancelDrag();
+  assert.equal(h.effects.trailClear, 1);
   assert.equal(h.windowListeners.length, 0);
 });
 
@@ -323,6 +350,7 @@ test('pointercancel restores node positions and cleans up', () => {
   assert.equal(n.fy, null);
   assert.equal(n.shell.classList.contains('graph-dragging'), false);
   assert.ok(h.effects.reheat.includes(0.2));
+  assert.equal(h.effects.trailClear, 1);
   assert.equal(h.getReleased(), 1);
 });
 

@@ -49,7 +49,8 @@ import {
 } from './vendor/d3-force.js';
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
-import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
+import { animate } from './vendor/anime.js';
+import { visibleGraphItems, directSetMemberIdsVisible, inheritedSetMemberIdsVisible, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
 import { belongsToSet } from './sets-model.js';
 import {
   reconcileRing,
@@ -65,6 +66,9 @@ import {
 } from './set-ring-model.js';
 import { forceSetGravity, forceSetExclusion, forceSetSeparation } from './set-gravity-model.js';
 import { glyphPath, layoutTitleGlyphs } from './set-glyph-model.js';
+import { createSetEffectsController } from './set-effects-model.js';
+import { createDragTrailController } from './drag-trail-model.js';
+import { decomposeRegions, regionCentroid, regionPath } from './set-region-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -72,6 +76,7 @@ import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
 import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
+import { getEdgeOpacity, getOutlineOpacity, getRegionOpacity } from './app/hotkeys-model.js';
 import { resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
@@ -339,12 +344,19 @@ function createGraphController() {
   let camera = null;
   let edgeLayer = null;
   let setLayer = null;
+  let regionLayer = null;
+  let effectsLayer = null;
   // One path per set, and the ring nodes whose positions it is drawn through.
   // The nodes live in the simulation alongside the icons, so the outline is
   // wherever the physics put them rather than a shape computed from the
   // members' positions.
   const setShapes = new Map();
+  const regionShapes = new Map();
+  let regionLayoutKey = null;
+  let regionCache = [];
   const setRings = new Map();
+  const setEffects = createSetEffectsController({ document, animate });
+  const dragTrail = createDragTrailController({ document, animate });
   // A ring node's collision radius.
   //
   // This was 18, reasoned as "only has to exceed half the spacing, since an
@@ -372,12 +384,12 @@ function createGraphController() {
   let pendingInitialFit = false;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
-  // Folder hues span the whole color spectrum (see assignSpatialFolderHues),
-  // kept per folder id in a session map that carries the relaxation state, so
-  // colors follow the folder positions and update as they are dragged.
+  // Folder hues retain their position solver state; set hues retain a seeded,
+  // distance-drift state. Both maps are session-only and never persisted.
   // One namespace is shared by folders and visible set outlines. Prefixing
   // ids prevents a folder id and set id with the same text from colliding.
   const spatialColors = new Map();
+  const spatialHueState = new Map();
 
   function folderColor(id) {
     const hue = spatialColors.get(`folder:${id}`);
@@ -388,6 +400,11 @@ function createGraphController() {
 
   function setColor(id) {
     const hue = spatialColors.get(`set:${id}`);
+    return typeof hue === 'number' ? `oklch(68% 0.18 ${hue}deg)` : null;
+  }
+
+  function regionColor(id) {
+    const hue = spatialColors.get(`region:${id}`);
     return typeof hue === 'number' ? `oklch(68% 0.18 ${hue}deg)` : null;
   }
 
@@ -408,8 +425,14 @@ function createGraphController() {
     // top of them.
     setLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     setLayer.setAttribute('class', 'graph-set-layer');
+    regionLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    regionLayer.setAttribute('class', 'graph-set-region-layer');
+    effectsLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    effectsLayer.setAttribute('class', 'graph-set-effects-layer');
+    dragTrail.setLayer(effectsLayer);
     edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    svg.append(setLayer, edgeLayer);
+    svg.append(regionLayer, effectsLayer, setLayer, edgeLayer);
+    syncEdgeOpacity();
 
     nodeLayer = document.createElement('div');
     nodeLayer.className = 'graph-node-layer';
@@ -440,6 +463,8 @@ function createGraphController() {
       camera = null;
       edgeLayer = null;
       setLayer = null;
+      regionLayer = null;
+      effectsLayer = null;
       setShapes.clear();
       setRings.clear();
       nodeLayer = null;
@@ -480,11 +505,18 @@ function createGraphController() {
     // otherwise survive into the next attach and describe rings that no longer
     // exist.
     setShapes.clear();
+    regionShapes.clear();
+    regionLayoutKey = null;
+    regionCache = [];
     setRings.clear();
+    setEffects.clear();
+    dragTrail.clear();
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
     setLayer = null;
+    regionLayer = null;
+    effectsLayer = null;
     nodeLayer = null;
     svg = null;
     viewportSelection = null;
@@ -513,6 +545,7 @@ function createGraphController() {
         `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
     });
     drawSetRings();
+    syncEdgeOpacity();
     syncFolderColors();
     edges.forEach((edge) => {
       const source = nodes.get(edge.sourceId);
@@ -526,6 +559,20 @@ function createGraphController() {
       if (!source || !target || !edge.path) return;
       edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
     });
+  }
+
+  function syncEdgeOpacity() {
+    if (!svg) return;
+    const preferences = state.view?.preferences;
+    const values = {
+      '--graph-edge-opacity': getEdgeOpacity(preferences),
+      '--graph-outline-opacity': getOutlineOpacity(preferences),
+      '--graph-region-opacity': getRegionOpacity(preferences),
+    };
+    for (const [property, value] of Object.entries(values)) {
+      const opacity = String(value);
+      if (svg.style.getPropertyValue(property) !== opacity) svg.style.setProperty(property, opacity);
+    }
   }
 
   function edgePath(x1, y1, x2, y2) {
@@ -573,14 +620,26 @@ function createGraphController() {
     return ids;
   }
 
-  /** The visible members of a set, as rectangles the ring can enclose. */
+  /** A direct member visible at this level makes the set eligible to draw here. */
+  function setDrawsAtCurrentLevel(itemSet, visibleIds) {
+    return directSetMemberIdsVisible(itemSet, visibleIds).length > 0;
+  }
+
+  /** The visible members of a set, as rectangles the ring can enclose. The
+   * eligibility gate above is intentionally separate: once a set draws, its
+   * outline encloses every visible inherited member, not only direct members. */
   function membersOnScreen(setId) {
     const itemSet = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId);
     if (!itemSet) return [];
+    const visibleIds = [...nodes]
+      .filter(([, node]) => !node.exiting)
+      .map(([nodeId]) => nodeId);
+    if (!setDrawsAtCurrentLevel(itemSet, visibleIds)) return [];
+    const inheritedIds = new Set(inheritedSetMemberIdsVisible(itemSet, visibleIds, ancestorsOfNode));
     const members = [];
     for (const [nodeId, node] of nodes) {
       if (node.exiting) continue;
-      if (!belongsToSet(itemSet, nodeId, ancestorsOfNode)) continue;
+      if (!inheritedIds.has(nodeId)) continue;
       members.push({ id: nodeId, x: node.x, y: node.y, width: node.width, height: node.height });
     }
     return members;
@@ -652,9 +711,20 @@ function createGraphController() {
           shape.path?.remove();
           shape.glyphs?.remove();
           setShapes.delete(setId);
-        }, 200);
+      }, 200);
       }
     }
+
+    const picking = setMembershipMode?.isActive() === true;
+    const chosen = picking ? new Set(setMembershipMode.chosenSetIds()) : null;
+    const partial = picking ? new Set(setMembershipMode.mixedSetIds()) : null;
+    syncSetRegions({ picking, chosen, partial });
+    setEffects.sync({
+      selectedSetIds: session.selectedSets,
+      regions: regionShapes,
+      colorFor: regionColor,
+      effectsLayer,
+    });
 
     // One line per reconcile, so a set that exists in the data but never
     // reaches the screen can be told apart from one that was never created.
@@ -823,6 +893,67 @@ function createGraphController() {
       shape.glyphs?.classList.toggle('set-chosen', picking && chosen.has(setId));
       shape.glyphs?.classList.toggle('set-partial', picking && partial.has(setId));
     }
+    syncSetRegions({ picking, chosen, partial });
+    setEffects.sync({
+      selectedSetIds: session.selectedSets,
+      regions: regionShapes,
+      colorFor: regionColor,
+      effectsLayer,
+    });
+  }
+
+  function syncSetRegions({ picking, chosen, partial }) {
+    if (!regionLayer) return;
+    const source = [...setShapes.values()]
+      .filter((shape) => !shape.retiring && Array.isArray(shape.outline) && shape.outline.length >= 3)
+      .map((shape) => ({ id: shape.setId, outline: shape.outline }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const layoutKey = source.map((shape) => `${shape.id}:${shape.outline.map(({ x, y }) => `${x},${y}`).join('|')}`).join(';');
+    if (layoutKey !== regionLayoutKey) {
+      regionCache = decomposeRegions(source).map((region) => ({
+        ...region,
+        center: regionCentroid(region),
+      }));
+      regionLayoutKey = layoutKey;
+    }
+    const regions = regionCache;
+    const wanted = new Set(regions.map(({ id }) => id));
+    for (const region of regions) {
+      let shape = regionShapes.get(region.id);
+      if (!shape) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-set-region');
+        path.setAttribute('fill-rule', 'nonzero');
+        path.dataset.regionId = `region:${region.id}`;
+        path.dataset.setIds = region.setIds.join('|');
+        regionLayer.append(path);
+        shape = { id: region.id, path, setIds: region.setIds, center: null };
+        regionShapes.set(region.id, shape);
+      }
+      const d = regionPath(region);
+      if (shape.path.getAttribute('d') !== d) shape.path.setAttribute('d', d);
+      shape.setIds = region.setIds;
+      shape.center = region.center;
+      shape.path.dataset.setIds = region.setIds.join('|');
+      const selected = region.setIds.some((setId) => session.selectedSets?.has(setId) === true);
+      shape.path.classList.toggle('region-selected', selected);
+      shape.path.classList.toggle('region-picking', picking);
+      shape.path.classList.toggle('region-chosen', picking && region.setIds.some((setId) => chosen?.has(setId)));
+      shape.path.classList.toggle('region-partial', picking && region.setIds.some((setId) => partial?.has(setId)));
+    }
+    for (const [id, shape] of regionShapes) {
+      if (wanted.has(id)) continue;
+      shape.path.remove();
+      regionShapes.delete(id);
+    }
+  }
+
+  function recordDragTrail(itemIds) {
+    const points = (itemIds ?? [])
+      .map((id) => nodes.get(id))
+      .filter((node) => node && !node.exiting)
+      .map((node) => ({ x: node.x, y: node.y }));
+    dragTrail.record(points);
   }
 
   function buildCandidate(vi) {
@@ -963,11 +1094,15 @@ function createGraphController() {
           return point ? { id: `set:${shape.setId}`, ...point } : null;
         })
         .filter(Boolean),
+      ...[...regionShapes.values()]
+        .filter((shape) => shape.center)
+        .map((shape) => ({ id: `region:${shape.id}`, ...shape.center })),
     ];
     assignSpatialFolderHues(
       spatialNodes,
       spatialColors,
       center,
+      spatialHueState,
     );
     for (const node of folderNodes) {
       const hue = spatialColors.get(`folder:${node.id}`);
@@ -990,6 +1125,10 @@ function createGraphController() {
         shape.path.style.setProperty('--set-color', color);
         shape.glyphs?.style.setProperty('--set-color', color);
       }
+    }
+    for (const shape of regionShapes.values()) {
+      const color = regionColor(shape.id);
+      if (color) shape.path.style.setProperty('--region-color', color);
     }
   }
 
@@ -1420,12 +1559,16 @@ function createGraphController() {
     updateGraphView,
     destroyGraphView,
     refreshSelection,
+    refreshEdgeOpacity: syncEdgeOpacity,
     reheat,
     fitGraph,
     ancestorsOfNode,
     setIdsAtPoint,
     setPathFor: (id) => setShapes.get(id)?.path ?? null,
     ejectTrespassers,
+    recordDragTrail,
+    clearDragTrail: () => dragTrail.clear(),
+    get dragTrailCount() { return dragTrail.count; },
     _getNode: (id) => nodes.get(id) ?? null,
     _setOnDragCancel(callback) { onDragCancel = callback; },
     _setSimulationDecay() {
@@ -1966,6 +2109,8 @@ const pointer = createPointerController({
   group,
   visiblePlacementIdFor,
   closeMenu,
+  onDragTrail: (itemIds) => graph.recordDragTrail(itemIds),
+  clearDragTrail: () => graph.clearDragTrail(),
   setSuppressGraphClick: (value) => { suppressGraphClick = value; },
   setSuppressBlankClick: (value) => { suppressBlankClick = value; },
   consumeSuppressGraphClick: () => {
@@ -2058,6 +2203,10 @@ const promptLibrary = createPromptLibraryDialog({
   fallbackPrompt: PICKUP_PROMPT,
   copyText: (text) => host.copyText(text),
   setStatus,
+  onViewPreferencesChanged: () => {
+    graph.refreshEdgeOpacity();
+    render();
+  },
 });
 
 bootstrapWorkspace({

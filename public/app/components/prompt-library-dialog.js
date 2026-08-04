@@ -45,8 +45,14 @@ import {
   assignHotkey,
   clearHotkeyOverride,
   effectiveBindings,
+  getEdgeOpacity,
+  getOutlineOpacity,
+  getRegionOpacity,
   resetAllHotkeyOverrides,
   resetHotkeyOverride,
+  setEdgeOpacity,
+  setOutlineOpacity,
+  setRegionOpacity,
 } from '../hotkeys-model.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -102,6 +108,7 @@ export function createPromptLibraryDialog({
   copyText,
   setStatus,
   hotkeyCatalog = HOTKEY_CATALOG,
+  onViewPreferencesChanged = null,
 }) {
   let abortController = null;
   let history = createPromptLibraryHistory([]);
@@ -132,6 +139,12 @@ export function createPromptLibraryDialog({
   const hotkeyList = document.querySelector('#hotkey-list');
   const hotkeyStatus = document.querySelector('#hotkey-status');
   const resetAllHotkeysButton = document.querySelector('#hotkey-reset-all');
+  const edgeOpacitySlider = document.querySelector('#edge-opacity-slider');
+  const edgeOpacityValue = document.querySelector('#edge-opacity-value');
+  const outlineOpacitySlider = document.querySelector('#outline-opacity-slider');
+  const outlineOpacityValue = document.querySelector('#outline-opacity-value');
+  const regionOpacitySlider = document.querySelector('#region-opacity-slider');
+  const regionOpacityValue = document.querySelector('#region-opacity-value');
   const addPromptButton = document.querySelector('#prompt-add-prompt');
   const addFolderButton = document.querySelector('#prompt-add-folder');
   const cardList = document.querySelector('#prompt-card-list');
@@ -342,19 +355,23 @@ export function createPromptLibraryDialog({
     return store.getSnapshot()?.view?.preferences?.hotkeys ?? {};
   }
 
-  function persistHotkeyPreferences(nextPreferences, message) {
+  function currentViewPreferences() {
+    return store.getSnapshot()?.view?.preferences ?? {};
+  }
+
+  function persistViewPreferences(nextPreferences, message) {
     const current = store.getSnapshot();
     const next = {
       ...current,
       view: {
         ...current.view,
         preferences: {
-          ...(current.view?.preferences ?? {}),
-          hotkeys: nextPreferences,
+          ...nextPreferences,
         },
       },
     };
     store.replace(next);
+    onViewPreferencesChanged?.(next);
     hotkeyStatusMessage(message);
     void store.save(next)
       .then(() => hotkeyStatusMessage(message))
@@ -362,6 +379,10 @@ export function createPromptLibraryDialog({
         caught instanceof Error ? caught.message : String(caught),
         { error: true },
       ));
+  }
+
+  function persistHotkeyPreferences(nextPreferences, message) {
+    persistViewPreferences({ ...currentViewPreferences(), hotkeys: nextPreferences }, message);
   }
 
   function setActivePage(page) {
@@ -374,8 +395,30 @@ export function createPromptLibraryDialog({
     renderHotkeys();
   }
 
+  const opacityControls = [
+    { slider: edgeOpacitySlider, output: edgeOpacityValue, get: getEdgeOpacity, set: setEdgeOpacity, label: 'Connector opacity' },
+    { slider: outlineOpacitySlider, output: outlineOpacityValue, get: getOutlineOpacity, set: setOutlineOpacity, label: 'Set outline opacity' },
+    { slider: regionOpacitySlider, output: regionOpacityValue, get: getRegionOpacity, set: setRegionOpacity, label: 'Region fill opacity' },
+  ];
+
+  function renderOpacityControls() {
+    const preferences = currentViewPreferences();
+    for (const control of opacityControls) {
+      if (!control.slider) continue;
+      const opacity = control.get(preferences);
+      control.slider.value = String(opacity);
+      if (control.output) control.output.textContent = `${Math.round(opacity * 100)}%`;
+    }
+  }
+
+  function focusCapturedBinding() {
+    if (!capturingActionId) return;
+    hotkeyList?.querySelector(`[data-hotkey-binding="${capturingActionId}"]`)?.focus?.();
+  }
+
   function renderHotkeys() {
     if (!hotkeyList) return;
+    renderOpacityControls();
     hotkeyList.textContent = '';
     const groups = [];
     const byGroup = new Map();
@@ -403,14 +446,15 @@ export function createPromptLibraryDialog({
         label.textContent = action.label;
         const current = document.createElement('span');
         current.className = 'hotkey-current';
+        current.dataset.hotkeyBinding = action.id;
+        current.setAttribute('role', 'button');
+        current.setAttribute('tabindex', '0');
+        current.title = 'Click to change this binding';
         const bindings = effectiveBindings(action.id, currentHotkeyPreferences(), hotkeyCatalog);
         current.textContent = bindings.length > 0 ? bindings.join(' · ') : 'Unassigned';
-        const defaults = document.createElement('span');
-        defaults.className = 'hotkey-defaults';
-        defaults.textContent = `Default: ${action.defaults.join(' · ')}`;
         const details = document.createElement('div');
         details.className = 'hotkey-details';
-        details.append(label, current, defaults);
+        details.append(label, current);
 
         const controls = document.createElement('div');
         controls.className = 'hotkey-controls';
@@ -422,25 +466,17 @@ export function createPromptLibraryDialog({
           cancel.textContent = 'Cancel';
           controls.append(cancel);
           current.textContent = 'Press shortcut…';
+          current.title = 'Press a shortcut, Backspace to unassign, or click outside to cancel';
         } else {
-          const change = document.createElement('button');
-          change.type = 'button';
-          change.className = 'paper-button';
-          change.dataset.hotkeyChange = action.id;
-          change.textContent = 'Change';
-          controls.append(change);
+          // The binding itself is the edit control. Reset remains separate so
+          // the creator can restore the catalog default without entering capture.
         }
-        const clear = document.createElement('button');
-        clear.type = 'button';
-        clear.className = 'paper-button';
-        clear.dataset.hotkeyClear = action.id;
-        clear.textContent = 'Clear';
         const reset = document.createElement('button');
         reset.type = 'button';
         reset.className = 'paper-button';
         reset.dataset.hotkeyReset = action.id;
         reset.textContent = 'Reset';
-        controls.append(clear, reset);
+        controls.append(reset);
         row.append(details, controls);
         section.append(row);
       }
@@ -450,28 +486,19 @@ export function createPromptLibraryDialog({
 
   function onHotkeyPageClick(event) {
     const target = event.target;
-    const change = target.closest?.('[data-hotkey-change]');
+    const binding = target.closest?.('[data-hotkey-binding]');
     const cancel = target.closest?.('[data-hotkey-cancel]');
-    const clear = target.closest?.('[data-hotkey-clear]');
     const reset = target.closest?.('[data-hotkey-reset]');
-    if (change) {
-      capturingActionId = change.dataset.hotkeyChange;
-      hotkeyStatusMessage('Press shortcut…');
+    if (binding) {
+      capturingActionId = binding.dataset.hotkeyBinding;
+      hotkeyStatusMessage('Press a shortcut. Backspace unassigns; click outside cancels.');
       renderHotkeys();
+      focusCapturedBinding();
       return;
     }
     if (cancel) {
       capturingActionId = null;
       hotkeyStatusMessage('Shortcut change canceled.');
-      renderHotkeys();
-      return;
-    }
-    if (clear) {
-      capturingActionId = null;
-      persistHotkeyPreferences(
-        clearHotkeyOverride(currentHotkeyPreferences(), clear.dataset.hotkeyClear, hotkeyCatalog),
-        'Binding cleared.',
-      );
       renderHotkeys();
       return;
     }
@@ -492,9 +519,29 @@ export function createPromptLibraryDialog({
   }
 
   function onHotkeyPageKeyDown(event) {
-    if (activePage !== 'hotkeys' || !capturingActionId) return;
+    if (activePage !== 'hotkeys') return;
+    const binding = event.target?.closest?.('[data-hotkey-binding]');
+    if (!capturingActionId && binding && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      capturingActionId = binding.dataset.hotkeyBinding;
+      hotkeyStatusMessage('Press a shortcut. Backspace unassigns; click outside cancels.');
+      renderHotkeys();
+      focusCapturedBinding();
+      return;
+    }
+    if (!capturingActionId) return;
     event.preventDefault();
     event.stopPropagation();
+    if (event.key === 'Backspace') {
+      const actionId = capturingActionId;
+      capturingActionId = null;
+      persistHotkeyPreferences(
+        clearHotkeyOverride(currentHotkeyPreferences(), actionId, hotkeyCatalog),
+        'Binding unassigned.',
+      );
+      renderHotkeys();
+      return;
+    }
     const result = assignHotkey(
       currentHotkeyPreferences(),
       capturingActionId,
@@ -523,6 +570,16 @@ export function createPromptLibraryDialog({
       'All bindings reset to their defaults.',
     );
     renderHotkeys();
+  }
+
+  function onOpacityInput(event) {
+    const control = opacityControls.find(({ slider }) => slider === event.target);
+    if (!control) return;
+    persistViewPreferences(
+      control.set(currentViewPreferences(), Number(control.slider.value)),
+      `${control.label} updated.`,
+    );
+    renderOpacityControls();
   }
 
   /** Copy selected is only meaningful with a selection, so it stays disabled until
@@ -1488,6 +1545,7 @@ export function createPromptLibraryDialog({
     hotkeysTab?.addEventListener('click', () => setActivePage('hotkeys'), { signal });
     hotkeysPage?.addEventListener('click', onHotkeyPageClick, { signal });
     hotkeysPage?.addEventListener('keydown', onHotkeyPageKeyDown, { signal });
+    hotkeysPage?.addEventListener('input', onOpacityInput, { signal });
     resetAllHotkeysButton?.addEventListener('click', resetAllHotkeys, { signal });
     copyButton.addEventListener('contextmenu', (event) => {
       event.preventDefault();

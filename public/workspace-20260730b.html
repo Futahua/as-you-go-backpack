@@ -103,12 +103,12 @@
       </section>
 
       <section class="confirm-layer" id="prompt-layer" hidden>
-        <div class="confirm-card prompt-library" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
+        <div class="confirm-card prompt-library" role="dialog" aria-modal="true" aria-labelledby="prompt-dialog-label">
           <header class="prompt-library-header">
-            <h2 id="prompt-title">Copy</h2>
-            <nav class="prompt-library-tabs" aria-label="Copy prompt pages">
+            <span id="prompt-dialog-label" class="sr-only">Prompt library</span>
+            <nav class="prompt-library-tabs" aria-label="Prompt library pages">
               <button id="prompt-tab-prompts" class="paper-button prompt-tab" type="button" aria-selected="true">Prompts</button>
-              <button id="prompt-tab-hotkeys" class="paper-button prompt-tab" type="button" aria-selected="false">Hotkeys</button>
+              <button id="prompt-tab-hotkeys" class="paper-button prompt-tab" type="button" aria-selected="false">Settings</button>
             </nav>
           </header>
           <div id="prompt-page-prompts" class="prompt-page">
@@ -137,6 +137,20 @@
           </div>
           <div id="prompt-page-hotkeys" class="prompt-page hotkeys-page" hidden>
             <p id="hotkey-status" class="prompt-library-status" role="status" aria-live="polite"></p>
+            <section class="settings-preferences" aria-label="Visual opacity">
+              <div class="settings-opacity-control">
+                <label id="edge-opacity-label" for="edge-opacity-slider">Connector opacity <output id="edge-opacity-value" for="edge-opacity-slider">50%</output></label>
+                <input id="edge-opacity-slider" type="range" min="0" max="1" step="0.05" value="0.5" />
+              </div>
+              <div class="settings-opacity-control">
+                <label id="outline-opacity-label" for="outline-opacity-slider">Set outline opacity <output id="outline-opacity-value" for="outline-opacity-slider">100%</output></label>
+                <input id="outline-opacity-slider" type="range" min="0" max="1" step="0.05" value="1" />
+              </div>
+              <div class="settings-opacity-control">
+                <label id="region-opacity-label" for="region-opacity-slider">Region fill opacity <output id="region-opacity-value" for="region-opacity-slider">100%</output></label>
+                <input id="region-opacity-slider" type="range" min="0" max="1" step="0.05" value="1" />
+              </div>
+            </section>
             <div id="hotkey-list" class="hotkey-list"></div>
             <div class="editor-actions hotkey-reset-actions">
               <button id="hotkey-reset-all" class="paper-button" type="button">Reset all</button>
