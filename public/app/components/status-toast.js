@@ -1,4 +1,4 @@
-const DEFAULT_VISIBLE_MS = 4200;
+const DEFAULT_VISIBLE_MS = 2500;
 const DEFAULT_FADE_MS = 260;
 
 /** Presents workspace feedback as one replacement-safe toast.

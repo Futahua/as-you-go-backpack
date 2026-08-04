@@ -77,7 +77,7 @@ test('workspace warnings are overlay toasts with a fade state', () => {
   assert.ok(/position:\s*fixed/.test(statusRule), 'warnings overlay the workspace instead of taking layout space');
   assert.ok(/width:\s*max-content/.test(statusRule), 'the popup wraps its message rather than becoming a full-width bar');
   assert.ok(/pointer-events:\s*none/.test(statusRule), 'a transient warning cannot block workspace controls');
-  assert.ok(/background:\s*rgb\([^)]*\/\s*50%\)/.test(statusRule), 'the popup surface is 50% transparent');
+  assert.ok(/opacity:\s*0\.5/.test(statusRule), 'the whole popup pill is 50% opaque');
   const fadingRule = toolbarCss.match(/\.status\.status-fading\s*\{[^}]*\}/)?.[0] ?? '';
   assert.ok(/opacity:\s*0/.test(fadingRule), 'the dismissal has a visible fade state');
 });
