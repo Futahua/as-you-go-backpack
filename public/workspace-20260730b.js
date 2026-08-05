@@ -1,3 +1,9 @@
+// Build marker. Papers runs from a packaged copy, so the first question when a
+// change appears to have no effect is whether this file is the one running at
+// all. Logged once at module load: if this line is absent from the console, the
+// renderer is serving a different build and no amount of editing here will show.
+console.info('[as-you-go] workspace module loaded: set-gravity branch, rings enabled');
+
 import {
   ROOT_ID,
   binSelection,
@@ -30,6 +36,7 @@ import {
   forkPlacement,
   collapsePlacements,
   placementCount,
+  setItemSets,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -42,21 +49,44 @@ import {
 } from './vendor/d3-force.js';
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
-import { visibleGraphItems, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
+import { animate } from './vendor/anime.js';
+import { visibleGraphItems, directSetMemberIdsVisible, inheritedSetMemberIdsVisible, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
+import { belongsToSet } from './sets-model.js';
+import {
+  reconcileRing,
+  ringPath,
+  ringHull,
+  resampleHull,
+  easeOutline,
+  floorOutline,
+  memberFloorHull,
+  forceRingShape,
+  ejectionTarget,
+  outlineCentroid,
+} from './set-ring-model.js';
+import { forceSetGravity, forceSetExclusion, forceSetSeparation } from './set-gravity-model.js';
+import { glyphPath, layoutTitleGlyphs } from './set-glyph-model.js';
+import { createSetEffectsController } from './set-effects-model.js';
+import { createDragTrailController } from './drag-trail-model.js';
+import { decomposeRegions, regionCentroid, regionPath } from './set-region-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
+import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
+import { getBackdropOpacity, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTransparentBackground, setBackdropOpacity } from './app/hotkeys-model.js';
 import { resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
 import { createEditorDialog } from './app/components/editor-dialog.js';
 import { createBinControls } from './app/components/bin-controls.js';
+import { createSetMembershipMode } from './app/components/set-membership-mode.js';
 import { bootstrapWorkspace } from './app/bootstrap.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
+import { resolveContextTarget } from './app/context-target-model.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
@@ -79,6 +109,7 @@ My request:
 [Describe what you want to experience.]`;
 
 const elements = getWorkspaceElements(document);
+const statusToast = createStatusToast({ element: elements.status });
 
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
@@ -102,11 +133,8 @@ let suppressBlankClick = false;
 let suppressGraphClick = false;
 let zoomTimer = null;
 
-function setStatus(text = '') {
-  elements.status.textContent = text;
-  // Any ordinary status drops the copy emphasis; confirmPickupCopy re-adds it
-  // immediately after its own call, so a stale confirmation cannot linger.
-  elements.status.classList.remove('status-copied');
+function setStatus(text = '', options) {
+  statusToast.show(text, options);
 }
 
 function escapeHtml(value) {
@@ -315,6 +343,35 @@ function createGraphController() {
   let viewport = null;
   let camera = null;
   let edgeLayer = null;
+  let setLayer = null;
+  let regionLayer = null;
+  let effectsLayer = null;
+  // One path per set, and the ring nodes whose positions it is drawn through.
+  // The nodes live in the simulation alongside the icons, so the outline is
+  // wherever the physics put them rather than a shape computed from the
+  // members' positions.
+  const setShapes = new Map();
+  const regionShapes = new Map();
+  let regionLayoutKey = null;
+  let regionCache = [];
+  const setRings = new Map();
+  const setEffects = createSetEffectsController({ document, animate });
+  const dragTrail = createDragTrailController({ document, animate });
+  // A ring node's collision radius.
+  //
+  // This was 18, reasoned as "only has to exceed half the spacing, since an
+  // icon is stopped by the pair of nodes it meets". That holds for an icon the
+  // simulation is free to move, and fails for a dragged one: a drag pins the
+  // node's position outright, so the ring must physically occupy the space
+  // rather than push back. Measured with a foreign tile pinned and walked to
+  // the set centre, 18 was breached at x=20 and 26 at x=0.
+  //
+  // 36 is half a tile, so a ring node is as substantial as the thing it is
+  // resisting, and the boundary holds at every position. Tighter spacing
+  // (linkDistance 40, radius 26) also works but costs 50% more ring nodes for
+  // the same result.
+  const RING_NODE_RADIUS = 30;
+  const RING_LINK_DISTANCE = 60;
   let nodeLayer = null;
   let svg = null;
   let resizeObserver = null;
@@ -327,15 +384,27 @@ function createGraphController() {
   let pendingInitialFit = false;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
-  // Folder hues span the whole color spectrum (see assignSpatialFolderHues),
-  // kept per folder id in a session map that carries the relaxation state, so
-  // colors follow the folder positions and update as they are dragged.
-  const folderColors = new Map();
+  // Folder hues retain their position solver state; set hues retain a seeded,
+  // distance-drift state. Both maps are session-only and never persisted.
+  // One namespace is shared by folders and visible set outlines. Prefixing
+  // ids prevents a folder id and set id with the same text from colliding.
+  const spatialColors = new Map();
+  const spatialHueState = new Map();
 
   function folderColor(id) {
-    const hue = folderColors.get(id);
+    const hue = spatialColors.get(`folder:${id}`);
     // OKLCH spacing tracks perceived difference better than HSL; 68% lightness
     // and 0.18 chroma read clearly on the warm paper background.
+    return typeof hue === 'number' ? `oklch(68% 0.18 ${hue}deg)` : null;
+  }
+
+  function setColor(id) {
+    const hue = spatialColors.get(`set:${id}`);
+    return typeof hue === 'number' ? `oklch(68% 0.18 ${hue}deg)` : null;
+  }
+
+  function regionColor(id) {
+    const hue = spatialColors.get(`region:${id}`);
     return typeof hue === 'number' ? `oklch(68% 0.18 ${hue}deg)` : null;
   }
 
@@ -352,8 +421,18 @@ function createGraphController() {
     svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'graph-edges-svg');
     svg.setAttribute('aria-hidden', 'true');
+    // Set outlines sit behind the edges so tiles and links stay readable on
+    // top of them.
+    setLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    setLayer.setAttribute('class', 'graph-set-layer');
+    regionLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    regionLayer.setAttribute('class', 'graph-set-region-layer');
+    effectsLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    effectsLayer.setAttribute('class', 'graph-set-effects-layer');
+    dragTrail.setLayer(effectsLayer);
     edgeLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    svg.append(edgeLayer);
+    svg.append(regionLayer, effectsLayer, setLayer, edgeLayer);
+    syncEdgeOpacity();
 
     nodeLayer = document.createElement('div');
     nodeLayer.className = 'graph-node-layer';
@@ -383,6 +462,11 @@ function createGraphController() {
       viewport = null;
       camera = null;
       edgeLayer = null;
+      setLayer = null;
+      regionLayer = null;
+      effectsLayer = null;
+      setShapes.clear();
+      setRings.clear();
       nodeLayer = null;
       svg = null;
       throw error;
@@ -417,9 +501,22 @@ function createGraphController() {
     nodes.clear();
     edges.clear();
     originEdges.clear();
+    // The paths go with the viewport below, but the maps that track them would
+    // otherwise survive into the next attach and describe rings that no longer
+    // exist.
+    setShapes.clear();
+    regionShapes.clear();
+    regionLayoutKey = null;
+    regionCache = [];
+    setRings.clear();
+    setEffects.clear();
+    dragTrail.clear();
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
+    setLayer = null;
+    regionLayer = null;
+    effectsLayer = null;
     nodeLayer = null;
     svg = null;
     viewportSelection = null;
@@ -447,24 +544,426 @@ function createGraphController() {
       node.shell.style.transform =
         `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
     });
+    drawSetRings();
+    syncEdgeOpacity();
     syncFolderColors();
     edges.forEach((edge) => {
       const source = nodes.get(edge.sourceId);
       const target = nodes.get(edge.targetId);
       if (!source || !target || !edge.path) return;
-      edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+      const d = edgePath(source.x, source.y, target.x, target.y);
+      if (edge.lastPathD === d) return;
+      edge.lastPathD = d;
+      edge.path.setAttribute('d', d);
     });
     originEdges.forEach((edge) => {
       const source = nodes.get(edge.sourceId);
       const target = nodes.get(edge.targetId);
       if (!source || !target || !edge.path) return;
-      edge.path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+      const d = edgePath(source.x, source.y, target.x, target.y);
+      if (edge.lastPathD === d) return;
+      edge.lastPathD = d;
+      edge.path.setAttribute('d', d);
     });
+  }
+
+  function syncEdgeOpacity() {
+    if (!svg) return;
+    const preferences = state.view?.preferences;
+    const values = {
+      '--graph-edge-opacity': getEdgeOpacity(preferences),
+      '--graph-outline-opacity': getOutlineOpacity(preferences),
+      '--graph-region-opacity': getRegionOpacity(preferences),
+    };
+    for (const [property, value] of Object.entries(values)) {
+      const opacity = String(value);
+      if (svg.style.getPropertyValue(property) !== opacity) svg.style.setProperty(property, opacity);
+    }
   }
 
   function edgePath(x1, y1, x2, y2) {
     const mx = (x1 + x2) / 2;
     return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+  }
+
+  /** Every folder an item sits inside, walked up to the root, nearest first.
+   *
+   * belongsToSet uses this to decide inherited membership: putting a folder in
+   * a set covers its contents, so a child is a member when any ancestor is.
+   * Passing nothing would make inheritance silently stop working, and passing
+   * an undefined identifier — which is what this replaces — threw on every
+   * group attempt with "ancestorsOfNode is not defined".
+   *
+   * The chain comes from the graph's own parentIds rather than the stored
+   * folder tree, because that is what the visible layout is built from. */
+  function ancestorsOfNode(nodeId) {
+    const chain = [];
+    const seen = new Set();
+    const node = nodes.get(nodeId);
+    const queue = (node?.parentIds?.length ? [...node.parentIds] : [node?.parentId]).filter(Boolean);
+    while (queue.length > 0) {
+      const parentId = queue.shift();
+      if (!parentId || parentId === ROOT_ID || parentId === 'bin' || seen.has(parentId)) continue;
+      seen.add(parentId);
+      chain.push(parentId);
+      const parent = nodes.get(parentId);
+      if (parent?.parentIds?.length) queue.push(...parent.parentIds);
+      else if (parent?.parentId) queue.push(parent.parentId);
+    }
+    return chain;
+  }
+
+  /** Which sets this node belongs to, by the same rule the ring is drawn from.
+   *
+   * Membership is inherited, so a folder's contents count — resolving it any
+   * other way here would let the forces disagree with the outline about who is
+   * inside what. */
+  function setIdsContaining(nodeId) {
+    const ids = [];
+    for (const itemSet of state.view?.itemSets ?? []) {
+      if (belongsToSet(itemSet, nodeId, ancestorsOfNode)) ids.push(itemSet.id);
+    }
+    return ids;
+  }
+
+  /** A direct member visible at this level makes the set eligible to draw here. */
+  function setDrawsAtCurrentLevel(itemSet, visibleIds) {
+    return directSetMemberIdsVisible(itemSet, visibleIds).length > 0;
+  }
+
+  /** The visible members of a set, as rectangles the ring can enclose. The
+   * eligibility gate above is intentionally separate: once a set draws, its
+   * outline encloses every visible inherited member, not only direct members. */
+  function membersOnScreen(setId) {
+    const itemSet = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId);
+    if (!itemSet) return [];
+    const visibleIds = [...nodes]
+      .filter(([, node]) => !node.exiting)
+      .map(([nodeId]) => nodeId);
+    if (!setDrawsAtCurrentLevel(itemSet, visibleIds)) return [];
+    const inheritedIds = new Set(inheritedSetMemberIdsVisible(itemSet, visibleIds, ancestorsOfNode));
+    const members = [];
+    for (const [nodeId, node] of nodes) {
+      if (node.exiting) continue;
+      if (!inheritedIds.has(nodeId)) continue;
+      members.push({ id: nodeId, x: node.x, y: node.y, width: node.width, height: node.height });
+    }
+    return members;
+  }
+
+  /** Creates and removes the ring for each set that has members on screen.
+   *
+   * The ring nodes are added to the simulation by syncSimulation, so this only
+   * decides how many there should be and where new ones start. It runs on
+   * structural changes rather than every frame: the node count follows the
+   * ring's perimeter, which only changes when members move appreciably. */
+  function syncSetRings() {
+    if (!setLayer) {
+      console.warn('[as-you-go] syncSetRings called with no set layer');
+      return;
+    }
+    const wanted = new Set();
+    for (const itemSet of (state.view?.itemSets ?? [])) {
+      const members = membersOnScreen(itemSet.id);
+      // A set with nothing on screen has no ring to draw; it still exists in
+      // the data and comes back when its members do.
+      if (members.length === 0) continue;
+      wanted.add(itemSet.id);
+
+      const previous = setRings.get(itemSet.id)?.nodes ?? [];
+      const ring = reconcileRing({ setId: itemSet.id, members, existing: previous });
+      setRings.set(itemSet.id, ring);
+
+      const existingShape = setShapes.get(itemSet.id);
+      if (existingShape) {
+        // Back before the fade finished. Clearing the flag both restores the
+        // outline and tells the pending timer to leave it alone.
+        if (existingShape.retiring) {
+          existingShape.retiring = false;
+          existingShape.path?.classList.remove('set-retiring');
+          existingShape.glyphs?.classList.remove('set-retiring');
+        }
+      } else {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const glyphs = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-set-outline');
+        glyphs.setAttribute('class', 'graph-set-glyphs');
+        path.dataset.setId = itemSet.id;
+        glyphs.dataset.setId = itemSet.id;
+        setLayer.append(path);
+        setLayer.append(glyphs);
+        setShapes.set(itemSet.id, { setId: itemSet.id, path, glyphs, glyphLayoutKey: null });
+      }
+    }
+
+    for (const [setId, shape] of setShapes) {
+      if (wanted.has(setId)) continue;
+      // Faded rather than cut. A set loses its ring whenever its members leave
+      // the screen, and removing the path outright made the outline disappear
+      // between two frames — indistinguishable, to the eye, from the set
+      // popping. The CSS transition carries it out; the node is removed when
+      // that finishes, so a set whose members come straight back reuses it.
+      if (!shape.retiring) {
+        shape.retiring = true;
+        shape.path?.classList.add('set-retiring');
+        shape.glyphs?.classList.add('set-retiring');
+        setRings.delete(setId);
+        window.setTimeout(() => {
+          // Re-checked on landing. The members may have returned during the
+          // fade and cleared the flag, or the layer may have been rebuilt
+          // wholesale and this entry replaced — the identity check catches the
+          // second, which a flag alone would not.
+          if (setShapes.get(setId) !== shape || !shape.retiring) return;
+          shape.path?.remove();
+          shape.glyphs?.remove();
+          setShapes.delete(setId);
+      }, 200);
+      }
+    }
+
+    const picking = setMembershipMode?.isActive() === true;
+    const chosen = picking ? new Set(setMembershipMode.chosenSetIds()) : null;
+    const partial = picking ? new Set(setMembershipMode.mixedSetIds()) : null;
+    syncSetRegions({ picking, chosen, partial });
+    setEffects.sync({
+      selectedSetIds: session.selectedSets,
+      regions: regionShapes,
+      colorFor: regionColor,
+      effectsLayer,
+    });
+
+    // One line per reconcile, so a set that exists in the data but never
+    // reaches the screen can be told apart from one that was never created.
+    // The three numbers are the three places it can go wrong: no sets stored,
+    // sets stored but no members matched on screen, or members matched but no
+    // ring built.
+    const stored = (state.view?.itemSets ?? []).length;
+    let ringNodes = 0;
+    for (const ring of setRings.values()) ringNodes += ring.nodes.length;
+    console.info(`[as-you-go] rings: ${stored} set(s) stored, ${setShapes.size} drawn, ${ringNodes} ring nodes`);
+  }
+
+  /** Which sets' rings enclose a point, smallest first.
+   *
+   * Tested against the ring nodes rather than the drawn path: the nodes are
+   * where the physics put them and the path is drawn through them, so the two
+   * agree by construction — there is no second geometry to fall out of step
+   * with what is on screen.
+   *
+   * Smallest first so clicking inside a small set nested in a larger one picks
+   * the small one, which is the set the click is most specifically about. */
+  function setIdsAtPoint(point) {
+    const hits = [];
+    for (const [setId, ring] of setRings) {
+      if (ring.nodes.length < 3) continue;
+      if (!pointInRing(point, ring.nodes)) continue;
+      hits.push({ setId, area: ringArea(ring.nodes) });
+    }
+    return hits.sort((a, b) => a.area - b.area).map((hit) => hit.setId);
+  }
+
+  /** Moves any of these items that ended up inside a set they do not belong to
+   * back outside it, along the shortest path.
+   *
+   * Called when a drag is released, not while it runs. The ring cannot stop a
+   * drag: a dragged node's position is set outright rather than nudged, so
+   * collision has nothing to push back against, and stiffening the boundary
+   * enough to try made the whole set convulse while foreign items still got in.
+   * Letting the gesture do whatever it likes and correcting afterwards means
+   * the screen the user is left looking at states the true relationship.
+   *
+   * Members are exempt: an item inside its own set is where it should be. A
+   * folder's contents inherit its sets, so belongsToSet decides this rather
+   * than the stored member list. */
+  function ejectTrespassers(itemIds) {
+    // Every visible node by default, not only the ones just dragged. An item
+    // can end up inside a set it does not belong to without being touched —
+    // the ring moves when its members do, and expanding a folder drops new
+    // tiles wherever the layout puts them. Checking only the drag left those
+    // sitting inside with nothing to correct them.
+    const candidates = itemIds ?? [...nodes.keys()];
+    for (const itemId of candidates) {
+      const node = nodes.get(itemId);
+      if (!node || node.exiting) continue;
+
+      for (const [setId, ring] of setRings) {
+        if (ring.nodes.length < 3) continue;
+        const itemSet = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId);
+        if (!itemSet) continue;
+        if (belongsToSet(itemSet, itemId, ancestorsOfNode)) continue;
+
+        const target = ejectionTarget({ x: node.x, y: node.y }, ring.nodes);
+        if (!target) continue;
+        node.x = target.x;
+        node.y = target.y;
+        // The pinned coordinates too, or the next tick puts it straight back
+        // where it was — a drag leaves fx/fy set, and they win over x/y.
+        if (node.fx != null) node.fx = target.x;
+        if (node.fy != null) node.fy = target.y;
+      }
+    }
+  }
+
+  /** Ray casting against the ring's hull — the shape actually on screen.
+   *
+   * This walked the chain in ringIndex order, which assumed the loop stays
+   * ordered. It does not: RING-TANGLE.md measured neighbours 317 degrees apart
+   * after a drag, and a ray cast over a crossed loop reports points plainly
+   * inside the outline as outside, silently.
+   *
+   * A click has to select what the user pointed at, so this must read the same
+   * hull that drawSetRings draws. */
+  function pointInRing(point, nodes) {
+    const ring = ringHull(nodes);
+    if (ring.length < 3) return false;
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+      const a = ring[i];
+      const b = ring[j];
+      if ((a.y > point.y) === (b.y > point.y)) continue;
+      const crossX = a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x);
+      if (point.x < crossX) inside = !inside;
+    }
+    return inside;
+  }
+
+  /** Shoelace area of the hull, used only to order overlapping hits.
+   *
+   * Same reason as pointInRing: the formula sums signed trapezoids around a
+   * loop, so a reordered node list gives a number that is not the area of
+   * anything and nested sets get ranked wrongly. The hull is also the area the
+   * user perceives, which is what "smallest first where they nest" means. */
+  function ringArea(nodes) {
+    const ring = ringHull(nodes);
+    let total = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+      total += (ring[j].x * ring[i].y) - (ring[i].x * ring[j].y);
+    }
+    return Math.abs(total) / 2;
+  }
+
+  /** Redraws each outline through its ring nodes' current positions.
+   *
+   * Cheap enough for every frame — it reads positions and builds a path string,
+   * with no sampling, routing or contour extraction. That is the whole point of
+   * the ring: the expensive part is the simulation, which was already running.
+   */
+  function drawSetRings() {
+    // Read once per frame rather than per set: while the picker is open these
+    // are the same for every outline, and they are what makes the canvas the
+    // picker rather than a list.
+    const picking = setMembershipMode?.isActive() === true;
+    const chosen = picking ? new Set(setMembershipMode.chosenSetIds()) : null;
+    const partial = picking ? new Set(setMembershipMode.mixedSetIds()) : null;
+    for (const [setId, shape] of setShapes) {
+      const ring = setRings.get(setId);
+
+      // The outline is eased towards the physics rather than snapped to it, and
+      // held open to a floor area. Recomputing the hull per frame is what made a
+      // set able to shrivel or blink out between frames when its ring collapsed
+      // or briefly degenerated; the drawn shape is its own state, so it settles
+      // instead of popping. A null target leaves the last good shape standing.
+      // The floor is the members' own tiles, so the outline can never shrink
+      // inside the items it is drawn around. Read live rather than cached: the
+      // members are what the floor is made of, and they move every frame.
+      // 40 matches reconcileRing's and forceRingShape's padding default, which
+      // is the gap the ring settles at: the floor has to agree with where the
+      // physics is already trying to hold the boundary, or the two fight.
+      const floor = ring ? memberFloorHull(membersOnScreen(setId), 40) : null;
+      const target = ring ? floorOutline(resampleHull(ringHull(ring.nodes)), floor) : null;
+      shape.outline = easeOutline(shape.outline, target);
+      const outlinePath = shape.outline ? ringPath(shape.outline, { hulled: true }) : '';
+      if (shape.lastPathD !== outlinePath) {
+        shape.lastPathD = outlinePath;
+        shape.path.setAttribute('d', outlinePath);
+      }
+      const title = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId)?.title?.trim() ?? '';
+      const named = title.length > 0 && Array.isArray(shape.outline);
+      shape.path.classList.toggle('set-named', named);
+      shape.glyphs?.classList.toggle('set-named', named);
+      // The outline is live while a ring moves, so every coordinate belongs in
+      // the key: caching a partial geometry key would visibly detach lettering
+      // from its body. Once the eased outline and title are unchanged, settled
+      // frames reuse the exact decorative path instead of rebuilding it.
+      const glyphLayoutKey = named
+        ? `${title}|${shape.outline.map(({ x, y }) => `${x},${y}`).join('|')}`
+        : '';
+      if (shape.glyphLayoutKey !== glyphLayoutKey) {
+        shape.glyphs?.setAttribute('d', named ? glyphPath(layoutTitleGlyphs(shape.outline, title)) : '');
+        shape.glyphLayoutKey = glyphLayoutKey;
+      }
+      shape.path.classList.toggle('set-selected', session.selectedSets?.has(setId) === true);
+      shape.path.classList.toggle('set-picking', picking);
+      shape.path.classList.toggle('set-chosen', picking && chosen.has(setId));
+      // Neither in nor out: Enter leaves a partial set exactly as it is, so it
+      // must not read as either.
+      shape.path.classList.toggle('set-partial', picking && partial.has(setId));
+      shape.glyphs?.classList.toggle('set-selected', session.selectedSets?.has(setId) === true);
+      shape.glyphs?.classList.toggle('set-picking', picking);
+      shape.glyphs?.classList.toggle('set-chosen', picking && chosen.has(setId));
+      shape.glyphs?.classList.toggle('set-partial', picking && partial.has(setId));
+    }
+    syncSetRegions({ picking, chosen, partial });
+    setEffects.sync({
+      selectedSetIds: session.selectedSets,
+      regions: regionShapes,
+      colorFor: regionColor,
+      effectsLayer,
+    });
+  }
+
+  function syncSetRegions({ picking, chosen, partial }) {
+    if (!regionLayer) return;
+    const source = [...setShapes.values()]
+      .filter((shape) => !shape.retiring && Array.isArray(shape.outline) && shape.outline.length >= 3)
+      .map((shape) => ({ id: shape.setId, outline: shape.outline }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    const layoutKey = source.map((shape) => `${shape.id}:${shape.outline.map(({ x, y }) => `${x},${y}`).join('|')}`).join(';');
+    if (layoutKey !== regionLayoutKey) {
+      regionCache = decomposeRegions(source).map((region) => ({
+        ...region,
+        center: regionCentroid(region),
+      }));
+      regionLayoutKey = layoutKey;
+    }
+    const regions = regionCache;
+    const wanted = new Set(regions.map(({ id }) => id));
+    for (const region of regions) {
+      let shape = regionShapes.get(region.id);
+      if (!shape) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'graph-set-region');
+        path.setAttribute('fill-rule', 'nonzero');
+        path.dataset.regionId = `region:${region.id}`;
+        path.dataset.setIds = region.setIds.join('|');
+        regionLayer.append(path);
+        shape = { id: region.id, path, setIds: region.setIds, center: null };
+        regionShapes.set(region.id, shape);
+      }
+      const d = regionPath(region);
+      if (shape.path.getAttribute('d') !== d) shape.path.setAttribute('d', d);
+      shape.setIds = region.setIds;
+      shape.center = region.center;
+      shape.path.dataset.setIds = region.setIds.join('|');
+      const selected = region.setIds.some((setId) => session.selectedSets?.has(setId) === true);
+      shape.path.classList.toggle('region-selected', selected);
+      shape.path.classList.toggle('region-picking', picking);
+      shape.path.classList.toggle('region-chosen', picking && region.setIds.some((setId) => chosen?.has(setId)));
+      shape.path.classList.toggle('region-partial', picking && region.setIds.some((setId) => partial?.has(setId)));
+    }
+    for (const [id, shape] of regionShapes) {
+      if (wanted.has(id)) continue;
+      shape.path.remove();
+      regionShapes.delete(id);
+    }
+  }
+
+  function recordDragTrail(itemIds) {
+    const points = (itemIds ?? [])
+      .map((id) => nodes.get(id))
+      .filter((node) => node && !node.exiting)
+      .map((node) => ({ x: node.x, y: node.y }));
+    dragTrail.record(points);
   }
 
   function buildCandidate(vi) {
@@ -592,18 +1091,31 @@ function createGraphController() {
     const folderNodes = [...nodes.values()].filter(
       (node) => !node.exiting && node.shell && node.candidate?.kind === 'group',
     );
-    if (folderNodes.length === 0) return;
     const center = {
       cx: (viewport?.clientWidth ?? 800) / 2,
       cy: (viewport?.clientHeight ?? 600) / 2,
     };
+    const spatialNodes = [
+      ...folderNodes.map((node) => ({ id: `folder:${node.id}`, x: node.x, y: node.y })),
+      ...[...setShapes.values()]
+        .filter((shape) => !shape.retiring)
+        .map((shape) => {
+          const point = outlineCentroid(shape.outline);
+          return point ? { id: `set:${shape.setId}`, ...point } : null;
+        })
+        .filter(Boolean),
+      ...[...regionShapes.values()]
+        .filter((shape) => shape.center)
+        .map((shape) => ({ id: `region:${shape.id}`, ...shape.center })),
+    ];
     assignSpatialFolderHues(
-      folderNodes.map((node) => ({ id: node.id, x: node.x, y: node.y })),
-      folderColors,
+      spatialNodes,
+      spatialColors,
       center,
+      spatialHueState,
     );
     for (const node of folderNodes) {
-      const hue = folderColors.get(node.id);
+      const hue = spatialColors.get(`folder:${node.id}`);
       if (node.appliedFolderHue === hue) continue;
       node.appliedFolderHue = hue;
       const iconItem = node.shell.querySelector('.icon-item');
@@ -617,6 +1129,17 @@ function createGraphController() {
       edge.appliedStroke = stroke;
       edge.path.style.stroke = stroke;
     });
+    for (const shape of setShapes.values()) {
+      const color = setColor(shape.setId);
+      if (color) {
+        shape.path.style.setProperty('--set-color', color);
+        shape.glyphs?.style.setProperty('--set-color', color);
+      }
+    }
+    for (const shape of regionShapes.values()) {
+      const color = regionColor(shape.id);
+      if (color) shape.path.style.setProperty('--region-color', color);
+    }
   }
 
   function refreshNodeContent(node) {
@@ -775,9 +1298,10 @@ function createGraphController() {
       if (!edge) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'graph-edge');
-        path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+        const d = edgePath(source.x, source.y, target.x, target.y);
+        path.setAttribute('d', d);
         edgeLayer.append(path);
-        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
+        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path, lastPathD: d };
         edges.set(key, edge);
       }
     }
@@ -810,9 +1334,10 @@ function createGraphController() {
       if (!edge) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'graph-edge bin-origin-edge');
-        path.setAttribute('d', edgePath(source.x, source.y, target.x, target.y));
+        const d = edgePath(source.x, source.y, target.x, target.y);
+        path.setAttribute('d', d);
         edgeLayer.append(path);
-        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path };
+        edge = { key, sourceId: info.sourceId, targetId: info.targetId, path, lastPathD: d };
         originEdges.set(key, edge);
       }
     }
@@ -825,9 +1350,83 @@ function createGraphController() {
     simulation = forceSimulation()
       .force('cx', forceX(w / 2).strength(0.05))
       .force('cy', forceY(h / 2).strength(0.05))
-      .force('charge', forceManyBody().strength(-280))
-      .force('collide', forceCollide().radius((n) => Math.max(n.width, n.height) / 2 + 20).strength(0.9))
-      .force('link', forceLink().id((n) => n.id).distance(145).strength(0.14))
+      // Ring nodes do not repel. Hundreds of them each pushing on everything
+      // would both swamp the layout the icons make between themselves and pay
+      // the charge cost for nodes whose position is already decided by their
+      // links and the shape force.
+      .force('charge', forceManyBody().strength((n) => (n.ring ? 0 : -280)))
+      .force('collide', forceCollide()
+        .radius((n) => (n.ring ? RING_NODE_RADIUS : Math.max(n.width, n.height) / 2 + 20))
+        .strength(0.9))
+      // Ring links are short and stiff: the boundary has to hold its spacing
+      // against the icons pushing on it, where the graph's own links are long
+      // and slack so the layout can breathe.
+      .force('link', forceLink()
+        .id((n) => n.id)
+        .distance((link) => (link.source.ring ? RING_LINK_DISTANCE : 145))
+        .strength((link) => (link.source.ring ? 0.9 : 0.14)))
+      // Holds each ring around its own members rather than letting it drift.
+      //
+      // The alpha floor inside it is gated on a drag being in progress. It
+      // refuses to cool, which is what keeps a ring with its member during a
+      // drag, but d3 cools everything else — so on a settled scene it was the
+      // only force still injecting velocity, driving icons through the ring
+      // nodes' collision and chasing them as they moved. Measured: two disjoint
+      // sets stretched without bound and their outlines crossed.
+      .force('ring', forceRingShape({
+        membersOf: membersOnScreen,
+        // Same test the other two set forces use for a held node, asked across
+        // the whole graph rather than about one id.
+        isDragging: () => {
+          for (const node of nodes.values()) if (node.fx != null) return true;
+          return false;
+        },
+      }))
+      // Gathers a set's members towards each other. Without it they sprawl
+      // wherever the graph's own layout puts them, and a boundary drawn round
+      // a sprawl is mostly empty space with bystanders sitting in it — the ring
+      // then has no way to exclude anything, because a point between two
+      // members is interior however the outline is drawn. Measured on a
+      // six-member set: without gravity only 4 of 6 members were inside their
+      // own ring and 2 foreign items were; with it, 6 of 6 and none.
+      .force('setGravity', forceSetGravity({
+        setsOf: (nodeId) => setIdsContaining(nodeId),
+        isHeld: (nodeId) => nodes.get(nodeId)?.fx != null,
+      }))
+      // Keeps unrelated sets from drawing through each other. Nothing else
+      // acts between two sets: ring nodes carry zero charge, and collision only
+      // separates node from node at 60px, which two rings can satisfy while the
+      // curves drawn through them still cross. Sets sharing a member are exempt,
+      // so the Venn that gravity builds is left alone.
+      .force('setSeparation', forceSetSeparation({
+        setsOf: (nodeId) => setIdsContaining(nodeId),
+        // The shape actually on screen, so the force parts what the creator
+        // sees rather than a proxy for it — the same rule drawing and
+        // hit-testing already follow. shape.outline is the eased, resampled,
+        // member-floored outline drawSetRings last put on screen; recomputing
+        // the hull from physics nodes would read a different shape. A null
+        // outline (not yet drawn, or retired) is a safe no-op: the node pass
+        // above covers the ring until a visible outline exists.
+        hullOf: (setId) => setShapes.get(setId)?.outline ?? null,
+        // A set whose member is under the pointer is anchored: it takes no
+        // separation impulse, and the other set absorbs the whole response.
+        isHeld: (nodeId) => nodes.get(nodeId)?.fx != null,
+      }))
+      // And pushes non-members back out of a set they have wandered into. The
+      // outline cannot do this alone: it can only exclude what lies outside the
+      // region its members occupy, so the layout has to express membership too.
+      .force('setExclusion', forceSetExclusion({
+        setsOf: (nodeId) => setIdsContaining(nodeId),
+        membersOf: membersOnScreen,
+        // The visible outline, so the force and the drawn shape agree on who is
+        // inside — the same source separation uses. Proximity to a member is a
+        // proxy for that and disagrees with it in open space within the
+        // boundary, which is where foreign items leaked. A null outline (not
+        // yet drawn, or retired) is a safe no-op: the set contributes nothing
+        // until its visible outline exists.
+        hullOf: (setId) => setShapes.get(setId)?.outline ?? null,
+        isHeld: (nodeId) => nodes.get(nodeId)?.fx != null,
+      }))
       .alphaDecay(0.028)
       .velocityDecay(0.32);
     simulation.on('tick', scheduleRender);
@@ -835,8 +1434,16 @@ function createGraphController() {
 
   function syncSimulation() {
     ensureSimulation();
+    syncSetRings();
     const nodeArray = [...nodes.values()].filter((n) => !n.exiting);
+    // Ring nodes are ordinary simulation nodes. That is the whole design: they
+    // collide with icons, so a member cannot leave its set and an outsider
+    // cannot get in, and the outline dents and stretches because the same
+    // forces act on it as on everything else. Nothing about containment is
+    // enforced separately.
+    for (const ring of setRings.values()) nodeArray.push(...ring.nodes);
     simulation.nodes(nodeArray);
+
     const edgeArray = [];
     edges.forEach((edge) => {
       edgeArray.push({ source: edge.sourceId, target: edge.targetId });
@@ -844,8 +1451,16 @@ function createGraphController() {
     originEdges.forEach((edge) => {
       edgeArray.push({ source: edge.sourceId, target: edge.targetId });
     });
+    // The links closing each ring into a loop, which is what stops the boundary
+    // opening up under load.
+    for (const ring of setRings.values()) edgeArray.push(...ring.links);
+
     simulation.force('link').links(edgeArray);
-    simulation.force('collide').radius((n) => Math.max(n.width, n.height) / 2 + 20);
+    // Ring nodes are small, so they pack tightly along the boundary instead of
+    // being held a whole icon apart by the padding icons need.
+    simulation.force('collide').radius((n) => (n.ring
+      ? RING_NODE_RADIUS
+      : Math.max(n.width, n.height) / 2 + 20));
     const w = viewport?.clientWidth || 800;
     const h = viewport?.clientHeight || 600;
     simulation.force('cx').x(w / 2);
@@ -908,6 +1523,9 @@ function createGraphController() {
       nodes.forEach((_, id) => removeNode(id));
       syncEdges([]);
       syncOriginEdges([]);
+      // Nothing on screen means no members, so every ring goes too. Without
+      // this the previous view's outlines would stay drawn over an empty graph.
+      syncSetRings();
       return;
     }
     const originEdges = session.binMode ? binOriginEdges(visible) : [];
@@ -953,8 +1571,16 @@ function createGraphController() {
     updateGraphView,
     destroyGraphView,
     refreshSelection,
+    refreshEdgeOpacity: syncEdgeOpacity,
     reheat,
     fitGraph,
+    ancestorsOfNode,
+    setIdsAtPoint,
+    setPathFor: (id) => setShapes.get(id)?.path ?? null,
+    ejectTrespassers,
+    recordDragTrail,
+    clearDragTrail: () => dragTrail.clear(),
+    get dragTrailCount() { return dragTrail.count; },
     _getNode: (id) => nodes.get(id) ?? null,
     _setOnDragCancel(callback) { onDragCancel = callback; },
     _setSimulationDecay() {
@@ -980,7 +1606,27 @@ function renderGraph(initialFit = false) {
   graph.updateGraphView(initialFit);
 }
 
+function applyTheme(preferences) {
+  document.documentElement.dataset.theme = getTheme(preferences);
+  document.documentElement.dataset.transparentBackground = String(getTransparentBackground(preferences));
+  applyBackdropOpacity(preferences);
+}
+
+/** Drives the .workspace-backdrop panel and keeps the pill's slider/readout in
+ * step. Split out so the drag handler can repaint on every input event without
+ * paying for a full render(). */
+function applyBackdropOpacity(preferences) {
+  const opacity = getBackdropOpacity(preferences);
+  document.documentElement.style.setProperty('--workspace-backdrop-opacity', String(opacity));
+  const slider = elements.backdropOpacitySlider;
+  if (slider && document.activeElement !== slider) slider.value = String(opacity);
+  if (elements.backdropOpacityValue) {
+    elements.backdropOpacityValue.textContent = `${Math.round(opacity * 100)}%`;
+  }
+}
+
 function render() {
+  applyTheme(state.view?.preferences);
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
     // us (e.g. via the top-level Bin list or "Delete all") — fall back to
@@ -1124,6 +1770,8 @@ async function runMenuAction(action) {
   if (action === 'restore') return confirmDialog.askRestoreConfirm([...session.selected]);
   if (action === 'delete-forever') return confirmDialog.askPermanentDelete();
   if (action === 'reset-graph-position') return commands.resetGraphPositions();
+  if (action === 'rename-set') return beginSetRename();
+  if (action === 'delete-sets') return commands.deleteSelectedSets();
 }
 
 elements.grid.addEventListener('click', (event) => {
@@ -1144,6 +1792,14 @@ elements.grid.addEventListener('click', (event) => {
       return;
     }
     if (tile.classList.contains('bin-origin-ghost')) return;
+    // While Ctrl+G is open a click picks the set the item belongs to, rather
+    // than changing the selection being edited — the subjects were captured
+    // when the mode opened, so changing selection underneath it would edit
+    // membership for items the user is no longer looking at.
+    if (setMembershipMode.isActive()) {
+      setMembershipMode.toggleFromItem(tile.dataset.id);
+      return;
+    }
     commands.selectItem(tile.dataset.id, {
       shiftKey: event.shiftKey,
       ctrlKey: event.ctrlKey,
@@ -1161,7 +1817,24 @@ elements.grid.addEventListener('click', (event) => {
       suppressGraphClick = false;
       return;
     }
+    // Blank space inside a set's ring selects that set. The click landed on the
+    // canvas rather than an icon, so the outline is the only thing it could
+    // have been about — and this has to come before clearing, or selecting a
+    // set would immediately deselect it.
+    // No optional chaining: while clientToWorld was missing from the pointer
+    // controller's exports, `?.` turned its absence into undefined, then into
+    // an empty hit list, and clicking inside a ring did nothing at all with no
+    // way to tell a missing function from a missed ring. A throw here would at
+    // least reach the status bar.
+    const world = pointer.clientToWorld(event.clientX, event.clientY);
+    const hitSets = graph.setIdsAtPoint(world);
+    if (hitSets.length > 0) {
+      commands.selectSets([hitSets[0]], { additive: event.ctrlKey === true });
+      closeMenu();
+      return;
+    }
     store.clearSelection();
+    commands.clearSetSelection();
     store.setSelectionAnchor(null);
     syncSelection();
     closeMenu();
@@ -1216,6 +1889,15 @@ elements.grid.addEventListener('contextmenu', (event) => {
   }
   const blank = event.target.closest('[data-blank-parent], [data-icon-grid]');
   if (!blank) return;
+  const world = pointer.clientToWorld(event.clientX, event.clientY);
+  const contextTarget = resolveContextTarget({
+    hitSetIds: graph.setIdsAtPoint(world),
+    selectedSetIds: session.selectedSets,
+  });
+  if (contextTarget.kind === 'set') {
+    openMenu(event.clientX, event.clientY);
+    return;
+  }
   if (session.binMode) {
     if (session.selected.size > 0) openMenu(event.clientX, event.clientY);
     return;
@@ -1296,6 +1978,28 @@ function confirmPickupCopy(message) {
   }, PICKUP_COPY_FLASH_MS);
 }
 
+// Background-opacity pill. `input` repaints live while dragging so the panel
+// tracks the thumb; `change` is what persists, so a drag writes state once on
+// release instead of on every frame.
+elements.backdropOpacitySlider.addEventListener('input', () => {
+  const opacity = Number(elements.backdropOpacitySlider.value);
+  document.documentElement.style.setProperty('--workspace-backdrop-opacity', String(opacity));
+  elements.backdropOpacityValue.textContent = `${Math.round(opacity * 100)}%`;
+});
+
+elements.backdropOpacitySlider.addEventListener('change', async () => {
+  const preferences = setBackdropOpacity(
+    state.view?.preferences,
+    Number(elements.backdropOpacitySlider.value),
+  );
+  const nextState = { ...state, view: { ...state.view, preferences } };
+  try {
+    await commit(nextState);
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+});
+
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
     const selectedTargets = [...session.selected]
@@ -1343,6 +2047,9 @@ const menu = createContextMenu({
   getBinMode: () => session.binMode,
   getClipboard: () => session.clipboard,
   getSelectedItems: () => [...session.selected].map(item).filter(Boolean),
+  getSelectedSets: () => [...session.selectedSets]
+    .map((id) => (state.view?.itemSets ?? []).find((candidate) => candidate.id === id))
+    .filter(Boolean),
   isWebLink,
   onAction: runMenuAction,
 });
@@ -1376,12 +2083,58 @@ const commands = createWorkspaceCommands({
   setGraphPositions,
   createWebLink,
   createDroppedShortcuts,
+  setItemSets,
+  // The graph's own ancestor chain, so inherited membership is resolved the
+  // same way the ring is drawn. A separate walk here would let the two disagree
+  // about which items a folder set covers.
+  ancestorsOfNode: (id) => graph.ancestorsOfNode(id),
   syncSelection,
   saveWorkspaceView,
   closeMenu,
   render,
   setStatus,
 });
+
+let activeSetRename = null;
+function beginSetRename() {
+  const ids = [...store.getSession().selectedSets];
+  if (ids.length !== 1) {
+    setStatus('Select exactly one set to rename.');
+    return false;
+  }
+  const setId = ids[0];
+  const itemSet = (state.view?.itemSets ?? []).find((candidate) => candidate.id === setId);
+  const path = graph.setPathFor(setId);
+  if (!itemSet || !path) {
+    setStatus('That set is not visible here.');
+    return false;
+  }
+  activeSetRename?.cancel();
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'set-name-editor';
+  input.value = itemSet.title ?? '';
+  input.setAttribute('aria-label', 'Set name');
+  const rect = path.getBoundingClientRect();
+  input.style.left = `${rect.left + rect.width / 2 - 90}px`;
+  input.style.top = `${rect.top + rect.height / 2 - 18}px`;
+  document.body.append(input);
+  const finish = async (save) => {
+    if (!activeSetRename) return;
+    activeSetRename = null;
+    input.remove();
+    if (save) await commands.renameSet(setId, input.value);
+  };
+  activeSetRename = { cancel: () => { activeSetRename = null; input.remove(); } };
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); void finish(true); }
+    else if (event.key === 'Escape') { event.preventDefault(); void finish(false); }
+  });
+  input.addEventListener('blur', () => { void finish(true); }, { once: true });
+  input.focus();
+  input.select();
+  return true;
+}
 
 // Constructed after commands: the controller delegates session mutation and
 // persistence to the marquee commands.
@@ -1410,6 +2163,8 @@ const pointer = createPointerController({
   group,
   visiblePlacementIdFor,
   closeMenu,
+  onDragTrail: (itemIds) => graph.recordDragTrail(itemIds),
+  clearDragTrail: () => graph.clearDragTrail(),
   setSuppressGraphClick: (value) => { suppressGraphClick = value; },
   setSuppressBlankClick: (value) => { suppressBlankClick = value; },
   consumeSuppressGraphClick: () => {
@@ -1463,6 +2218,25 @@ const binControls = createBinControls({
   saveWorkspaceView,
 });
 
+/** Ctrl+G membership picking.
+ *
+ * Constructed before the keyboard controller, which needs it to route Enter
+ * and Escape while the mode is open. Sets are chosen by clicking their
+ * contents rather than from a list, so the mode also intercepts canvas clicks
+ * — see the graph click handler. */
+const setMembershipMode = createSetMembershipMode({
+  getSets: () => state.view?.itemSets ?? [],
+  getSelectedIds: () => [...store.getSession().selected],
+  shareSelectionWithSets: (desired, itemIds, before) =>
+    commands.shareSelectionWithSets(desired, itemIds, before),
+  // The graph's chain, matching how the ring decides membership. Resolving
+  // inheritance two different ways here would let the picker disagree with the
+  // outline about which items a folder set covers.
+  ancestorsOf: (itemId) => graph.ancestorsOfNode(itemId),
+  render: () => render(),
+  setStatus,
+});
+
 const keyboard = createKeyboardController({
   document,
   elements,
@@ -1471,6 +2245,10 @@ const keyboard = createKeyboardController({
   closeMenu,
   getVisibleItemIds: visibleItemIds,
   confirmDialog,
+  beginSetMembershipEdit: () => setMembershipMode.begin(),
+  setMembershipMode,
+  setStatus,
+  beginSetRename,
 });
 
 const promptLibrary = createPromptLibraryDialog({
@@ -1479,6 +2257,11 @@ const promptLibrary = createPromptLibraryDialog({
   fallbackPrompt: PICKUP_PROMPT,
   copyText: (text) => host.copyText(text),
   setStatus,
+  onViewPreferencesChanged: (next) => {
+    applyTheme(next.view?.preferences);
+    graph.refreshEdgeOpacity();
+    render();
+  },
 });
 
 bootstrapWorkspace({

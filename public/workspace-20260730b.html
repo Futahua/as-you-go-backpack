@@ -10,7 +10,13 @@
   </head>
   <body>
     <main class="workspace">
+      <div class="workspace-backdrop" id="workspace-backdrop" aria-hidden="true"></div>
       <section class="navigation" aria-label="Folder navigation">
+        <div class="backdrop-slider toolbar-float" id="backdrop-slider" data-toolbar-key="backdrop-slider">
+          <label class="sr-only" for="backdrop-opacity-slider">Background opacity</label>
+          <input id="backdrop-opacity-slider" type="range" min="0" max="1" step="0.05" value="1" />
+          <output id="backdrop-opacity-value" class="sr-only" for="backdrop-opacity-slider">100%</output>
+        </div>
         <nav class="breadcrumbs toolbar-float" id="breadcrumbs" data-toolbar-key="breadcrumbs" aria-label="Current group path"></nav>
         <button class="quiet-button icon-button toolbar-float" id="restore-all-bin" data-toolbar-key="restore-all-bin" type="button" title="Restore all" hidden>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10a6 6 0 1 0 1.76-4.24M4 10V5m0 5h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -103,9 +109,15 @@
       </section>
 
       <section class="confirm-layer" id="prompt-layer" hidden>
-        <div class="confirm-card prompt-library" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
+        <div class="confirm-card prompt-library" role="dialog" aria-modal="true" aria-labelledby="prompt-dialog-label">
           <header class="prompt-library-header">
-            <h2 id="prompt-title">Copy</h2>
+            <span id="prompt-dialog-label" class="sr-only">Prompt library</span>
+            <nav class="prompt-library-tabs" aria-label="Prompt library pages">
+              <button id="prompt-tab-prompts" class="paper-button prompt-tab" type="button" aria-selected="true">Prompts</button>
+              <button id="prompt-tab-hotkeys" class="paper-button prompt-tab" type="button" aria-selected="false">Settings</button>
+            </nav>
+          </header>
+          <div id="prompt-page-prompts" class="prompt-page">
             <div class="prompt-library-add-actions">
               <button id="prompt-add-prompt" class="paper-button" type="button">
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3h6l4 4v10a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 4 17V4.5A1.5 1.5 0 0 1 5.5 3z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 8v6M7 11h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -116,7 +128,6 @@
                 New folder
               </button>
             </div>
-          </header>
           <p id="prompt-status" class="prompt-library-status" role="status" aria-live="polite"></p>
           <div id="prompt-delete-confirm" class="prompt-delete-confirm" hidden>
             <span id="prompt-delete-message"></span>
@@ -129,6 +140,42 @@
           </div>
           <div id="prompt-tree-menu" class="prompt-tree-menu" role="menu" hidden></div>
           <p id="prompt-error" class="editor-error" role="alert"></p>
+          </div>
+          <div id="prompt-page-hotkeys" class="prompt-page hotkeys-page" hidden>
+            <p id="hotkey-status" class="prompt-library-status" role="status" aria-live="polite"></p>
+            <section class="settings-preferences" aria-label="Visual preferences">
+              <div class="settings-opacity-control">
+                <label id="edge-opacity-label" for="edge-opacity-slider">Connector opacity <output id="edge-opacity-value" for="edge-opacity-slider">50%</output></label>
+                <input id="edge-opacity-slider" type="range" min="0" max="1" step="0.05" value="0.5" />
+              </div>
+              <div class="settings-opacity-control">
+                <label id="outline-opacity-label" for="outline-opacity-slider">Set outline opacity <output id="outline-opacity-value" for="outline-opacity-slider">100%</output></label>
+                <input id="outline-opacity-slider" type="range" min="0" max="1" step="0.05" value="1" />
+              </div>
+              <div class="settings-opacity-control">
+                <label id="region-opacity-label" for="region-opacity-slider">Region fill opacity <output id="region-opacity-value" for="region-opacity-slider">100%</output></label>
+                <input id="region-opacity-slider" type="range" min="0" max="1" step="0.05" value="1" />
+              </div>
+              <div class="settings-opacity-control settings-theme-control">
+                <label for="theme-select">Theme</label>
+                <select id="theme-select" aria-label="Theme">
+                  <option value="light">Light paper</option>
+                  <option value="dark">Dark paper</option>
+                </select>
+              </div>
+              <div class="settings-opacity-control settings-transparent-control">
+                <label for="transparent-background-toggle">Background</label>
+                <label class="settings-checkbox-label">
+                  <input id="transparent-background-toggle" type="checkbox" />
+                  <span>Transparent</span>
+                </label>
+              </div>
+            </section>
+            <div id="hotkey-list" class="hotkey-list"></div>
+            <div class="editor-actions hotkey-reset-actions">
+              <button id="hotkey-reset-all" class="paper-button" type="button">Reset all</button>
+            </div>
+          </div>
           <div class="editor-actions editor-submit">
             <button id="prompt-copy-selected" class="paper-button" type="button" disabled title="Select rows to copy their prompt text">Copy selected</button>
             <button id="prompt-cancel" class="paper-button primary" type="button">Close</button>

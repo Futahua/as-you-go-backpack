@@ -21,16 +21,16 @@
   user-select: none;
   cursor: default;
 }
-.icon-item:hover { background: rgba(232, 229, 217, 0.68); }
+.icon-item:hover { background: var(--item-surface-hover); }
 .icon-item.selected {
-  border-color: #9caf9e;
+  border-color: var(--item-selected-border);
   background: var(--selection);
-  box-shadow: inset 0 0 0 1px rgba(76, 114, 90, 0.12);
+  box-shadow: inset 0 0 0 1px var(--item-accent-wash);
 }
 .icon-item.drop-inside {
-  border-color: #4c725a;
-  background: #d7e7d9;
-  box-shadow: 0 0 0 3px rgba(76, 114, 90, 0.16);
+  border-color: var(--accent);
+  background: var(--accent-selection);
+  box-shadow: 0 0 0 3px var(--item-drop-wash);
 }
 .item-icon {
   display: grid;
@@ -44,7 +44,7 @@
 .icon-item.folder-colored .item-icon {
   border: 3px solid var(--folder-color);
   border-radius: 12px;
-  background: color-mix(in oklch, var(--folder-color) 18%, white);
+  background: color-mix(in oklch, var(--folder-color) 18%, var(--surface));
 }
 .item-icon img {
   max-width: 100%;
@@ -58,7 +58,7 @@
   height: 72%;
   border-radius: 20%;
   background: var(--green-soft);
-  color: #356648;
+  color: var(--accent-strong);
   place-items: center;
   font-size: calc(var(--icon-size) * 0.36);
 }
@@ -69,10 +69,10 @@
   width: 92%;
   height: 70%;
   margin-top: 18%;
-  border: 1px solid #b59551;
+  border: 1px solid var(--warning);
   border-radius: 7px 7px 9px 9px;
-  background: linear-gradient(#e9c875, #ddb55a);
-  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.3);
+  background: linear-gradient(var(--folder-top), var(--folder-body));
+  box-shadow: inset 0 3px 0 var(--folder-highlight);
 }
 .folder-art::before {
   position: absolute;
@@ -80,10 +80,10 @@
   left: 8%;
   width: 40%;
   height: 22%;
-  border: 1px solid #b59551;
+  border: 1px solid var(--warning);
   border-bottom: 0;
   border-radius: 6px 6px 0 0;
-  background: #e4bf66;
+  background: var(--folder-tab);
   content: "";
 }
 
@@ -97,8 +97,8 @@
   height: 23px;
   border: 0;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.78);
-  color: #456b54;
+  background: var(--surface);
+  color: var(--accent-strong);
   place-items: center;
   font-size: 19px;
   line-height: 1;
@@ -116,7 +116,7 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--surface);
   color: var(--green);
   place-items: center;
   font-size: 12px;
@@ -157,5 +157,5 @@
   outline: 0;
 }
 .icon-grid.bin-canvas {
-  background: rgba(41, 40, 34, 0.06);
+  background: var(--shadow);
 }

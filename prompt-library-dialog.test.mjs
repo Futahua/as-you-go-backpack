@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createPromptLibraryDialog } from './public/app/components/prompt-library-dialog.js';
+import { createHotkeyCatalog } from './public/app/hotkeys-model.js';
 
 function matchSimple(node, selector) {
   if (!node) return false;
@@ -228,6 +229,10 @@ function buildPromptLayerTree(nodes) {
   nodes['prompt-card-list'].className = 'prompt-tree-list';
   nodes['prompt-root-surface'].className = 'prompt-root-surface';
   nodes['prompt-tree-menu'].setAttribute('role', 'menu');
+  nodes['prompt-page-prompts'].className = 'prompt-page';
+  nodes['prompt-page-hotkeys'].className = 'prompt-page hotkeys-page';
+  nodes['prompt-page-hotkeys'].hidden = true;
+  nodes['hotkey-list'].className = 'hotkey-list';
   // The real markup carries this label; the dialog only ever restores it.
   nodes['prompt-copy-selected'].textContent = 'Copy selected';
   nodes['prompt-tree-viewport'].appendChild(nodes['prompt-card-list']);
@@ -237,8 +242,22 @@ function buildPromptLayerTree(nodes) {
     'prompt-tree-viewport', 'prompt-tree-menu', 'prompt-error', 'prompt-cancel',
     'prompt-copy-selected',
   ]) {
-    card.appendChild(nodes[id]);
+    nodes['prompt-page-prompts'].appendChild(nodes[id]);
   }
+  card.append(nodes['prompt-tab-prompts'], nodes['prompt-tab-hotkeys'], nodes['prompt-page-prompts'], nodes['prompt-page-hotkeys']);
+  nodes['prompt-page-hotkeys'].append(
+    nodes['hotkey-status'],
+    nodes['edge-opacity-slider'],
+    nodes['edge-opacity-value'],
+    nodes['outline-opacity-slider'],
+    nodes['outline-opacity-value'],
+    nodes['region-opacity-slider'],
+    nodes['region-opacity-value'],
+    nodes['theme-select'],
+    nodes['transparent-background-toggle'],
+    nodes['hotkey-list'],
+    nodes['hotkey-reset-all'],
+  );
   nodes['prompt-delete-confirm'].appendChild(nodes['prompt-delete-message']);
   nodes['prompt-delete-confirm'].appendChild(nodes['prompt-delete-ok']);
   nodes['prompt-delete-confirm'].appendChild(nodes['prompt-delete-cancel']);
@@ -263,14 +282,14 @@ const treeFixture = () => ({
   ] },
 });
 
-function createHarness({ initialView = null, copyFails = false } = {}) {
+function createHarness({ initialView = null, copyFails = false, persist = async () => {}, hotkeyCatalog = createHotkeyCatalog(), onViewPreferencesChanged = null } = {}) {
   let state = initialView
     ? { groups: [], shortcuts: [], view: initialView }
     : { groups: [], shortcuts: [], view: { promptLibrary: [] } };
   const store = createWorkspaceStore({
     getState: () => state,
     setState: (next) => { state = next; },
-    persist: async () => {},
+    persist,
     normalizeState: (s) => s,
     setStatus: () => {},
   });
@@ -279,6 +298,9 @@ function createHarness({ initialView = null, copyFails = false } = {}) {
     'prompt-root-surface', 'prompt-tree-menu', 'prompt-status',
     'prompt-error', 'prompt-cancel', 'prompt-copy-selected', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
+    'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
+    'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
+    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'transparent-background-toggle', 'hotkey-reset-all',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);
@@ -322,6 +344,8 @@ function createHarness({ initialView = null, copyFails = false } = {}) {
       return Promise.resolve();
     },
     setStatus: (message) => statuses.push(message),
+    hotkeyCatalog,
+    onViewPreferencesChanged,
   });
   dialog.mount();
   return {
@@ -332,6 +356,7 @@ function createHarness({ initialView = null, copyFails = false } = {}) {
     promptRows: () => nodes['prompt-card-list'].querySelectorAll('.prompt-tree-row.prompt-prompt-row'),
     folderRows: () => nodes['prompt-card-list'].querySelectorAll('.prompt-tree-row.prompt-folder-row'),
     textareaFor: (id) => nodes['prompt-card-list'].querySelectorAll('.prompt-card-details').find((d) => d.dataset.nodeId === id)?.querySelector('.prompt-card-text') ?? null,
+    hotkeyRows: () => nodes['hotkey-list'].querySelectorAll('.hotkey-row'),
   };
 }
 
@@ -352,7 +377,7 @@ const keyOn = (h, event = {}) => {
 };
 /** Dispatches a keydown from a specific element, bubbling. */
 const keyFrom = (node, event = {}) => {
-  node.dispatch('keydown', { target: node, ...event, preventDefault, stopPropagation });
+  node.dispatch('keydown', { target: node, preventDefault, stopPropagation, ...event });
 };
 const openPrompt = (h, id) => {
   const chevron = h.rowFor(id).querySelector('.prompt-card-toggle');
@@ -376,6 +401,183 @@ const blankClick = (h) => {
   const surface = h.nodes['prompt-root-surface'];
   surface.dispatch('click', { target: surface, preventDefault, stopPropagation });
 };
+
+function hotkeyRow(h, actionId) {
+  return h.hotkeyRows().find((row) => row.dataset.hotkeyAction === actionId);
+}
+
+function hotkeyButton(h, actionId, kind) {
+  return hotkeyRow(h, actionId).querySelector(`[data-hotkey-${kind}="${actionId}"]`);
+}
+
+test('Hotkeys page renders every injected catalog action and preserves prompt data across page switches', () => {
+  const catalog = createHotkeyCatalog([{
+    id: 'future.preview', label: 'Preview future action', group: 'Workspace', scope: 'workspace', defaults: ['Alt+P'],
+  }]);
+  const h = createHarness({
+    hotkeyCatalog: catalog,
+    initialView: { promptLibrary: [{ id: 'prompt-a', type: 'prompt', title: 'Keep me', text: 'body', includeInBatch: true }] },
+  });
+  open(h);
+  h.nodes['prompt-tab-hotkeys'].dispatch('click', { target: h.nodes['prompt-tab-hotkeys'] });
+  assert.equal(h.nodes['prompt-page-hotkeys'].hidden, false);
+  assert.equal(h.hotkeyRows().length, catalog.length);
+  assert.equal(hotkeyRow(h, 'future.preview').querySelector('.hotkey-label').textContent, 'Preview future action');
+  h.nodes['prompt-tab-prompts'].dispatch('click', { target: h.nodes['prompt-tab-prompts'] });
+  assert.equal(h.nodes['prompt-page-prompts'].hidden, false);
+  assert.equal(h.getState().view.promptLibrary[0].title, 'Keep me');
+});
+
+test('Settings binding capture consumes the event, reports conflicts, and permits cross-scope reuse', () => {
+  const h = createHarness();
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  hotkeyButton(h, 'workspace.cut', 'binding').dispatch('click', { target: hotkeyButton(h, 'workspace.cut', 'binding') });
+  let prevented = false;
+  let stopped = false;
+  keyFrom(h.nodes['prompt-page-hotkeys'], {
+    key: 'c', ctrlKey: true,
+    preventDefault: () => { prevented = true; },
+    stopPropagation: () => { stopped = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.match(h.nodes['hotkey-status'].textContent, /Already used by/);
+  hotkeyButton(h, 'copy-prompts.copy', 'binding').dispatch('click', { target: hotkeyButton(h, 'copy-prompts.copy', 'binding') });
+  keyFrom(h.nodes['prompt-page-hotkeys'], { key: 'c', ctrlKey: true, preventDefault, stopPropagation });
+  assert.deepEqual(h.getState().view.preferences.hotkeys.overrides['copy-prompts.copy'], ['Ctrl+C']);
+});
+
+test('Settings rows expose only binding and reset, and Backspace unassigns', async () => {
+  const saves = [];
+  const h = createHarness({ persist: async (snapshot) => saves.push(snapshot) });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  const row = hotkeyRow(h, 'workspace.copy');
+  assert.equal(row.querySelector('.hotkey-defaults'), null);
+  assert.equal(row.querySelector('[data-hotkey-change]'), null);
+  assert.equal(row.querySelector('[data-hotkey-clear]'), null);
+  assert.ok(hotkeyButton(h, 'workspace.copy', 'reset'));
+  hotkeyButton(h, 'workspace.copy', 'binding').dispatch('click', { target: hotkeyButton(h, 'workspace.copy', 'binding') });
+  keyFrom(h.nodes['prompt-page-hotkeys'], { key: 'Backspace', preventDefault, stopPropagation });
+  assert.deepEqual(h.getState().view.preferences.hotkeys.overrides['workspace.copy'], []);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(saves.length > 0);
+  hotkeyButton(h, 'workspace.copy', 'reset').dispatch('click', { target: hotkeyButton(h, 'workspace.copy', 'reset') });
+  assert.equal(h.getState().view.preferences.hotkeys?.overrides, undefined);
+  hotkeyButton(h, 'workspace.copy', 'binding').dispatch('click', { target: hotkeyButton(h, 'workspace.copy', 'binding') });
+  keyFrom(h.nodes['prompt-page-hotkeys'], { key: 'k', altKey: true, preventDefault, stopPropagation });
+  assert.deepEqual(h.getState().view.preferences.hotkeys.overrides['workspace.copy'], ['Alt+K']);
+  h.nodes['hotkey-reset-all'].dispatch('click', { target: h.nodes['hotkey-reset-all'] });
+  assert.equal(h.getState().view.preferences.hotkeys?.overrides, undefined);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+});
+
+test('Settings edge opacity slider persists, updates immediately, and keeps unknown preferences', async () => {
+  const saves = [];
+  const h = createHarness({
+    persist: async (snapshot) => saves.push(JSON.parse(snapshot)),
+    initialView: { preferences: { future: { keep: true } } },
+  });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  assert.equal(h.nodes['edge-opacity-slider'].value, '0.5');
+  assert.equal(h.nodes['edge-opacity-value'].textContent, '50%');
+  h.nodes['edge-opacity-slider'].value = '0.8';
+  h.nodes['edge-opacity-slider'].dispatch('input', { target: h.nodes['edge-opacity-slider'] });
+  assert.equal(h.getState().view.preferences.edgeOpacity, 0.8);
+  assert.deepEqual(h.getState().view.preferences.future, { keep: true });
+  assert.equal(h.nodes['edge-opacity-value'].textContent, '80%');
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(saves.at(-1).view.preferences.edgeOpacity, 0.8);
+});
+
+test('visual opacity settings persist outline and region values independently', async () => {
+  const saves = [];
+  const h = createHarness({
+    persist: async (snapshot) => saves.push(JSON.parse(snapshot)),
+    initialView: { preferences: { outlineOpacity: 0.4, regionOpacity: 0.7 } },
+  });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  assert.equal(h.nodes['outline-opacity-slider'].value, '0.4');
+  assert.equal(h.nodes['outline-opacity-value'].textContent, '40%');
+  assert.equal(h.nodes['region-opacity-slider'].value, '0.7');
+  h.nodes['outline-opacity-slider'].value = '0.25';
+  h.nodes['outline-opacity-slider'].dispatch('input', { target: h.nodes['outline-opacity-slider'] });
+  h.nodes['region-opacity-slider'].value = '0.55';
+  h.nodes['region-opacity-slider'].dispatch('input', { target: h.nodes['region-opacity-slider'] });
+  assert.equal(h.getState().view.preferences.outlineOpacity, 0.25);
+  assert.equal(h.getState().view.preferences.regionOpacity, 0.55);
+  assert.equal(h.getState().view.preferences.edgeOpacity, undefined);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(saves.at(-1).view.preferences.regionOpacity, 0.55);
+});
+
+test('Settings theme toggle updates immediately, persists, and removes the light default', async () => {
+  const saves = [];
+  const applied = [];
+  const h = createHarness({
+    persist: async (snapshot) => saves.push(JSON.parse(snapshot)),
+    initialView: { preferences: { theme: 'dark', future: { keep: true } } },
+    onViewPreferencesChanged: (next) => applied.push(next.view.preferences.theme ?? 'light'),
+  });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  assert.equal(h.nodes['theme-select'].value, 'dark');
+  h.nodes['theme-select'].value = 'light';
+  h.nodes['theme-select'].dispatch('change', { target: h.nodes['theme-select'] });
+  assert.equal(h.getState().view.preferences.theme, undefined);
+  assert.deepEqual(h.getState().view.preferences.future, { keep: true });
+  assert.equal(h.nodes['theme-select'].value, 'light');
+  assert.deepEqual(applied, ['light']);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(saves.at(-1).view.preferences.theme, undefined);
+});
+
+test('Settings transparent background toggle updates immediately and persists through reload state', async () => {
+  const saves = [];
+  const h = createHarness({
+    persist: async (snapshot) => saves.push(JSON.parse(snapshot)),
+    initialView: { preferences: { future: { keep: true } } },
+  });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  assert.equal(h.nodes['transparent-background-toggle'].checked, false);
+  h.nodes['transparent-background-toggle'].checked = true;
+  h.nodes['transparent-background-toggle'].dispatch('change', { target: h.nodes['transparent-background-toggle'] });
+  assert.equal(h.getState().view.preferences.transparentBackground, true);
+  assert.deepEqual(h.getState().view.preferences.future, { keep: true });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(saves.at(-1).view.preferences.transparentBackground, true);
+
+  const reloaded = createHarness({ initialView: h.getState().view });
+  open(reloaded);
+  reloaded.dialog.setActivePage('hotkeys');
+  assert.equal(reloaded.nodes['transparent-background-toggle'].checked, true);
+  reloaded.nodes['transparent-background-toggle'].checked = false;
+  reloaded.nodes['transparent-background-toggle'].dispatch('change', { target: reloaded.nodes['transparent-background-toggle'] });
+  assert.equal(reloaded.getState().view.preferences.transparentBackground, undefined);
+});
+
+test('Copy Prompts bindings are scoped to the prompt page and replace Enter', () => {
+  const h = createHarness({
+    initialView: {
+      promptLibrary: treeFixture().view.promptLibrary,
+      preferences: { hotkeys: { overrides: { 'copy-prompts.open-or-toggle': ['F3'] } } },
+    },
+  });
+  open(h);
+  assert.deepEqual(h.getState().view.preferences.hotkeys.overrides['copy-prompts.open-or-toggle'], ['F3']);
+  clickRow(h, 'prompt-root');
+  assert.equal(h.document.activeElement, h.rowFor('prompt-root'));
+  keyFrom(h.nodes['prompt-layer'], { key: 'Enter' });
+  assert.equal(h.rowFor('prompt-root').querySelector('.prompt-card-title'), null, 'old Enter is disabled');
+  let prevented = false;
+  keyFrom(h.nodes['prompt-layer'], { key: 'F3', preventDefault: () => { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.ok(h.rowFor('prompt-root').querySelector('.prompt-card-title'), 'custom prompt binding opens the prompt');
+});
 
 test('Ctrl+Z/Y/Shift+Z drive local undo/redo', () => {
   const h = createHarness({ initialView: treeFixture().view });
@@ -990,6 +1192,9 @@ test('a failed auto-save is surfaced and leaves the dialog open', async () => {
     'prompt-root-surface', 'prompt-tree-menu', 'prompt-status',
     'prompt-error', 'prompt-cancel', 'prompt-copy-selected', 'copy-prompt',
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
+    'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
+    'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
+    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'transparent-background-toggle', 'hotkey-reset-all',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);

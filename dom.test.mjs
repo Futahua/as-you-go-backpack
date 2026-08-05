@@ -15,6 +15,7 @@ test('dom registry resolves every required workspace element', () => {
   const document = fakeDocument([
     '#status', '#icon-grid', '#explorer', '#selection-marquee', '#empty',
     '#breadcrumbs', '#delete-all-bin', '#restore-all-bin', '#selection-status',
+    '#backdrop-opacity-slider', '#backdrop-opacity-value',
     '#context-menu', '#bin-button', '#bin-label', '#bin-count', '#editor-layer',
     '#editor', '#save-editor', '#editor-title', '#editor-error', '#name-input',
     '#description-input', '#description-label', '#target-input', '#target-fields',
@@ -27,7 +28,7 @@ test('dom registry resolves every required workspace element', () => {
   const elements = getWorkspaceElements(document);
   assert.equal(elements.grid.selector, '#icon-grid');
   assert.equal(elements.editor.selector, '#editor');
-  assert.equal(Object.keys(elements).length, 36);
+  assert.equal(Object.keys(elements).length, 38);
 });
 
 test('dom registry fails fast when an element is missing', () => {

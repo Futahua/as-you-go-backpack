@@ -258,3 +258,31 @@ test('save queue runs a queued save even after the previous save rejects', async
   await second;
   assert.deepEqual(order, ['b']);
 });
+
+test('set selection is independent of item selection', () => {
+  let state = {};
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => {},
+    normalizeState: (s) => s,
+    setStatus: () => {},
+  });
+
+  store.setSelection(['i1', 'i2']);
+  store.setSelectedSets(['s1']);
+  store.addToSelectedSets('s2');
+  assert.deepEqual([...store.getSession().selectedSets], ['s1', 's2']);
+  assert.deepEqual([...store.getSession().selected], ['i1', 'i2'], 'items untouched');
+
+  // The separation is what lets Delete mean two things safely: clearing one
+  // selection must never quietly empty the other.
+  store.clearSelectedSets();
+  assert.deepEqual([...store.getSession().selectedSets], []);
+  assert.deepEqual([...store.getSession().selected], ['i1', 'i2'], 'still untouched');
+
+  store.clearSelection();
+  store.setSelectedSets(['s3']);
+  assert.deepEqual([...store.getSession().selected], []);
+  assert.deepEqual([...store.getSession().selectedSets], ['s3'], 'and the reverse holds');
+});

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createContextMenu } from './public/app/components/context-menu.js';
+import { resolveContextTarget } from './public/app/context-target-model.js';
 
-function createHarness({ binMode = false, clipboard = null, selected = [], currentId = 'root' } = {}) {
+function createHarness({ binMode = false, clipboard = null, selected = [], selectedSets = [], currentId = 'root' } = {}) {
   const actions = [];
   const menuNode = {
     hidden: null,
@@ -36,6 +37,7 @@ function createHarness({ binMode = false, clipboard = null, selected = [], curre
     getBinMode: () => binMode,
     getClipboard: () => clipboard,
     getSelectedItems: () => selected,
+    getSelectedSets: () => selectedSets,
     isWebLink: (candidate) => candidate.target?.startsWith('https://'),
     onAction: (action) => actions.push(action),
   });
@@ -80,6 +82,26 @@ test('openMenu with a single selection shows edit/rename and Open', () => {
   assert.match(menuNode.innerHTML, /data-action="open"/);
   assert.match(menuNode.innerHTML, /data-action="edit"/);
   assert.doesNotMatch(menuNode.innerHTML, /data-action="rename"/);
+});
+
+test('openMenu with a selected set offers only bounded set actions', () => {
+  const { menu, menuNode } = createHarness({ selectedSets: [{ id: 'set-a' }] });
+  menu.openMenu(100, 100);
+  assert.match(menuNode.innerHTML, /data-action="rename-set"/);
+  assert.match(menuNode.innerHTML, /data-action="delete-sets"/);
+  assert.doesNotMatch(menuNode.innerHTML, /data-action="bin"/);
+});
+
+test('context target prioritizes item, then selected set, then blank space', () => {
+  assert.deepEqual(
+    resolveContextTarget({ itemId: 'item-1', hitSetIds: ['set-1'], selectedSetIds: new Set(['set-1']) }),
+    { kind: 'item', id: 'item-1' },
+  );
+  assert.deepEqual(
+    resolveContextTarget({ hitSetIds: ['set-1', 'set-2'], selectedSetIds: new Set(['set-2']) }),
+    { kind: 'set', id: 'set-2' },
+  );
+  assert.deepEqual(resolveContextTarget({ hitSetIds: ['set-1'], selectedSetIds: new Set() }), { kind: 'blank', id: null });
 });
 
 test('click dispatch routes the action to onAction and closes', () => {

@@ -1,4 +1,6 @@
+import { normalizeItemSets } from './sets-model.js';
 import { normalizePromptLibrary } from './prompt-library-model.js';
+import { normalizeViewPreferences } from './app/hotkeys-model.js';
 
 export const ROOT_ID = 'root';
 export const DEFAULT_ICON_SIZE = 96;
@@ -27,6 +29,8 @@ export function emptyState() {
       promptLibrary: [],
       graphPositions: {},
       toolbarPositions: {},
+      preferences: {},
+      itemSets: [],
     },
   };
 }
@@ -332,6 +336,7 @@ export function normalizeState(raw) {
       layout: raw?.view?.layout === 'graph' ? 'graph' : 'explorer',
       graphPositions: normalizeGraphPositions(raw?.view?.graphPositions),
       toolbarPositions: normalizeFlatPositions(raw?.view?.toolbarPositions),
+      preferences: normalizeViewPreferences(raw?.view?.preferences),
       // promptLibrary replaces promptCards/pickupPrompt: the older shapes are
       // read here purely for migration (normalizePromptLibrary) and never
       // written again.
@@ -340,6 +345,10 @@ export function normalizeState(raw) {
         raw?.view?.promptCards,
         raw?.view?.pickupPrompt,
       ),
+      // Filled in below, once every item id is known: a set naming an item that
+      // no longer exists must be pruned rather than left dangling, and that
+      // cannot be decided until the groups and shortcuts are normalized.
+      itemSets: [],
     },
   };
 
@@ -360,7 +369,33 @@ export function normalizeState(raw) {
     });
     combined.forEach((entry, order) => entry.apply(order));
   }
+
+  // Sets reference items by id, so they are normalized once every item is
+  // known. Membership is independent of folder location, so both groups and
+  // shortcut records count as addressable members.
+  state.view.itemSets = normalizeItemSets(raw?.view?.itemSets, [
+    ...state.groups.map((candidate) => candidate.id),
+    ...state.shortcuts.map((candidate) => candidate.id),
+  ]);
   return state;
+}
+
+/** Replaces the whole set list. Sets live in the view rather than beside the
+ * items because they are a way of looking at the workspace, not a container in
+ * it — an item's place in the folder tree is untouched by what it belongs to.
+ *
+ * Members are pruned against the current items on the way in, not only on
+ * load: a set that never holds an id the workspace cannot resolve is one that
+ * cannot be saved holding one either. */
+export function setItemSets(state, itemSets) {
+  const knownItemIds = [
+    ...state.groups.map((candidate) => candidate.id),
+    ...state.shortcuts.map((candidate) => candidate.id),
+  ];
+  return {
+    ...state,
+    view: { ...state.view, itemSets: normalizeItemSets(itemSets, knownItemIds) },
+  };
 }
 
 export function migrateActions(actions) {

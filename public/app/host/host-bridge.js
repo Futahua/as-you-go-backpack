@@ -1,3 +1,8 @@
+import {
+  decodeWorkspaceState,
+  encodeWorkspaceState,
+} from './workspace-state-codec.js';
+
 /** The papers:host:result message type the parent frame uses to answer a
  * request sent via postMessage. */
 const HOST_RESULT = 'papers:host:result';
@@ -47,8 +52,10 @@ export function createHostBridge(window) {
   });
 
   return {
-    loadWorkspace: () => request('papers:project:as-you-go-load'),
-    saveWorkspace: (state) => request('papers:project:as-you-go-save', { state }),
+    loadWorkspace: () => request('papers:project:as-you-go-load').then(decodeWorkspaceState),
+    saveWorkspace: (state) => request('papers:project:as-you-go-save', {
+      state: encodeWorkspaceState(state),
+    }),
     launchShortcut: (actionId) => request('papers:project:as-you-go-launch', { actionId }),
     revealShortcut: (actionId) => request('papers:project:as-you-go-reveal', { actionId }),
     openWebLink: (url) => request('papers:project:open-web-link', { url }),
