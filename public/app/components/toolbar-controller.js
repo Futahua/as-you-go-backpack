@@ -79,13 +79,17 @@ export function createToolbarController({
       element.style.left = `${clampToolbarOffset(x, width, spanX) * 100}%`;
       element.style.right = 'auto';
     }
-    if (y < 0) {
-      element.style.bottom = `${clampToolbarOffset(-y, height, spanY) * 100}%`;
-      element.style.top = 'auto';
-    } else {
-      element.style.top = `${clampToolbarOffset(y, height, spanY) * 100}%`;
-      element.style.bottom = 'auto';
-    }
+    // Always position from the top. The pills live inside .navigation, which
+    // is height:0, so a percentage `bottom` resolves against nothing and puts
+    // the element off-screen above the window — which is how a pill dragged
+    // near the bottom edge became unreachable. Converting a bottom-anchored
+    // offset to a top offset in pixels keeps it on screen and still respects
+    // where it was dropped.
+    const topOffset = y < 0
+      ? spanY - clampToolbarOffset(-y, height, spanY) * spanY - height
+      : clampToolbarOffset(y, height, spanY) * spanY;
+    element.style.top = `${Math.max(TOOLBAR_EDGE_MARGIN, Math.min(topOffset, spanY - height - TOOLBAR_EDGE_MARGIN))}px`;
+    element.style.bottom = 'auto';
   }
 
   function restorePositions() {
