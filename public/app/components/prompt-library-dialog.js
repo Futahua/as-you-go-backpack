@@ -49,12 +49,14 @@ import {
   getOutlineOpacity,
   getRegionOpacity,
   getTheme,
+  getTransparentBackground,
   resetAllHotkeyOverrides,
   resetHotkeyOverride,
   setEdgeOpacity,
   setOutlineOpacity,
   setRegionOpacity,
   setTheme,
+  setTransparentBackground,
 } from '../hotkeys-model.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -148,6 +150,7 @@ export function createPromptLibraryDialog({
   const regionOpacitySlider = document.querySelector('#region-opacity-slider');
   const regionOpacityValue = document.querySelector('#region-opacity-value');
   const themeSelect = document.querySelector('#theme-select');
+  const transparentBackgroundToggle = document.querySelector('#transparent-background-toggle');
   const addPromptButton = document.querySelector('#prompt-add-prompt');
   const addFolderButton = document.querySelector('#prompt-add-folder');
   const cardList = document.querySelector('#prompt-card-list');
@@ -416,6 +419,7 @@ export function createPromptLibraryDialog({
 
   function renderThemeControl() {
     if (themeSelect) themeSelect.value = getTheme(currentViewPreferences());
+    if (transparentBackgroundToggle) transparentBackgroundToggle.checked = getTransparentBackground(currentViewPreferences());
   }
 
   function focusCapturedBinding() {
@@ -595,6 +599,15 @@ export function createPromptLibraryDialog({
     persistViewPreferences(
       setTheme(currentViewPreferences(), themeSelect.value),
       'Theme updated.',
+    );
+    renderThemeControl();
+  }
+
+  function onTransparentBackgroundChange(event) {
+    if (event.target !== transparentBackgroundToggle) return;
+    persistViewPreferences(
+      setTransparentBackground(currentViewPreferences(), transparentBackgroundToggle.checked),
+      'Transparent background updated. Restart Papers to see through the window.',
     );
     renderThemeControl();
   }
@@ -1564,6 +1577,7 @@ export function createPromptLibraryDialog({
     hotkeysPage?.addEventListener('keydown', onHotkeyPageKeyDown, { signal });
     hotkeysPage?.addEventListener('input', onOpacityInput, { signal });
     themeSelect?.addEventListener('change', onThemeChange, { signal });
+    transparentBackgroundToggle?.addEventListener('change', onTransparentBackgroundChange, { signal });
     resetAllHotkeysButton?.addEventListener('click', resetAllHotkeys, { signal });
     copyButton.addEventListener('contextmenu', (event) => {
       event.preventDefault();

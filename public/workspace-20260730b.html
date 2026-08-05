@@ -10,7 +10,16 @@
   </head>
   <body>
     <main class="workspace">
+      <div class="workspace-backdrop" id="workspace-backdrop" aria-hidden="true"></div>
       <section class="navigation" aria-label="Folder navigation">
+        <div class="backdrop-slider toolbar-float" id="backdrop-slider" data-toolbar-key="backdrop-slider">
+          <label class="sr-only" for="backdrop-opacity-slider">Background opacity</label>
+          <span class="backdrop-slider-grip" aria-hidden="true">
+            <svg viewBox="0 0 20 20"><path d="M7 5.5v9M13 5.5v9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </span>
+          <input id="backdrop-opacity-slider" type="range" min="0" max="1" step="0.05" value="1" />
+          <output id="backdrop-opacity-value" for="backdrop-opacity-slider">100%</output>
+        </div>
         <nav class="breadcrumbs toolbar-float" id="breadcrumbs" data-toolbar-key="breadcrumbs" aria-label="Current group path"></nav>
         <button class="quiet-button icon-button toolbar-float" id="restore-all-bin" data-toolbar-key="restore-all-bin" type="button" title="Restore all" hidden>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10a6 6 0 1 0 1.76-4.24M4 10V5m0 5h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -156,6 +165,13 @@
                   <option value="light">Light paper</option>
                   <option value="dark">Dark paper</option>
                 </select>
+              </div>
+              <div class="settings-opacity-control settings-transparent-control">
+                <label for="transparent-background-toggle">Background</label>
+                <label class="settings-checkbox-label">
+                  <input id="transparent-background-toggle" type="checkbox" />
+                  <span>Transparent</span>
+                </label>
               </div>
             </section>
             <div id="hotkey-list" class="hotkey-list"></div>

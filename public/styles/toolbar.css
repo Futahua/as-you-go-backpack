@@ -40,10 +40,41 @@
 .icon-button .bin-count { position: static; }
 
 .toolbar-float[data-toolbar-key="breadcrumbs"] { top: 12px; left: 28px; }
+.toolbar-float[data-toolbar-key="backdrop-slider"] { top: 12px; right: 268px; }
 .toolbar-float[data-toolbar-key="copy-prompt"] { top: 12px; right: 148px; }
 .toolbar-float[data-toolbar-key="bin-button"] { top: 12px; right: 28px; }
 .toolbar-float[data-toolbar-key="delete-all-bin"] { top: 12px; right: 88px; }
 .toolbar-float[data-toolbar-key="restore-all-bin"] { top: 12px; right: 208px; }
+/* Background-opacity pill. The grip is the drag handle: the toolbar
+ * controller ignores pointerdown on an <input>, so dragging the range itself
+ * would fight the thumb. Grabbing anywhere else on the pill still drags. */
+.backdrop-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--paper);
+  padding: 7px 12px 7px 8px;
+}
+.backdrop-slider-grip {
+  display: inline-flex;
+  color: var(--ink-soft);
+}
+.backdrop-slider-grip svg { width: 16px; height: 16px; }
+.backdrop-slider input[type="range"] {
+  width: 96px;
+  cursor: pointer;
+  accent-color: var(--green);
+}
+.backdrop-slider output {
+  min-width: 34px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 #delete-all-bin.selective {
   background: var(--toolbar-danger-surface);
   border-color: var(--toolbar-danger-text);

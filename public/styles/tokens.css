@@ -156,7 +156,9 @@
   --prompt-input-focus: rgba(255, 254, 249, 0.22);
   --prompt-input-focus-soft: rgba(120, 168, 137, 0.5);
   --prompt-card-surface: rgba(48, 44, 37, 0.94);
-  --prompt-text-focus: rgba(255, 254, 249, 0.88);
+  /* Focus lifts the field slightly off the card rather than inverting it: a
+   * light fill here puts near-white --text on near-white and is unreadable. */
+  --prompt-text-focus: rgba(65, 60, 50, 0.92);
   --prompt-input-focus-strong: rgba(120, 168, 137, 0.58);
   --prompt-expanded: rgba(65, 60, 50, 0.72);
   --border-hover: #8a8172;
@@ -164,4 +166,8 @@
   --bin-surface: #4a3828;
   --bin-badge: #a6b29b;
   --icon-size: 96px;
+}
+
+:root[data-transparent-background="true"] {
+  --page-background: transparent;
 }

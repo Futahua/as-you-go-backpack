@@ -76,7 +76,7 @@ import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
 import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
-import { getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme } from './app/hotkeys-model.js';
+import { getBackdropOpacity, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTransparentBackground, setBackdropOpacity } from './app/hotkeys-model.js';
 import { resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
@@ -1608,6 +1608,21 @@ function renderGraph(initialFit = false) {
 
 function applyTheme(preferences) {
   document.documentElement.dataset.theme = getTheme(preferences);
+  document.documentElement.dataset.transparentBackground = String(getTransparentBackground(preferences));
+  applyBackdropOpacity(preferences);
+}
+
+/** Drives the .workspace-backdrop panel and keeps the pill's slider/readout in
+ * step. Split out so the drag handler can repaint on every input event without
+ * paying for a full render(). */
+function applyBackdropOpacity(preferences) {
+  const opacity = getBackdropOpacity(preferences);
+  document.documentElement.style.setProperty('--workspace-backdrop-opacity', String(opacity));
+  const slider = elements.backdropOpacitySlider;
+  if (slider && document.activeElement !== slider) slider.value = String(opacity);
+  if (elements.backdropOpacityValue) {
+    elements.backdropOpacityValue.textContent = `${Math.round(opacity * 100)}%`;
+  }
 }
 
 function render() {
@@ -1962,6 +1977,28 @@ function confirmPickupCopy(message) {
     if (elements.status.textContent === message) setStatus('');
   }, PICKUP_COPY_FLASH_MS);
 }
+
+// Background-opacity pill. `input` repaints live while dragging so the panel
+// tracks the thumb; `change` is what persists, so a drag writes state once on
+// release instead of on every frame.
+elements.backdropOpacitySlider.addEventListener('input', () => {
+  const opacity = Number(elements.backdropOpacitySlider.value);
+  document.documentElement.style.setProperty('--workspace-backdrop-opacity', String(opacity));
+  elements.backdropOpacityValue.textContent = `${Math.round(opacity * 100)}%`;
+});
+
+elements.backdropOpacitySlider.addEventListener('change', async () => {
+  const preferences = setBackdropOpacity(
+    state.view?.preferences,
+    Number(elements.backdropOpacitySlider.value),
+  );
+  const nextState = { ...state, view: { ...state.view, preferences } };
+  try {
+    await commit(nextState);
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error));
+  }
+});
 
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {

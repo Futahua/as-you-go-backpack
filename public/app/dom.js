@@ -21,6 +21,8 @@ export function getWorkspaceElements(document) {
     deleteAllBin: requiredElement(document, '#delete-all-bin'),
     restoreAllBin: requiredElement(document, '#restore-all-bin'),
     selectionStatus: requiredElement(document, '#selection-status'),
+    backdropOpacitySlider: requiredElement(document, '#backdrop-opacity-slider'),
+    backdropOpacityValue: requiredElement(document, '#backdrop-opacity-value'),
     menu: requiredElement(document, '#context-menu'),
     binButton: requiredElement(document, '#bin-button'),
     binLabel: requiredElement(document, '#bin-label'),

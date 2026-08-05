@@ -7,6 +7,9 @@ export const HOTKEY_SCOPE_PROMPTS = 'copy-prompts';
 export const DEFAULT_EDGE_OPACITY = 0.5;
 export const DEFAULT_OUTLINE_OPACITY = 1;
 export const DEFAULT_REGION_OPACITY = 1;
+/** Backdrop panel behind the canvas: 1 is the solid paper background (the
+ * look before transparency existed), 0 lets the desktop through untinted. */
+export const DEFAULT_BACKDROP_OPACITY = 1;
 
 const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift', 'Meta'];
 const MODIFIER_ALIASES = new Map([
@@ -391,9 +394,11 @@ const OPACITY_DEFAULTS = Object.freeze({
   edgeOpacity: DEFAULT_EDGE_OPACITY,
   outlineOpacity: DEFAULT_OUTLINE_OPACITY,
   regionOpacity: DEFAULT_REGION_OPACITY,
+  backdropOpacity: DEFAULT_BACKDROP_OPACITY,
 });
 
 export const DEFAULT_THEME = 'light';
+export const DEFAULT_TRANSPARENT_BACKGROUND = false;
 
 export function normalizeTheme(value) {
   return value === 'dark' ? 'dark' : DEFAULT_THEME;
@@ -409,6 +414,17 @@ export function setTheme(rawPreferences, value) {
   const theme = normalizeTheme(value);
   if (theme === DEFAULT_THEME) delete next.theme;
   else next.theme = theme;
+  return next;
+}
+
+export function getTransparentBackground(rawPreferences) {
+  return rawPreferences?.transparentBackground === true;
+}
+
+export function setTransparentBackground(rawPreferences, value) {
+  const next = isRecord(rawPreferences) ? cloneValue(rawPreferences) : {};
+  if (value === true) next.transparentBackground = true;
+  else delete next.transparentBackground;
   return next;
 }
 
@@ -443,6 +459,9 @@ export const setOutlineOpacity = (rawPreferences, value) => setOpacity(rawPrefer
 export const normalizeRegionOpacity = (value) => normalizeOpacity('regionOpacity', value);
 export const getRegionOpacity = (rawPreferences) => getOpacity(rawPreferences, 'regionOpacity');
 export const setRegionOpacity = (rawPreferences, value) => setOpacity(rawPreferences, 'regionOpacity', value);
+export const normalizeBackdropOpacity = (value) => normalizeOpacity('backdropOpacity', value);
+export const getBackdropOpacity = (rawPreferences) => getOpacity(rawPreferences, 'backdropOpacity');
+export const setBackdropOpacity = (rawPreferences, value) => setOpacity(rawPreferences, 'backdropOpacity', value);
 
 /** Normalizes the complete project-owned view/preferences object while leaving
  * unrelated future preference records untouched. */
@@ -456,6 +475,8 @@ export function normalizeViewPreferences(rawPreferences, catalog = HOTKEY_CATALO
     if (theme === DEFAULT_THEME) delete next.theme;
     else next.theme = theme;
   }
+  if (Object.prototype.hasOwnProperty.call(next, 'transparentBackground')
+    && next.transparentBackground !== true) delete next.transparentBackground;
   for (const [key, fallback] of Object.entries(OPACITY_DEFAULTS)) {
     if (!Object.prototype.hasOwnProperty.call(next, key)) continue;
     const opacity = normalizeOpacity(key, next[key]);

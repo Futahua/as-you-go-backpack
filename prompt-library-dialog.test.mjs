@@ -254,6 +254,7 @@ function buildPromptLayerTree(nodes) {
     nodes['region-opacity-slider'],
     nodes['region-opacity-value'],
     nodes['theme-select'],
+    nodes['transparent-background-toggle'],
     nodes['hotkey-list'],
     nodes['hotkey-reset-all'],
   );
@@ -299,7 +300,7 @@ function createHarness({ initialView = null, copyFails = false, persist = async 
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
     'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
     'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
-    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'hotkey-reset-all',
+    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'transparent-background-toggle', 'hotkey-reset-all',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);
@@ -532,6 +533,31 @@ test('Settings theme toggle updates immediately, persists, and removes the light
   assert.deepEqual(applied, ['light']);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(saves.at(-1).view.preferences.theme, undefined);
+});
+
+test('Settings transparent background toggle updates immediately and persists through reload state', async () => {
+  const saves = [];
+  const h = createHarness({
+    persist: async (snapshot) => saves.push(JSON.parse(snapshot)),
+    initialView: { preferences: { future: { keep: true } } },
+  });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  assert.equal(h.nodes['transparent-background-toggle'].checked, false);
+  h.nodes['transparent-background-toggle'].checked = true;
+  h.nodes['transparent-background-toggle'].dispatch('change', { target: h.nodes['transparent-background-toggle'] });
+  assert.equal(h.getState().view.preferences.transparentBackground, true);
+  assert.deepEqual(h.getState().view.preferences.future, { keep: true });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(saves.at(-1).view.preferences.transparentBackground, true);
+
+  const reloaded = createHarness({ initialView: h.getState().view });
+  open(reloaded);
+  reloaded.dialog.setActivePage('hotkeys');
+  assert.equal(reloaded.nodes['transparent-background-toggle'].checked, true);
+  reloaded.nodes['transparent-background-toggle'].checked = false;
+  reloaded.nodes['transparent-background-toggle'].dispatch('change', { target: reloaded.nodes['transparent-background-toggle'] });
+  assert.equal(reloaded.getState().view.preferences.transparentBackground, undefined);
 });
 
 test('Copy Prompts bindings are scoped to the prompt page and replace Enter', () => {
@@ -1168,7 +1194,7 @@ test('a failed auto-save is surfaced and leaves the dialog open', async () => {
     'prompt-delete-confirm', 'prompt-delete-message', 'prompt-delete-ok', 'prompt-delete-cancel',
     'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
     'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
-    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'hotkey-reset-all',
+    'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'transparent-background-toggle', 'hotkey-reset-all',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);

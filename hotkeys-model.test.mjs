@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { emptyState, normalizeState } from './public/workspace-model-20260730b.js';
 import {
+  DEFAULT_BACKDROP_OPACITY,
   DEFAULT_EDGE_OPACITY,
   DEFAULT_OUTLINE_OPACITY,
   DEFAULT_REGION_OPACITY,
   DEFAULT_THEME,
+  DEFAULT_TRANSPARENT_BACKGROUND,
   HOTKEY_CATALOG,
   HOTKEY_SCOPE_PROMPTS,
   HOTKEY_SCOPE_WORKSPACE,
@@ -14,12 +16,15 @@ import {
   clearHotkeyOverride,
   createHotkeyCatalog,
   effectiveBindings,
+  getBackdropOpacity,
   getEdgeOpacity,
   getOutlineOpacity,
   getRegionOpacity,
   getTheme,
+  getTransparentBackground,
   findHotkeyConflict,
   normalizeHotkeyPreferences,
+  normalizeBackdropOpacity,
   normalizeEdgeOpacity,
   normalizeOutlineOpacity,
   normalizeRegionOpacity,
@@ -27,10 +32,12 @@ import {
   resetAllHotkeyOverrides,
   resetHotkeyOverride,
   setHotkeyOverride,
+  setBackdropOpacity,
   setEdgeOpacity,
   setOutlineOpacity,
   setRegionOpacity,
   setTheme,
+  setTransparentBackground,
 } from './public/app/hotkeys-model.js';
 
 test('the explicit catalog contains every current Backpack action exactly once', () => {
@@ -217,6 +224,18 @@ test('theme preference defaults to light, persists dark, removes light, and pres
   assert.deepEqual(normalizeViewPreferences({ theme: 'light', future: { keep: true } }), { future: { keep: true } });
 });
 
+test('transparent background defaults off, round-trips, removes its default, and preserves unknowns', () => {
+  assert.equal(DEFAULT_TRANSPARENT_BACKGROUND, false);
+  assert.equal(getTransparentBackground({}), false);
+  assert.equal(getTransparentBackground({ transparentBackground: 'yes' }), false);
+  const enabled = setTransparentBackground({ future: { keep: true } }, true);
+  assert.deepEqual(enabled, { future: { keep: true }, transparentBackground: true });
+  assert.equal(getTransparentBackground(enabled), true);
+  assert.deepEqual(setTransparentBackground(enabled, false), { future: { keep: true } });
+  assert.deepEqual(normalizeViewPreferences({ transparentBackground: true, future: { keep: true } }), enabled);
+  assert.deepEqual(normalizeViewPreferences({ transparentBackground: 'yes', future: { keep: true } }), { future: { keep: true } });
+});
+
 test('edge opacity defaults safely and stores only a non-default view override', () => {
   assert.equal(DEFAULT_EDGE_OPACITY, 0.5);
   assert.equal(normalizeEdgeOpacity(undefined), 0.5);
@@ -240,6 +259,20 @@ test('visual opacity preferences normalize, persist, and remove defaults indepen
   assert.deepEqual(setRegionOpacity({ outlineOpacity: 0.35 }, 0.65), { outlineOpacity: 0.35, regionOpacity: 0.65 });
   assert.deepEqual(setOutlineOpacity({ outlineOpacity: 0.35 }, 1), {});
   assert.deepEqual(setRegionOpacity({ regionOpacity: 0.65 }, 1), {});
+});
+
+test('backdrop opacity normalizes, persists, and drops its opaque default', () => {
+  assert.equal(DEFAULT_BACKDROP_OPACITY, 1);
+  assert.equal(normalizeBackdropOpacity('bad'), 1);
+  assert.equal(normalizeBackdropOpacity(-1), 1);
+  assert.equal(getBackdropOpacity(undefined), 1);
+  assert.equal(getBackdropOpacity({ backdropOpacity: 0 }), 0);
+  assert.equal(getBackdropOpacity({ backdropOpacity: 0.4 }), 0.4);
+  assert.deepEqual(setBackdropOpacity({ edgeOpacity: 0.8 }, 0.4), { edgeOpacity: 0.8, backdropOpacity: 0.4 });
+  // Fully opaque is the default, so it is stored as an absence.
+  assert.deepEqual(setBackdropOpacity({ backdropOpacity: 0.4 }, 1), {});
+  // Fully transparent is a real choice and must survive a round trip.
+  assert.deepEqual(normalizeViewPreferences({ backdropOpacity: 0 }), { backdropOpacity: 0 });
 });
 
 test('view preference normalization preserves unknown records and repairs edge opacity', () => {

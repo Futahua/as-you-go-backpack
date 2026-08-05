@@ -101,9 +101,9 @@ test('set outlines and named-set glyphs share outline opacity, while selected re
   assert.ok(/calc\(24% \* var\(--graph-region-opacity,\s*1\)\)/.test(selectedRegion), 'selected fill remains 2x the base strength');
 });
 
-test('settings visual controls share a four-column layout and wrap on narrow panels', () => {
+test('settings visual controls share a five-column layout and wrap on narrow panels', () => {
   const rule = dialogCss.match(/\.settings-preferences\s*\{[^}]*\}/)?.[0] ?? '';
-  assert.ok(/grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/.test(rule));
+  assert.ok(/grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/.test(rule));
   assert.ok(/@media\s*\(max-width:\s*560px\)/.test(dialogCss));
 });
 
@@ -128,6 +128,13 @@ test('workspace body uses a plain page surface without a square grid', () => {
   const bodyRule = baseCss.match(/body\s*\{(?=[^}]*min-height:\s*100vh)[^}]*\}/)?.[0] ?? '';
   assert.match(bodyRule, /background:\s*var\(--page-background\)/);
   assert.doesNotMatch(bodyRule, /linear-gradient|background-size/);
+});
+
+test('transparent background opt-in overrides page surface without changing dark tokens', () => {
+  assert.match(tokensCss, /:root\[data-transparent-background="true"\]/);
+  assert.match(tokensCss, /--page-background:\s*transparent/);
+  assert.match(graphCss, /\.graph-set-region\s*\{[^}]*color-mix/);
+  assert.match(itemsCss, /\.icon-item/);
 });
 
 test('floating surfaces use theme variables, including the breadcrumb handle', () => {

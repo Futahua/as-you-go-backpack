@@ -236,16 +236,9 @@
   box-shadow: inset 0 0 0 1px var(--text-on-accent);
   pointer-events: none;
 }
+/* The selection count is left in the DOM (still written by syncSelection, and
+ * asserted by dom.test.mjs) but not drawn: the floating pill sat over the
+ * canvas and the selection is already visible on the tiles themselves. */
 .selection-status {
-  position: fixed;
-  right: 20px;
-  bottom: 18px;
-  z-index: 15;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--paper);
-  padding: 7px 12px;
-  box-shadow: 0 8px 22px var(--shadow);
-  color: var(--text-secondary);
-  font-size: 11px;
+  display: none;
 }
