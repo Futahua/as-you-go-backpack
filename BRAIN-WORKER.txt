@@ -5913,3 +5913,113 @@ leaving the ten pre-existing modified host/runtime/test files and three
 pre-existing untracked windowBounds/runtime-test files untouched. Commit this
 coordination log separately in As you Go. Assignment 015 remains queued and is
 not dispatched by this acceptance.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 015 CREATOR AUTHORIZATION + DISPATCH
+======================================================================
+
+AUTHORIZATION
+The creator answered "yé" to BRAIN's explicit request to: (1) carefully merge
+the narrow window capability into the currently dirty Papers lifecycle/bridge
+area without overwriting existing work; (2) build/restart Papers for this slice;
+and (3) launch and control only one disposable test window. This authority is
+limited to Assignment 015. It does not authorize manipulating any creator
+application window, packaging/installing Papers, updating the Start Menu build,
+or beginning multi-window Assignment 016.
+
+ACTIONABLE CONTRACT
+The complete `Assignment 015 QUEUED, NOT DISPATCHED` block above now becomes
+actionable, with the following precise repository and merge constraints.
+
+PAPERS MERGE BOUNDARY
+Canonical repo: `D:\Letters\MatTroiSeConMoc\PAPERS 3\Papers-3`.
+014 product commit is `da3dd6d`. Pre-existing unrelated dirty work remains.
+
+Use these seams:
+- NEW main-process modules under `src/main/windows` for the shared bounded
+  observation/binding service, and NEW dedicated IPC registration under
+  `src/main/ipc`. Do not force this through generic protocol send or hostFacade.
+- MODIFY clean `src/preload/backpackProject.ts` only for the enumerated, deeply
+  validated project message vocabulary and typed result shaping.
+- MODIFY dirty `src/main/index.ts` only in isolated import/composition/shutdown
+  hunks: construct the shared service/factory, register the dedicated IPC with
+  `backpackProjectRuntime.isSender`, and await/best-effort stop before owned app
+  shutdown. Preserve every existing window-bounds and close-before-destroy hunk.
+- DO NOT edit the already-dirty `src/main/hostFacade.ts`, `src/main/ipc/hostIpc.ts`,
+  `src/main/backpacks/backpackProjectRuntime.ts`,
+  `src/main/backpacks/backpackProjectService.ts`, `src/host/bridge.ts`,
+  `src/preload/host.ts`, SettingsPane or their existing dirty tests. If the
+  dedicated route proves impossible, checkpoint the precise blocker; do not
+  absorb those files.
+- Prefer new focused tests so existing dirty tests remain untouched. At pickup,
+  record the pre-015 status and preserve a hunk-level separation for index.ts;
+  no staging/commit may include its unrelated pre-existing hunks.
+
+PAPERS CAPABILITY SHAPE
+- The Backpack project gets only: list eligible candidates, bind one candidate,
+  observe one issued binding/runtime capability, minimize, restore and apply
+  bounds for that issued capability. No close in the project bridge, no raw
+  send/HWND/process-command/path input and no arbitrary launch.
+- Main owns lazy 014 start, helper restart/re-resolution and shutdown. Exclude
+  Papers itself (all current-process windows), invisible/tool/unsafe/system
+  candidates and entries without sufficient trusted identity. Bound candidate
+  count, title/path/icon bytes, pending calls, observation cadence, subscribers
+  and caches.
+- Candidate icon enrichment uses main-process `app.getFileIcon` only on a path
+  obtained from the helper's trusted observation. The project cannot request an
+  arbitrary icon path. Cache/deduplicate by trusted process identity.
+- Bind is allowed only for a currently listed, host-issued candidate token.
+  Return a versioned stable descriptor suitable for persistence plus ephemeral
+  runtime capability separately. A persisted descriptor can be used only for
+  fail-closed re-resolution of an already visible window; it is never authority
+  to execute/launch a path. Zero/multiple matches remain missing/ambiguous.
+- The dedicated IPC must enforce `backpackProjectRuntime.isSender` on every
+  call, validate all message fields and bounds deeply, and return typed bounded
+  outcomes. Unknown fields/methods cannot become commands.
+
+AS YOU GO ONE-MEMBER SLICE
+Canonical repo: `D:\Letters\MatTroiSeConMoc\Papers\Backpack projects\As you Go`.
+Base product item commit is `539d2af`; current coordination head includes 014.
+
+- Implement exactly the queued 015 one-member model/UI behavior. Persist one
+  ordered membership descriptor and per-layout arrangement; never runtimeId,
+  token, HWND or live observation. Normalize legacy 008 records safely.
+- Extend `public/app/host/host-bridge.js` with only the enumerated window methods
+  and bounded correlation. No arbitrary request method exposed to item code.
+- Picker is an in-item compact list driven by host candidates. Pick absent to
+  bind; pick the sole current member to unlink. Cancellation/no result changes
+  nothing. Show program icon, exact distinguishing label and static live state.
+- Individual member click toggles minimize/restore and never starts outer drag.
+  Activate applies saved bounds plus normal/minimized intent using enumerated
+  calls, then becomes the sole recording layout.
+- Use one explicit active-recording layout id. A bounded observer updates only
+  its membership arrangement, coalesces/debounces queued saves, patches only the
+  member interior and never rebuilds/reheats graph physics. Inactive/no-consumer
+  stops observation. Programmatic apply is echo-suppressed.
+- Deleting/unlinking remains data-only. Missing/ambiguous/helper-unavailable is
+  visible and never guessed. Do not add second-member/group/drag-out behavior.
+
+TEST AND LIVE-PROOF AUTHORITY
+- First run complete fake/model/bridge/lifecycle/persistence/pointer/security
+  tests plus full relevant suites and typecheck. Do not proceed live on failure.
+- Build canonical Papers (`npm run build`) only after tests pass. Do not package,
+  install or replace the Start Menu target.
+- Launch one worker-owned Papers test instance and one uniquely titled
+  disposable window. Control only that disposable target: pick, observe,
+  move/resize, verify auto-record, minimize, restore, activate saved geometry,
+  save/reload/re-resolve. Never select or act on another listed window.
+- Cleanup in finally: close only the worker-owned disposable target/test Papers
+  instance, stop its helper, verify zero owned helper/test processes and no test
+  window. Record exact transcript and creator-visible screenshots if available.
+  Do not leave a test instance running merely for inspection.
+
+VERIFICATION AND STOP
+Papers: focused 010-015, full unit, typecheck, build, preload/IPC security and
+lifecycle cleanup. As you Go: model/renderer/pointer/host bridge plus full suite
+and static fixture where applicable. Run diff/EOF checks. Append `WORKER -
+Assignment 015 CHECKPOINT` with exact files, APIs, counts, live evidence,
+cleanup and hunk-level dirty-tree separation. Do not commit/push or start 016.
+
+WORKER
+Append 015 PICKUP, implement this authorized slice, run the bounded proof,
+append 015 CHECKPOINT and stop for BRAIN review.
