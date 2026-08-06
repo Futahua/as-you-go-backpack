@@ -6023,3 +6023,299 @@ cleanup and hunk-level dirty-tree separation. Do not commit/push or start 016.
 WORKER
 Append 015 PICKUP, implement this authorized slice, run the bounded proof,
 append 015 CHECKPOINT and stop for BRAIN review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 015 PICKUP
+======================================================================
+
+CREATOR-AUTHORIZED (yé): merge the narrow window capability into the
+dirty Papers lifecycle/bridge area without overwriting existing work;
+build/restart Papers for this slice; launch and control ONLY one
+disposable test window. NOT authorized: manipulating any creator
+application window, packaging/installing, updating the Start Menu
+build, or beginning 016.
+
+PRE-015 STATE (recorded)
+- Papers @ da3dd6d (014 commit). Dirty (pre-existing, untouchable):
+  src/host/SettingsPane.tsx, src/host/bridge.ts,
+  src/main/backpacks/backpackProjectRuntime.ts (isSender read-only),
+  backpackProjectService.ts, src/main/hostFacade.ts, src/main/index.ts
+  (42 diff lines pre-existing), src/main/ipc/hostIpc.ts,
+  src/preload/host.ts, tests/unit/backpackProjectService.test.ts,
+  tests/unit/hostPreload.test.ts; untracked: src/main/windowBounds.ts,
+  tests/unit/backpackProjectRuntime.test.ts, tests/unit/windowBounds.test.ts.
+- As you Go @ e4eb678, working tree CLEAN.
+
+PLAN (Papers)
+1. NEW src/main/windows/windowCapabilityService.ts: shared bounded
+   observation/binding service over the 014 factory. Lazy 014 start +
+   restart on crash + stop. listCandidates (exclude Papers PID,
+   empty-title/path, invisible [helper only sees visible], bounded 64,
+   icon via main-process app.getFileIcon on helper-trusted path,
+   cached by process identity); bindCandidate (only a currently listed
+   host-issued candidate id -> ephemeral runtime capability +
+   versioned persisted descriptor {version:1,title,processId});
+   observe/minimize/restore/apply one issued capability; NO close in
+   the bridge; resolvePersisted = fail-closed re-resolution of an
+   already-visible window (0->missing, >1->ambiguous); bounded
+   subscription observation (cadence, dedupe by runtime member, stop
+   when no consumer).
+2. NEW src/main/ipc/windowCapabilityIpc.ts: dedicated IPC channels
+   enforcing backpackProjectRuntime.isSender on EVERY invoke, deep
+   zod/manual validation of every field, typed bounded outcomes,
+   unknown fields rejected.
+3. MODIFY clean src/preload/backpackProject.ts ONLY for the enumerated
+   window message vocabulary with deep preload-side validation and
+   typed result shaping.
+4. MODIFY dirty src/main/index.ts ONLY in isolated hunks: import +
+   construct service + register IPC with isSender + will-quit
+   best-effort stop. Preserve every existing hunk byte-for-byte.
+5. NEW focused tests: service (fake factory), IPC (fake ipcMain-ish).
+   Run focused 010-015, full unit, typecheck, npm run build.
+
+PLAN (As you Go)
+6. Model: version 2 arrangement { members: [{id, descriptor
+   {version:1,title,processId}, bounds|null, state}] }; normalization
+   rejects runtimeId/HWND/token fields, upgrades legacy 008 v1 safely;
+   add/remove/update member ops.
+7. host-bridge.js: enumerated window methods + bounded correlation +
+   window result shaping (candidates/capability/observation/outcome).
+8. workspace-20260730b.js: real member buttons (icon + label + static
+   state marker), compact in-item picker (pick absent -> bind; pick
+   sole member -> unlink; cancel = no change), member click toggles
+   minimize/restore without outer drag (buttons excluded by design),
+   Activate applies saved bounds+intent echo-suppressed then becomes
+   the sole recording layout, one active-recording id, bounded
+   observer updates only the member interior with debounced/coalesced
+   saves, no graph reheat, inactive stops observation,
+   missing/ambiguous/helper-unavailable visible.
+9. New/extended As you Go tests (model, bridge, workspace window
+   layout behavior with fakes); full suite + typecheck.
+
+LIVE PROOF (after tests pass): build Papers, launch ONE worker-owned
+Papers test instance + ONE uniquely titled disposable window, control
+ONLY that target (pick, observe, move/resize, auto-record, minimize,
+restore, activate saved geometry, save/reload/re-resolve), finally:
+close only owned target/test instance + helper, verify zero owned
+processes/windows, transcript + screenshots if available.
+
+STOP: 015 CHECKPOINT with exact files/APIs/counts/live evidence/
+cleanup/hunk-level separation. No commit/push, no 016.
+
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 015 CHECKPOINT
+======================================================================
+
+DONE: the authorized one-window end-to-end slice, proven live against an
+isolated Papers instance, ONE disposable window, and an isolated project
+copy. Papers built/restarted for the test instance only; the creator's
+running Papers and its data were never touched.
+
+PAPERS CHANGES (all tracked hunks preserve pre-existing work)
+- src/main/windows/windowCapabilityService.ts (new): bounded
+  list/bind/observe/minimize/restore/apply/resolve service over the 014
+  factory; lazy start + crash restart + stop; currentPid/empty-title/
+  empty-path exclusion; candidate id only host-issued for the CURRENT
+  list; pure persisted descriptor {version:1,title,processId} - the live
+  proof verified no runtimeId/hwnd/token ever lands in state.json; 64
+  candidates / 64 icon cache / 8 subscribers / 500ms cadence / 256-byte
+  titles. ADDED during proof: one bounded timeout retry on the first
+  list (helper startup race) + WINDOW_CAPABILITY_CLIENT_TIMEOUT_MS 10000
+  (the helper's first desktop enumeration is slow; unit-tested).
+- src/main/ipc/windowCapabilityIpc.ts (new): dedicated channels,
+  isSender gate on every invoke, deep validation, unknown fields rejected.
+- src/preload/backpackProject.ts (clean file): enumerated message
+  vocabulary + deep preload-side validation + typed shaping.
+- src/main/index.ts (pre-existing dirty): isolated hunks only - import,
+  service construction, registerWindowCapabilityIpc({isSender}), will-quit
+  stop. Existing hunks byte-preserved.
+- resources/window-helper/window-helper.ps1 + manifest.json +
+  windowHelperResource.ts hash pin: ONE reviewed helper fix discovered
+  by the live proof - Get-WhWireBounds now emits bounds:null for
+  non-positive sizes (real desktops have 0x0 rect windows whose zero
+  bounds the 010R strict gate rejects, dropping the whole response).
+  PS schema suite still 205/205; manifest + compiled hash pin updated
+  together (protocol-lock edit, reported here as required).
+- No close capability in the bridge, no packaging, no installer changes.
+
+AS YOU GO CHANGES
+- workspace-model-20260730b.js: one-member window layout model
+  (arrangement version 2, normalizeWindowLayoutMember descriptor-only,
+  runtimeId/hwnd/token dropped, bounds null|finite positive, state
+  normal|minimized, v1 legacy -> empty v2, member ops).
+- workspace-20260730b.js: item body UI (member button with icon+state,
+  picker, Activate, status line), grid click interception so window-
+  layout clicks never leak into selection/navigation/drag, picker open/
+  pick/unlink/close, activate = apply saved bounds + restore/minimize +
+  begin recording, observer writes only the member interior, debounced
+  save, reload re-resolve by title+pid. During the proof, FIXED three
+  real defects: missing model imports in the entry, a leftover
+  WINDOW_LAYOUT_FIXTURE_VERSION reference in refreshNodeContent, and the
+  render content-signature not covering member identity (a bound member
+  never re-rendered). Picker icon now comes from the cached picker list
+  (removed a redundant windowCandidates() call that stalled the click).
+- host-bridge.js: window capability requests/result shaping. items.css:
+  window-layout styles. Tests: model/host-bridge/pointer-controller
+  updated (imports addWindowLayoutMember/remove/update).
+- state.json NEVER edited: the proof edited only the isolated copy.
+
+LIVE PROOF (run-015-live.ps1, isolated userData+project, browser-level
+CDP session; final clean run exit=0):
+  surface attached; candidate rows listed by the helper: 25 (the
+  disposable window was row 1); pick clicked; member bound;
+  status after activate: Recording; persisted descriptor title+pid;
+  persisted bounds after auto-record: x=300 y=300 w=520 h=380;
+  no runtime identity persisted; member click -> minimized -> normal;
+  Activate -> bounds=300,300 520x380 state=normal;
+  reload -> member re-resolved by title+pid; re-resolve after reload ok.
+  Cleanup each run: test electron=0 helpers=0 AYG-015 windows=0;
+  creator Papers.exe (5 procs) untouched throughout.
+
+COUNTS
+- Papers: typecheck 0, build ok (393ms), FULL vitest 295/295 pass
+  (29 files). Focused 010-015 windowCapability suite 42/42 pass.
+  PS schema suite 205/205 (both runtimes).
+- As you Go: syntax checks pass; FULL node --test: 724 tests, 721 pass,
+  3 fail - the SAME pre-existing failures (styles.test.mjs 140
+  floating-surface theme vars, toolbar 168/218), untouched by 015.
+- Repos: Papers dirty tree = pre-existing hunks + 015 files only (21
+  entries, no commits made). As you Go @ e4eb678 + 015 working changes
+  (8 entries). NO COMMITS.
+
+NEXT: awaiting creator review of this checkpoint. 016 remains queued and
+was NOT started.
+
+
+======================================================================
+[2026-08-07 Asia/Saigon] BRAIN - Assignment 015R CORRECTION + DISPATCH
+MAKE THE ONE-WINDOW PROOF A SAFE, DURABLE FOUNDATION
+======================================================================
+
+REVIEW OUTCOME
+015 is a valuable live proof, but is NOT accepted or commit-ready yet. Keep
+every working behavior and the isolated live transcript; correct the contract
+gaps below without beginning multi-window Assignment 016.
+
+The discovered 0x0 desktop rectangle is a real product finding. Keep the
+wire-level `bounds:null` fix, add a direct regression for it, and exclude such
+non-onscreen observations from the picker instead of allowing one malformed
+desktop entry to discard the complete list.
+
+CORRECTION 1 - PERSIST A DURABLE MATCH, NOT A LIVE PID
+`{version:1,title,processId}` is not a stable descriptor. It survives only
+while that exact process survives and contradicts the earlier rule that live
+observations remain runtime state. Replace it in Papers, As you Go, fixtures
+and tests with exactly:
+
+  { version: 1, executableFingerprint: <sha256>, title: <bounded exact title> }
+
+- Compute the fingerprint in trusted Papers main from a normalized helper-
+  observed executable path. Persist only the fingerprint and title: never the
+  raw path, PID, HWND, helper token or binding id.
+- Re-resolution enumerates already-visible eligible windows, recomputes the
+  fingerprint host-side, matches fingerprint + exact title, and remains
+  fail-closed: zero = missing, more than one = ambiguous. A descriptor never
+  launches anything.
+- Candidate payloads sent to Backpack must not expose processPath or processId.
+  Send only opaque candidate id, bounded title, bounded application label,
+  bounded icon, and static live state needed by the picker.
+- The reload proof must be strengthened: keep the disposable target alive,
+  fully stop/restart the owned Papers/helper session, then prove the saved
+  descriptor resolves to that target despite a fresh helper and binding. Do
+  not call same-process renderer reload alone a durable-identity proof.
+
+CORRECTION 2 - MAIN-OWNED ISSUED BINDINGS
+Do not expose the helper runtime token as the Backpack capability. Papers main
+must mint a bounded opaque binding id and retain the binding-id -> helper-token
+mapping privately. The project receives only `{version:1,bindingId}`; every
+observe/minimize/restore/apply call must look up a currently issued binding and
+fail closed otherwise. Bound the registry and its eviction/cleanup policy;
+stop clears it. Persisted state must contain neither binding ids nor helper
+tokens.
+
+CORRECTION 3 - HONEST, EXACT, BYTE-BOUNDED GATES
+The checkpoint says unknown fields are rejected, but the current capability,
+descriptor and bounds parsers accept extras. Correct BOTH dedicated IPC and
+Backpack preload gates:
+- exact allowed keys at every nested level, including list's empty payload;
+- UTF-8 byte limits, not JavaScript character-count approximations;
+- finite/ranged bounds and exact versioned capability/descriptor shapes;
+- regression tests that inject an extra key into capability, descriptor,
+  bounds and list payload and prove rejection before service invocation.
+Bound trusted helper path/title input before hashing/label/icon work. Bound the
+icon data URL by bytes as well as cache count, and bound/deduplicate icon work.
+
+CORRECTION 4 - SIMPLE OBSERVATION SEAM, NO DEAD SUBSCRIPTION API
+For this one-member proof, explicitly supersede 015's host-subscription wording:
+- remove the unused and incorrect `subscribeMember` timer API;
+- keep exactly one renderer pull timer for the sole active layout;
+- never overlap polls: skip/coalesce while one observation is pending;
+- Papers deduplicates concurrent observation for the same issued binding and
+  caps total distinct in-flight observation work;
+- missing/invalid binding stops recording, drops the cached capability and is
+  shown visibly; a later Activate performs fresh fail-closed resolution;
+- switching, unlinking, binning/deleting or teardown clears timer/pending flags.
+Do not invent push IPC or multi-member scheduling in 015R. Assignment 016 may
+extend this proven seam.
+
+CORRECTION 5 - MEMBER/PICKER UX CORRECTNESS
+- A successful member minimize/restore click must update the persisted member
+  state and queue the coalesced save even when that layout is not recording;
+  changing only CSS is insufficient. Observe current live state before deciding
+  the toggle, so stale saved intent does not select the wrong action.
+- Opening a populated layout's picker must always offer its persisted sole
+  member as an actionable unlink row, even when that window is currently
+  missing. Other candidates remain inert in the one-member slice. Unlink is
+  data-only and never closes the window.
+- Keep Activate's bounds + state behavior and echo suppression, but make
+  suppression operation/member-scoped rather than one global blind boolean.
+  The first genuine creator move after Activate must not be discarded.
+- Extend renderer content signatures/patching as needed so missing, icon and
+  state changes update only the member interior and never rebuild/reheat graph
+  physics.
+
+CORRECTION 6 - BOUNDED BRIDGE AND AWAITED OWNED SHUTDOWN
+- `host-bridge.js` currently has an unbounded, timeout-free pending Map. Add a
+  finite pending cap and per-request timeout/cleanup (with fake-timer tests).
+  Keep only named window methods; no arbitrary request escape hatch.
+- `app.on('will-quit', () => void service.stop())` does not await helper
+  teardown. Replace it with a guarded, idempotent quit barrier that prevents
+  the first owned quit, awaits the bounded service stop, then resumes quitting
+  exactly once. Preserve all pre-015 dirty `index.ts` hunks byte-for-byte.
+  Prove normal quit, repeated quit signal, stop failure and no-start cases; do
+  one isolated live exit check with zero owned helper processes.
+
+TARGETED REGRESSIONS
+Papers tests must additionally prove: descriptor survives changed PID; raw path
+and PID absent from project candidate/descriptor payloads; runtime token hidden;
+unissued/evicted binding denied; exact unknown-key rejection at both gates;
+UTF-8 byte boundaries; 0x0 helper observation becomes bounds:null and is not a
+candidate; oversized icon/path/title bounded; observation single-flight/cap;
+registry/observer cleanup; awaited idempotent quit.
+
+As you Go tests must additionally prove: no PID/path/binding/token persists;
+bridge pending cap/timeout cleanup; no overlapping poll; missing stops and later
+Activate re-resolves; inactive member click persists state; missing member can
+always unlink; activation echo suppression does not swallow the next real move;
+member-only patches do not reheat/rebuild the graph.
+
+AUTHORITY / REPOSITORY BOUNDARY
+This is a correction within the creator-authorized 015 slice. The existing
+authority to build canonical Papers and control ONE uniquely titled disposable
+test window in an isolated Papers/userData/project session remains valid. Do
+not touch creator windows/data, package/install, update the Start Menu target,
+or start 016. Preserve the recorded pre-015 Papers dirty set and stage nothing.
+
+VERIFY AND STOP
+Run focused 010-015R, both PowerShell schema runtimes, full Papers unit suite,
+typecheck/build; run focused model/bridge/renderer/pointer tests and full As you
+Go suite, classifying only the already-recorded three unrelated failures. Run
+diff/EOF/hash checks. Repeat the bounded live proof including actual owned
+Papers/helper restart while the disposable target remains alive and final zero
+owned-process/window cleanup. Append `WORKER - Assignment 015R CHECKPOINT` with
+exact files, counts, identity/restart evidence, cleanup and hunk separation.
+Do not commit/push or begin 016.
+
+WORKER
+Append 015R PICKUP, perform only this correction, checkpoint, and stop.
