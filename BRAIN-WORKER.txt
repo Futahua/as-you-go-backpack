@@ -4988,3 +4988,281 @@ BOUNDARY AND STOP
 No native/live/product changes, no build/install/launch/restart, no
 commit or push. Assignment 013 snapshot is formatting-clean and ready
 for the BRAIN snapshot commit.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - WINDOW LAYOUT DELIVERY ROADMAP
+ASSIGNMENTS 014-017, WITH OPTIONAL 018
+======================================================================
+
+CREATOR DIRECTION
+Proceed from the proven Assignment 013 foundation to the first genuinely
+usable window-layout feature in four main assignments. Keep each slice small,
+reviewable and architecture-safe. BRAIN reviews and commits every accepted
+snapshot before the next assignment becomes actionable. An `R` correction is
+not a new feature slice and is issued only for a concrete failed gate.
+
+CORE MILESTONE
+Assignment 017 is the stopping point for creator evaluation. At that point a
+real workspace `window-layout` item must be able to pick and group onscreen
+windows, show program-icon member buttons, continuously retain per-layout
+position/size/state while active, activate different layouts with independent
+arrangements, and provide the illustrated individual/group operations. Ordinary
+workspace physics/rules remain authoritative for the outer item.
+
+OPTIONAL DETACHMENT
+Dragging the WHOLE layout controller beyond Papers is intentionally Assignment
+018, after core acceptance. Dragging a MEMBER button outside the item to unlink
+it belongs to 016. Never conflate those two interactions.
+
+GLOBAL RULES FOR 014-017
+- No raw HWND, arbitrary shell command, arbitrary process launch, executable
+  path supplied by Backpack, generic protocol send, or persisted runtime token.
+- Persist stable membership/launch intent and per-layout arrangement only.
+  Runtime tokens and observations remain helper-session state.
+- Exactly one layout may record at a time. An inactive layout observes status
+  but never has its saved geometry overwritten by another layout's live window.
+- Deleting a layout or unlinking a member never closes/minimizes/moves a window.
+- Every native target resolves fail-closed. Missing/ambiguous never means first.
+- Shared observation work is bounded and deduplicated; it must not rebuild or
+  reheat graph physics. No repeating animation or large-area status effects.
+- Preserve creator changes and dirty trees. Stage/commit exact reviewed files
+  only. Never absorb unrelated changes into a feature snapshot.
+- Build/package/install/app launch and manipulation of any real window require
+  an explicit assignment-scoped creator authorization recorded by BRAIN.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 014 DISPATCH
+PAPERS-OWNED PRODUCTION HELPER FACTORY - NO UI OR LIVE WINDOW
+======================================================================
+
+PURPOSE
+Turn the accepted 013 helper proof into a Papers-owned, packageable main-process
+runtime asset and fixed factory. Prove ownership, path resolution, spawn policy
+and supervisor composition without exposing it to Backpack, launching Papers,
+enumerating the creator's windows or wiring the product lifecycle.
+
+REPOSITORY AND DIRTY-TREE BOUNDARY
+Work in canonical Papers only:
+`D:\Letters\MatTroiSeConMoc\PAPERS 3\Papers-3`.
+The current tree already has unrelated creator changes in host/settings/
+Backpack runtime/IPC/preload/index files plus untracked windowBounds work.
+Do not edit, stage, revert, format or commit any of those. Prefer new files
+under `src/main/windows`, a dedicated resource directory and focused tests.
+`electron-builder.yml` may receive only the narrow helper-resource inclusion.
+If any other existing dirty seam is genuinely required, checkpoint and stop.
+
+PRODUCTION ASSET
+- Establish one canonical Papers resource directory for the reviewed helper
+  and its reused Win32 adapter. Productize comments/names, but preserve 013R5F
+  protocol, token, identity, capacity and native behavior exactly.
+- The packaged asset must remain outside app.asar through a narrow
+  `extraResources` entry. Development and packaged paths are explicit and
+  unit-tested; never derive them from renderer input or the working directory.
+- Record provenance/version so future edits cannot silently drift from the
+  accepted protocol. Test the actual Papers-owned script, not only the old
+  As you Go probe copy, under Windows PowerShell 5.1 and PowerShell 7.
+
+FIXED PAPERS FACTORY
+- Add a main-process-internal factory that composes the accepted 010-012 typed
+  client/supervisor/process transport with a child created only by Papers.
+- Spawn a fixed `powershell.exe` command with fixed noninteractive/no-profile
+  arguments and the resolved Papers-owned helper path, `shell: false`, hidden
+  window and pipe-only stdio. Backpack supplies no executable, script, args,
+  cwd, environment, limits or raw transport.
+- Validate platform/resource/runtime availability before spawn and return the
+  existing typed helper-unavailable outcome/state. Stop owns stdin close,
+  bounded termination escalation and exactly-once terminal reporting; no child
+  may survive an owned stop or Papers shutdown once lifecycle wiring happens.
+- Keep dependency injection private for tests. The exported product surface is
+  capability methods and start/stop/readiness only, never `spawn`, child,
+  transport, `send`, command line or resource path.
+
+MANDATORY TESTS
+- dev vs packaged path resolution; missing/tampered resource fails before
+  spawn; Windows-only gate; fixed executable/arguments/options; no shell;
+- one child per start, idempotent start/stop, concurrent start/stop, crash and
+  timeout behavior inherited without replay; stdout/stderr bounds retained;
+- actual Papers-owned helper fake/schema suite under both PowerShell runtimes,
+  including 013 session-token/capacity/strict-shape regressions;
+- package configuration includes only the intended helper resource directory;
+- typecheck, focused TS tests, full Papers unit suite and diff checks.
+
+NOT IN 014
+No edits to hostFacade/IPC/preload/index/Backpack runtime, no renderer API, no
+As you Go edit, no picker, no member persistence, no polling, no actual helper
+process launch from Papers, no enumeration/control of a real window, no build,
+package, install, Papers launch/restart or creator-state change.
+
+WORKER
+Append 014 PICKUP, implement only this slice, append 014 CHECKPOINT with exact
+files/API/tests and dirty-tree separation, then stop without commit/push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 015 QUEUED, NOT DISPATCHED
+ONE-WINDOW END-TO-END ITEM SLICE
+======================================================================
+
+GATE
+Do not pick up 015 until BRAIN accepts and commits 014 in Papers and commits its
+coordination checkpoint here. Before dispatch, BRAIN must separately authorize
+the precise host bridge edits in the currently dirty Papers files and record
+creator permission for build/launch plus one disposable test window. No creator
+application window may be controlled during proof.
+
+PURPOSE
+Make one real 008 window-layout item useful with one member: pick one eligible
+onscreen window, observe it, show its icon/status, toggle minimize/restore, and
+automatically record position/size/state for the active layout. This is the
+first bridge/UI slice, not the multi-window UX.
+
+PAPERS BOUNDARY
+- Wire 014 into Papers lifecycle with one shared bounded host-side observation
+  service. Start lazily on first capability use and stop on app shutdown.
+- Expose a narrow Backpack-project capability API: list eligible candidates,
+  bind/resolve one trusted candidate, observe, minimize, restore and apply one
+  already-issued capability. Do not expose protocol/send/raw HWND/process path
+  input/arbitrary launch/close.
+- Exclude Papers/internal/invisible/tool/system windows host-side. Enrich a
+  trusted candidate with a cached program icon host-side; renderer cannot ask
+  for an arbitrary filesystem icon.
+- Deduplicate observation by resolved runtime member, use a bounded cadence and
+  subscriptions, and stop observation when no consumer remains.
+
+AS YOU GO MODEL/UI
+- Extend the existing `window-layout` record with a versioned ordered membership
+  containing stable trusted matching intent and one per-layout arrangement.
+  Normalization must reject runtimeId/HWND and preserve legacy empty records.
+- "Pick onscreen window" opens a compact candidate list. Selecting an absent
+  candidate adds it; selecting the sole existing member removes it. Picker
+  cancel changes nothing. Never list Papers itself.
+- The member button uses the program icon and a small static state marker.
+  Normal click toggles minimize/restore without beginning outer graph drag.
+- Creating/activating the layout makes it the sole recording layout. Bounded
+  live observations update only this layout's member bounds/state and persist
+  through the existing queued save with debounce/coalescing. Status-only DOM
+  patches must not reconstruct or reheat the graph.
+- An explicit Activate/Resume action applies this layout's saved bounds/state
+  to its resolved member, suppresses programmatic echo, then begins recording.
+  Missing/ambiguous is visible and fail-closed.
+
+TEST/ACCEPTANCE
+Use fakes for model, bridge, picker, recording cadence, save coalescing, graph
+drag exclusion, token non-persistence, ambiguity and lifecycle. Run relevant
+full suites/typecheck. After explicit authorization, build and run one bounded
+disposable-window eye/use proof: pick, move/resize, auto-record, minimize,
+restore, activate/restore geometry, save/reload, cleanup. Commit Papers and As
+you Go as separate exact snapshots after BRAIN review.
+
+NOT IN 015
+No second member/layout behavior, group controls, isolate, reorder, drag-out,
+closed-app launch, optional close-windows command or whole-item detachment.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 016 QUEUED, NOT DISPATCHED
+MULTI-WINDOW ILLUSTRATED CONTROLS
+======================================================================
+
+GATE
+Do not pick up until 015 is accepted and committed in both repositories.
+
+PURPOSE
+Complete the creator's illustrated multi-window controller inside the ordinary
+workspace item while preserving outer physics/rules.
+
+REQUIRED BEHAVIOR
+- Picker toggles any eligible onscreen window into/out of the layout; no member
+  duplicates within a layout, while the same window may belong to other layouts.
+- Render compact program-icon member buttons in a creator-controlled persisted
+  order. Live status/miniature updates do not move the outer node.
+- Normal member click toggles that member. Ctrl-click provides inner member
+  multiselection separate from workspace selection.
+- Group minimize and restore/open act on selected members when any are selected,
+  otherwise all. At this milestone "open" restores safely resolved live
+  members; an unresolved closed member remains missing unless 017 establishes a
+  safe registered-program launch capability.
+- Isolate restores selected members and minimizes only unselected members of
+  THIS layout. It never touches windows outside the layout.
+- Dedicated inner reorder drag changes member order only. Dropping a member
+  beyond a clear outside threshold unlinks it from this layout only; Escape,
+  cancel or drop-back-inside changes nothing. It never closes or moves a window
+  and never removes membership from another layout.
+- Delete layout remains data-only. A separate explicit close-members command is
+  not added in this slice.
+- Background drag, selection, sets, Bin, folders, copy, trail behavior and
+  collision footprint remain ordinary 008/005 workspace behavior.
+
+ARCHITECTURE/TESTS
+Use one bounded batch/action layer with per-member typed results and no guessed
+fallback. Deduplicate shared observations and serialize/conflict-control group
+commands deterministically. Test mixed missing/denied/success, selection scope,
+isolate boundaries, pointer ownership, reorder/unlink cancellation, persistence,
+duplicate membership across layouts and no graph reheat. Run full relevant
+suites plus an explicitly authorized 2-3 disposable-window eye/use proof.
+
+STOP
+Checkpoint for BRAIN review; separate exact commits per repository. No whole-
+item detachment and no arbitrary executable launch.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 017 QUEUED, NOT DISPATCHED
+MULTIPLE LAYOUTS, INDEPENDENT ARRANGEMENTS, CORE ACCEPTANCE
+======================================================================
+
+GATE
+Do not pick up until 016 is accepted and committed in both repositories.
+
+PURPOSE
+Meet the creator's A-at-X / A-at-Y requirement and finish the first usable
+session-first layout milestone.
+
+REQUIRED BEHAVIOR
+- Persist one explicit active-recording layout id independently of contents.
+  At most one layout records. Inactive layouts show live status but retain their
+  own saved geometry/state unchanged.
+- The same window may be in Layout 1 at X and Layout 2 at Y. Activating Layout 1
+  stops recording Layout 2, resolves/applies X, then records only Layout 1;
+  activating Layout 2 symmetrically applies Y. Programmatic application is
+  echo-suppressed and cannot corrupt either saved arrangement.
+- Switching is ordered and failure-aware: stop old recording, resolve new
+  members, apply per-member states/bounds, publish typed partial results, then
+  begin new recording only under the documented success/partial policy.
+- Session layouts persist promptly for crash recovery and remain until the
+  creator deletes them. No automatic shutdown deletion is invented.
+- Deleting a layout never closes its windows. Add an optional separately named,
+  explicit confirmed close-members operation only if it uses already-resolved
+  members, reports per-member failures and cannot run as a delete side effect.
+- Safe closed-member launch may reuse an EXISTING Papers registered-program
+  capability when a trusted picked member maps to it. Otherwise show missing;
+  never accept an executable/path/arguments from Backpack and never add an
+  arbitrary launch escape hatch.
+- Confirm save/reload, helper restart/re-resolution, missing/ambiguous recovery,
+  multi-monitor work-area/DPI normalization and bounds clamping without letting
+  one monitor/layout rewrite another layout's intent.
+
+CORE ACCEPTANCE MATRIX
+- At least two layouts and two or three disposable windows, including one shared
+  member with visibly different X/Y geometry/state in each layout;
+- repeated activation L1 -> L2 -> L1 restores the correct independent states;
+- active-only move/resize recording; inactive geometry byte-for-byte stable;
+- individual toggle, selected/all minimize/restore, isolate, reorder and
+  drag-out unlink; program icons; delete-without-close; reload and helper restart;
+- ordinary workspace physics/rules, sets, folders, Bin and trails unchanged;
+- bounded processes/subscriptions/timers/pending maps, clean shutdown, no helper
+  or disposable window leak, full tests/typecheck/build and creator eye/use.
+
+STOP
+After BRAIN review and separate exact commits, stop feature work and hand the
+core milestone to the creator for evaluation. Do not begin 018 automatically.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 018 OPTIONAL, NOT DISPATCHED
+WHOLE-LAYOUT DETACHMENT OUTSIDE PAPERS
+======================================================================
+
+Only after creator acceptance of 017, design a Papers-owned detached utility
+window that can host the whole layout controller beyond the Papers bounds while
+retaining one persisted workspace item identity. This requires a separate
+security/lifecycle/focus/multi-monitor proof. It is not member drag-out, must not
+duplicate layout state or native subscriptions, and must reattach safely if its
+owner/project closes. No worker may pick it up without a new creator request and
+BRAIN dispatch.
