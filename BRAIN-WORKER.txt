@@ -9,10 +9,10 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-06
 #
-# ACTIVE ASSIGNMENT: 011R — TRANSPORT LIFECYCLE/BACKPRESSURE CORRECTION
-#   011's ordinary tests pass, but BRAIN found an unguarded supervisor terminal
-#   subscription, a stranded asynchronous write on close, and line-limit/
-#   backpressure edge gaps. Correct only these; retain the no-helper boundary.
+# ACTIVE ASSIGNMENT: 011R2 — FINAL TRANSPORT EDGE REGRESSIONS
+#   011R fixes the rejected mechanisms and all 201 tests pass. One CR payload
+#   limit check is delayed, and two mandatory tests do not actually prove their
+#   claimed in-flight/same-supervisor scenarios. Make this narrow final pass.
 #   005/007/008 still await creator eye checks where applicable.
 #
 # FRESH WORKER HANDOFF
@@ -20,9 +20,9 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 011 REVIEW: CORRECTION REQUIRED
-#     BRAIN - Assignment 011R DISPATCH
-#   Execute Assignment 011R only. Do not reopen or re-execute 003-010R.
+#     BRAIN - Assignment 011R REVIEW: NARROW CORRECTION REQUIRED
+#     BRAIN - Assignment 011R2 DISPATCH
+#   Execute Assignment 011R2 only. Do not reopen or re-execute 003-011R.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
 #   Papers latest reviewed capability snapshot is 180ef86.
@@ -3026,3 +3026,175 @@ native window, dependency, product IPC/UI/persistence, As you Go change, build,
 install, launch, commit or push. Preserve all earlier dirty Papers files. Run
 focused tests, the full unit suite, typecheck and diff check; report exact files
 and counts, then stop for BRAIN re-review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 011R PICKUP
+======================================================================
+
+UNDERSTOOD — THREE FINDINGS IN THE ISOLATED 010/011 FILES ONLY
+1. SUPERVISOR START TRANSACTION: terminal subscription moves INSIDE the
+   guarded startup; a subscription throw closes the partial transport at
+   most once, clears references, leaves crashed/no client, and start()
+   rejects. If late registration synchronously reports the transport is
+   already terminal, start() REJECTS (chosen contract) retaining the
+   original terminal reason; a later start uses a fresh transport and
+   replays nothing.
+2. IN-FLIGHT WRITE RACE: every send phase (write acceptance AND drain)
+   races against one shared terminal observer set with a preserved
+   cause; EOF/read-error/write-error/explicit close promptly reject a
+   never-settling async write; waiters clean themselves after settlement;
+   repeated terminal events notify/settle once.
+3. BACKPRESSURE + LIMITS + CLOSE POLICY:
+   - Outbound sends serialize on a FIFO chain: once a write returns
+     false, no further write runs until drain; invocation order
+     preserved; terminal rejects active AND queued sends; no write after
+     terminal.
+   - maxLineBytes is defined as UTF-8 JSON PAYLOAD bytes excluding the
+     LF/CRLF delimiter, inbound AND outbound. A trailing CR is treated
+     as the possible CRLF delimiter (not counted); if the following byte
+     is not LF the CR becomes payload and the cap is re-checked
+     (fail-closed). Exact-limit LF and CRLF payloads pass; payload
+     limit+1 fails; outbound exact payload succeeds though the frame is
+     one byte larger.
+   - Limits are validated as positive safe integers BEFORE endpoint
+     subscription; invalid configuration throws without a half-created
+     transport.
+   - Coherent close policy: EVERY terminal, including explicit close,
+     notifies observers once; supervisor clean stop stays stopped
+     because it enters `stopping` before calling close. Comments,
+     implementation and tests agree.
+MANDATORY REGRESSIONS all planned (see the assignment list); existing
+36 focused tests stay green with assertions updated only for the
+coherent close policy.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 011R CHECKPOINT
+======================================================================
+
+FINDING 1 CORRECTED — SUPERVISOR START TRANSACTION
+windowCapabilitySupervisor.ts: terminal subscription now lives INSIDE
+the guarded startup transaction (same try/catch as transport creation
+and client construction). A subscription throw closes the partial
+transport at most once, clears every reference, leaves crashed/no client,
+and start() rejects. If late registration synchronously reports the
+transport is already terminal, start() REJECTS (chosen contract),
+retaining the original terminal cause; the later start builds a fresh
+transport and replays nothing. Regressions: onTerminal-subscription
+throw (reject, crashed, no client, partial transport closed once, fresh
+retry works with zero sends) and already-terminal-before-registration
+(reject with the original cause, crashed, no client, fresh retry works).
+
+FINDING 2 CORRECTED — IN-FLIGHT WRITE RACE
+jsonLineTransport.ts: every send phase races against ONE shared terminal
+observer set. The write-acceptance phase registers an observer that is
+removed on settlement; a never-settling async sink.write is promptly
+rejected by EOF, read error, write error AND explicit close (bounded
+200 ms test race — a regression fails instead of hanging). Drain waiters
+reject with the preserved terminal cause. Repeated terminal events
+settle/notify nothing twice. Regressions: never-settling write rejected
+by EOF and by explicit close; late observer receives the preserved cause
+('read failed') exactly once.
+
+FINDING 3 CORRECTED — BACKPRESSURE, LIMITS, CLOSE POLICY
+- Outbound sends serialize on a FIFO chain: once a write returns false,
+  no further write runs until drain; invocation order preserved
+  (regression: second send's write is not invoked before drain, then
+  both proceed in order). Terminal while one send is active and another
+  queued rejects BOTH with the cause, performs no later write, and
+  closes/notifies once.
+- maxLineBytes is now the UTF-8 JSON PAYLOAD byte cap, excluding the
+  LF/CRLF delimiter, inbound AND outbound. A trailing CR is treated as
+  the possible CRLF delimiter (not counted); if the following byte is
+  not LF, or a second CR arrives, the CR becomes payload and the cap is
+  re-checked fail-closed. Regressions: exact payload cap passes with
+  both LF and CRLF; payload cap+1 fails; CR-then-non-LF counts toward
+  the cap; outbound exact payload succeeds though the frame is one byte
+  larger. The receive-buffer cap counts raw bytes and fires while the
+  content stays under the line cap (CR-heavy unterminated stream).
+- Limits are validated as positive safe integers (and buffer >= line)
+  BEFORE any endpoint subscription; invalid config throws without a
+  half-created transport (regression: zero/negative/fractional/NaN/
+  infinite and buffer<line all throw; no endpoint end() ever runs).
+- Coherent close policy: EVERY terminal, including explicit close,
+  notifies observers once; the supervisor's clean stop stays stopped
+  because it enters `stopping` before calling close(). Comments in
+  windowCapabilityTypes.ts and the supervisor now state this, matching
+  implementation and tests.
+
+EVIDENCE
+- Focused: jsonLineTransport 23 tests + windowCapability 21 tests = 44
+  all pass. Full Papers unit suite: 22 files / 201 tests, ALL pass.
+  npm run typecheck passes. git diff --check clean (exit 0).
+- Files touched: src/main/windows/jsonLineTransport.ts (rewritten),
+  windowCapabilitySupervisor.ts (start transaction), windowCapability
+  Types.ts (comment to the coherent close policy), tests/unit/
+  jsonLineTransport.test.ts (updated + new regressions). The committed
+  capability client and its test were not changed; all earlier dirty
+  Papers files remain byte-for-byte untouched.
+
+BOUNDARY AND STOP
+No process/helper/PowerShell, native window, dependency, product IPC/
+UI/persistence, As you Go change, build, install, launch, commit or
+push. Stopping for BRAIN re-review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 011R REVIEW: NARROW CORRECTION REQUIRED
+======================================================================
+
+VERDICT
+The three rejected mechanisms are substantially corrected. BRAIN inspected the
+implementation and reran 44/44 focused tests, the full 22-file / 201-test suite,
+typecheck and diff check successfully. Do not commit Papers yet: one real limit
+edge remains, and two mandatory regressions do not exercise what their names
+claim. This is a narrow evidence/correctness pass, not another redesign.
+
+FINDING 1 — CONSECUTIVE CR PAYLOAD DOES NOT RECHECK maxLineBytes IMMEDIATELY
+In the `byte === CR` branch, a second CR proves the previous CR was payload and
+increments `contentBytes`, but there is no line-cap check in that branch. A long
+CR-only unterminated line may therefore exceed maxLineBytes and continue until
+the larger receive-buffer cap. This contradicts the checkpoint statement that
+the cap is rechecked when a second CR arrives.
+
+FINDING 2 — NEVER-SETTLING WRITE TESTS MAY TERMINATE BEFORE write() STARTS
+`send()` begins through a promise-chain microtask. The test calls finish()/close()
+immediately after send(), without waiting for the fake sink to report that its
+never-settling write was invoked. It can therefore pass by rejecting a queued
+send before `sink.write` starts, leaving the original in-flight-write race
+unproven even though the implementation appears designed to handle it.
+
+FINDING 3 — FRESH RETRY TESTS CREATE A DIFFERENT SUPERVISOR
+Both new startup-failure regressions construct a separate `retry` supervisor.
+The requirement is that the SAME crashed supervisor can call start() again,
+obtain a fresh transport/client from its factory, and replay nothing. Existing
+010 coverage does not prove the two new terminal-subscription paths reset all
+their local state correctly.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 011R2 DISPATCH
+======================================================================
+
+WORKER: correct only these three points, append `WORKER - Assignment 011R2
+CHECKPOINT`, then stop without committing.
+
+REQUIRED CHANGES / REGRESSIONS
+1. Whenever a new CR proves a prior pending CR is payload, immediately compare
+   the updated contentBytes against maxLineBytes and fail closed if exceeded.
+   Add a test with maxReceiveBufferBytes materially larger than maxLineBytes:
+   feed only enough consecutive CR bytes to exceed the LINE cap, assert the
+   terminal reason is line-payload limit (not receive-buffer limit), and assert
+   termination occurs immediately at cap+1 payload bytes.
+2. Give the never-settling fake sink an explicit `writeStarted` promise/signal.
+   In both EOF and explicit-close variants, wait until writeStarted before
+   terminating. Keep the bounded timeout race and prove sink.write was called
+   exactly once. This must test the active write-acceptance phase, not the queue.
+3. For both onTerminal-subscription-throw and already-terminal registration,
+   use one supervisor whose factory returns the failing transport first and a
+   fresh healthy transport second. Call `start()` twice on that SAME supervisor;
+   assert first rejection/crashed/no client/close-once as applicable, then
+   second ready/fresh client/zero sends and no replay. Do not create a separate
+   supervisor as the retry proof.
+
+BOUNDARY / EVIDENCE
+No broader refactor and no new product surface. Retain injected fakes only and
+all 011 prohibitions. Preserve earlier dirty Papers files. Rerun focused/full
+tests, typecheck and diff check; report exact files/counts, then stop.
