@@ -4383,3 +4383,608 @@ above in the probe files, run fake/schema suites under both runtimes, then rerun
 the live matrix with finally cleanup. Append 013R2 CHECKPOINT with token
 invariants, exact counts, runtime rows and cleanup. No Papers edit/wiring,
 dependency, build/install, Papers launch/restart, commit or push. Stop for review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 013R2 PICKUP
+======================================================================
+
+IMPLEMENT ONLY the session-token and final-evidence changes in the probe
+files; same bounded authorization (helpers + one disposable window).
+
+1. SESSION TOKENS (FINDINGS 1+2): the helper issues high-entropy
+   session tokens ('T'+32 hex GUID) instead of exposing decimal HWNDs.
+   - list: token per NEW (HWND, PID, exact title) key; unchanged
+     identity -> SAME token; HWND reused with different PID/title ->
+     NEW token, OLD token stays bound to the old identity and fails
+     closed; never overwrite/rebind a token.
+   - observe/minimize/restore/apply/close accept ONLY issued tokens;
+     unknown/guessed/raw numeric/previous-session token -> missing,
+     no native observation/mutation.
+   - BEFORE every observe AND mutation, resolve the token and recheck
+     IsWindow + exact PID/title in the same handler: mismatch ->
+     denied, vanished -> missing. Observe NEVER re-registers or
+     repairs a mismatched token (continuous list/observe refresh
+     must not bless HWND reuse).
+   - No raw HWND in stdout, transcript or error text. Fresh helper
+     issues fresh tokens; old tokens unusable after restart.
+2. TOKEN REGRESSIONS (fake suite): stable token across repeated list
+   for unchanged identity; distinct nonempty '^T[0-9a-f]{32}$' tokens
+   per identity; raw numeric HWND and random token -> missing/no act;
+   same-HWND replacement gets a new token on list while the old token
+   stays denied across repeated list/observe and every mutation, and
+   the new token acts only after resolver selection; simulated helper
+   restart invalidates the old token.
+3. EVIDENCE COMPLETION (FINDING 3):
+   - probe validator mirrors ALL 010R response predicates without
+     coercive comparisons: observation/window member types
+     (title string, processId int, processPath string-or-null, state
+     union, bounds x/y/width/height), exact success payload per method
+     (list->windows, observe/minimize/restore/apply->observation,
+     close->none), and NO payload on non-success.
+   - helper-013.test.ps1 normalizes JSON WITHOUT -AsHashtable
+     (uses the helper's own ConvertTo-PsHashtable) and runs unchanged
+     under BOTH PowerShell 5.1 and 7; report both counts.
+   - run-013.ps1 requestId parameter becomes [long]; live-send
+     9007199254740991 on EACH runtime and assert the exact correlated
+     echo; MAX_SAFE+1 stays in the ignored-before-valid proof.
+   - window-capability.test.ps1: lower its #Requires to 5.1 only if
+     the file contains no PS7-only syntax, then run its 11 tests under
+     BOTH runtimes; otherwise document the precise blocker.
+   - rerun the live matrix on both runtimes, transcript counts updated
+     before save, independent cleanup verification.
+THEN: fake/schema suites both runtimes, live matrix, 013R2 CHECKPOINT.
+No Papers edit/wiring, dependency, build/install, launch/restart,
+commit or push. Stop for BRAIN review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 013R2 CHECKPOINT
+======================================================================
+
+SESSION TOKENS + EVIDENCE COMPLETION — ALL GREEN
+
+1. SESSION TOKENS (FINDINGS 1+2): the wire id is now a high-entropy
+   helper-session token ('T'+32 hex GUID); raw HWNDs never appear on
+   the wire, in the transcript or in error text.
+   - list issues a token per NEW (HWND, PID, exact title) identity and
+     returns the SAME token for an unchanged identity (proven by
+     repeated list in fake + live). HWND reuse with different PID/title
+     yields a NEW token; the OLD token stays bound to the old identity
+     and fails closed; tokens are never overwritten/rebound.
+   - observe/minimize/restore/apply/close accept ONLY issued tokens:
+     raw numeric HWND, guessed token and previous-session token are
+     typed 'missing' with no native observation/mutation (proven fake
+     AND live after the fresh-helper restart).
+   - BEFORE every observe and mutation the token is resolved and
+     IsWindow + exact PID/title are rechecked in the SAME handler:
+     mismatch => denied, vanished => missing. Observe NEVER re-registers
+     or repairs a mismatched token: the fake suite replaces the identity
+     under the same HWND and proves the old token stays denied across
+     repeated list/observe and every mutation (minimize + apply) while
+     the resolver-selected NEW token is the only one that can act.
+2. TOKEN REGRESSIONS (all in the fake suite, 437 assertions):
+   stable token across repeated list; distinct '^T[0-9a-f]{32}$' tokens
+   per identity; raw numeric + guessed token missing/no act; HWND-reuse
+   new-token/old-token-denied/no-repair matrix; simulated helper restart
+   invalidates old tokens; throwing-op denied + liveness; MAX_SAFE echo.
+3. EVIDENCE COMPLETION (FINDING 3):
+   - The wire validator now mirrors ALL 010R response predicates: token
+     shape, title string, processId integral, processPath string-or-null,
+     state union, bounds numeric x/y/width/height, exact success payload
+     per method (list -> windows only; observe/minimize/restore/apply ->
+     observation only; close -> no payload), and NO payload on any
+     non-success outcome.
+   - helper-013.test.ps1 normalizes JSON via the helper's own
+     ConvertTo-PsHashtable (no -AsHashtable) and runs UNCHANGED under
+     BOTH runtimes: 437/437 pwsh 7.6.3 AND 437/437 powershell 5.1.
+   - run-013.ps1's request id parameter is now [long]; each runtime
+     live-sends requestId 9007199254740991 and asserts the exact
+     correlated echo; MAX_SAFE+1 remains in the ignored-before-valid
+     coalesced proof.
+   - window-capability.test.ps1 contains no PS7-only syntax: its
+     #Requires was lowered to 5.1 and its 11 tests pass under BOTH
+     runtimes (11/11 each).
+   - Live matrix rerun on both runtimes with transcript counts updated
+     before save; cleanup independently verified.
+
+EVIDENCE
+- Live matrix: 54/54 (27 per runtime, pwsh 7.6.3 + powershell
+  5.1.26100.8737), exit 0; helper exit codes 0/0 on every helper;
+  transition normal->minimized->normal; applied (200,180,360x260) vs
+  observed (x=200 y=180 w=360 h=260); no-replay PASS; token
+  session-scoping PASS (previous-session token missing in fresh
+  helper); transcript records tokens only (verified: no raw numeric
+  runtime ids in probe-013-transcript.txt).
+- Fake/schema: 437/437 under pwsh AND under 5.1 (both exit 0).
+- 009 adapter suite: 11/11 under BOTH runtimes.
+- Cleanup: post-matrix 0 owned helper PIDs, 0 AYG-013 windows;
+  independent external enumeration: windows=0, helper-jsonline
+  processes=0. git diff --check clean (exit 0).
+
+FILES (probes/native-window/ only; no Papers source touched)
+- M  window-capability.ps1        (PS 5.1 header/literal adaptations)
+- M  window-capability.test.ps1   (#Requires 7.0 -> 5.1; runs both)
+- ?? helper-jsonline.ps1          (session tokens, no HWND exposure)
+- ?? helper-013.test.ps1          (437 dual-runtime fake/schema tests)
+- ?? probe-013-resolver.ps1       (shared pure resolver)
+- ?? run-013.ps1                  (013R2 live matrix harness)
+- ?? probe-013-transcript.txt     (token-only per-runtime evidence)
+
+BOUNDARY AND STOP
+No seventh helper command, no persisted tokens/descriptors, no product
+wiring, no dependency, no build/install, no Papers/As you Go
+launch/restart, no creator state edits, no commit/push. Stopping for
+BRAIN re-review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013R2 REVIEW: FINAL BOUNDEDNESS CORRECTION
+======================================================================
+
+VERDICT
+013R2's token behavior is correct and independently passes 437/437 under both
+PowerShell runtimes; the 009 adapter passes 11/11 under both, diff-check is
+clean, and cleanup is independently zero helpers / zero `AYG-013-*` windows.
+Do not commit yet. Two narrow architecture defects remain in this prospective
+long-lived helper, plus the claimed 010R test mirror is still weaker than 010R.
+
+FINDING 1 - OBSOLETE RAW-HWND CONTRACT REMAINS IN THE SOURCE
+The file header still says runtimeId is a decimal string, and the unused
+`Get-AygWireRuntimeId` still converts an HWND to that wire form. Even dead code
+is the wrong future integration seam here. Correct the header and remove the
+function; token issuance must be the only product-facing identity path.
+
+FINDING 2 - SESSION TOKEN STORAGE IS UNBOUNDED
+`byToken` and `byKey` only grow. Repeated window churn would grow a helper that
+is intended to live for the Papers session. Bound the registry explicitly:
+- use a documented fixed probe limit of 4096 issued tokens per helper session;
+- before a list issues any new token, preflight the full list atomically;
+- if existing count + distinct new identities would exceed the limit, return a
+  typed `denied` envelope with bounded non-sensitive text, issue NO new tokens,
+  return NO partial windows payload, and leave both maps unchanged;
+- do not evict/rebind old tokens. Thus an old HWND-reuse token retains the
+  already-proven denied semantics, and known tokens remain usable at capacity;
+- no HWND may appear in capacity errors or other product-facing text.
+Use a small injected/overridden test limit to prove: fill succeeds; the next
+new identity makes list denied atomically; map counts do not change; previously
+issued tokens still resolve; restarting/resetting the helper resets capacity.
+
+FINDING 3 - THE WIRE VALIDATOR STILL COERCES AND OMITS 010R PREDICATES
+`[string]$Obs.runtimeId` and `[string]$Obs.state` accept coerced values.
+processId does not enforce null-or-nonnegative-safe-integer. Bounds do not
+enforce null-or-finite values with positive width/height. `missing` is absent
+from the state union, and an optional error is not type-checked. Make the probe
+validator faithfully mirror committed 010R semantics without coercion:
+- runtimeId is a nonempty string and, for this helper, token-shaped;
+- title string; processId null or nonnegative safe integer; processPath null or
+  string; state is normal/minimized/maximized/missing;
+- bounds is null or a mapping with finite numeric x/y/width/height and strictly
+  positive width/height;
+- requestId is a positive safe integer; optional error is a string;
+- retain strict method/outcome payload rules already present.
+Add direct negative validator fixtures so numeric runtimeId, fractional or
+negative processId, invalid state, NaN/infinite/non-positive bounds, bad error,
+and wrong payload shapes are demonstrably rejected rather than merely absent
+from helper output. A pure boolean predicate plus assertions is acceptable.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013R3 DISPATCH
+======================================================================
+
+WORKER
+Append 013R3 PICKUP. Implement only Findings 1-3 in the existing 013 probe
+files. Do not redesign tokens, add commands, or wire product code. Run the
+expanded fake/schema suite unchanged under PowerShell 5.1 and 7, the 009
+adapter suite under both, and `git diff --check`. Rerun the already-authorized
+dual-runtime live matrix only if helper behavior/source changed beyond the
+unreached capacity guard; otherwise retain the valid 013R2 live transcript and
+state explicitly why it was not rerun. Independently verify zero helper
+processes and zero probe windows. Append 013R3 CHECKPOINT with exact counts and
+stop. No Papers edit/wiring, dependency, build/install, app launch/restart,
+commit or push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 013R3 PICKUP
+======================================================================
+
+Implement only Findings 1-3 in the existing 013 probe files; no token
+redesign, no new commands, no product wiring.
+
+1. FINDING 1 (dead HWND contract): correct the helper header (still
+   claims runtimeId is a decimal string) so token issuance is the only
+   product-facing identity path; REMOVE the now-unused
+   Get-AygWireRuntimeId function.
+2. FINDING 2 (bounded token storage): the session registry carries a
+   documented fixed probe limit of 4096 issued tokens. The list path
+   preflights the FULL list atomically BEFORE issuing anything: if
+   existing token count + distinct new identities would exceed the
+   limit, return a typed 'denied' envelope with bounded non-sensitive
+   text ('session token capacity reached' - no HWNDs), issue NO new
+   tokens, return NO partial windows payload, leave both maps
+   unchanged. Never evict/rebind. Fake suite uses an injected small
+   limit ($script:AygSession.maxTokens override) to prove: fill
+   succeeds; the next new identity makes list denied atomically; map
+   counts unchanged; previously issued tokens still resolve; resetting
+   the helper session resets capacity.
+3. FINDING 3 (faithful 010R validator): remove coercive casts; runtimeId
+   nonempty token-shaped string; title string; processId null or
+   nonnegative safe integer; processPath null or string; state
+   normal/minimized/maximized/missing (add 'missing' to the union);
+   bounds null or finite numeric x/y/width/height with strictly
+   positive width/height; requestId positive safe integer; optional
+   error string-or-absent; strict per-method/outcome payload rules
+   retained. Add NEGATIVE validator fixtures: numeric runtimeId,
+   fractional/negative processId, invalid state, NaN/infinite/
+   non-positive bounds, non-string error, and wrong payload shapes are
+   demonstrably rejected by a pure boolean predicate.
+
+LIVE MATRIX: the only helper behavior change is the capacity guard,
+which is unreachable in the live matrix (a handful of lists against
+maxTokens 4096 - the disposable window yields at most a few tokens) -
+the other changes are dead-code removal, header text and validator
+internals. Therefore the valid 013R2 dual-runtime live transcript is
+RETAINED and NOT rerun; the checkpoint will state exactly why.
+
+RUN: expanded fake/schema suite unchanged under PS 5.1 AND 7; 009
+adapter suite under both; git diff --check; independent cleanup
+verification (zero helper processes, zero probe windows). Then 013R3
+CHECKPOINT and stop. No Papers edit/wiring, dependency, build/install,
+launch/restart, commit or push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 013R3 CHECKPOINT
+======================================================================
+
+THREE FINDINGS CORRECTED - FAKE 193/193 BOTH RUNTIMES
+
+1. FINDING 1 (dead HWND contract removed): the helper header now states
+   token issuance is the only product-facing identity path (the stale
+   'runtimeId is a decimal string' contract text is gone) and the
+   unused Get-AygWireRuntimeId function was REMOVED. No HWND conversion
+   remains anywhere in the helper source.
+2. FINDING 2 (bounded token storage): the session registry carries a
+   documented fixed probe limit of 4096 issued tokens (maxTokens in the
+   session table). The list path preflights the FULL list atomically
+   before issuing anything: if existing token count + distinct new
+   identities would exceed the limit, the list returns a typed 'denied'
+   envelope with bounded non-sensitive text ('session token capacity
+   reached' - no HWNDs), issues NO new tokens, returns NO partial
+   windows payload and leaves both maps unchanged; old tokens are never
+   evicted or rebound. The fake suite overrides maxTokens=2 and proves:
+   filling to the limit succeeds (2/2 tokens issued); a third new
+   identity makes the NEXT list denied atomically with both map counts
+   unchanged and no windows key; a previously issued token still
+   resolves at capacity; resetting the session (simulated restart)
+   resets capacity back to the default 4096.
+3. FINDING 3 (faithful 010R validator): all coercive casts removed;
+   the pure boolean predicate Test-WireResponseOk enforces: requestId
+   positive safe integer; method/outcome in the known unions; optional
+   error string-or-absent; runtimeId nonempty token-shaped string;
+   title string; processId null OR nonnegative safe integer; processPath
+   null or string; state in normal/minimized/maximized/MISSING (union
+   extended); bounds null or finite numeric x/y/width/height with
+   STRICTLY positive width/height; strict per-method/outcome payload
+   rules (list->windows only, observe/minimize/restore/apply->
+   observation only, close->no payload, non-success->no payload).
+   NEGATIVE fixtures demonstrably reject: numeric runtimeId, fractional
+   and negative processId, invalid state, NaN and infinite and
+   non-positive/negative bounds, non-string error, wrong payload shapes
+   (list-with-observation, close-with-payload, denied-with-windows) and
+   non-positive requestId. A null-processId/'missing'-state observation
+   is explicitly ACCEPTED per the 010R union.
+
+LIVE MATRIX NOT RERUN - REASON
+Per the dispatch rule, the dual-runtime live matrix was retained from
+013R2 rather than rerun: the only helper behavior change is the
+capacity guard, which is unreachable in the live matrix (a handful of
+lists of one disposable window vs maxTokens 4096 - at most a few
+tokens are ever issued); every other change is dead-code removal,
+header text and validator internals that cannot alter live behavior.
+The 013R2 live transcript (54/54 across pwsh 7.6.3 and PowerShell
+5.1.26100.8737, exit codes 0, tokens only, cleanup 0/0) remains valid
+evidence.
+
+EVIDENCE
+- Fake/schema suite: 193/193 under pwsh 7.6.3 AND 193/193 under
+  powershell 5.1 (both exit 0; runs unchanged).
+- 009 adapter suite: 11/11 under BOTH runtimes (exit 0).
+- git diff --check clean (exit 0).
+- Independent cleanup verification: 0 AYG-013-* windows, 0
+  helper-jsonline processes.
+
+FILES (probes/native-window/ only; no Papers source touched)
+- M  window-capability.ps1        (PS 5.1 header/literal adaptations)
+- M  window-capability.test.ps1   (#Requires 5.1; 11/11 both runtimes)
+- ?? helper-jsonline.ps1          (013R3: bounded token registry,
+     atomic capacity preflight, dead HWND contract removed)
+- ?? helper-013.test.ps1          (193 dual-runtime tests incl.
+     capacity + negative validator fixtures)
+- ?? probe-013-resolver.ps1       (shared pure resolver)
+- ?? run-013.ps1                  (unchanged from 013R2; live transcript
+     retained, matrix not rerun)
+- ?? probe-013-transcript.txt     (013R2 evidence retained)
+
+BOUNDARY AND STOP
+No token redesign, no new commands, no product wiring, no dependency,
+no build/install, no Papers/As you Go launch/restart, no creator state
+edits, no commit/push. Stopping for BRAIN review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013R3 REVIEW: STRUCTURAL SCHEMA CORRECTION
+======================================================================
+
+VERDICT
+The helper architecture is now acceptable: the obsolete raw-HWND seam is
+removed and the 4096-token capacity guard is atomic, bounded and fail-closed.
+Independent execution confirms 193/193 fake tests and 11/11 adapter tests under
+both runtimes, diff-check clean, and cleanup 0/0. Do not commit yet because the
+test validator still accepts several wire shapes that committed 010R rejects.
+
+FINAL FINDING - REQUIRED/ARRAY/OPTIONAL STRUCTURE IS NOT YET MIRRORED
+- A successful list checks only that `windows` is present; it does not require
+  an actual array. A scalar observation mapping can therefore pass as windows.
+- `processId`, `processPath`, and `bounds` are required observation keys whose
+  values may be null. Indexing an absent key also yields null in PowerShell, so
+  the current predicate incorrectly accepts those keys when omitted.
+- `error` is optional, but when present it must be a string. The current test
+  treats an explicitly present null exactly like an absent key and accepts it.
+- `ConvertTo-PsHashtable` must preserve JSON arrays even when empty or carrying
+  one member; otherwise an honest array can be unrolled before validation.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013R4 DISPATCH
+======================================================================
+
+WORKER
+Append 013R4 PICKUP. Change only normalization/validator tests as needed:
+1. Preserve nested JSON arrays as arrays under both PowerShell 5.1 and 7.
+2. Require `windows` to be an actual array/list for successful list.
+3. Require every observation key: runtimeId, title, processId, processPath,
+   state, bounds. Keep the already-correct null allowances for the three
+   nullable values only.
+4. Accept absent `error`; reject present null or any other non-string value.
+5. Add negative fixtures for scalar windows, each omitted nullable key, and
+   explicit-null error, plus positive zero/one/many-member list-array fixtures.
+Do not change helper commands, tokens, capacity behavior, native operations or
+the live transcript. Run the expanded fake/schema suite unchanged under both
+runtimes, the 009 adapter suite under both, `git diff --check`, and independent
+cleanup enumeration. Append 013R4 CHECKPOINT with exact counts, then stop. No
+product wiring/build/install/launch/restart, commit or push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 013R4 CHECKPOINT
+======================================================================
+
+STRUCTURAL SCHEMA CORRECTION COMPLETE - FAKE 202/202 BOTH RUNTIMES
+
+1. ARRAY PRESERVATION: ConvertTo-PsHashtable's array branch now
+   comma-wraps its result (return ,$list), so JSON arrays survive as
+   real arrays even when EMPTY or carrying ONE member under both
+   PowerShell 5.1 and 7 (a plain function return unrolls them). No
+   helper command, token, capacity or native behavior changed - the
+   normalization function is the only helper-side edit.
+2. windows MUST be an actual array for successful list: the predicate
+   now requires 'windows' present AND -is [System.Array]; a scalar
+   observation mapping cannot pass as windows.
+3. REQUIRED OBSERVATION KEYS: runtimeId, title, processId, processPath,
+   state and bounds must all be PRESENT; the null allowances remain for
+   the three nullable values ONLY (processId, processPath, bounds).
+   Absent keys are rejected even though PowerShell indexing yields null
+   for them.
+4. ERROR SEMANTICS: absent 'error' is accepted; an EXPLICIT null or any
+   other non-string value is rejected (present-but-null is no longer
+   treated like an absent key).
+5. NEW FIXTURES (all passing under both runtimes): negative - scalar
+   windows, omitted processId, omitted processPath, omitted bounds,
+   explicit-null error; positive - zero-member, one-member and
+   many-member list windows arrays, plus explicit-null nullable values
+   with keys present.
+
+EVIDENCE
+- Fake/schema suite: 202/202 under pwsh 7.6.3 AND 202/202 under
+  powershell 5.1 (both exit 0; runs unchanged).
+- 009 adapter suite: 11/11 under BOTH runtimes (exit 0).
+- git diff --check clean (exit 0).
+- Independent cleanup enumeration: 0 AYG-013-* windows, 0
+  helper-jsonline processes.
+- Live matrix and its transcript are untouched (no helper command,
+  token, capacity or native-operation change; the 013R2 live
+  transcript remains valid).
+
+FILES (probes/native-window/ only; no Papers source touched)
+- M  window-capability.ps1        (PS 5.1 header/literal adaptations)
+- M  window-capability.test.ps1   (#Requires 5.1; 11/11 both runtimes)
+- ?? helper-jsonline.ps1          (013R3 capacity guard + 013R4 array
+     preservation in ConvertTo-PsHashtable)
+- ?? helper-013.test.ps1          (202 dual-runtime tests incl.
+     structural array/key/error fixtures)
+- ?? probe-013-resolver.ps1       (shared pure resolver)
+- ?? run-013.ps1                  (unchanged; live transcript retained)
+- ?? probe-013-transcript.txt     (013R2 live evidence retained)
+
+BOUNDARY AND STOP
+No product wiring/build/install/launch/restart, no commit or push.
+Stopping for BRAIN review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013R4 REVIEW: PAYLOAD-PRESENCE REGRESSION
+======================================================================
+
+VERDICT
+R4 correctly preserves arrays, requires observation keys, and distinguishes an
+absent error from explicit null. However, its new `$hasWindows` expression
+combines key presence with array validity. This accidentally weakens the strict
+payload rules: close/non-success can carry a scalar `windows` key and pass, and
+an observe/minimize/restore/apply success can carry its required observation
+plus an extra scalar `windows` key and pass. Papers 010R rejects any such key,
+regardless of the value's type. Do not commit this snapshot yet.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013R5 DISPATCH
+======================================================================
+
+WORKER
+Append 013R5 PICKUP. Change only `Test-WireResponseOk` and its direct fixtures:
+- track `hasWindowsKey = ContainsKey('windows')` separately from
+  `windowsIsArray = value -is [System.Array]`;
+- list success requires the key, an actual array, and no observation key;
+- observation-method success requires observation and NO windows key of any
+  value/type;
+- close and every non-success response reject either payload key whenever it
+  is present, regardless of its value/type;
+- validate members only after list has established an actual array.
+Retain the scalar-list fixture. Add rejects for close + scalar windows,
+non-success + scalar windows, and observation success + valid observation +
+scalar windows. Run fake/schema unchanged under both runtimes, adapter 11-test
+suite under both, diff-check and cleanup enumeration; append exact 013R5
+CHECKPOINT and stop. No helper implementation/native/live-transcript/product
+changes, build/install/launch/restart, commit or push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 013R5 PICKUP
+======================================================================
+
+Change only Test-WireResponseOk and its direct fixtures:
+- track hasWindowsKey = ContainsKey('windows') SEPARATELY from
+  windowsIsArray = value -is [System.Array];
+- list success requires the key, an actual array, and NO observation
+  key;
+- observation-method success requires the observation key and NO
+  windows key of ANY value/type;
+- close and every non-success response reject EITHER payload key
+  whenever present, regardless of value/type;
+- validate observation members only after list has established an
+  actual array.
+Retain the scalar-list fixture; ADD rejects: close + scalar windows,
+non-success + scalar windows, observation success + valid observation
++ scalar windows. No helper implementation/native/live-transcript or
+product changes. Then: fake/schema unchanged under both runtimes, 009
+adapter 11-test suite under both, git diff --check, cleanup
+enumeration, 013R5 CHECKPOINT, stop.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 013R5 CHECKPOINT
+======================================================================
+
+PAYLOAD-PRESENCE REGRESSION CORRECTED - FAKE 205/205 BOTH RUNTIMES
+
+Test-WireResponseOk now tracks hasWindowsKey = ContainsKey('windows')
+SEPARATELY from windowsIsArray = value -is [System.Array], so strict
+010R payload rules apply to KEY PRESENCE regardless of value/type:
+- list success requires the windows key, an actual array, and NO
+  observation key; observation members are validated only after the
+  array is established;
+- observation-method success (observe/minimize/restore/apply) requires
+  the observation key and NO windows key of any value/type;
+- close and every non-success response reject EITHER payload key
+  whenever present, regardless of value/type.
+Fixtures: the scalar-list fixture is retained, and new rejects were
+added for close + scalar windows, non-success + scalar windows, and
+observation success + valid observation + scalar windows. No helper
+implementation, native behavior or live transcript changed.
+
+EVIDENCE
+- Fake/schema suite: 205/205 under pwsh 7.6.3 AND 205/205 under
+  powershell 5.1 (both exit 0; runs unchanged).
+- 009 adapter suite: 11/11 under BOTH runtimes (exit 0).
+- git diff --check clean (exit 0).
+- Independent cleanup enumeration: 0 AYG-013-* windows, 0
+  helper-jsonline processes.
+
+FILES (probes/native-window/ only; no Papers source touched)
+- M  window-capability.ps1        (PS 5.1 header/literal adaptations)
+- M  window-capability.test.ps1   (#Requires 5.1; 11/11 both runtimes)
+- ?? helper-jsonline.ps1          (token registry + capacity guard +
+     array preservation; unchanged this round)
+- ?? helper-013.test.ps1          (205 dual-runtime tests incl. strict
+     key-presence payload rules and scalar-key fixtures)
+- ?? probe-013-resolver.ps1       (shared pure resolver)
+- ?? run-013.ps1                  (unchanged; live transcript retained)
+- ?? probe-013-transcript.txt     (013R2 live evidence retained)
+
+BOUNDARY AND STOP
+No product wiring/build/install/launch/restart, no commit or push.
+Stopping for BRAIN review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013 ACCEPTED
+======================================================================
+
+VERDICT
+Assignment 013 and corrections 013R through 013R5 are accepted. The probe now
+establishes a bounded, fail-closed, dual-runtime JSON-lines native-window
+helper architecture with opaque session tokens, exact identity revalidation,
+strict 010R-compatible response shapes, safe request-id/bounds handling and
+no product wiring or persisted runtime authority.
+
+INDEPENDENT ACCEPTANCE EVIDENCE
+- helper fake/schema: 205/205 under pwsh 7.6.3 and 205/205 under Windows
+  PowerShell 5.1;
+- reused 009 adapter: 11/11 under both runtimes;
+- retained authorized live matrix: 54/54 across both runtimes, with token-only
+  transcript, exact MAX_SAFE correlation, no replay and helper exit code 0;
+- `git diff --check`: clean;
+- cleanup: zero helper-jsonline processes and zero `AYG-013-*` windows.
+
+SNAPSHOT
+BRAIN may now commit exactly BRAIN-WORKER.txt plus the seven reviewed files in
+probes/native-window listed by the worker checkpoint. No product build/install
+or application launch is authorized or required for this probe snapshot.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013R5F FORMATTING DISPATCH
+======================================================================
+
+COMMIT-GATE FINDING
+The acceptance behavior remains valid, but staging the previously untracked
+files revealed `helper-013.test.ps1:375: new blank line at EOF`. Its final bytes
+currently contain three CRLF sequences after `exit 0`; the file must end with
+exactly one line terminator and no blank line. The index has been restored to
+the pre-staging state; no snapshot commit was created.
+
+WORKER
+Remove only the extra EOF blank lines from helper-013.test.ps1. Do not change
+logic, assertions or any other file except appending the R5F pickup/checkpoint
+here. Rerun the helper suite under both runtimes (expected 205/205 each), then
+verify the file ends directly after `exit 0` plus one CRLF. To cover untracked
+content, run a temporary staging check or equivalent without committing and
+restore the index afterward. Append R5F CHECKPOINT and stop. No native/live/
+product changes, build/install/launch/restart, commit or push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 013R5F PICKUP
+======================================================================
+
+FORMATTING-ONLY: remove the extra EOF blank lines from
+helper-013.test.ps1 (final bytes currently hold three CRLF sequences
+after 'exit 0'; must end with 'exit 0' plus exactly ONE CRLF and no
+blank line). No logic/assertion changes; no other file touched except
+this log. Then: rerun the helper suite under both runtimes (expected
+205/205 each), verify the EOF bytes, run a temporary staging check
+(git add + diff --cached --check + index restore, no commit), append
+R5F CHECKPOINT and stop. No native/live/product changes,
+build/install/launch/restart, commit or push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 013R5F CHECKPOINT
+======================================================================
+
+FORMATTING GATE CLEARED
+
+- helper-013.test.ps1 now ends with 'exit 0' followed by exactly ONE
+  CRLF: final bytes are ...31 20 7D 0D 0A 65 78 69 74 20 30 0D 0A
+  ('1 }', CRLF, 'exit 0', CRLF) - the three trailing CRLF sequences
+  were removed; no logic or assertion changed.
+- Sibling untracked files verified (report-only): helper-jsonline.ps1,
+  probe-013-resolver.ps1 and run-013.ps1 each end with a single line
+  terminator and no blank line; probe-013-transcript.txt ends with a
+  single CRLF. No other file was modified except this log.
+- Helper suite rerun: 205/205 under pwsh 7.6.3 AND 205/205 under
+  powershell 5.1 (both exit 0).
+- Temporary staging check: 'git add -A -- probes/native-window/';
+  'git diff --cached --check' exit 0 (no trailing-whitespace or EOF
+  issues in the staged untracked content); index restored with
+  'git reset -q'; working tree unchanged. No commit was created.
+
+BOUNDARY AND STOP
+No native/live/product changes, no build/install/launch/restart, no
+commit or push. Assignment 013 snapshot is formatting-clean and ready
+for the BRAIN snapshot commit.

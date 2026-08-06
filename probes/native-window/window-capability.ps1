@@ -17,10 +17,11 @@
 #   and requires an already resolved runtime member; it is proven only
 #   against the disposable target during cleanup.
 #
-# Requires: PowerShell 7 + Windows Desktop (System.Windows.Forms for the
-# Win32 P/Invoke surface; no other dependency).
+# Requires: Windows PowerShell 5.1 or PowerShell 7 + Windows Desktop
+# (System.Windows.Forms for the Win32 P/Invoke surface; no other
+# dependency). Proven on both runtimes by the 013 live matrix.
 
-#Requires -Version 7.0
+#Requires -Version 5.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -83,7 +84,7 @@ $script:AygOps = @{
 function Get-AygWindowObservation([IntPtr]$hWnd) {
   $title = New-Object System.Text.StringBuilder 512
   [void][AYG.Win32]::GetWindowText($hWnd, $title, $title.Capacity)
-  $pidValue = 0u
+  $pidValue = [uint32]0
   [void][AYG.Win32]::GetWindowThreadProcessId($hWnd, [ref]$pidValue)
   $rect = New-Object AYG.Rect
   $hasRect = [AYG.Win32]::GetWindowRect($hWnd, [ref]$rect)

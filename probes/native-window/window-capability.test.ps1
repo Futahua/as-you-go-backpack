@@ -4,7 +4,7 @@
 # runtime ops are injected, so fail-closed matching and command routing are
 # proven deterministically. Run:  pwsh -File probes/native-window/window-capability.test.ps1
 
-#Requires -Version 7.0
+#Requires -Version 5.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
