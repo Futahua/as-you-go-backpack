@@ -9,10 +9,10 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-06
 #
-# ACTIVE ASSIGNMENT: 012R — PROCESS OWNERSHIP CORRECTION
-#   012's 215 tests pass, but stdin errors are unobservable, stderr ownership is
-#   not closed, and invalid stderr limits can disable the bound. Correct only
-#   these ownership gaps; still no real process or product wiring.
+# ACTIVE ASSIGNMENT: 012R2 — FINAL PROCESS-SEAM VALIDATION
+#   012R fixes the ownership holes and all 221 tests pass. Finish the actual
+#   stream-shape guard and make the backpressure/error regression enter its
+#   claimed phase. No architectural expansion or real process.
 #   005/007/008 still await creator eye checks where applicable.
 #
 # FRESH WORKER HANDOFF
@@ -20,9 +20,9 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 012 REVIEW: CORRECTION REQUIRED
-#     BRAIN - Assignment 012R DISPATCH
-#   Execute Assignment 012R only. Do not reopen or re-execute 003-011R2.
+#     BRAIN - Assignment 012R REVIEW: NARROW CORRECTION REQUIRED
+#     BRAIN - Assignment 012R2 DISPATCH
+#   Execute Assignment 012R2 only. Do not reopen or re-execute 003-012R.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
 #   Papers latest reviewed capability snapshot is a01b489.
@@ -3591,3 +3591,137 @@ No new file beyond the existing two 012 files unless unavoidable. No actual
 spawn/helper/PowerShell, native window, dependency, product wiring, persistence,
 UI, build/install/launch, commit or push. Preserve all earlier dirty Papers
 files. Run focused/full tests, typecheck and diff check; report counts and stop.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 012R PICKUP
+======================================================================
+
+UNDERSTOOD — FOUR FINDINGS IN THE TWO NEW 012 FILES ONLY
+1. OUT-OF-BAND STDIN ERROR: the child-side stdin seam gains a narrow
+   `onError` subscription (`ChildStdin extends TransportSink`); the
+   generic JSON-line TransportSink is not widened. The adapter
+   subscribes inside guarded construction and feeds the SAME first-cause
+   terminal callback as stdout/child events. A stdin error before,
+   during or after a pending/backpressured write terminates once,
+   rejects the send once, and later signals cannot replace its cause.
+2. STDERR OWNERSHIP: one guarded `endReadablesOnce()` ends stdin, stdout
+   AND stderr at most once each plus kill once, on every terminal /
+   explicit-close / construction-cleanup path; end failures are
+   best-effort and cannot duplicate or replace the first cause; stderr
+   chunks after terminal are ignored.
+3. STDERR CAP VALIDATION: maxStderrBytes must be a NON-NEGATIVE safe
+   integer (0 allowed = retain nothing but still mark deterministic
+   truncation when input arrives); NaN/Infinity/fractions/negatives
+   throw synchronously BEFORE createProcess or any subscription/end/kill
+   (the JSON-line caps are pre-validated there too).
+4. SURFACE: the returned object is asserted by direct runtime keys to be
+   exactly { send, onMessage, onTerminal, close }; module runtime
+   exports are asserted to contain no spawn/exec/fork/launch function and
+   no raw handle.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 012R CHECKPOINT
+======================================================================
+
+FOUR FINDINGS CORRECTED (the two new 012 files only)
+
+1. OUT-OF-BAND STDIN ERROR (helperProcessTransport.ts): new
+   `ChildStdin extends TransportSink` adds `onError(callback)` — the
+   generic JSON-line TransportSink is NOT widened. `isChildLike`
+   requires it. The adapter subscribes `child.stdin.onError` inside the
+   guarded construction and feeds the SAME first-cause terminal callback
+   as stdout/child events. Regressions: an independent stdin error is
+   the first preserved terminal cause (later stdout EOF / child error /
+   child exit change nothing), and an active backpressured send rejects
+   once with the stdin-error cause.
+2. STDERR OWNERSHIP: one guarded `endOwnershipOnce()` (safeEnd wrapper)
+   ends stdin, stdout AND stderr at most once each plus child.kill at
+   most once, on every terminal, explicit-close and construction-cleanup
+   path; end() throws/rejections are best-effort and cannot duplicate a
+   kill or replace the first cause; the stderr chunk handler ignores
+   data after terminal (readablesEnded guard). Regressions: every
+   terminal trigger (close/EOF/child-error/child-exit/stdin-error) ends
+   all three streams once and kills once; throwing end() still yields
+   one kill; stderr pushed after close is ignored and changes nothing.
+3. STDERR CAP VALIDATION: maxStderrBytes validated as a NON-NEGATIVE
+   safe integer (0 retains no bytes but marks deterministic truncation)
+   — NaN/Infinity/fractions/negatives throw synchronously; maxLineBytes/
+   maxReceiveBufferBytes are pre-validated as positive safe integers too.
+   ALL validation happens BEFORE createProcess, subscriptions, ends and
+   kills. Regression: factory-invocation counter stays 0 and kills 0 for
+   every invalid cap; cap 0 truncates (marker, no text).
+4. TEST-SURFACE: the returned transport object is asserted by direct
+   runtime keys to be exactly [close, onMessage, onTerminal, send] with
+   no child/stdin/stdout/stderr/kill handle; module runtime exports
+   contain no spawn/exec/fork/launch function name.
+
+EVIDENCE
+- Focused 010-012: 21 + 24 + 19 = 64 all pass. Full Papers unit suite:
+  23 files / 221 tests, ALL pass. npm run typecheck passes; git diff
+  --check clean (exit 0).
+- Files: only src/main/windows/helperProcessTransport.ts and
+  tests/unit/helperProcessTransport.test.ts. All earlier dirty Papers
+  files byte-for-byte untouched.
+
+BOUNDARY AND STOP
+No actual spawn/helper/PowerShell, native window, dependency, product
+wiring, persistence, UI, build/install/launch, commit or push. Stopping
+for BRAIN re-review and the snapshot commit.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 012R REVIEW: NARROW CORRECTION REQUIRED
+======================================================================
+
+VERDICT
+012R corrects the independent stdin-error path, complete ownership shutdown,
+stderr limit validation and runtime return surface. BRAIN reran 64/64 focused
+tests, the full 23-file / 221-test suite, typecheck and diff check successfully.
+Do not commit Papers yet: one construction guard is materially incomplete, and
+one regression again terminates before proving the phase named by the test.
+
+FINDING 1 — `isChildLike` DOES NOT VALIDATE REQUIRED STREAM METHODS
+The guard requires stdin.onError and truthy stdout/stderr, but does not validate
+stdin write/onDrain/end or stdout/stderr onChunk/onEnd/end. A child with missing
+methods can pass construction and expose a transport, failing only on a later
+send/close. “Missing required stdio fails construction closed” must cover the
+required callable shape, not merely object presence.
+
+FINDING 2 — “ACTIVE BACKPRESSURED” STDIN-ERROR TEST IS STILL PRE-WRITE
+The test calls send() and immediately emits the independent error. As in 011,
+send begins on a promise-chain microtask, so sink.write may never be called. The
+test can pass by rejecting a queued send and does not prove that a stdin error
+interrupts a write that returned false and is waiting for drain.
+
+EVIDENCE GAP — ASYNC END REJECTION
+The checkpoint claims endpoint end rejections are covered, but the new test only
+throws synchronously from end(). The implementation catches promise rejection;
+add the direct regression so this lifecycle claim is executable evidence.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 012R2 DISPATCH
+======================================================================
+
+WORKER: make only this final validation/test pass in the existing two 012 files,
+append `WORKER - Assignment 012R2 CHECKPOINT`, then stop without committing.
+
+REQUIRED CHANGES / TESTS
+1. Validate the complete child shape before any subscription or transport is
+   exposed: stdin write/onDrain/onError/end; stdout and stderr onChunk/onEnd/end;
+   process onExit/onError/kill. For each stream group, add a representative
+   missing/non-function method regression that throws at construction, ends
+   every available valid endpoint best-effort, kills once, and returns nothing.
+   Keep cleanup robust when the partial shape itself lacks an end method.
+2. Instrument the fake stdin with write-call/write-start evidence. For the
+   independent-error/backpressure test: set false-write behavior, call send,
+   wait until write was invoked, flush until the send is demonstrably still
+   pending awaiting drain, then emit stdin error. Assert one write, no drain,
+   one rejection with the preserved cause, one terminal and full ownership
+   cleanup. A queue-only rejection is not sufficient.
+3. Add async Promise-rejecting end() coverage for stdin/stdout/stderr. After a
+   bounded microtask turn, assert terminal once, every end called once and child
+   killed once, with no unhandled rejection or cause replacement.
+
+BOUNDARY / EVIDENCE
+No refactor beyond these points; retain all 012 prohibitions and the two-file
+scope. Preserve earlier dirty Papers files. Rerun focused/full tests, typecheck
+and diff check, append counts, then stop.
