@@ -9,25 +9,24 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-06
 #
-# ACTIVE ASSIGNMENT: 010 — PAPERS-SIDE WINDOW CLIENT/SUPERVISOR SEAM
-#   009 is checkpointed, engineering-reviewed and ready for its snapshot commit.
-#   010 is source/tests only: injected fake transport, no helper/window launch,
-#   no host IPC or As you Go wiring. 005/007/008 await eye/use checks.
+# ACTIVE ASSIGNMENT: 011 — BOUNDED JSON-LINE TRANSPORT PROOF
+#   010R is reviewed, accepted and committed in Papers as 180ef86. Prove only
+#   the byte/line framing and lifecycle seam over injected streams. Do not spawn
+#   a helper, touch a native window, or wire Papers/As you Go product surfaces.
+#   005/007/008 still await creator eye checks where applicable.
 #
 # FRESH WORKER HANDOFF
 #   The history below is not perfectly chronological: some earlier WORKER
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 008 REVIEW
-#     BRAIN - Assignment 009 (QUEUED, NOT DISPATCHED)
-#     BRAIN - CREATOR UX DIRECTION
-#     BRAIN - Assignment 009 AUTHORIZATION + DISPATCH
-#     BRAIN - UX ADDENDUM: DRAG MEMBER BUTTONS OUT
-#     BRAIN - UX CLARIFICATION: PER-LAYOUT WINDOW STATE
-#   Execute Assignment 009 only. Do not reopen or re-execute 003-008.
+#     BRAIN - Assignment 010R REVIEW: PASS
+#     BRAIN - Assignment 011 DISPATCH
+#   Execute Assignment 011 only. Do not reopen or re-execute 003-010R.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
+#   Papers latest reviewed capability snapshot is 180ef86.
+#   As you Go latest feature/probe snapshot is c87103c before this log update.
 #   The 009 snapshot subject is `probe: prove native window capability`.
 #   539d2af is the reviewed 008 feature snapshot; bbdf681 is pre-008;
 #   5b6d95a is the old pre-trail historical base. Never reset/checkout or
@@ -37,7 +36,9 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   button / deletion guards are all DEAD. Do not port them.
 #
 # GIT STATE
-#   main latest — reviewed through Assignment 009; active starting snapshot.
+#   main latest — reviewed through Assignment 010R; 011 is active.
+#   Papers 180ef86 — reviewed Assignment 010/010R capability boundary.
+#   As you Go c87103c — reviewed Assignment 009 native feasibility probe.
 #   54e3315 — fresh-worker handoff before Assignment 009.
 #   539d2af — reviewed Assignment 008 feature snapshot.
 #   bbdf681 — clean pre-008 rollback snapshot.
@@ -2392,3 +2393,406 @@ no Papers build/package/install/launch, no creator/Papers window
 manipulated, no helper or test window left running, no dependency
 installed. Stopping for BRAIN review before the one-window product
 slice.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 010 PICKUP
+======================================================================
+
+UNDERSTOOD
+Canonical Papers only; fake transport only; nothing is spawned. New
+narrow files under src/main/windows/ (no such directory exists — zero
+overlap with the dirty tree) plus one new test file. Existing dirty
+host/preload/IPC/settings/runtime/state-save files are preserved and
+never edited; if a necessary seam overlapped them I would checkpoint the
+conflict and stop instead.
+
+DESIGN
+- windowCapabilityTypes.ts — the typed internal contract: six methods
+  (list/observe/minimize/restore/apply/close), typed outcomes
+  (success/missing/ambiguous/denied/malformed/helper-unavailable/
+  timeout), WindowObservation with an OPAQUE branded RuntimeWindowId
+  (live-session only), request/response messages, and a structurally
+  separate PersistedWindowDescriptor (launch-path identity; no runtime
+  id — enforced by a @ts-expect-error compile check and a runtime shape
+  test).
+- windowCapabilityClient.ts — owns request ids, bounded pending map,
+  per-request timeouts, inbound schema validation and correlation.
+  handleMessage ignores malformed/unknown/duplicate/stale/mismatched
+  responses without satisfying any request. Exposes ONLY the six
+  enumerated capability methods (+ handleMessage/rejectAllPending/stop):
+  no raw send, no exec, no arbitrary id synthesis. zero/multiple never
+  become a guessed id (the client never invents targets).
+- windowCapabilitySupervisor.ts — abstract stopped/starting/ready/
+  stopping/crashed states; creates the transport + client on start;
+  crash/stop rejects every pending request exactly once with
+  helper-unavailable and tears the client down; a restart builds a fresh
+  client with an empty pending map, so a move/minimize/restore/close is
+  NEVER replayed.
+- Transport seam: { send, onMessage, close } — the client subscribes to
+  onMessage; tests use an in-memory fake that can deliver out-of-order
+  and malformed payloads. No child process, PowerShell, socket, hook or
+  polling exists anywhere in 010.
+
+TEST PLAN (tests/unit/windowCapability.test.ts) — the full assignment
+list: out-of-order correlation; timeout + bounded pending; malformed/
+unknown/duplicate/stale/mismatched fail closed; crash/stop rejects
+pending exactly once; restart never replays; every typed outcome
+survives transport; the method/command union has no exec/send escape
+hatch; runtime ids absent from persisted descriptors; fake
+list/observe/minimize/restore/apply/close route to only the requested
+id.
+
+BOUNDARIES: no hostFacade/IPC/preload/postMessage/Backpack seam, no
+renderer-supplied HWND/executable/script, no persistence, no polling,
+no build/package/install/launch/restart, no commit, no push, no As you
+Go change, no creator state edit.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 010R CHECKPOINT
+======================================================================
+
+FINDING 1 CORRECTED — DEEP VALIDATION (windowCapabilityTypes.ts)
+parseWindowResponse is now a real schema gate with these exact
+predicates (no unchecked casts anywhere):
+- requestId: positive safe integer (rejects 0, negatives, fractions,
+  NaN, +/-Infinity, > MAX_SAFE_INTEGER).
+- runtimeId: non-empty string.
+- observation fields: title string; processId null or non-negative safe
+  integer; processPath null or string; state in
+  {normal, minimized, maximized, missing}; bounds key must exist and be
+  null or a plain object with finite x/y/width/height and STRICTLY
+  positive width/height (arrays and non-plain objects rejected).
+- windows array: every entry validated; ONE bad entry invalidates the
+  whole response.
+- Strict per-method/outcome shapes: successful `list` must carry a valid
+  windows array; successful observe/minimize/restore/apply must carry a
+  valid observation; successful `close` is the documented envelope-only
+  shape; every non-success response is envelope-only (extra payload
+  rejected).
+Regressions: non-positive-safe request ids; array observation; empty/
+numeric runtime id; bad state; negative/fractional processId; NaN/
+Infinite/zero/negative/missing-key bounds; bad entry invalidates the
+array; successful list without windows; success mutation with malformed
+observation; close with payload rejected; envelope-only close accepted.
+
+FINDING 2 CORRECTED — TARGET CORRELATION (windowCapabilityClient.ts)
+PendingEntry now stores the request `target`; handleMessage requires any
+response carrying an observation to have observation.runtimeId === the
+pending target, otherwise the response is ignored fail-closed and the
+request stays pending. Regression: a minimize(A) request delivered a
+valid observation for B stays pending, then resolves only from A.
+
+FINDING 3 CORRECTED — SUPERVISOR START FAILURE (windowCapabilitySupervisor.ts)
+start() wraps transport creation + client construction/subscription in
+try/catch: on failure it best-effort closes any constructed transport
+exactly once, clears transport/client references, transitions to
+`crashed` with getClient() null, and start() REJECTS (the chosen,
+documented contract). A later start builds a FRESH transport/client and
+replays nothing. Regressions: factory throw -> crashed/no client/no
+sends, retry with a fresh transport works; onMessage/subscription throw
+-> crashed, partial transport closed exactly once, independent retry
+works.
+
+EVIDENCE
+- Focused windowCapability suite: 21/21 pass (was 14; +7 regressions
+  across the three findings).
+- Full Papers unit suite: 21 files / 178 tests, ALL pass.
+- npm run typecheck: passes (includes the @ts-expect-error runtime-id/
+  persisted-descriptor separation check).
+- git diff --check: clean (exit 0).
+- Changed files: only the four 010 files (windowCapabilityTypes.ts,
+  windowCapabilityClient.ts, windowCapabilitySupervisor.ts) and
+  tests/unit/windowCapability.test.ts. Every pre-existing dirty Papers
+  file preserved untouched.
+
+BOUNDARY AND STOP
+No helper spawn, no PowerShell, no native window, no IPC/preload/host
+bridge, no As you Go change, no dependency, no build/install/launch,
+no commit, no push, no creator state edit. Stopping for BRAIN
+re-review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 010 CHECKPOINT
+======================================================================
+
+EXACT FILES (all NEW; the dirty Papers tree was preserved untouched)
+- src/main/windows/windowCapabilityTypes.ts — the typed contract: six
+  methods (list/observe/minimize/restore/apply/close), typed outcomes
+  (success/missing/ambiguous/denied/malformed/helper-unavailable/
+  timeout), WindowObservation with an OPAQUE branded RuntimeWindowId
+  (declare-const unique-symbol brand), WindowRequestMessage /
+  WindowResponseMessage, PersistedWindowDescriptor (launch-path
+  identity + titleHint; structurally NO runtime id), the injectable
+  WindowTransport seam ({send, onMessage, close}), WindowCapabilityResult
+  and parseWindowResponse (inbound schema gate).
+- src/main/windows/windowCapabilityClient.ts — request ids, bounded
+  pending map (default 64, overflow resolves helper-unavailable
+  immediately), per-request timeouts, correlation; handleMessage ignores
+  malformed/unknown/duplicate/stale/mismatched responses without
+  satisfying any request; send failure fails only that request closed;
+  rejects/stop resolve pendings exactly once. Exposes ONLY the six
+  enumerated methods + handleMessage/rejectAllPending/stop/pendingCount —
+  no raw send, no exec, no id synthesis.
+- src/main/windows/windowCapabilitySupervisor.ts — state machine
+  stopped/starting/ready/stopping/crashed; start() builds transport +
+  client; crash()/stop() reject every pending request exactly once with
+  helper-unavailable, close the transport, and null the client; a
+  restart creates a FRESH client with an empty pending map, so no
+  move/minimize/restore/close is ever replayed. getClient() returns null
+  in every non-ready state (callers fail closed).
+- tests/unit/windowCapability.test.ts — 14 tests (below).
+
+PUBLIC INTERNAL TYPES (exported)
+WindowCapabilityMethod, WindowOutcome, WindowState, WindowBounds,
+RuntimeWindowId, WindowObservation, WindowRequestMessage,
+WindowResponseMessage, PersistedWindowDescriptor, WindowTransport,
+WindowCapabilityResult, parseWindowResponse, and the two factories
+createWindowCapabilityClient / createWindowCapabilitySupervisor.
+
+STATE MACHINE (supervisor)
+stopped --start--> starting --(transport+client built)--> ready
+ready --crash--> crashed --start--> starting (fresh client)
+ready --stop--> stopping --teardown--> stopped
+crash/stop: every pending request resolved exactly once with
+helper-unavailable; the client is dropped, so restart cannot replay.
+
+EVIDENCE (14/14 focused; full Papers unit suite 21 files / 171 tests,
+ALL pass; typecheck passes; git diff --check clean)
+- out-of-order replies (3,1,2) correlate to the right requests;
+- timeout resolves typed and frees the pending slot; pending bounded;
+- malformed/unknown/mismatched/stale responses are ignored and nothing
+  is satisfied by the wrong reply;
+- every typed outcome (missing/ambiguous/denied/malformed/
+  helper-unavailable) survives the transport unchanged;
+- crash rejects two pendings exactly once each (resolutions==2, second
+  crash no-op); stop after crash closes the transport once;
+- restart sends NOTHING again (sent-message count unchanged after a
+  crashed minimize/close);
+- fake list/observe/minimize/restore/apply/close route to exactly the
+  requested id (target/bounds/state asserted on the wire);
+- the client surface is exactly the enumerated union — no send/exec/
+  invoke/shell/spawn/launch/eval name exists;
+- PersistedWindowDescriptor has no runtimeId key at runtime and a
+  RuntimeWindowId is a compile-time type error to assign to it
+  (@ts-expect-error, verified under tsc).
+
+DIRTY-TREE SEPARATION
+Only the four new files above exist under src/main/windows/ (a directory
+that did not previously exist) and the one new test. All pre-existing
+dirty files (backpackProjectRuntime, backpackProjectService, hostFacade,
+index, ipc/hostIpc, windowBounds, host bridge/preload/settings work)
+were not edited. No conflict seam was needed.
+
+BOUNDARIES HELD
+Nothing spawned; no PowerShell, socket, hook, polling or dependency;
+no hostFacade/IPC/preload/postMessage/Backpack method added; no
+renderer-supplied HWND/executable/script path exists; no persistence;
+no As you Go change; no build/package/install/launch/restart; no
+commit, no push, no creator state edit. Stopping for BRAIN review; BRAIN
+creates the reviewed snapshot commit before the helper-transport proof.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 010 REVIEW: CORRECTION REQUIRED
+======================================================================
+
+VERDICT
+Do not commit the 010 snapshot yet. File isolation, method vocabulary, bounded
+pending map and basic supervisor behavior pass, and BRAIN reran the focused 14
+tests plus typecheck successfully. The fail-closed schema/correlation boundary
+is incomplete in ways the current tests do not cover.
+
+FINDING 1 — NESTED PAYLOADS ARE CAST, NOT VALIDATED
+parseWindowResponse validates the envelope but accepts `windows` as any array
+and `observation` as any object (including arrays), then casts them to trusted
+WindowObservation types. A malformed helper response can therefore inject bad
+runtime ids, states, bounds or process fields through the supposedly typed gate.
+
+REQUIRED CORRECTION
+- requestId must be a positive safe integer.
+- A runtime id must be a non-empty string at the wire boundary.
+- Validate every WindowObservation field: title string; processId null or a
+  non-negative safe integer; processPath null or string; allowed WindowState;
+  bounds null or a plain object with finite x/y/width/height and positive width/
+  height. Reject arrays and malformed nested entries.
+- If `windows` or `observation` is present, validate it deeply. Do not return a
+  partially filtered payload and do not use an unchecked cast as validation.
+- Enforce outcome/method payload shapes sufficiently that a successful `list`
+  cannot omit/forge its list and a successful observation/mutation cannot pass
+  malformed observation data. A successful `close` may use the explicitly
+  documented no-observation shape.
+
+FINDING 2 — SAME-METHOD WRONG-TARGET RESPONSE CAN RESOLVE A REQUEST
+PendingEntry stores only the method. A request to observe/minimize/etc. Window A
+can be satisfied by a response carrying a valid observation for Window B as long
+as requestId and method match. That violates "route only to the requested id."
+
+REQUIRED CORRECTION
+- Store the request target in PendingEntry.
+- For every target method whose response contains an observation, require its
+  runtimeId to equal the pending target before resolving. A mismatch is ignored
+  fail-closed and the real request remains pending.
+- Add a regression with two runtime ids proving an A request cannot resolve from
+  a B observation, then resolves only from A. Cover close's documented response
+  shape separately.
+
+FINDING 3 — TRANSPORT CONSTRUCTION FAILURE STRANDS `starting`
+If createTransport or client subscription throws, start() leaves the supervisor
+in `starting`. A real spawn/handshake seam must fail into `crashed`, expose no
+client and retain no transport/client references.
+
+REQUIRED CORRECTION
+- Catch construction/subscription failure, best-effort close any constructed
+  transport, clear references, transition to `crashed`, and fail closed.
+- Define whether start() rejects or resolves in that case and test the chosen
+  contract. A later start must use a fresh transport and send/replay nothing.
+
+REQUIRED REGRESSIONS
+- NaN/infinite/fractional/negative request ids; array observation; malformed
+  runtime id/state/process fields/bounds; one bad entry invalidates a windows
+  array; successful list missing windows; success mutation malformed payload.
+- same-method wrong-target response cannot resolve A with B.
+- factory throw and onMessage/subscription throw leave crashed/no client; fresh
+  restart works and replays nothing; partial transport closes once.
+- Existing 14 tests and all Papers tests/typecheck remain green.
+
+BOUNDARY AND STOP
+Change only the four new 010 files and its new test. Preserve every pre-existing
+dirty Papers file. No helper spawn, PowerShell, native window, IPC/preload/host
+bridge, As you Go feature/state, dependency, build/install/launch or commit.
+Append WORKER 010R CHECKPOINT with exact validation predicates and evidence,
+then stop for BRAIN re-review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 010R DISPATCH
+======================================================================
+
+WORKER: append Assignment 010R PICKUP, correct only the three review findings
+above in the isolated 010 files/tests, append 010R CHECKPOINT, then stop. The
+passing surface tests do not override the missing deep-validation evidence.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 010R PICKUP
+======================================================================
+
+UNDERSTOOD — THREE FINDINGS, THREE CORRECTIONS, ONLY THE 010 FILES
+1. DEEP VALIDATION: parseWindowResponse becomes a real schema gate.
+   requestId must be a positive safe integer; runtime ids must be
+   non-empty strings; every WindowObservation field is validated (title
+   string; processId null or non-negative safe integer; processPath null
+   or string; allowed WindowState; bounds null or finite x/y/width/height
+   with positive width/height; arrays rejected); one bad entry
+   invalidates a whole windows array; strict per-method/outcome shapes —
+   successful list must carry a valid list, successful observe/minimize/
+   restore/apply must carry a valid observation, successful close is the
+   documented envelope-only shape, and non-success responses are
+   envelope-only. No unchecked cast anywhere.
+2. TARGET CORRELATION: PendingEntry stores the request target; any
+   response carrying an observation whose runtimeId differs from the
+   pending target is ignored fail-closed and the request stays pending.
+   Regression: an A request cannot resolve from a B observation.
+3. SUPERVISOR START FAILURE: construction/subscription failure best-
+   effort closes any constructed transport, clears all references,
+   transitions to `crashed`, and start() REJECTS (the chosen contract).
+   A later start uses a fresh transport and replays nothing.
+Regressions for NaN/infinite/fractional/negative request ids, array
+observation, malformed id/state/process/bounds, bad-entry-invalidates-
+array, missing list on success, malformed success payload, wrong-target,
+factory/onMessage throws (crashed, no client, partial transport closed
+once, fresh restart works). All 14 existing tests stay green (updated
+where the stricter shape now requires observations in success replies).
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 010R REVIEW: PASS
+======================================================================
+
+VERDICT
+Accepted. BRAIN inspected the four isolated 010 files, reran the focused
+suite (21/21), the full Papers unit suite (21 files / 178 tests), typecheck,
+and diff hygiene. The correction closes all three review findings:
+
+- Inbound responses are deeply and strictly validated, including positive
+  safe request ids, nonempty runtime ids, allowed state/process fields and
+  finite positive bounds. One malformed observation rejects the whole payload.
+- Target methods retain their requested runtime id; an observation for B cannot
+  satisfy a pending request for A.
+- Factory/subscription failures tear down partial transport exactly once, leave
+  no client, enter crashed, reject start(), and permit a clean fresh restart
+  without replay.
+
+SNAPSHOT
+Papers commit 180ef86 (`feat: add fail-closed window capability client`). Only:
+- src/main/windows/windowCapabilityTypes.ts
+- src/main/windows/windowCapabilityClient.ts
+- src/main/windows/windowCapabilitySupervisor.ts
+- tests/unit/windowCapability.test.ts
+
+Every earlier dirty Papers file remains unstaged and outside this snapshot.
+No helper/native action, product wiring, build, install, launch or restart was
+performed.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 011 DISPATCH
+======================================================================
+
+GOAL — ONE SMALL ARCHITECTURE PROOF
+Add a Papers-side JSON-lines transport implementation for the accepted
+WindowTransport seam, tested only with injected readable/writable fakes. This
+assignment proves framing, bounded memory, backpressure and terminal lifecycle.
+It does not start or choose a helper and it does not control any real window.
+
+ALLOWED SCOPE
+- Prefer new files under src/main/windows/ and one focused unit test file.
+- If required, minimally extend only the four committed 010 files. Explain why.
+- Preserve every pre-existing dirty Papers file byte-for-byte and unstaged.
+- Use platform-neutral injected stream-like interfaces narrow enough to fake;
+  do not bind the capability client to Node child-process objects.
+
+REQUIRED BEHAVIOR
+1. Outbound messages serialize as UTF-8 JSON followed by exactly one newline.
+   `send()` returns a promise reflecting acceptance/backpressure: it must not
+   report success before a false/backpressured write has drained, and it must
+   reject on write failure or terminal closure.
+2. Inbound bytes support arbitrary chunk boundaries, multiple coalesced lines,
+   LF and CRLF, and UTF-8 characters split across chunks. Deliver each complete
+   decoded line once, in order, to the existing client message boundary.
+3. Parse each line as JSON and require the existing response schema gate before
+   delivery. Malformed JSON/schema is fail-closed: it satisfies no request and
+   cannot expose an untyped payload. Define whether one malformed line is
+   ignored or terminal, document the choice, and test it.
+4. Set explicit, small configurable maximums for one encoded line and for the
+   unfinished receive buffer. Reject/terminate before memory can grow without
+   bound. Count encoded bytes, not JavaScript character count. Test exact limit,
+   limit+1, and an unterminated oversized stream.
+5. EOF, read error, write error and explicit close are terminal and idempotent.
+   Close the underlying endpoints at most once; no later messages are emitted;
+   pending client requests resolve helper-unavailable through the existing
+   supervisor lifecycle, exactly once.
+6. A transport terminal event must be observable by the supervisor so it enters
+   crashed/unavailable. Extend the narrow seam only as needed; retain clean stop
+   as stopped. A fresh restart creates a fresh transport/client and replays no
+   request.
+7. Expose no raw product-side send/exec/shell/spawn/eval escape hatch. The
+   capability client remains the only six-method command vocabulary.
+
+MANDATORY REGRESSIONS
+- fragmented UTF-8 and JSON; multiple lines in one chunk; CRLF/LF mixture;
+- malformed JSON and schema; empty line policy;
+- outbound escaping/newline and synchronous/asynchronous write failure;
+- backpressure waits for drain, then resolves; close/error while waiting rejects;
+- byte limit exact boundary, limit+1, oversized unterminated buffer;
+- EOF/error/explicit close happen once, ignore later chunks, and supervisor
+  rejects pending once as helper-unavailable;
+- restart is fresh and sends/replays nothing.
+
+OUT OF SCOPE / FORBIDDEN
+No child process, PowerShell invocation, executable discovery, socket, named
+pipe, HWND/native call, polling, hook, dependency, renderer, As you Go change,
+hostFacade/IPC/preload/postMessage wiring, persistence, UI, build/package,
+install, launch/restart, commit or push. Do not touch creator state.json.
+
+EVIDENCE AND STOP
+Run the focused tests, full Papers unit suite, `npm run typecheck`, and
+`git diff --check`. List exact changed files and prove the earlier dirty tree
+was untouched. Append `WORKER - Assignment 011 CHECKPOINT` with the chosen
+malformed-line policy, byte limits, lifecycle state/evidence and test counts,
+then stop without committing. BRAIN will review and create the snapshot commit.
