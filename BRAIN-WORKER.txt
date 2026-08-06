@@ -9,9 +9,10 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-06
 #
-# ACTIVE ASSIGNMENT: 009 — NATIVE WINDOW CAPABILITY FEASIBILITY
-#   Creator authorized the bounded local harness/disposable-window probe with
-#   "you do you." 008 is engineering-reviewed; 005/007/008 await eye/use checks.
+# ACTIVE ASSIGNMENT: 010 — PAPERS-SIDE WINDOW CLIENT/SUPERVISOR SEAM
+#   009 is checkpointed, engineering-reviewed and ready for its snapshot commit.
+#   010 is source/tests only: injected fake transport, no helper/window launch,
+#   no host IPC or As you Go wiring. 005/007/008 await eye/use checks.
 #
 # FRESH WORKER HANDOFF
 #   The history below is not perfectly chronological: some earlier WORKER
@@ -26,16 +27,19 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #     BRAIN - UX CLARIFICATION: PER-LAYOUT WINDOW STATE
 #   Execute Assignment 009 only. Do not reopen or re-execute 003-008.
 #
-# BASE: main @ 539d2af — REVIEWED ASSIGNMENT 008 SNAPSHOT.
-#   Working tree was clean at dispatch. bbdf681 is the pre-008 rollback point;
-#   5b6d95a is only the old pre-trail historical base. Never reset/checkout or
-#   disturb creator changes to reach either historical commit.
+# BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
+#   The 009 snapshot subject is `probe: prove native window capability`.
+#   539d2af is the reviewed 008 feature snapshot; bbdf681 is pre-008;
+#   5b6d95a is the old pre-trail historical base. Never reset/checkout or
+#   disturb creator changes to reach a historical commit.
 #   Do NOT build on trail/01 or trail/02. The creator rejected both.
 #   Their trail-graph.js / trail-graph-model.js / trail CSS / expander
 #   button / deletion guards are all DEAD. Do not port them.
 #
 # GIT STATE
-#   main 539d2af — reviewed through Assignment 008; active starting snapshot.
+#   main latest — reviewed through Assignment 009; active starting snapshot.
+#   54e3315 — fresh-worker handoff before Assignment 009.
+#   539d2af — reviewed Assignment 008 feature snapshot.
 #   bbdf681 — clean pre-008 rollback snapshot.
 #   5b6d95a — historical pre-trail published base; reference only.
 #   trail/01-overlay-checkpoint, trail/02-workspace-items — rejected,
@@ -2143,3 +2147,248 @@ ACTIVATION RULE
 This requirement belongs to the later product slices; Assignment 009 must make
 its recommended capability boundary able to read and apply the necessary state,
 but must not implement multi-layout activation itself.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 009 REVIEW
+======================================================================
+
+VERDICT
+Engineering and safety review pass. The proof establishes native feasibility;
+it does not yet establish the final packaged helper choice.
+
+EVIDENCE ACCEPTED
+- Direct Win32 operations behind the narrow adapter enumerated, resolved,
+  minimized, restored, moved/resized, observed and gracefully closed exactly
+  one uniquely titled disposable WinForms window.
+- Bounds round-tripped from 400x300@120,140 to 520x340@300,220; state moved
+  normal -> minimized -> normal; disappearance after graceful close was
+  observed and zero matching AYG test windows remained.
+- Runtime HWND was used only as an ephemeral resolved id, never persisted.
+- Deterministic fake suite passes 11/11, including zero/multiple fail-closed,
+  no fallthrough to Target B, gone/unresolved close refusal and absence of an
+  exec-style command surface. BRAIN reran this suite successfully.
+- No dependency, elevation, Papers/creator-window manipulation, project-state
+  edit, product wiring, package/install or surviving helper was introduced.
+
+ARCHITECTURE DECISION WITH CAVEAT
+Accept Win32 P/Invoke and the narrow capability vocabulary as the proven native
+boundary. Accept JSON-line request/response as a candidate transport seam.
+PowerShell 7/WinForms is proven on THIS machine only; do not silently make it a
+permanent Papers distribution requirement. A later packaging proof must choose
+between a supervised locally available helper and a shipped self-contained
+helper using measured startup/memory/reliability evidence.
+
+SNAPSHOT
+Commit the 009 probe, transcript and coordination checkpoint before 010 begins.
+No production code belongs in the 009 snapshot.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 010
+PAPERS-SIDE TYPED WINDOW CLIENT/SUPERVISOR SEAM — FAKE TRANSPORT ONLY
+======================================================================
+
+PURPOSE
+Prove the product-side architecture that will own the native helper without yet
+spawning a process or connecting Backpack content. This isolates protocol and
+lifecycle correctness from native launch and UX.
+
+REPOSITORY AND DIRTY-TREE BOUNDARY
+Assignment 010 changes canonical Papers source/tests only:
+`D:\Letters\MatTroiSeConMoc\PAPERS 3\Papers-3`.
+That tree already contains creator/previous-assignment changes. Preserve them.
+Prefer new narrowly named module/test files; do not edit existing dirty host,
+preload, IPC, settings, runtime or state-save files in this proof. If a necessary
+seam overlaps them, checkpoint the conflict and stop rather than absorbing it.
+
+TYPED CONTRACT
+Define a narrow internal capability vocabulary sufficient for later slices:
+- list eligible top-level window observations;
+- observe one already resolved ephemeral runtime id;
+- minimize, restore, apply bounds/state and graceful-close one resolved member;
+- opaque runtime ids are live-session values and are structurally separate from
+  any future persisted matching/launch descriptor;
+- explicit typed outcomes for success, missing, ambiguous, denied, malformed,
+  helper-unavailable and timeout. Never convert zero/multiple into a guessed id.
+
+CLIENT / SUPERVISOR SEAM
+- Client owns request ids, schema validation, bounded timeouts and correlation.
+- Inject a transport interface. Tests use an in-memory fake only; no child
+  process, PowerShell, native window, socket, global hook or polling loop.
+- Supervisor owns abstract start/ready/stop/crash states and rejects pending
+  requests deterministically on crash/stop. It must not silently replay a move,
+  minimize, restore or close command after restart.
+- Ignore/reject malformed, duplicate, stale and mismatched responses without
+  satisfying the wrong request. Bound any pending-request collection.
+- Expose enumerated capability methods, not raw protocol send, arbitrary Win32,
+  shell execution or arbitrary process launch.
+
+SECURITY / PRODUCT BOUNDARY
+This remains main-process-internal. Do not add hostFacade, IPC, preload, parent
+postMessage or Backpack methods yet. Do not let a renderer supply raw HWNDs,
+executables, scripts or command lines. Graceful close remains a distinct future
+confirmed operation, never a side effect of layout deletion.
+
+REQUIRED TESTS
+- request/response correlation with out-of-order replies;
+- timeout and bounded pending cleanup;
+- malformed/unknown/duplicate/stale/mismatched messages fail closed;
+- stop/crash rejects every pending request exactly once;
+- restart does not replay mutations;
+- typed missing/ambiguous/denied/helper-unavailable outcomes survive transport;
+- allowed method/command union contains no arbitrary execute/send escape hatch;
+- runtime ids are absent from any persisted descriptor type;
+- fake list/observe/minimize/restore/apply/close route to only the requested id.
+
+NOT IN 010
+No native/helper spawn, no PowerShell execution, no dependency install, no
+existing host bridge/preload/IPC edit, no As you Go change, no picker, no item
+button wiring, no persistence, no polling, no build/package/install/launch/
+restart and no creator state edit.
+
+VERIFICATION AND STOP
+Run focused new tests, complete Papers unit suite, typecheck and diff check.
+Append WORKER 010 CHECKPOINT to this coordination log with exact files, public
+internal types, state machine, evidence and dirty-tree separation. Do not commit
+or push. Stop for BRAIN review; BRAIN creates the reviewed snapshot commit before
+dispatching the helper-transport proof.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 010 DISPATCH
+======================================================================
+
+Assignment 009 is engineering-reviewed and committed as a snapshot before this
+dispatch becomes actionable. WORKER: append Assignment 010 PICKUP, implement the
+bounded canonical-Papers fake-transport client/supervisor seam above, append 010
+CHECKPOINT, then stop. Preserve the dirty Papers tree and do not spawn anything.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 009 PICKUP
+======================================================================
+
+AUTHORIZATION ACKNOWLEDGED
+BRAIN recorded the creator's "you do you" as explicit authorization for
+ONLY this bounded feasibility harness: build/run the probe and launch,
+manipulate and close ONE disposable test window. No product packaging,
+installation, restart, Papers modification, As you Go state change, 008
+wiring, creator/Papers window manipulation, persistence, polling, hooks,
+elevation, auto-start or detachment. Nothing may be left running.
+
+ENVIRONMENT FACTS (checked before pick-up)
+- PowerShell 7.6.3, Windows 10.0.26200 (AMD64), System.Windows.Forms
+  loads in-process (no install).
+- Route comparison conclusion: direct Win32 via Add-Type P/Invoke in
+  PS 7 is the only viable zero-install route here. A Node native addon
+  would need node-gyp + a compiler toolchain; a maintained npm native
+  window package would need an install (reporting, not installing); the
+  installed PowerToys Workspaces executables are internal and not a
+  documented/stable API (per the contract, not treated as one).
+
+DELIVERABLE PLAN (isolated probe, not production runtime)
+Location: <repo>/probes/native-window/
+1. window-capability.ps1 — one narrow typed adapter: enum visible
+   top-level windows (ephemeral runtime id, pid, process path, title,
+   bounds, normal/minimized/maximized), Resolve-Target fail-closed on
+   0/multiple, Get/Set bounds, Minimize/Restore, IsIconic/IsZoomed,
+   graceful close for an already resolved member (addendum). The window
+   source is injectable so fake tests can prove fail-closed matching and
+   command routing without any live window.
+2. window-capability.test.ps1 — deterministic fake tests: zero-match
+   and multi-match resolution reject; command routing never falls
+   through to a different id; bounds/state commands round-trip; the
+   close contract refuses anything not resolved first; no exec-style
+   escape hatch exists.
+3. run-feasibility.ps1 — live transcript: launch ONE WinForms window
+   with a unique title; enumerate and resolve it; record original
+   bounds/state; minimize → verify IsIconic; restore → verify; set new
+   bounds → read back; close it → disappearance reported and graceful
+   close proven; cleanup asserts no window with the unique title
+   remains and the process exited.
+Safety: only the harness-launched target is ever manipulated or closed;
+original bounds/state recorded before each operation; nothing persists.
+
+CHECKPOINT WILL REPORT: exact probe files and commands, PS/.NET/OS
+versions, the live state/bounds transitions, cleanup proof, fail-closed
+test evidence, packaging/runtime constraints, and the Proof C route
+recommendation.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 009 CHECKPOINT
+======================================================================
+
+EXACT PROBE FILES AND COMMANDS (isolated under probes/, not production)
+- probes/native-window/window-capability.ps1 — the narrow typed adapter
+  (P/Invoke Win32 via Add-Type, compiled in-process; no install):
+  Get-AygVisibleWindows, Resolve-AygTarget (fail-closed), Test-AygWindow
+  Alive, Get/Set-AygWindowState/Bounds, Minimize/Restore-AygWindow,
+  Close-ResolvedAygMember (addendum's narrow graceful close). Runtime ops
+  route through an injectable $script:AygOps table; the window source is
+  injectable. No exec/eval path exists.
+- probes/native-window/window-capability.test.ps1 — deterministic fake
+  tests (no live windows). Run:
+    pwsh -File probes/native-window/window-capability.test.ps1
+- probes/native-window/run-feasibility.ps1 — the live transcript. Run:
+    pwsh -File probes/native-window/run-feasibility.ps1
+  (Output: feasibility-transcript.txt in the same folder.)
+
+VERSIONS
+PowerShell 7.6.3; Windows 10.0.26200 (AMD64); .NET 9 runtime (WinForms
+in-process); C# compiler via PS Add-Type; no dependency was installed.
+
+LIVE STATE/BOUNDS TRANSITIONS (one disposable WinForms window, unique
+title AYG-FEASIBILITY-<pid>-<guid>)
+- launched: runtime id 12328754 (ephemeral HWND), enumeration of 39
+  visible top-level windows, exactly 1 matched the unique title.
+- resolve: exactly one; state=normal, bounds=400x300@120,140 (originals
+  recorded before any operation).
+- minimize: state -> minimized (verified).
+- restore: state -> normal (verified).
+- set-bounds 300,220,520,340: read back 520x340@300,220 (verified).
+- graceful close (WM_CLOSE on the resolved member only): alive=False,
+  form disposed, 0 windows with the unique title remain.
+
+CLEANUP PROOF
+Only the harness-launched target was ever manipulated or closed. After
+the run: a fresh enumeration finds 0 windows titled AYG-*; the pwsh
+process exited; nothing was left running; no creator/Papers window was
+touched (the adapter never resolved anything else).
+
+FAIL-CLOSED EVIDENCE (11/11 fake tests)
+zero-match and multi-match resolution reject; single match resolves
+exactly; bounds/state round-trip through the resolved id; Target B in a
+two-window registry was never touched (routing cannot fall through to a
+different window); graceful close requires an already resolved member
+and refuses gone/unresolvable ids; the adapter surface exposes no
+exec-style command.
+
+PACKAGING/RUNTIME CONSTRAINTS
+- The P/Invoke boundary needs only user32.dll (present on every
+  Windows); no elevation was required for enumeration/bounds/state on
+  top-level windows.
+- PowerShell 7 + WinForms must exist on the host (they do here); the
+  compiled C# adapter is in-process and self-contained.
+- A Node native addon would need node-gyp + a compiler toolchain; a
+  maintained npm native window package would need an install; the
+  installed PowerToys Workspaces executables are internal and were NOT
+  treated as a documented API. None were installed or chosen.
+- Product note: the eventual product slice must not depend on the
+  renderer reaching Windows directly (sandbox); the recommended shape
+  below hosts this same boundary outside the renderer.
+
+ARCHITECTURE DECISION / PROOF C RECOMMENDATION
+Recommended route: keep THIS Win32 P/Invoke adapter (proven here) as a
+small Papers-owned helper process exposing the same narrow typed
+contract over a JSON-line stdin/stdout protocol, launched and
+supervised by Papers — no dependency, no long-running companion beyond
+the helper's lifetime, no PowerToys, no native Node install. Proof C
+should then drive the one-window slice against that helper using the
+same fake-test pattern (injectable source/ops) plus the same live
+transcript, extended with fail-closed identity resolution from stored
+launch identities (not HWNDs — this probe treated HWNDs as ephemeral
+runtime ids only, per contract).
+
+BOUNDARIES HELD
+No As you Go state modified, no 008 controls wired, no commit, no push,
+no Papers build/package/install/launch, no creator/Papers window
+manipulated, no helper or test window left running, no dependency
+installed. Stopping for BRAIN review before the one-window product
+slice.
