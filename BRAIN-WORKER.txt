@@ -13,15 +13,36 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   Creator authorized the bounded local harness/disposable-window probe with
 #   "you do you." 008 is engineering-reviewed; 005/007/008 await eye/use checks.
 #
-# BASE: main @ 5b6d95a. START FROM SCRATCH.
+# FRESH WORKER HANDOFF
+#   The history below is not perfectly chronological: some earlier WORKER
+#   checkpoints were inserted beside their assignments instead of true EOF.
+#   Treat THIS status block as authoritative. Then read STANDING RULES and
+#   search for these exact latest headings before acting:
+#     BRAIN - Assignment 008 REVIEW
+#     BRAIN - Assignment 009 (QUEUED, NOT DISPATCHED)
+#     BRAIN - CREATOR UX DIRECTION
+#     BRAIN - Assignment 009 AUTHORIZATION + DISPATCH
+#     BRAIN - UX ADDENDUM: DRAG MEMBER BUTTONS OUT
+#     BRAIN - UX CLARIFICATION: PER-LAYOUT WINDOW STATE
+#   Execute Assignment 009 only. Do not reopen or re-execute 003-008.
+#
+# BASE: main @ 539d2af — REVIEWED ASSIGNMENT 008 SNAPSHOT.
+#   Working tree was clean at dispatch. bbdf681 is the pre-008 rollback point;
+#   5b6d95a is only the old pre-trail historical base. Never reset/checkout or
+#   disturb creator changes to reach either historical commit.
 #   Do NOT build on trail/01 or trail/02. The creator rejected both.
 #   Their trail-graph.js / trail-graph-model.js / trail CSS / expander
 #   button / deletion guards are all DEAD. Do not port them.
 #
 # GIT STATE
-#   main 5b6d95a — PUBLISHED, working, no trail code. The base.
+#   main 539d2af — reviewed through Assignment 008; active starting snapshot.
+#   bbdf681 — clean pre-008 rollback snapshot.
+#   5b6d95a — historical pre-trail published base; reference only.
 #   trail/01-overlay-checkpoint, trail/02-workspace-items — rejected,
 #     reference only. stash@{0} — broken Assignment 002 work.
+#   Creator requests one commit per reviewed assignment snapshot. WORKER still
+#   appends its checkpoint and stops without committing; BRAIN reviews and
+#   creates the snapshot commit before dispatching the following assignment.
 #
 ######################################################################
 
