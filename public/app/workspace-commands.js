@@ -15,6 +15,10 @@ import {
 export function createWorkspaceCommands({
   store,
   group,
+  // A persisted window-layout record lookup, mirroring group(): window
+  // layouts are single-parent entities (copy/cut/move/bin/paste treat them
+  // like folders, never like linked shortcut placements).
+  windowLayout = () => null,
   shortcut,
   item,
   isWebLink,
@@ -507,11 +511,12 @@ export function createWorkspaceCommands({
       return;
     }
     try {
-      const groupIds = movable.filter((draggedId) => group(draggedId));
+      const groupIds = movable.filter((draggedId) =>
+        group(draggedId) || windowLayout(draggedId));
       const wholeShortcutIds = movable.filter((draggedId) =>
-        !group(draggedId) && visibleParentCountFor(draggedId) > 1);
+        !group(draggedId) && !windowLayout(draggedId) && visibleParentCountFor(draggedId) > 1);
       const singlePlacementIds = movable
-        .filter((draggedId) => !group(draggedId) && visibleParentCountFor(draggedId) <= 1)
+        .filter((draggedId) => !group(draggedId) && !windowLayout(draggedId) && visibleParentCountFor(draggedId) <= 1)
         .map((shortcutId) => placementIds.get(shortcutId) ?? anyActivePlacementId(shortcutId))
         .filter(Boolean);
       let next = store.getSnapshot();

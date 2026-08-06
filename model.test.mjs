@@ -33,6 +33,10 @@ import {
   setPromptLibrary,
   trailContextKey,
   setTrailExpandedByContext,
+  createWindowLayout,
+  itemsIn,
+  binnedItems,
+  setItemSets,
 } from './model.mjs';
 
 import {
@@ -1301,6 +1305,141 @@ test('trail context keys separate explorer, root and Bin views', () => {
   assert.equal(trailContextKey('group-a', true, 'bin'), 'bin:bin');
   assert.equal(trailContextKey('group-a', true, 'group-b'), 'bin:group-b');
   assert.notEqual(trailContextKey('group-a', false, 'bin'), trailContextKey('group-a', true, 'group-b'));
+});
+
+// =============================================================================
+// Assignment 008: the persisted window-layout item kind — a single-parent
+// entity like a group, rendered with a static fixture miniature. Records
+// normalize/prune, save/reload, move, duplicate independently, bin, restore
+// and delete like any item; the graph and sets treat them generically.
+// =============================================================================
+
+test('window-layout records normalize, prune malformed entries and survive reload', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'Studio', parentId: ROOT_ID });
+  const raw = {
+    ...JSON.parse(JSON.stringify(state)),
+    windowLayouts: [
+      state.windowLayouts[0],
+      { name: 'no id' },
+      { id: 'dup', name: 'Dup', parentId: 'root' },
+      { id: 'dup', name: 'Dup again', parentId: 'root' },
+      { id: 'bad-bin', name: 'Bad bin', parentId: 'root', bin: 'not-an-object' },
+      { id: 'bad-arr', name: 'Bad arr', parentId: 'root', arrangement: { version: 2, members: [] } },
+      {
+        id: 'valid', name: ' Valid ', parentId: 'root', order: 5,
+        bin: { parentId: 'root', order: 0, binnedAt: '2026-01-01T00:00:00.000Z' },
+        arrangement: { version: 1, members: [] },
+      },
+    ],
+  };
+  const normalized = normalizeState(raw);
+  assert.deepEqual(normalized.windowLayouts.map((w) => w.name), ['Studio', 'Dup', 'Bad bin', 'Bad arr', 'Valid']);
+  assert.equal(normalized.windowLayouts.filter((w) => w.name === 'Dup').length, 1, 'duplicate ids pruned');
+  assert.equal(normalized.windowLayouts.find((w) => w.name === 'Bad bin').bin, undefined, 'malformed bin dropped');
+  assert.deepEqual(
+    normalized.windowLayouts.find((w) => w.name === 'Bad arr').arrangement,
+    { version: 1, members: [] },
+    'malformed arrangement defaults to the versioned empty shape',
+  );
+  assert.equal(normalized.windowLayouts.find((w) => w.name === 'Valid').name, 'Valid');
+  assert.deepEqual(normalized.windowLayouts.find((w) => w.name === 'Valid').bin,
+    { parentId: 'root', order: 0, binnedAt: '2026-01-01T00:00:00.000Z' });
+  assert.equal(normalized.view.iconSize, state.view.iconSize, 'unrelated view data preserved');
+  const reloaded = normalizeState(JSON.parse(JSON.stringify(normalized)));
+  assert.deepEqual(reloaded.windowLayouts, normalized.windowLayouts, 'save/reload round trip');
+});
+
+test('window layouts join itemsIn as a real item kind and duplicate independently', () => {
+  let state = emptyState();
+  state = createGroup(state, 'Folder');
+  const folder = state.groups[0].id;
+  state = createWindowLayout(state, { name: 'Studio', parentId: folder });
+  const wl = state.windowLayouts[0];
+  const inFolder = itemsIn(state, folder);
+  assert.ok(inFolder.some((i) => i.kind === 'window-layout' && i.id === wl.id));
+
+  const copied = copySelection(state, [wl.id], folder);
+  assert.equal(copied.windowLayouts.length, 2, 'an independent duplicate is created');
+  assert.notEqual(copied.windowLayouts[1].id, wl.id, 'a new record id — never a linked placement');
+  assert.deepEqual(copied.windowLayouts.map((w) => w.parentId), [folder, folder]);
+  assert.equal(itemsIn(copied, folder).filter((i) => i.kind === 'window-layout').length, 2);
+});
+
+test('window layouts move, bin, restore and delete like single-parent items', () => {
+  let state = emptyState();
+  state = createGroup(state, 'Folder');
+  const folder = state.groups[0].id;
+  state = createWindowLayout(state, { name: 'Studio', parentId: ROOT_ID });
+  const wl = state.windowLayouts[0];
+
+  state = moveSelection(state, [wl.id], folder);
+  assert.equal(state.windowLayouts[0].parentId, folder, 'folder move updates the record');
+
+  state = binSelection(state, [wl.id], '2026-01-01T00:00:00.000Z');
+  assert.ok(state.windowLayouts[0].bin, 'bin metadata recorded');
+  assert.ok(binnedItems(state).some((i) => i.kind === 'window-layout' && i.id === wl.id));
+
+  state = restoreSelection(state, [wl.id]);
+  assert.equal(state.windowLayouts[0].bin, undefined);
+  assert.equal(state.windowLayouts[0].parentId, folder, 'restores to the original folder');
+
+  state = binSelection(state, [wl.id], '2026-01-01T00:00:00.000Z');
+  const deleted = permanentlyDelete(state, [wl.id]);
+  assert.equal(deleted.windowLayouts.length, 0, 'permanent delete removes the record');
+});
+
+test('deleting a folder cleans up the window layouts inside it', () => {
+  let state = emptyState();
+  state = createGroup(state, 'Folder');
+  const folder = state.groups[0].id;
+  state = createWindowLayout(state, { name: 'Inside', parentId: folder });
+  state = binSelection(state, [folder], '2026-01-01T00:00:00.000Z');
+  const deleted = permanentlyDelete(state, [folder]);
+  assert.equal(deleted.windowLayouts.length, 0, 'the nested layout died with its folder');
+});
+
+test('window-layout ids are valid set members and trail provenance follows 005', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'Studio', parentId: ROOT_ID });
+  const wl = state.windowLayouts[0];
+  const withSets = setItemSets(state, [{
+    id: 'set-s', type: 'set', title: 'S', memberIds: [wl.id], excludedIds: [],
+  }]);
+  assert.deepEqual(withSets.view.itemSets[0].memberIds, [wl.id], 'membership survives setItemSets');
+  const reloaded = normalizeState(JSON.parse(JSON.stringify(withSets)));
+  assert.deepEqual(reloaded.view.itemSets[0].memberIds, [wl.id], 'and survives reload');
+  assert.ok(setEligibleItems(visibleGraphItems(reloaded, ROOT_ID, new Set(), false))
+    .some((i) => i.id === wl.id), 'an ordinary instance is set-eligible');
+
+  // A window layout revealed beneath an expanded ancestor is a trail item,
+  // so 005 excludes it from the set system for that view only.
+  let s2 = createGroup(emptyState(), 'F1');
+  const f1 = s2.groups[0].id;
+  s2 = createWindowLayout(s2, { name: 'Trail layout', parentId: f1 });
+  s2 = createGroup(s2, 'F2', f1);
+  const f2 = s2.groups.at(-1).id;
+  const trailItems = visibleGraphItems(s2, f2, new Set(), false, 'bin',
+    [{ id: ROOT_ID, name: 'As you Go' }, { id: f1, name: 'F1' }], new Set([f1]));
+  const trailWl = trailItems.find((i) => i.kind === 'window-layout');
+  assert.ok(trailWl?.trail === true, 'revealed under an expanded ancestor, it is trail');
+  assert.ok(!setEligibleItems(trailItems).some((i) => i.id === trailWl?.id),
+    'and excluded from sets in that view');
+});
+
+test('the simulation collides with the rendered window-layout footprint', () => {
+  // The footprint seam: node.width/height come from the measured shell
+  // (offsetWidth/offsetHeight), so a wide window-layout shell makes the
+  // existing collision treat it as wide. Two bodies dropped at the same
+  // point separate to at least the sum of their measured radii.
+  const wide = { id: 'wl', x: 400, y: 300, width: 220, height: 152, vx: 0, vy: 0 };
+  const neighbor = { id: 'n', x: 400, y: 300, width: 124, height: 152, vx: 0, vy: 0 };
+  settleScene([wide, neighbor], []);
+  const radiusA = Math.max(wide.width, wide.height) / 2 + 20;
+  const radiusB = Math.max(neighbor.width, neighbor.height) / 2 + 20;
+  const distance = Math.hypot(wide.x - neighbor.x, wide.y - neighbor.y);
+  assert.ok(distance >= radiusA + radiusB - 1,
+    `separated by the measured footprints (${distance.toFixed(0)}px >= ${radiusA + radiusB}px)`);
 });
 
 // =============================================================================

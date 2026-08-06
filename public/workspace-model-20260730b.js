@@ -18,6 +18,7 @@ export function emptyState() {
     schemaVersion: 1,
     groups: [],
     shortcuts: [],
+    windowLayouts: [],
     view: {
       iconSize: DEFAULT_ICON_SIZE,
       currentGroupId: ROOT_ID,
@@ -39,6 +40,20 @@ function group(state, groupId) {
   return state.groups.find((candidate) => candidate.id === groupId) ?? null;
 }
 
+/** A persisted window-layout record by its own id. Window layouts are
+ * single-parent entities like groups (one record, one location), but they
+ * are not folders: they hold no children and never navigate. */
+function windowLayout(state, windowLayoutId) {
+  return state.windowLayouts?.find((candidate) => candidate.id === windowLayoutId) ?? null;
+}
+
+/** The versioned, empty arrangement shape a window-layout record carries in
+ * this proof. Native member data lands here in a later proof without a
+ * migration: readers default missing/malformed shapes to this. */
+function emptyWindowLayoutArrangement() {
+  return { version: 1, members: [] };
+}
+
 /** Finds the shortcut record and one specific placement by that placement's
  * id, searching both active and binned placements. */
 function findPlacement(state, placementId) {
@@ -55,11 +70,13 @@ function shortcutRecord(state, shortcutId) {
 
 /** Resolves an id the way the renderer sees it: a group by its own id, or a
  * shortcut placement (by placement id) expanded with its shared data and
- * that placement's own parentId/order - mirroring what itemsIn/binnedItems
+ * that placement's own parentId/order — mirroring what itemsIn/binnedItems
  * emit, so callers can treat any selected id uniformly. */
 function item(state, itemId) {
   const asGroup = group(state, itemId);
   if (asGroup) return { ...asGroup, kind: 'group' };
+  const asWindowLayout = windowLayout(state, itemId);
+  if (asWindowLayout) return { ...asWindowLayout, kind: 'window-layout' };
   const found = findPlacement(state, itemId);
   if (!found) return null;
   const { shortcut, placement } = found;
@@ -95,7 +112,7 @@ function activeItem(state, candidate) {
 
 /** Walks up from parentId past any binned ancestors to find the nearest
  * still-active folder (or ROOT_ID). Used to restore an item nested inside
- * a binned folder without un-binning that folder - e.g. binning 3 in the
+ * a binned folder without un-binning that folder — e.g. binning 3 in the
  * chain 1>2>3>4>5 and then restoring 5 alone should land it directly under
  * 2, the nearest ancestor that's still active. */
 function nearestActiveAncestorId(state, parentId) {
@@ -127,7 +144,7 @@ function sorted(items) {
 }
 
 /** Expands each shortcut into one entry per active placement in `parentId`.
- * The emitted `id` IS the placement id - that's what gets selected, dragged,
+ * The emitted `id` IS the placement id — that's what gets selected, dragged,
  * moved, and binned. `shortcutId` is the shared record every placement of
  * the same shortcut has in common, used for edits, launching and reveal. */
 function shortcutPlacementsIn(state, parentId) {
@@ -155,8 +172,20 @@ export function itemsIn(state, parentId = ROOT_ID) {
   return sorted([
     ...state.groups.filter((candidate) => candidate.parentId === parentId && activeItem(state, candidate))
       .map((candidate) => ({ ...candidate, kind: 'group' })),
+    ...windowLayoutsIn(state, parentId),
     ...shortcutPlacementsIn(state, parentId),
   ]);
+}
+
+/** Active (non-bin) window-layout records in a folder, in the same emitted
+ * shape contract as groups — the itemsIn seam every downstream consumer
+ * (graph walk, trail provenance, selection, marquee, Bin traversal) reads. */
+function windowLayoutsIn(state, parentId) {
+  return sorted(
+    (state.windowLayouts ?? [])
+      .filter((candidate) => candidate.parentId === parentId && activeItem(state, candidate))
+      .map((candidate) => ({ ...candidate, kind: 'window-layout' })),
+  );
 }
 
 export function children(state, parentId = ROOT_ID) {
@@ -181,7 +210,7 @@ export function binnedItems(state) {
         bin: placement.bin,
         linked: placementCount(candidate) > 1,
         // Whether this shortcut had more than one placement in total
-        // (active + binned) - unlike `linked` above (which only counts
+        // (active + binned) — unlike `linked` above (which only counts
         // currently-active placements, correct for the link badge/fork
         // prompt elsewhere), this stays true even when every placement
         // was binned at once, since the Bin still needs to distinguish
@@ -193,14 +222,17 @@ export function binnedItems(state) {
   }
   return sorted([
     ...state.groups.filter((candidate) => candidate.bin).map((candidate) => ({ ...candidate, kind: 'group' })),
+    ...(state.windowLayouts ?? [])
+      .filter((candidate) => candidate.bin)
+      .map((candidate) => ({ ...candidate, kind: 'window-layout', parentId: 'bin' })),
     ...shortcutPlacements,
   ]);
 }
 
 /** Lists the direct children of a binned folder, for expanding it inside
- * the Bin view. Nothing here was independently binned - a folder's
+ * the Bin view. Nothing here was independently binned — a folder's
  * children are still fully intact, just hidden from the normal view
- * because their ancestor is binned (see isUnderBinnedGroup) - so this
+ * because their ancestor is binned (see isUnderBinnedGroup) — so this
  * intentionally skips the "hidden by binned ancestor" filter itemsIn()
  * applies, while still excluding anything that has since been
  * independently binned itself (it already has its own top-level Bin
@@ -209,6 +241,9 @@ export function itemsInBinnedGroup(state, groupId) {
   const childGroups = state.groups
     .filter((candidate) => candidate.parentId === groupId && !candidate.bin)
     .map((candidate) => ({ ...candidate, kind: 'group' }));
+  const childWindowLayouts = (state.windowLayouts ?? [])
+    .filter((candidate) => candidate.parentId === groupId && !candidate.bin)
+    .map((candidate) => ({ ...candidate, kind: 'window-layout' }));
   const childPlacements = [];
   for (const candidate of state.shortcuts) {
     for (const placement of activePlacements(candidate)) {
@@ -225,7 +260,50 @@ export function itemsInBinnedGroup(state, groupId) {
       });
     }
   }
-  return sorted([...childGroups, ...childPlacements]);
+  return sorted([...childGroups, ...childWindowLayouts, ...childPlacements]);
+}
+
+/** Validates and prunes persisted window-layout records. A record needs a
+ * string id and a non-empty name; parentId defaults to the root, order and
+ * the bin shape mirror groups, and the versioned arrangement defaults to
+ * empty when missing or malformed. Legacy state with no collection becomes
+ * []; unrelated records and unknown fields are preserved. */
+function normalizeWindowLayouts(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const records = [];
+  for (const candidate of raw) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+    const id = typeof candidate.id === 'string' && candidate.id ? candidate.id : null;
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    records.push({
+      id,
+      name,
+      parentId: typeof candidate.parentId === 'string' ? candidate.parentId : ROOT_ID,
+      order: hasNumber(candidate.order) ? candidate.order : 0,
+      icon: candidate.icon ?? null,
+      ...(candidate.bin && typeof candidate.bin === 'object' && !Array.isArray(candidate.bin)
+        ? {
+          bin: {
+            parentId: typeof candidate.bin.parentId === 'string' ? candidate.bin.parentId : ROOT_ID,
+            order: hasNumber(candidate.bin.order) ? candidate.bin.order : 0,
+            binnedAt: typeof candidate.bin.binnedAt === 'string'
+              ? candidate.bin.binnedAt
+              : new Date(0).toISOString(),
+          },
+        }
+        : {}),
+      arrangement: candidate.arrangement && typeof candidate.arrangement === 'object'
+        && !Array.isArray(candidate.arrangement)
+        && candidate.arrangement.version === 1
+        && Array.isArray(candidate.arrangement.members)
+        ? { version: 1, members: candidate.arrangement.members }
+        : emptyWindowLayoutArrangement(),
+    });
+  }
+  return records;
 }
 
 function normalizeGraphPositions(raw) {
@@ -320,6 +398,7 @@ export function normalizeState(raw) {
           return { ...rest, placements: normalizePlacements(candidate) };
         })
       : [],
+    windowLayouts: normalizeWindowLayouts(raw?.windowLayouts),
     view: {
       iconSize: Math.min(
         MAX_ICON_SIZE,
@@ -381,6 +460,7 @@ export function normalizeState(raw) {
   state.view.itemSets = normalizeItemSets(raw?.view?.itemSets, [
     ...state.groups.map((candidate) => candidate.id),
     ...state.shortcuts.map((candidate) => candidate.id),
+    ...state.windowLayouts.map((candidate) => candidate.id),
   ]);
   // Per-view trail expansion is pruned once every folder id is known: ids
   // that are no longer valid folders are dropped, the `root` and `bin`
@@ -394,7 +474,7 @@ export function normalizeState(raw) {
 
 /** Replaces the whole set list. Sets live in the view rather than beside the
  * items because they are a way of looking at the workspace, not a container in
- * it - an item's place in the folder tree is untouched by what it belongs to.
+ * it — an item's place in the folder tree is untouched by what it belongs to.
  *
  * Members are pruned against the current items on the way in, not only on
  * load: a set that never holds an id the workspace cannot resolve is one that
@@ -403,6 +483,7 @@ export function setItemSets(state, itemSets) {
   const knownItemIds = [
     ...state.groups.map((candidate) => candidate.id),
     ...state.shortcuts.map((candidate) => candidate.id),
+    ...(state.windowLayouts ?? []).map((candidate) => candidate.id),
   ];
   return {
     ...state,
@@ -422,7 +503,7 @@ export function trailContextKey(currentGroupId, binMode, binCurrentId) {
 /** Normalizes the per-view trail expansion map. Malformed keys/values are
  * discarded, ids are deduped, ids that are no longer valid folders are
  * pruned, and the `root`/`bin` pseudo heads are preserved where meaningful.
- * An entry that ends up empty is dropped - "collapsed" is the same as
+ * An entry that ends up empty is dropped — "collapsed" is the same as
  * absent. Unknown fields elsewhere in `view` are left untouched. */
 export function normalizeTrailExpansionByContext(value, validIds) {
   const valid = new Set(validIds);
@@ -494,6 +575,25 @@ export function createGroup(state, name, parentId = ROOT_ID, icon = null) {
       order: nextOrder(state, parentId),
       name: trimmed,
       icon,
+    }],
+  };
+}
+
+/** Creates one persisted window-layout record in a folder. It is a
+ * single-parent entity like a group — one record, one location, its own
+ * id — and carries the versioned empty arrangement this proof uses. */
+export function createWindowLayout(state, { name = 'Window layout', parentId = ROOT_ID } = {}) {
+  const trimmed = String(name).trim() || 'Window layout';
+  assertParent(state, parentId);
+  return {
+    ...state,
+    windowLayouts: [...(state.windowLayouts ?? []), {
+      id: id('window-layout'),
+      parentId,
+      order: nextOrder(state, parentId),
+      name: trimmed,
+      icon: null,
+      arrangement: emptyWindowLayoutArrangement(),
     }],
   };
 }
@@ -644,14 +744,22 @@ export function updateGroup(state, groupId, changes) {
       icon: changes.icon ?? null,
     };
   });
+  // A window-layout record is edited through the same name+icon surface the
+  // group editor provides, so the existing editor renames it unchanged.
+  const windowLayouts = (state.windowLayouts ?? []).map((candidate) => {
+    if (candidate.id !== groupId) return candidate;
+    found = true;
+    return { ...candidate, name, icon: changes.icon ?? null };
+  });
   if (!found) throw new Error('Group was not found.');
-  return { ...state, groups };
+  return { ...state, groups, windowLayouts };
 }
 
 export function moveSelection(state, ids, destinationId = ROOT_ID) {
   assertParent(state, destinationId);
   const selected = new Set(selectedRoots(state, ids));
   const selectedGroupIds = new Set();
+  const selectedWindowLayoutIds = new Set();
   const selectedPlacementIds = new Set();
   for (const selectedId of selected) {
     const selectedGroup = group(state, selectedId);
@@ -660,6 +768,8 @@ export function moveSelection(state, ids, destinationId = ROOT_ID) {
         throw new Error('A group cannot be moved inside itself.');
       }
       selectedGroupIds.add(selectedId);
+    } else if (windowLayout(state, selectedId)) {
+      selectedWindowLayoutIds.add(selectedId);
     } else {
       selectedPlacementIds.add(selectedId);
     }
@@ -668,19 +778,22 @@ export function moveSelection(state, ids, destinationId = ROOT_ID) {
   const groups = state.groups.map((candidate) => selectedGroupIds.has(candidate.id)
     ? { ...candidate, parentId: destinationId, order: order++, bin: undefined }
     : candidate);
+  const windowLayouts = (state.windowLayouts ?? []).map((candidate) => selectedWindowLayoutIds.has(candidate.id)
+    ? { ...candidate, parentId: destinationId, order: order++, bin: undefined }
+    : candidate);
   const shortcuts = mapPlacements(state.shortcuts, selectedPlacementIds, (placement) => ({
     ...placement,
     parentId: destinationId,
     order: order++,
     bin: undefined,
   }));
-  return { ...state, groups, shortcuts };
+  return { ...state, groups, windowLayouts, shortcuts };
 }
 
 /** Collapses every one of a shortcut's active placements into a single new
  * placement at `destinationId`. Used when cutting a linked shortcut from a
  * view where all of its placements are currently visible at once (e.g. the
- * top-level graph showing every edge) - the whole shared thing moves,
+ * top-level graph showing every edge) — the whole shared thing moves,
  * rather than any one specific location. Binned placements are untouched. */
 export function collapsePlacements(state, shortcutId, destinationId = ROOT_ID) {
   assertParent(state, destinationId);
@@ -701,20 +814,32 @@ export function collapsePlacements(state, shortcutId, destinationId = ROOT_ID) {
  * independent duplicate. `newPlacements` collects { shortcutId, parentId,
  * order } entries to fold into the existing records afterward. Groups still
  * fully clone, recursively, including a new placement for any linked
- * shortcut found inside. */
+ * shortcut found inside. Window-layout records duplicate as independent
+ * records with a new id — never shortcut-style linked placements. */
 function copyGroup(state, source, parentId, order, copies, newPlacements) {
   const copied = { ...source, id: id('group'), parentId, order, bin: undefined };
   copies.groups.push(copied);
   for (const child of itemsIn(state, source.id)) {
     if (child.kind === 'group') copyGroup(state, child, copied.id, child.order, copies, newPlacements);
-    else newPlacements.push({ shortcutId: child.shortcutId, parentId: copied.id, order: child.order });
+    else if (child.kind === 'window-layout') {
+      const { kind: _kind, ...record } = child;
+      copies.windowLayouts.push({
+        ...record,
+        id: id('window-layout'),
+        parentId: copied.id,
+        order: child.order,
+        bin: undefined,
+      });
+    } else {
+      newPlacements.push({ shortcutId: child.shortcutId, parentId: copied.id, order: child.order });
+    }
   }
 }
 
 export function copySelection(state, ids, destinationId = ROOT_ID) {
   assertParent(state, destinationId);
   const selected = new Set(selectedRoots(state, ids));
-  const copies = { groups: [] };
+  const copies = { groups: [], windowLayouts: [] };
   const newPlacements = [];
   let order = nextOrder(state, destinationId);
 
@@ -725,9 +850,23 @@ export function copySelection(state, ids, destinationId = ROOT_ID) {
     copyGroup(state, sourceGroup, destinationId, order++, copies, newPlacements);
   }
 
+  const selectedWindowLayouts = sorted(
+    (state.windowLayouts ?? [])
+      .filter((candidate) => selected.has(candidate.id) && activeItem(state, candidate)),
+  );
+  for (const source of selectedWindowLayouts) {
+    copies.windowLayouts.push({
+      ...source,
+      id: id('window-layout'),
+      parentId: destinationId,
+      order: order++,
+      bin: undefined,
+    });
+  }
+
   const selectedPlacements = sorted(
     [...selected]
-      .filter((selectedId) => !group(state, selectedId))
+      .filter((selectedId) => !group(state, selectedId) && !windowLayout(state, selectedId))
       .map((selectedId) => findPlacement(state, selectedId))
       .filter((found) => found && !found.placement.bin)
       .map(({ shortcut, placement }) => ({ shortcutId: shortcut.id, order: placement.order })),
@@ -755,6 +894,7 @@ export function copySelection(state, ids, destinationId = ROOT_ID) {
   return {
     ...state,
     groups: [...state.groups, ...copies.groups],
+    windowLayouts: [...(state.windowLayouts ?? []), ...copies.windowLayouts],
     shortcuts,
   };
 }
@@ -814,8 +954,15 @@ function selectedRoots(state, ids) {
 export function binSelection(state, ids, binnedAt = new Date().toISOString()) {
   const roots = new Set(selectedRoots(state, ids));
   const groupRoots = new Set([...roots].filter((rootId) => group(state, rootId)));
-  const placementRoots = [...roots].filter((rootId) => !groupRoots.has(rootId));
+  const windowLayoutRoots = new Set([...roots].filter((rootId) => windowLayout(state, rootId)));
+  const placementRoots = [...roots].filter((rootId) => !groupRoots.has(rootId) && !windowLayoutRoots.has(rootId));
   const groups = state.groups.map((candidate) => groupRoots.has(candidate.id)
+    ? {
+        ...candidate,
+        bin: { parentId: candidate.parentId, order: candidate.order ?? 0, binnedAt },
+      }
+    : candidate);
+  const windowLayouts = (state.windowLayouts ?? []).map((candidate) => windowLayoutRoots.has(candidate.id)
     ? {
         ...candidate,
         bin: { parentId: candidate.parentId, order: candidate.order ?? 0, binnedAt },
@@ -825,7 +972,7 @@ export function binSelection(state, ids, binnedAt = new Date().toISOString()) {
     ...placement,
     bin: { parentId: placement.parentId, order: placement.order ?? 0, binnedAt },
   }));
-  return { ...state, groups, shortcuts };
+  return { ...state, groups, windowLayouts, shortcuts };
 }
 
 export function restoreSelection(state, ids) {
@@ -843,13 +990,14 @@ export function restoreSelection(state, ids) {
         bin: undefined,
       };
     }
-    // Never itself binned - just nested inside a binned ancestor. Restoring
+    // Never itself binned — just nested inside a binned ancestor. Restoring
     // it alone reparents it to the nearest still-active ancestor, without
     // touching the binned folder it was pulled out of.
     if (!isUnderBinnedGroup(state, candidate)) return candidate;
     return { ...candidate, parentId: nearestActiveAncestorId(state, candidate.parentId) };
   };
   const groups = state.groups.map(restore);
+  const windowLayouts = (state.windowLayouts ?? []).map(restore);
   const shortcuts = mapPlacements(state.shortcuts, ids, (placement) => {
     if (placement.bin) {
       const originalParent = placement.bin.parentId;
@@ -864,7 +1012,7 @@ export function restoreSelection(state, ids) {
     if (!isUnderBinnedGroupId(state, placement.parentId)) return placement;
     return { ...placement, parentId: nearestActiveAncestorId(state, placement.parentId) };
   });
-  return { ...state, groups, shortcuts };
+  return { ...state, groups, windowLayouts, shortcuts };
 }
 
 function descendantGroupIds(state, roots) {
@@ -897,6 +1045,10 @@ export function permanentlyDelete(state, ids) {
     state.groups.filter((candidate) => selectedGroupIds.has(candidate.id)).map((candidate) => candidate.id),
   );
   const groups = state.groups.filter((candidate) => !groupsToDelete.has(candidate.id));
+  // Window layouts die with their folder or when deleted outright; binned
+  // ones can only be deleted when in the Bin (the guard above).
+  const windowLayouts = (state.windowLayouts ?? [])
+    .filter((candidate) => !selectedIds.has(candidate.id) && !groupsToDelete.has(candidate.parentId));
   const shortcuts = state.shortcuts
     .map((candidate) => ({
       ...candidate,
@@ -907,7 +1059,7 @@ export function permanentlyDelete(state, ids) {
       }),
     }))
     .filter((candidate) => candidate.placements.length > 0);
-  return { ...state, groups, shortcuts };
+  return { ...state, groups, windowLayouts, shortcuts };
 }
 
 export function renameItem(state, itemId, name) {

@@ -158,6 +158,81 @@
   word-break: break-word;
 }
 
+/* Window-layout items (Assignment 008, static proof). The shell widens so
+   the compact fixture miniature fits; the simulation keeps measuring the
+   rendered shell, so collision uses the real footprint. Restrained static
+   styles from existing tokens; every interior control is disabled and no
+   animation exists. */
+.graph-node-shell.window-layout-shell {
+  width: clamp(148px, calc(var(--icon-size) + 84px), calc(var(--icon-size) + 100px));
+}
+.window-layout-art {
+  position: relative;
+  display: block;
+  width: 82%;
+  height: 62%;
+  border: 2px solid var(--text-secondary);
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+.window-layout-art::before {
+  position: absolute;
+  top: -16%;
+  left: 12%;
+  width: 46%;
+  height: 24%;
+  border: 2px solid var(--text-secondary);
+  border-bottom: 0;
+  border-radius: 5px 5px 0 0;
+  background: var(--surface-raised);
+  content: "";
+}
+.window-layout-body {
+  display: grid;
+  width: 100%;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+.window-layout-members {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+.window-layout-member {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1;
+  padding: 4px 5px;
+  cursor: default;
+}
+.window-layout-member.minimized { background: var(--surface-muted); }
+.window-layout-member.maximized { border-width: 2px; }
+.window-layout-member.missing { opacity: 0.5; text-decoration: line-through; }
+.window-layout-controls {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+.window-layout-control {
+  width: 22px;
+  height: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: default;
+}
+
 .icon-grid[data-view="graph"] {
   display: block;
   position: relative;

@@ -35,6 +35,7 @@ export function createContextMenu({
       content = [
         menuButton('new-folder', 'New folder'),
         menuButton('new-shortcut', 'Add shortcut'),
+        menuButton('new-window-layout', 'New window layout'),
         menuButton('new-web-link', 'Add web link'),
         clipboard ? '<hr />' : '',
         clipboard ? menuButton('paste', clipboard.mode === 'cut' ? 'Paste moved items' : 'Paste copied items') : '',

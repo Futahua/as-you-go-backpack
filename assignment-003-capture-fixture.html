@@ -65,6 +65,19 @@
       }
       : {}),
   };
+  // Assignment 008: an optional served window-layout record, so probes can
+  // verify the static miniature, the widened measured footprint and the
+  // stale-fixture refresh behavior through the real code path.
+  if (params.get('wl') === '1') {
+    state.windowLayouts = [{
+      id: 'wl-probe-1',
+      parentId: scene.currentGroupId,
+      order: 99,
+      name: 'Studio',
+      icon: null,
+      arrangement: { version: 1, members: [] },
+    }];
+  }
 
   window.addEventListener('message', (event) => {
     const data = event.data;
@@ -168,6 +181,47 @@
       lines.push(`nav crumbsBefore="${crumbsBefore.replace(/\s+/g, ' ').trim()}"`);
       lines.push(`nav crumbsAfter="${(frame.contentDocument.querySelector('#breadcrumbs')?.innerText ?? '').replace(/\s+/g, ' ').trim()}"`);
       lines.push(`nav currentShells=${frame.contentDocument?.querySelectorAll('.graph-node-shell')?.length ?? 0}`);
+    }
+    // Assignment 008 probes.
+    const wlShells = [...(doc?.querySelectorAll('.graph-node-shell.window-layout-shell') ?? [])];
+    if (wlShells.length > 0) {
+      const shell = wlShells[0];
+      const members = [...shell.querySelectorAll('.window-layout-member')];
+      const controls = [...shell.querySelectorAll('.window-layout-control')];
+      const ordinaryShell = [...allShells].find((s) => !s.classList.contains('window-layout-shell'));
+      lines.push(`wlShells=${wlShells.length} members=${members.length} controls=${controls.length} ` +
+        `allDisabled=${[...members, ...controls].every((b) => b.disabled)} ` +
+        `shellWidth=${shell.getBoundingClientRect().width.toFixed(0)} ` +
+        `ordinaryWidth=${ordinaryShell ? ordinaryShell.getBoundingClientRect().width.toFixed(0) : 'none'}`);
+    }
+    if (params.get('refresh') === '1' && wlShells.length > 0) {
+      // Ctrl+wheel on the explorer changes the persistent icon size, which
+      // re-renders every shell through refreshNodeContent — the fixture
+      // miniature must be rebuilt, not duplicated.
+      const explorer = frame.contentDocument.querySelector('.explorer');
+      const wheel = (deltaY) => explorer.dispatchEvent(new frame.contentWindow.WheelEvent('wheel', {
+        bubbles: true, cancelable: true, ctrlKey: true, deltaY,
+      }));
+      wheel(-120);
+      await wait(600);
+      wheel(-120);
+      await wait(600);
+      lines.push(`refreshBodies=${doc.querySelectorAll('.window-layout-body').length} ` +
+        `refreshMembers=${doc.querySelectorAll('.window-layout-member').length}`);
+    }
+    if (params.get('create') === '1') {
+      // Real creation path: blank right-click opens the context menu, the
+      // "New window layout" action creates the record and renders the item.
+      const grid = frame.contentDocument.querySelector('#icon-grid');
+      grid.dispatchEvent(new frame.contentWindow.MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, clientX: 600, clientY: 400,
+      }));
+      await wait(300);
+      const createButton = frame.contentDocument.querySelector('[data-action="new-window-layout"]');
+      lines.push(`createMenuItem=${createButton ? 'present' : 'missing'}`);
+      createButton?.dispatchEvent(new frame.contentWindow.MouseEvent('click', { bubbles: true }));
+      await wait(1500);
+      lines.push(`createShells=${frame.contentDocument.querySelectorAll('.graph-node-shell.window-layout-shell').length}`);
     }
     report.hidden = false;
     report.textContent = lines.join('\n');

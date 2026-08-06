@@ -38,6 +38,7 @@ import {
   placementCount,
   setItemSets,
   setTrailExpandedByContext,
+  createWindowLayout,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -102,7 +103,7 @@ Primary-machine source checkout: D:\\Letters\\MatTroiSeConMoc\\PAPERS 3\\Papers-
 
 Before acting, read AGENTS.md and HERMES.md completely from the current repository, then follow the document map in README.md. Treat those current files as authoritative over this copied orientation.
 
-I do not code or design technical architecture. I describe the experience I want; you must construct it, test it, protect my data, and explain the result in plain language. Clicking buttons, entering information, choosing files, opening applications, organizing work, and confirming actions are normal use-not configuration or permission to invent editors, frameworks, or product-wide abstractions.
+I do not code or design technical architecture. I describe the experience I want; you must construct it, test it, protect my data, and explain the result in plain language. Clicking buttons, entering information, choosing files, opening applications, organizing work, and confirming actions are normal use—not configuration or permission to invent editors, frameworks, or product-wide abstractions.
 
 Treat Backpacks as independently developed projects, closest to plugins in ownership. Backpack interfaces, behavior, and implementation belong outside Papers' main binaries unless a concrete requirement genuinely needs a Papers-host change. A local Backpack is local in experience, implementation, and data; its ordinary development must not create a Papers version or update other machines.
 
@@ -157,11 +158,18 @@ function shortcut(shortcutId) {
 }
 
 function item(itemId) {
-  return group(itemId) ?? shortcut(itemId);
+  return group(itemId) ?? windowLayout(itemId) ?? shortcut(itemId);
+}
+
+/** A persisted window-layout record by its own id. Window layouts are
+ * single-parent entities (like groups): one record, one location, their own
+ * identity — never shortcut-style linked placements. */
+function windowLayout(windowLayoutId) {
+  return state.windowLayouts?.find((candidate) => candidate.id === windowLayoutId) ?? null;
 }
 
 /** Resolves a shortcut by either its shared record id or one of its
- * placement ids - bin-mode graph tiles are keyed by placement id (each
+ * placement ids — bin-mode graph tiles are keyed by placement id (each
  * binned placement is its own independent tile), so looking a bin
  * shortcut tile up by shortcut() alone (which only matches the record id)
  * always misses. */
@@ -172,7 +180,7 @@ function shortcutByRecordOrPlacementId(candidateId) {
 }
 
 /** Any one active (non-bin) placement id belonging to the given shortcut
- * identity - enough for the model layer's placement-scoped functions
+ * identity — enough for the model layer's placement-scoped functions
  * (copySelection/moveSelection/collapsePlacements) to find the record. */
 function anyActivePlacementId(shortcutId) {
   const record = shortcut(shortcutId);
@@ -185,7 +193,7 @@ function allActivePlacementIds(shortcutId) {
 }
 
 /** The specific placement the user is currently looking at for this
- * shortcut - the one matching its visible parent in the currently
+ * shortcut — the one matching its visible parent in the currently
  * rendered graph node, falling back to any active placement if the node
  * isn't on screen. Must be resolved at gesture-start time (copy/cut,
  * drag start, bin move, editor open), not at commit time, since
@@ -201,7 +209,7 @@ function visiblePlacementIdFor(shortcutId) {
   )?.id ?? anyActivePlacementId(shortcutId);
 }
 
-/** Resolves a Bin-context id - a group id, or one specific placement id -
+/** Resolves a Bin-context id — a group id, or one specific placement id —
  * to its display name. Used for the Bin, where a tile's own id is the
  * placement, not the shared shortcut identity. */
 function binItemName(binItemId) {
@@ -213,7 +221,7 @@ function binItemName(binItemId) {
 }
 
 /** How many distinct folders the given shortcut is currently shown linked
- * into, in the graph node currently on screen for it - this is what decides
+ * into, in the graph node currently on screen for it — this is what decides
  * whether cutting it collapses every placement into one, or only moves the
  * one this view represents (per the creator's rule: 2+ visible edges means
  * "act on the whole shared thing," exactly 1 means "act on this location"). */
@@ -284,11 +292,11 @@ function pathTo(groupId) {
   return [{ id: ROOT_ID, name: 'As you Go' }, ...result];
 }
 
-/** Breadcrumb path while drilled into a folder inside the Bin - walks up
+/** Breadcrumb path while drilled into a folder inside the Bin — walks up
  * from groupId through its real (original) ancestor chain, stopping at
  * the first folder that isn't itself binned (its own placement in the
- * Bin's top-level list), so the trail reads "Bin > outerBinnedFolder >
- * ... > groupId" without ever crossing into the real explorer tree. */
+ * Bin's top-level list), so the trail reads "Bin › outerBinnedFolder ›
+ * ... › groupId" without ever crossing into the real explorer tree. */
 function pathToBin(groupId) {
   const result = [];
   let cursor = group(groupId);
@@ -324,6 +332,9 @@ function iconMarkup(candidate) {
   if (candidate.kind === 'bin-origin') {
     return '<span class="folder-art" aria-hidden="true"><span></span></span>';
   }
+  if (candidate.kind === 'window-layout') {
+    return '<span class="window-layout-art" aria-hidden="true"><span></span><span></span></span>';
+  }
   if (candidate.kind === 'group') {
     if (candidate.icon) {
       return `<img src="${escapeHtml(candidate.icon)}" alt="" />`;
@@ -334,14 +345,14 @@ function iconMarkup(candidate) {
     return `<img src="${escapeHtml(candidate.icon)}" alt="" />`;
   }
   if (isWebLink(candidate)) {
-    return `<img data-web-icon="${escapeHtml(candidate.target)}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">?</span>`;
+    return `<img data-web-icon="${escapeHtml(candidate.target)}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
   }
-  return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">?</span>`;
+  return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
 }
 
 function linkMarkup(candidate) {
   return candidate.linked
-    ? '<span class="link-badge" title="Linked into more than one folder" aria-hidden="true">?</span>'
+    ? '<span class="link-badge" title="Linked into more than one folder" aria-hidden="true">⛓</span>'
     : '';
 }
 
@@ -349,6 +360,37 @@ function descriptionMarkup(candidate) {
   return candidate.kind === 'shortcut' && candidate.description
     ? `<small>${escapeHtml(candidate.description)}</small>`
     : '';
+}
+
+// Assignment 008: deterministic fixture members for the static window-layout
+// proof. Render-time only — the persisted record always carries an empty
+// members array; native member data arrives in a later proof. Buttons are
+// ordered purely for layout clarity and never represent desktop positions.
+const WINDOW_LAYOUT_FIXTURE_VERSION = 1;
+const WINDOW_LAYOUT_FIXTURE_MEMBERS = [
+  { id: 'fixture-a', label: 'Win A', state: 'open' },
+  { id: 'fixture-b', label: 'Win B', state: 'minimized' },
+  { id: 'fixture-c', label: 'Win C', state: 'maximized' },
+  { id: 'fixture-d', label: 'Win D', state: 'missing' },
+];
+
+/** The compact static miniature inside a window-layout shell: one small
+ * button per fixture member plus three disabled group controls. Every
+ * button is disabled and never calls the host; pressing one also never
+ * begins graph dragging, because the graph drag excludes <button>
+ * pointerdowns by design. */
+function windowLayoutBodyMarkup() {
+  const members = WINDOW_LAYOUT_FIXTURE_MEMBERS.map((member) =>
+    `<button class="window-layout-member ${member.state}" data-wl-member="${member.id}" type="button" disabled title="${escapeHtml(member.label)} — ${member.state}">${escapeHtml(member.label)}</button>`)
+    .join('');
+  return `<div class="window-layout-body" aria-label="Fixture window group — static proof">
+    <div class="window-layout-members">${members}</div>
+    <div class="window-layout-controls">
+      <button class="window-layout-control minimize-all" type="button" disabled title="Minimize all — not part of this proof">—</button>
+      <button class="window-layout-control restore-all" type="button" disabled title="Restore / open all — not part of this proof">▢</button>
+      <button class="window-layout-control save-positions" type="button" disabled title="Save current positions — not part of this proof">⤓</button>
+    </div>
+  </div>`;
 }
 
 const graph = createGraphController();
@@ -591,7 +633,7 @@ function createGraphController() {
   function syncEdgeOpacity() {
     const preferences = state.view?.preferences;
     // Trail opacity styles ancestor TILES, which live in the node layer rather
-    // than inside the edges <svg> - so it is written to the root element, and
+    // than inside the edges <svg> — so it is written to the root element, and
     // written BEFORE the svg guard below, or it would silently never apply
     // whenever the graph view happens not to be attached yet.
     const trailOpacity = String(getTrailOpacity(preferences));
@@ -620,7 +662,7 @@ function createGraphController() {
    * belongsToSet uses this to decide inherited membership: putting a folder in
    * a set covers its contents, so a child is a member when any ancestor is.
    * Passing nothing would make inheritance silently stop working, and passing
-   * an undefined identifier - which is what this replaces - threw on every
+   * an undefined identifier — which is what this replaces — threw on every
    * group attempt with "ancestorsOfNode is not defined".
    *
    * The chain comes from the graph's own parentIds rather than the stored
@@ -644,7 +686,7 @@ function createGraphController() {
 
   /** Which sets this node belongs to, by the same rule the ring is drawn from.
    *
-   * Membership is inherited, so a folder's contents count - resolving it any
+   * Membership is inherited, so a folder's contents count — resolving it any
    * other way here would let the forces disagree with the outline about who is
    * inside what. */
   /** Whether an id is trail-derived in this view (an ancestor body or
@@ -656,7 +698,7 @@ function createGraphController() {
     return nodes.get(id)?.candidate?.trail === true;
   }
 
-  /** Every non-trail node - the bodies that participate in the set system
+  /** Every non-trail node — the bodies that participate in the set system
    * for this view. Shared by membership resolution, ring members and the
    * ejection sweep, so they all see the same eligible set. */
   function setEligibleNodes() {
@@ -666,7 +708,7 @@ function createGraphController() {
   function setIdsContaining(nodeId) {
     // Trail bodies are not members of anything drawn here. Sets express how
     // the creator organised their real items, and a trail body wandering
-    // into a ring - or being pulled by its gravity - misrepresents that.
+    // into a ring — or being pulled by its gravity — misrepresents that.
     // Excluding them at this one function keeps the outline and the forces
     // agreeing, which is the invariant the rest of this block depends on.
     if (isTrailNode(nodeId)) return [];
@@ -751,7 +793,7 @@ function createGraphController() {
       if (wanted.has(setId)) continue;
       // Faded rather than cut. A set loses its ring whenever its members leave
       // the screen, and removing the path outright made the outline disappear
-      // between two frames - indistinguishable, to the eye, from the set
+      // between two frames — indistinguishable, to the eye, from the set
       // popping. The CSS transition carries it out; the node is removed when
       // that finishes, so a set whose members come straight back reuses it.
       if (!shape.retiring) {
@@ -762,7 +804,7 @@ function createGraphController() {
         window.setTimeout(() => {
           // Re-checked on landing. The members may have returned during the
           // fade and cleared the flag, or the layer may have been rebuilt
-          // wholesale and this entry replaced - the identity check catches the
+          // wholesale and this entry replaced — the identity check catches the
           // second, which a flag alone would not.
           if (setShapes.get(setId) !== shape || !shape.retiring) return;
           shape.path?.remove();
@@ -798,7 +840,7 @@ function createGraphController() {
    *
    * Tested against the ring nodes rather than the drawn path: the nodes are
    * where the physics put them and the path is drawn through them, so the two
-   * agree by construction - there is no second geometry to fall out of step
+   * agree by construction — there is no second geometry to fall out of step
    * with what is on screen.
    *
    * Smallest first so clicking inside a small set nested in a larger one picks
@@ -828,7 +870,7 @@ function createGraphController() {
    * than the stored member list. */
   function ejectTrespassers(itemIds) {
     // Every visible node by default, not only the ones just dragged. An item
-    // can end up inside a set it does not belong to without being touched -
+    // can end up inside a set it does not belong to without being touched —
     // the ring moves when its members do, and expanding a folder drops new
     // tiles wherever the layout puts them. Checking only the drag left those
     // sitting inside with nothing to correct them.
@@ -837,7 +879,7 @@ function createGraphController() {
       const node = nodes.get(itemId);
       if (!node || node.exiting) continue;
       // Trail bodies are outside the set system entirely. They are not
-      // members, but they are not trespassers either - ejecting them would
+      // members, but they are not trespassers either — ejecting them would
       // still be a set acting on the trail, and it would shove a navigation
       // or trail-revealed body across the canvas for being near a ring it
       // has nothing to do with.
@@ -854,14 +896,14 @@ function createGraphController() {
         node.x = target.x;
         node.y = target.y;
         // The pinned coordinates too, or the next tick puts it straight back
-        // where it was - a drag leaves fx/fy set, and they win over x/y.
+        // where it was — a drag leaves fx/fy set, and they win over x/y.
         if (node.fx != null) node.fx = target.x;
         if (node.fy != null) node.fy = target.y;
       }
     }
   }
 
-  /** Ray casting against the ring's hull - the shape actually on screen.
+  /** Ray casting against the ring's hull — the shape actually on screen.
    *
    * This walked the chain in ringIndex order, which assumed the loop stays
    * ordered. It does not: RING-TANGLE.md measured neighbours 317 degrees apart
@@ -901,7 +943,7 @@ function createGraphController() {
 
   /** Redraws each outline through its ring nodes' current positions.
    *
-   * Cheap enough for every frame - it reads positions and builds a path string,
+   * Cheap enough for every frame — it reads positions and builds a path string,
    * with no sampling, routing or contour extraction. That is the whole point of
    * the ring: the expensive part is the simulation, which was already running.
    */
@@ -1026,7 +1068,7 @@ function createGraphController() {
   function buildCandidate(vi) {
     if (vi.kind === 'bin-origin') {
       // A ghost node standing in for a folder that isn't itself visible in
-      // the current Bin walk - just a "this is where it came from" label,
+      // the current Bin walk — just a "this is where it came from" label,
       // not a real interactive item. The folder may since have been
       // deleted or renamed to nothing findable; fall back to a generic
       // label rather than dropping the edge entirely.
@@ -1040,12 +1082,22 @@ function createGraphController() {
         linked: false,
       };
     }
-    const stored = vi.kind === 'shortcut' ? shortcutByRecordOrPlacementId(vi.id) : group(vi.id);
+    const stored = vi.kind === 'shortcut'
+      ? shortcutByRecordOrPlacementId(vi.id)
+      : vi.kind === 'window-layout'
+        ? windowLayout(vi.id)
+        : (vi.id === ROOT_ID || vi.id === 'bin'
+          // The two pseudo heads of the ancestor chain ("As you Go" and the
+          // Bin) have no stored record — pathTo synthesises their names, and
+          // this fallback lets them render and navigate like the folders
+          // they stand for.
+          ? { kind: 'group', name: vi.name ?? (vi.id === 'bin' ? 'Bin' : 'As you Go') }
+          : group(vi.id));
     if (!stored) return null;
     return {
       ...stored,
       // The graph node's identity is always vi.id (a placement id for a
-      // bin-mode shortcut tile, the shared record id everywhere else) -
+      // bin-mode shortcut tile, the shared record id everywhere else) —
       // never stored.id, which for a resolved-by-placement bin tile would
       // be the shared shortcut record id and corrupt every DOM/selection
       // lookup keyed off candidate.id (dataset.id, dataset.graphNodeId).
@@ -1057,7 +1109,7 @@ function createGraphController() {
       // place or moves just the one placement this view represents).
       parentIds: vi.parentIds ?? [vi.parentId],
       // Whether the underlying shortcut has more than one active placement
-      // anywhere at all (not just in this view) - drives the link marker
+      // anywhere at all (not just in this view) — drives the link marker
       // and the apply-everywhere-or-fork prompt on edit.
       linked: vi.kind === 'shortcut' ? placementCount(stored) > 1 : false,
       // Assignment 003: an ancestor of the current folder, prepended to
@@ -1066,7 +1118,7 @@ function createGraphController() {
       ancestor: vi.ancestor === true,
       // Assignment 005: the broader derived-branch provenance. Every
       // ancestor AND everything revealed beneath an expanded ancestor is a
-      // trail item - outside the set system for this view, styled by the
+      // trail item — outside the set system for this view, styled by the
       // Trail opacity slider. Expanded trail descendants are trail items,
       // not ancestors.
       trail: vi.trail === true,
@@ -1080,7 +1132,7 @@ function createGraphController() {
     }
     // Seed-position buckets. The head of the ancestor chain has no parent, so
     // keying it by `parentId ?? ROOT_ID` used to drop it in with every real
-    // top-level item - and seedPosition's parentless ring grows with the
+    // top-level item — and seedPosition's parentless ring grows with the
     // bucket's size (RADIUS * 2.4 * total/4), so in a crowded folder the trail
     // head seeded past the viewport edge and appeared to land off screen.
     // Giving the chain its own bucket makes its seed independent of how many
@@ -1125,8 +1177,8 @@ function createGraphController() {
       const originX = viewport ? viewport.clientWidth / 2 : 400;
       const originY = viewport ? viewport.clientHeight / 2 : 300;
       // Ancestors never read a stored position. Their ids collide with real
-      // records - 'root' and 'bin' have saved coordinates from before the
-      // trail existed, several of them negative (off the left edge) - and a
+      // records — 'root' and 'bin' have saved coordinates from before the
+      // trail existed, several of them negative (off the left edge) — and a
       // saved position is applied as fx/fy, which PINS the node so the solver
       // can never pull it back into view. That is why the trail sometimes
       // appeared stuck off screen. Ancestors are derived from the path, not
@@ -1160,7 +1212,7 @@ function createGraphController() {
   /** Frames a folder's icon square with its assigned color; non-folders are
    * left plain. The color is exposed as --folder-color and styled in CSS so
    * it wraps only the icon graphic, not the tile's text. An ancestor of the
-   * current folder wears the --text outline instead of a hue - the existing
+   * current folder wears the --text outline instead of a hue — the existing
    * folder-colored rule draws both the ring and its color-mix fill; nothing
    * else about the tile changes. */
   function applyFolderColor(iconItem, candidate) {
@@ -1268,15 +1320,17 @@ function createGraphController() {
       isExpanded,
       session.binMode,
       state.view.iconSize,
+      candidate.kind === 'window-layout' ? WINDOW_LAYOUT_FIXTURE_VERSION : 0,
     ]);
     if (node.contentSignature !== signature) {
       node.contentSignature = signature;
       iconItem.innerHTML =
-        `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">></button>` : ''}`
+        `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
         + `${linkMarkup(candidate)}`
         + `<div class="item-icon">${iconMarkup(candidate)}</div>`
         + `<strong>${escapeHtml(candidate.name)}</strong>`
-        + `${descriptionMarkup(candidate)}`;
+        + `${descriptionMarkup(candidate)}`
+        + `${candidate.kind === 'window-layout' ? windowLayoutBodyMarkup() : ''}`;
       hydrateNodeIcons(node.shell);
     }
     node.width = node.shell.offsetWidth || (state.view.iconSize + 42);
@@ -1294,7 +1348,7 @@ function createGraphController() {
       : session.graphExpanded.has(candidate.id));
 
     const shell = document.createElement('div');
-    shell.className = `graph-node-shell${isGhost ? ' bin-origin-ghost' : ''}`;
+    shell.className = `graph-node-shell${isGhost ? ' bin-origin-ghost' : ''}${candidate.kind === 'window-layout' ? ' window-layout-shell' : ''}`;
     shell.dataset.graphNodeId = candidate.id;
     shell.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
 
@@ -1310,11 +1364,12 @@ function createGraphController() {
     iconItem.setAttribute('tabindex', '-1');
     iconItem.setAttribute('aria-label', `${candidate.ancestor ? 'Go to ' : ''}${escapeHtml(candidate.name)}`);
     iconItem.innerHTML =
-      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">></button>` : ''}`
+      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
       + `${linkMarkup(candidate)}`
       + `<div class="item-icon">${iconMarkup(candidate)}</div>`
       + `<strong>${escapeHtml(candidate.name)}</strong>`
-      + `${descriptionMarkup(candidate)}`;
+      + `${descriptionMarkup(candidate)}`
+      + `${candidate.kind === 'window-layout' ? windowLayoutBodyMarkup() : ''}`;
 
     shell.append(iconItem);
     nodeLayer.append(shell);
@@ -1330,6 +1385,7 @@ function createGraphController() {
       isExpanded,
       session.binMode,
       state.view.iconSize,
+      candidate.kind === 'window-layout' ? WINDOW_LAYOUT_FIXTURE_VERSION : 0,
     ]);
 
     node.width = shell.offsetWidth || (state.view.iconSize + 42);
@@ -1409,7 +1465,7 @@ function createGraphController() {
   }
 
   /** Draws the "where did this come from" edges for binned tiles (see
-   * binOriginEdges) - kept in a separate map/CSS class from the normal
+   * binOriginEdges) — kept in a separate map/CSS class from the normal
    * graph-edge set above, since these connect to a possibly-ghost node
    * and are always styled distinctly (red) rather than the default gray. */
   function syncOriginEdges(edgeList) {
@@ -1470,7 +1526,7 @@ function createGraphController() {
       //
       // The alpha floor inside it is gated on a drag being in progress. It
       // refuses to cool, which is what keeps a ring with its member during a
-      // drag, but d3 cools everything else - so on a settled scene it was the
+      // drag, but d3 cools everything else — so on a settled scene it was the
       // only force still injecting velocity, driving icons through the ring
       // nodes' collision and chasing them as they moved. Measured: two disjoint
       // sets stretched without bound and their outlines crossed.
@@ -1485,7 +1541,7 @@ function createGraphController() {
       }))
       // Gathers a set's members towards each other. Without it they sprawl
       // wherever the graph's own layout puts them, and a boundary drawn round
-      // a sprawl is mostly empty space with bystanders sitting in it - the ring
+      // a sprawl is mostly empty space with bystanders sitting in it — the ring
       // then has no way to exclude anything, because a point between two
       // members is interior however the outline is drawn. Measured on a
       // six-member set: without gravity only 4 of 6 members were inside their
@@ -1502,7 +1558,7 @@ function createGraphController() {
       .force('setSeparation', forceSetSeparation({
         setsOf: (nodeId) => setIdsContaining(nodeId),
         // The shape actually on screen, so the force parts what the creator
-        // sees rather than a proxy for it - the same rule drawing and
+        // sees rather than a proxy for it — the same rule drawing and
         // hit-testing already follow. shape.outline is the eased, resampled,
         // member-floored outline drawSetRings last put on screen; recomputing
         // the hull from physics nodes would read a different shape. A null
@@ -1520,7 +1576,7 @@ function createGraphController() {
         setsOf: (nodeId) => setIdsContaining(nodeId),
         membersOf: membersOnScreen,
         // The visible outline, so the force and the drawn shape agree on who is
-        // inside - the same source separation uses. Proximity to a member is a
+        // inside — the same source separation uses. Proximity to a member is a
         // proxy for that and disagrees with it in open space within the
         // boundary, which is where foreign items leaked. A null outline (not
         // yet drawn, or retired) is a safe no-op: the set contributes nothing
@@ -1621,7 +1677,7 @@ function createGraphController() {
     updatePending = false;
     // Assignment 007: trail expansion is remembered per view context and is
     // fully independent of ordinary expansion. The active set for THIS view
-    // is synced into the session here - one place, every render - so the
+    // is synced into the session here — one place, every render — so the
     // chevrons and the walk below read one source.
     const trailExpanded = new Set(
       state.view?.trailExpandedByContext?.[currentTrailContextKey()] ?? [],
@@ -1631,7 +1687,7 @@ function createGraphController() {
       state,
       // Navigating to the root via an ancestor tile sets currentId to null
       // (the store's own "no folder" value), but items at the top level are
-      // stored under ROOT_ID - collectVisible finds nothing for null and the
+      // stored under ROOT_ID — collectVisible finds nothing for null and the
       // whole workspace renders empty. Normalise here so both spellings of
       // "the root" resolve to the same folder.
       session.currentId ?? ROOT_ID,
@@ -1640,7 +1696,7 @@ function createGraphController() {
       session.binCurrentId,
       // Assignment 003: the ancestors of the current folder join its item
       // list as ordinary bodies. The chain is the path TO here, so the
-      // current folder's own entry is sliced off - at root it is empty.
+      // current folder's own entry is sliced off — at root it is empty.
       session.binMode
         ? pathToBin(session.binCurrentId === 'bin' ? null : session.binCurrentId).slice(0, -1)
         : pathTo(session.currentId).slice(0, -1),
@@ -1761,7 +1817,7 @@ function render() {
   applyTheme(state.view?.preferences);
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
-    // us (e.g. via the top-level Bin list or "Delete all") - fall back to
+    // us (e.g. via the top-level Bin list or "Delete all") — fall back to
     // the top of the Bin rather than rendering a dangling, nonexistent
     // breadcrumb segment.
     store.setNavigation({ binCurrentId: 'bin' });
@@ -1770,10 +1826,10 @@ function render() {
   document.documentElement.style.setProperty('--icon-size', `${iconSize}px`);
   elements.breadcrumbs.innerHTML = session.binMode
     ? pathToBin(session.binCurrentId === 'bin' ? null : session.binCurrentId).map((candidate, index, path) =>
-        `<button type="button" data-bin-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">></span>' : ''}`,
+        `<button type="button" data-bin-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
       ).join('')
     : pathTo(session.currentId).map((candidate, index, path) =>
-        `<button type="button" data-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">></span>' : ''}`,
+        `<button type="button" data-breadcrumb="${candidate.id}">${escapeHtml(candidate.name)}</button>${index < path.length - 1 ? '<span aria-hidden="true">›</span>' : ''}`,
       ).join('');
 
   const visible = session.binMode
@@ -1865,7 +1921,7 @@ async function commit(nextState, options = {}) {
 
 function visibleItemIds() {
   // Ancestors never enter the selection: select-all and shift-ranges read
-  // this list, and the marquee filters separately - the bin-origin pattern
+  // this list, and the marquee filters separately — the bin-origin pattern
   // for keeping derived bodies out of selection and deletion.
   return [...elements.grid.querySelectorAll('.icon-item')]
     .filter((node) => !node.classList.contains('ancestor-item'))
@@ -1881,14 +1937,14 @@ function currentSelectionParent() {
 
 
 /** Resolves a set of graph item ids (groups or shared shortcut identities)
- * to the exact Bin-context ids binSelection() needs - a linked shortcut
+ * to the exact Bin-context ids binSelection() needs — a linked shortcut
  * with more than one visible edge bins every one of its placements (the
  * whole shared thing), while one with a single visible edge only bins the
  * placement this view represents. Shared by the Bin button/keyboard path
  * and drag-onto-the-bin-pill. */
 function resolveBinTargets(itemIds) {
   return itemIds.flatMap((itemId) => {
-    if (group(itemId)) return [itemId];
+    if (group(itemId) || windowLayout(itemId)) return [itemId];
     return visibleParentCountFor(itemId) > 1
       ? allActivePlacementIds(itemId)
       : [visiblePlacementIdFor(itemId)].filter(Boolean);
@@ -1901,13 +1957,25 @@ async function runMenuAction(action) {
   if (action === 'new-folder') return editorDialog.showEditor('group', null, elements.menu.dataset.parent);
   if (action === 'new-shortcut') return editorDialog.showEditor('shortcut', null, elements.menu.dataset.parent);
   if (action === 'new-web-link') return editorDialog.showEditor('web', null, elements.menu.dataset.parent);
+  if (action === 'new-window-layout') {
+    try {
+      await commit(createWindowLayout(state, { parentId: elements.menu.dataset.parent ?? session.currentId ?? ROOT_ID }));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+    return;
+  }
   if (action === 'paste') return commands.pasteInto(elements.menu.dataset.parent);
   if (action === 'open' && onlyId) return commands.activateItem(onlyId);
   if (action === 'edit' && onlyId) {
     const chosen = shortcut(onlyId);
     return editorDialog.showEditor(isWebLink(chosen) ? 'web' : 'shortcut', chosen);
   }
-  if (action === 'rename' && onlyId) return editorDialog.showEditor('group', group(onlyId));
+  if (action === 'rename' && onlyId) {
+    // A window-layout is edited through the same name+icon surface as a
+    // folder (updateGroup handles both), so the existing editor renames it.
+    return editorDialog.showEditor('group', group(onlyId) ?? windowLayout(onlyId));
+  }
   if (action === 'copy') return commands.copySelection();
   if (action === 'cut') return commands.cutSelection();
   if (action === 'bin') return commands.moveSelectionToBin();
@@ -1947,10 +2015,10 @@ elements.grid.addEventListener('click', (event) => {
     }
     if (tile.classList.contains('bin-origin-ghost')) return;
     // Assignment 003: an ancestor tile is the breadcrumb as folder
-    // contents - clicking it navigates into that folder, never selects.
+    // contents — clicking it navigates into that folder, never selects.
     if (tile.classList.contains('ancestor-item')) {
       // Assignment 003: an ancestor tile is the breadcrumb as folder
-      // contents - clicking it navigates exactly as the pill's crumb
+      // contents — clicking it navigates exactly as the pill's crumb
       // buttons do, never selecting.
       if (session.binMode) {
         store.setNavigation({ binCurrentId: tile.dataset.id });
@@ -1968,7 +2036,7 @@ elements.grid.addEventListener('click', (event) => {
       return;
     }
     // While Ctrl+G is open a click picks the set the item belongs to, rather
-    // than changing the selection being edited - the subjects were captured
+    // than changing the selection being edited — the subjects were captured
     // when the mode opened, so changing selection underneath it would edit
     // membership for items the user is no longer looking at. Trail items are
     // outside the set system in this view: pointing at one must not drive
@@ -1981,7 +2049,7 @@ elements.grid.addEventListener('click', (event) => {
     // Shift+left-click stands in for double-click: it opens the item. The
     // range-selection it used to do assumed items sit in a linear order,
     // which is meaningless in a force-directed graph where "between" has no
-    // definition. Shift+DRAG still pins (pointer-controller owns that) - this
+    // definition. Shift+DRAG still pins (pointer-controller owns that) — this
     // only fires on a click that never became a drag.
     if (event.shiftKey && !event.ctrlKey) {
       commands.activateItem(tile.dataset.id, { revealDirectoryTarget: true });
@@ -2006,7 +2074,7 @@ elements.grid.addEventListener('click', (event) => {
     }
     // Blank space inside a set's ring selects that set. The click landed on the
     // canvas rather than an icon, so the outline is the only thing it could
-    // have been about - and this has to come before clearing, or selecting a
+    // have been about — and this has to come before clearing, or selecting a
     // set would immediately deselect it.
     // No optional chaining: while clientToWorld was missing from the pointer
     // controller's exports, `?.` turned its absence into undefined, then into
@@ -2035,7 +2103,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
   event.stopPropagation();
   // Opening the context menu can implicitly cancel an in-progress pointer
   // sequence without ever dispatching pointerup/pointercancel to the grid
-  // (observed with Shift+right-click on a folder) - leaving graph-dragging/
+  // (observed with Shift+right-click on a folder) — leaving graph-dragging/
   // will-pin/graph-drop-target visuals stuck on whatever tile the pointer
   // last touched. Cancel the drag defensively any time the menu opens.
   pointer.cancelDrag();
@@ -2043,7 +2111,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
   if (tile && tile.classList.contains('bin-origin-ghost')) return;
   // An ancestor tile has no context menu (nothing on it can be renamed,
   // moved or deleted), but Shift+right-click is this workspace's expand
-  // gesture and must keep working on it - returning early here is what
+  // gesture and must keep working on it — returning early here is what
   // made expanding a trail folder impossible.
   const isAncestorTile = tile?.classList.contains('ancestor-item') === true;
   if (isAncestorTile && !event.shiftKey && !event.altKey) return;
@@ -2055,7 +2123,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
         // you clicked, Alt toggles every OTHER folder IN THAT FOLDER'S SETS.
         // Sets are what express "these belong together", so the gesture is
         // scoped by membership rather than by whatever happens to be on
-        // screen. It is a toggle, not a collapse - if the others are open it
+        // screen. It is a toggle, not a collapse — if the others are open it
         // closes them ("isolate this one within its set"), and pressing it
         // again reopens them. Direction is decided once, from whether ANY
         // other member is currently open, so one gesture never both opens
@@ -2093,7 +2161,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
       }
       closeMenu();
       // Right-clicking a tile moves DOM focus onto it (standard mousedown
-      // behavior) even though it's only tabindex="-1" - the plain
+      // behavior) even though it's only tabindex="-1" — the plain
       // right-click path clears this because opening the context menu
       // moves focus onto one of its buttons, but this Shift+right-click
       // expand shortcut never opens a menu, so the tile's :focus-visible
@@ -2290,6 +2358,7 @@ const openMenu = (...args) => menu.openMenu(...args);
 const commands = createWorkspaceCommands({
   store,
   group,
+  windowLayout,
   shortcut,
   item,
   isWebLink,
@@ -2456,7 +2525,7 @@ const binControls = createBinControls({
  * Constructed before the keyboard controller, which needs it to route Enter
  * and Escape while the mode is open. Sets are chosen by clicking their
  * contents rather than from a list, so the mode also intercepts canvas clicks
- * - see the graph click handler. */
+ * — see the graph click handler. */
 const setMembershipMode = createSetMembershipMode({
   getSets: () => state.view?.itemSets ?? [],
   // Trail items are outside the set system in this view: they never open

@@ -470,3 +470,34 @@ test('an ancestor dragged onto the Bin pill still reaches the guarded command', 
   assert.ok(binCall, 'the Bin-drop command runs so its guard can refuse');
   assert.deepEqual(binCall[1].itemIds, ['anc-f1']);
 });
+
+// ===========================================================================
+// Interior window-layout controls (Assignment 008): the graph drag excludes
+// any pointerdown on a <button> by design (the expander uses the same
+// seam), so pressing a disabled miniature control never begins dragging.
+// ===========================================================================
+
+test('pointerdown on an interior window-layout control never begins graph dragging', () => {
+  const h = createHarness();
+  h.graphNodes.set('wl1', node('wl1', 100, 100));
+  const control = fakeNode();
+  control.closest = (sel) => (sel === 'button' || sel === '[data-expand]' ? control : null);
+  const tile = fakeNode();
+  tile.closest = (sel) => (sel === '.icon-item' || sel === '.graph-node-shell' ? tile : null);
+  control.closest = (sel) => {
+    if (sel === 'button' || sel === '[data-expand]') return control;
+    return tile.closest(sel);
+  };
+
+  h.grid._dispatch('pointerdown', pointerEvent(1, 10, 10, { target: control }));
+  h.grid._dispatch('pointermove', pointerEvent(1, 60, 40));
+  h.grid._dispatch('pointerup', pointerEvent(1, 60, 40));
+
+  assert.equal(h.commandCalls.find(([name]) => name === 'select'), undefined,
+    'pressing the control selects nothing and starts no gesture');
+  assert.equal(h.commandCalls.find(([name]) => name === 'release'), undefined,
+    'no drag was started');
+  assert.equal(h.commandCalls.find(([name]) => name === 'marquee-start'), undefined,
+    'and no marquee either');
+  assert.equal(h.effects.reheat.length, 0);
+});
