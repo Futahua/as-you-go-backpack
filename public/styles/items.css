@@ -46,6 +46,16 @@
   border-radius: 12px;
   background: color-mix(in oklch, var(--folder-color) 18%, var(--surface));
 }
+/* Trail tiles (Assignment 005): the whole derived trail branch — ancestor
+   bodies and every item revealed beneath an expanded ancestor — fades as
+   one, icon and label together, so the trail can recede behind real content
+   without being removed. Driven by the Trail opacity slider in Settings via
+   --graph-trail-opacity. This is a static per-tile value, not an animation —
+   nothing here changes over time. */
+.icon-item.trail-item {
+  opacity: var(--graph-trail-opacity, 1);
+}
+
 .item-icon img {
   max-width: 100%;
   max-height: 100%;

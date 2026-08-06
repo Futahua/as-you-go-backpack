@@ -10,6 +10,10 @@ export const DEFAULT_REGION_OPACITY = 1;
 /** Backdrop panel behind the canvas: 1 is the solid paper background (the
  * look before transparency existed), 0 lets the desktop through untinted. */
 export const DEFAULT_BACKDROP_OPACITY = 1;
+/** Ancestor (breadcrumb trail) bodies in the workspace. 1 shows them like any
+ * other item; lower values let the trail recede behind real content without
+ * removing it. */
+export const DEFAULT_TRAIL_OPACITY = 1;
 
 const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift', 'Meta'];
 const MODIFIER_ALIASES = new Map([
@@ -395,6 +399,7 @@ const OPACITY_DEFAULTS = Object.freeze({
   outlineOpacity: DEFAULT_OUTLINE_OPACITY,
   regionOpacity: DEFAULT_REGION_OPACITY,
   backdropOpacity: DEFAULT_BACKDROP_OPACITY,
+  trailOpacity: DEFAULT_TRAIL_OPACITY,
 });
 
 export const DEFAULT_THEME = 'light';
@@ -462,6 +467,9 @@ export const setRegionOpacity = (rawPreferences, value) => setOpacity(rawPrefere
 export const normalizeBackdropOpacity = (value) => normalizeOpacity('backdropOpacity', value);
 export const getBackdropOpacity = (rawPreferences) => getOpacity(rawPreferences, 'backdropOpacity');
 export const setBackdropOpacity = (rawPreferences, value) => setOpacity(rawPreferences, 'backdropOpacity', value);
+export const normalizeTrailOpacity = (value) => normalizeOpacity('trailOpacity', value);
+export const getTrailOpacity = (rawPreferences) => getOpacity(rawPreferences, 'trailOpacity');
+export const setTrailOpacity = (rawPreferences, value) => setOpacity(rawPreferences, 'trailOpacity', value);
 
 /** Normalizes the complete project-owned view/preferences object while leaving
  * unrelated future preference records untouched. */

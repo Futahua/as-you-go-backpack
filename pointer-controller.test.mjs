@@ -413,3 +413,60 @@ test('a drop into the Bin or a folder is not an ejection', () => {
   bin.grid._dispatch('pointerup', pointerEvent(1, 60, 40));
   assert.deepEqual(bin.effects.ejected, [], 'the Bin drop was left alone');
 });
+
+// ===========================================================================
+// Ancestor drags (Assignment 003): an ancestor tile is a breadcrumb body —
+// draggable like any item, but it never selects (clicks navigate), never
+// pins (even with Shift), and never persists a position.
+// ===========================================================================
+
+function dragAncestorTile(h, id, from, to, overrides = {}) {
+  const tile = fakeNode();
+  tile.dataset = { id, kind: 'group' };
+  tile.classList.add('ancestor-item');
+  tile.closest = (sel) => (sel === '.icon-item' || sel === '.graph-node-shell' ? tile : null);
+  h.grid._dispatch('pointerdown', pointerEvent(1, from.x, from.y, { target: tile, ...overrides }));
+  h.grid._dispatch('pointermove', pointerEvent(1, to.x, to.y, overrides));
+  return tile;
+}
+
+test('pointerdown on an ancestor tile starts a single-node drag without selecting', () => {
+  const h = createHarness();
+  const n = node('anc-f1', 100, 100);
+  h.graphNodes.set('anc-f1', n);
+  dragAncestorTile(h, 'anc-f1', { x: 10, y: 10 }, { x: 60, y: 40 });
+  assert.equal(h.commandCalls.find(([name]) => name === 'select'), undefined,
+    'an ancestor tile never selects');
+  h.grid._dispatch('pointerup', pointerEvent(1, 60, 40));
+  assert.equal(h.commandCalls.find(([name]) => name === 'pin'), undefined,
+    'an ancestor drag never pins');
+  assert.equal(h.commandCalls.find(([name]) => name === 'release'), undefined,
+    'an ancestor drag never clears a stored graph position');
+  assert.equal(n.fx, null, 'the ancestor floats again after the drag');
+  assert.equal(n.fy, null);
+  assert.ok(h.effects.reheat.includes(0.25), 'the simulation reheats after the drag');
+});
+
+test('ancestor drags ignore the shift key — never pin, even with Shift held', () => {
+  const h = createHarness();
+  h.graphNodes.set('anc-f1', node('anc-f1', 100, 100));
+  dragAncestorTile(h, 'anc-f1', { x: 10, y: 10 }, { x: 60, y: 40 }, { shiftKey: true });
+  for (const listener of h.windowListeners) {
+    if (listener.type === 'keydown') listener.handler({ key: 'Shift' });
+  }
+  h.grid._dispatch('pointerup', pointerEvent(1, 60, 40, { shiftKey: true }));
+  assert.equal(h.commandCalls.find(([name]) => name === 'pin'), undefined,
+    'Shift never pins an ancestor');
+  assert.equal(h.commandCalls.find(([name]) => name === 'release'), undefined);
+});
+
+test('an ancestor dragged onto the Bin pill still reaches the guarded command', () => {
+  const h = createHarness();
+  h.graphNodes.set('anc-f1', node('anc-f1', 100, 100));
+  dragAncestorTile(h, 'anc-f1', { x: 10, y: 10 }, { x: 60, y: 40 });
+  h.binButton.contains = () => true;
+  h.grid._dispatch('pointerup', pointerEvent(1, 60, 40));
+  const binCall = h.commandCalls.find(([name]) => name === 'bin');
+  assert.ok(binCall, 'the Bin-drop command runs so its guard can refuse');
+  assert.deepEqual(binCall[1].itemIds, ['anc-f1']);
+});

@@ -31,6 +31,8 @@ import {
   removeGraphPositions,
   normalizeGraphPositions,
   setPromptLibrary,
+  trailContextKey,
+  setTrailExpandedByContext,
 } from './model.mjs';
 
 import {
@@ -39,7 +41,20 @@ import {
   seedPosition,
   allFinite,
   allUniquePositions,
+  setEligibleItems,
+  directSetMemberIdsVisible,
 } from './public/graph-model-20260730b.js';
+
+import { belongsToSet } from './public/sets-model.js';
+
+import {
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceCollide,
+  forceX,
+  forceY,
+} from './public/vendor/d3-force.js';
 
 /** A freshly created shortcut has exactly one placement; this is that
  * placement's id, which is what selection/move/copy/bin operate on. */
@@ -315,6 +330,7 @@ test('the local project preserves its explorer working position', () => {
     preferences: {},
     promptLibrary: [],
     itemSets: [],
+    trailExpandedByContext: {},
   });
 });
 
@@ -979,4 +995,401 @@ test('removeGraphPositions on all entries cleans up context object', () => {
   state = removeGraphPositions(state, ROOT_ID, ['item1']);
   assert.equal(getGraphPosition(state, ROOT_ID, 'item1'), null);
   assert.deepEqual(state.view.graphPositions, {});
+});
+
+// =====================================================================
+// Assignment 003: the trail as ordinary folder contents. The current
+// folder's ancestors (pathTo minus the current folder's own entry) are
+// prepended to its item list by collectVisible. They are ordinary group
+// bodies flagged `ancestor: true`; the current folder never appears.
+// =====================================================================
+
+/** A chain of `depth` nested folders; returns { state, chain } with the
+ * chain in root-to-leaf order, and every folder's id resolvable by name. */
+function buildChain(depth, { childrenPerFolder = 2 } = {}) {
+  let state = emptyState();
+  const chain = [];
+  let parentId = ROOT_ID;
+  for (let d = 1; d <= depth; d += 1) {
+    state = createGroup(state, `Folder ${d}`, parentId);
+    chain.push(state.groups.at(-1).id);
+    for (let c = 1; c <= childrenPerFolder; c += 1) {
+      state = createGroup(state, `Folder ${d} child ${c}`, chain.at(-1));
+    }
+    parentId = chain.at(-1);
+  }
+  return { state, chain };
+}
+
+function pathShape(state, chain) {
+  const names = new Map(state.groups.map((g) => [g.id, g.name]));
+  return [
+    { id: ROOT_ID, name: 'As you Go' },
+    ...chain.map((id) => ({ id, name: names.get(id) })),
+  ];
+}
+
+test('the ancestor chain is prepended as ordinary group entries marked ancestor', () => {
+  const { state, chain } = buildChain(2);
+  const ancestors = pathShape(state, chain).slice(0, -1);
+  const items = visibleGraphItems(state, chain[1], new Set(), false, 'bin', ancestors);
+  assert.equal(items.length, 2 + 2, 'two ancestors plus Folder 2 child 1 and child 2');
+  assert.deepEqual(items.slice(0, 2).map((i) => i.id), [ROOT_ID, chain[0]]);
+  assert.deepEqual(items.slice(0, 2).map((i) => i.kind), ['group', 'group']);
+  assert.ok(items.slice(0, 2).every((i) => i.ancestor === true));
+  assert.ok(items.slice(2).every((i) => i.ancestor !== true), 'view items are not ancestors');
+  assert.deepEqual(items.slice(0, 2).map((i) => i.depth), [0, 1]);
+  assert.equal(items[1].parentId, ROOT_ID, 'the second ancestor is parented to the first');
+});
+
+test('the current folder never renders: dropped from the chain and never spawned', () => {
+  const { state, chain } = buildChain(2);
+  const ancestors = pathShape(state, chain).slice(0, -1);
+  // Expanding an ancestor is a TRAIL action (Assignment 007): it lives in
+  // the trail set for this view, never in ordinary expansion.
+  const items = visibleGraphItems(state, chain[1], new Set(), false, 'bin', ancestors,
+    new Set([chain[0]]));
+  assert.ok(!items.some((i) => i.id === chain[1]),
+    'expanding Folder 1 must not spawn the current folder (Folder 2)');
+  const spawned = items.filter((i) => i.parentId === chain[0] && i.id !== chain[1]);
+  assert.equal(spawned.length, 2, 'Folder 1 child 1 and child 2 spawn in place');
+  assert.equal(spawned[0].depth, 2);
+});
+
+test('at root the ancestor list is empty and the view is unchanged', () => {
+  const { state, chain } = buildChain(2);
+  const plain = visibleGraphItems(state, ROOT_ID, new Set(), false);
+  const withAncestors = visibleGraphItems(state, ROOT_ID, new Set(), false, 'bin', []);
+  assert.deepEqual(withAncestors, plain);
+  assert.deepEqual(plain.map((i) => i.id), [chain[0]], 'the root view shows only root children');
+});
+
+test('ancestor chain edges draw between visible chain nodes; none at root', () => {
+  const { state, chain } = buildChain(3);
+  const mid = visibleGraphItems(state, chain[2], new Set(), false, 'bin', pathShape(state, chain).slice(0, -1));
+  const edges = graphEdges(mid);
+  assert.ok(edges.some((e) => e.source === ROOT_ID && e.target === chain[0]), 'root to Folder 1 edge draws');
+  assert.ok(edges.some((e) => e.source === chain[0] && e.target === chain[1]), 'Folder 1 to Folder 2 edge draws');
+  assert.ok(!edges.some((e) => e.target === chain[2]), 'no edge into the current folder');
+
+  const atRoot = visibleGraphItems(state, ROOT_ID, new Set(), false, 'bin', []);
+  assert.equal(graphEdges(atRoot).length, 0, 'no head edge when the head is not visible');
+});
+
+test('Bin ancestors: the Bin head and binned chain join a drilled Bin view; Bin top shows nothing', () => {
+  let state = createGroup(emptyState(), 'Outer');
+  const outer = state.groups[0];
+  state = createGroup(state, 'Inner', outer.id);
+  const inner = state.groups.at(-1);
+  state = binSelection(state, [outer.id], '2026-07-30T00:00:00.000Z');
+
+  const top = visibleGraphItems(state, ROOT_ID, new Set(), true, 'bin', []);
+  assert.ok(!top.some((i) => i.ancestor === true), 'the Bin itself is the current folder — nothing prepended');
+
+  const drilled = visibleGraphItems(state, ROOT_ID, new Set(), true, inner.id,
+    [{ id: 'bin', name: 'Bin' }, { id: outer.id, name: 'Outer' }]);
+  assert.deepEqual(drilled.slice(0, 2).map((i) => i.id), ['bin', outer.id]);
+  assert.ok(drilled.slice(0, 2).every((i) => i.ancestor === true));
+  assert.ok(!drilled.some((i) => i.id === inner.id), 'the drilled folder never appears');
+  const binEdges = graphEdges(drilled);
+  assert.ok(binEdges.some((e) => e.source === 'bin' && e.target === outer.id), 'Bin head to Outer edge draws');
+});
+
+// =============================================================================
+// Assignment 005: trail provenance and the set-eligibility boundary. The whole
+// derived trail branch (ancestors plus everything revealed beneath an expanded
+// ancestor) carries `trail: true`; ordinary current-folder items do not; a
+// merged shared shortcut resolves ordinary. Trail items are outside the set
+// system for the view, while persisted sets stay byte-for-byte untouched.
+// =============================================================================
+
+test('ancestor bodies are trail; ordinary current-folder items are not', () => {
+  const { state, chain } = buildChain(2);
+  const items = visibleGraphItems(state, chain[1], new Set(), false, 'bin', pathShape(state, chain).slice(0, -1));
+  assert.deepEqual(items.slice(0, 2).map((i) => i.id), [ROOT_ID, chain[0]]);
+  assert.ok(items.slice(0, 2).every((i) => i.trail === true && i.ancestor === true),
+    'every ancestor body is trail and ancestor');
+  assert.ok(items.slice(2).every((i) => i.trail === false && i.ancestor !== true),
+    'ordinary view items are not trail and not ancestor');
+});
+
+test('a child and grandchild revealed from an expanded ancestor are trail', () => {
+  const { state, chain } = buildChain(3);
+  const childA = state.groups.find((g) => g.name === 'Folder 2 child 1').id;
+  let extended = createGroup(state, 'Folder 2 child 1 sub', childA);
+  const subId = extended.groups.at(-1).id;
+  // Expanded chain[1] (Folder 2) spawns childA; expanded childA spawns subId.
+  // Both live in the trail expansion set for this view (Assignment 007).
+  const items = visibleGraphItems(extended, chain[2], new Set(), false, 'bin',
+    pathShape(extended, chain).slice(0, -1), new Set([chain[1], childA]));
+  const childEntry = items.find((i) => i.id === childA);
+  const subEntry = items.find((i) => i.id === subId);
+  assert.ok(childEntry.trail === true && childEntry.ancestor !== true, 'expanded child is trail, not ancestor');
+  assert.ok(subEntry.trail === true && subEntry.ancestor !== true, 'expanded grandchild is trail, not ancestor');
+});
+
+test('a shared shortcut visible through both the trail and ordinary paths resolves ordinary', () => {
+  let state = createGroup(emptyState(), 'F1');
+  const f1 = state.groups[0].id;
+  state = createGroup(state, 'F2', f1);
+  const f2 = state.groups.at(-1).id;
+  state = createShortcut(state, { name: 'shared', target: 'C:\\x.exe', parentId: f1 });
+  const placementId = state.shortcuts.at(-1).placements[0].id;
+  state = copySelection(state, [placementId], f2);
+
+  const items = visibleGraphItems(state, f2, new Set(), false, 'bin',
+    [{ id: ROOT_ID, name: 'As you Go' }, { id: f1, name: 'F1' }], new Set([f1]));
+  const sharedEntries = items.filter((i) => i.id === state.shortcuts[0].id);
+  assert.equal(sharedEntries.length, 1, 'one merged body, not one per parent');
+  assert.equal(sharedEntries[0].trail, false, 'real provenance wins over the trail path');
+  assert.deepEqual(sharedEntries[0].parentIds.sort(), [f1, f2].sort(), 'both parents recorded');
+});
+
+test('Bin expanded-trail descendants carry the same provenance', () => {
+  let state = createGroup(emptyState(), 'Outer');
+  const outer = state.groups[0].id;
+  state = createGroup(state, 'Inner', outer);
+  const inner = state.groups.at(-1).id;
+  state = createGroup(state, 'Sibling', outer);
+  const sibling = state.groups.at(-1).id;
+  state = binSelection(state, [outer], '2026-07-30T00:00:00.000Z');
+
+  // Drilled into Inner; expanding the Outer ancestor reveals Sibling — a
+  // trail expansion in the bin:<Inner> context (Assignment 007).
+  const items = visibleGraphItems(state, ROOT_ID, new Set(), true, inner,
+    [{ id: 'bin', name: 'Bin' }, { id: outer, name: 'Outer' }], new Set([outer]));
+  const head = items.find((i) => i.id === 'bin');
+  const outerEntry = items.find((i) => i.id === outer);
+  const siblingEntry = items.find((i) => i.id === sibling);
+  assert.ok(head.trail === true && head.ancestor === true);
+  assert.ok(outerEntry.trail === true && outerEntry.ancestor === true);
+  assert.ok(siblingEntry.trail === true && siblingEntry.ancestor !== true,
+    'an expanded Bin-ancestor descendant is trail, not ancestor');
+  assert.ok(!items.some((i) => i.id === inner), 'the drilled folder never appears');
+});
+
+test('setEligibleItems excludes trail bodies while ordinary members stay; persisted sets untouched', () => {
+  const { state, chain } = buildChain(2);
+  // Expanded chain[0] (Folder 1) makes Folder 1 child 1/2 trail via the
+  // trail set; Folder 2's own children stay ordinary. Set A contains one
+  // trail member and two ordinary members.
+  const trailMember = state.groups.find((g) => g.name === 'Folder 1 child 1').id;
+  const ordinaryA = state.groups.find((g) => g.name === 'Folder 2 child 1').id;
+  const ordinaryB = state.groups.find((g) => g.name === 'Folder 2 child 2').id;
+  const itemSets = [{
+    id: 'set-a', type: 'set', title: 'A', memberIds: [trailMember, ordinaryA, ordinaryB], excludedIds: [],
+  }];
+  const withSets = { ...state, view: { ...state.view, itemSets } };
+  const before = JSON.stringify(withSets.view.itemSets);
+
+  const items = visibleGraphItems(withSets, chain[1], new Set(), false, 'bin',
+    pathShape(state, chain).slice(0, -1), new Set([chain[0]]));
+  const eligible = setEligibleItems(items);
+
+  assert.deepEqual(eligible.map((i) => i.id), [ordinaryA, ordinaryB],
+    'the trail member is not eligible; the ordinary members are');
+  assert.ok(!eligible.some((i) => i.trail === true), 'no trail body is ever eligible');
+  assert.equal(JSON.stringify(withSets.view.itemSets), before,
+    'setEligibleItems never touches the persisted sets');
+  assert.ok(belongsToSet(itemSets[0], trailMember, () => []),
+    'the data still says the trail member belongs — the view simply ignores it');
+  const direct = directSetMemberIdsVisible(itemSets[0], eligible.map((i) => i.id));
+  assert.deepEqual(direct, [ordinaryA, ordinaryB],
+    'the set still draws around its ordinary visible members in this view');
+});
+
+// =============================================================================
+// Assignment 007: trail expansion is independent of ordinary expansion and
+// remembered per view context. Each explicit context key
+// (`folder:<id>` / `bin:<id>`) owns its own set, defaults to collapsed, and
+// never seeds or mutates ordinary graphExpandedGroupIds.
+// =============================================================================
+
+test('ordinary expansion never seeds the trail: Apps expanded at root stays collapsed inside a trail', () => {
+  let state = createGroup(emptyState(), 'Apps');
+  const apps = state.groups[0].id;
+  state = createGroup(state, 'Apps child', apps);
+  const appsChild = state.groups.at(-1).id;
+  state = createGroup(state, 'Real');
+  const real = state.groups.at(-1).id;
+  state = createGroup(state, 'A', real);
+  const a = state.groups.at(-1).id;
+
+  const ordinary = new Set([apps]);
+  const ancestors = [{ id: ROOT_ID, name: 'As you Go' }, { id: real, name: 'Real' }];
+
+  // Trail view of folder:A with only the head expanded: Apps is revealed but
+  // COLLAPSED even though ordinary expansion at root has it open.
+  const collapsed = visibleGraphItems(state, a, ordinary, false, 'bin', ancestors,
+    new Set([ROOT_ID]));
+  const appsEntry = collapsed.find((i) => i.id === apps);
+  assert.ok(appsEntry?.trail === true, 'Apps is revealed inside the trail');
+  assert.ok(!collapsed.some((i) => i.id === appsChild),
+    'Apps starts collapsed in the trail regardless of its root expansion');
+
+  // Explicitly expanding Apps IN THIS TRAIL context reveals its children.
+  const expanded = visibleGraphItems(state, a, ordinary, false, 'bin', ancestors,
+    new Set([ROOT_ID, apps]));
+  assert.ok(expanded.some((i) => i.id === appsChild),
+    'trail expansion reveals Apps children without touching ordinary expansion');
+});
+
+test('per-view trail expansion is remembered per context and survives normalize/reload', () => {
+  const { state, chain } = buildChain(2);
+  const childA = state.groups.find((g) => g.name === 'Folder 1 child 1').id;
+  let withMap = setTrailExpandedByContext(state, 'folder:real', [chain[0], childA]);
+  assert.deepEqual(withMap.view.trailExpandedByContext, { 'folder:real': [chain[0], childA] });
+
+  const reloaded = normalizeState(JSON.parse(JSON.stringify(withMap)));
+  assert.deepEqual(reloaded.view.trailExpandedByContext, { 'folder:real': [chain[0], childA] },
+    'the choice survives a reload round-trip');
+  assert.equal(reloaded.view.trailExpandedByContext['folder:other'], undefined,
+    'a different view context has no saved choice and defaults collapsed');
+
+  const same = visibleGraphItems(reloaded, chain[1], new Set(), false, 'bin',
+    pathShape(reloaded, chain).slice(0, -1), new Set(reloaded.view.trailExpandedByContext['folder:real']));
+  assert.ok(same.some((i) => i.id === childA), 'the restored context still reveals its choice');
+});
+
+test('malformed and stale trail expansion normalizes safely without losing unrelated view data', () => {
+  const { state, chain } = buildChain(2);
+  const raw = {
+    ...JSON.parse(JSON.stringify(state)),
+    view: {
+      ...state.view,
+      currentGroupId: chain[1],
+      trailExpandedByContext: {
+        'folder:root': [ROOT_ID, 'bin', 'no-such-folder', chain[0], chain[0], 42],
+        'folder:real': 'malformed',
+        42: [chain[0]],
+        'bin:bin': [],
+      },
+    },
+  };
+  const normalized = normalizeState(raw);
+  assert.deepEqual(normalized.view.trailExpandedByContext, {
+    'folder:root': [ROOT_ID, 'bin', chain[0]],
+  }, 'malformed entries dropped, stale ids pruned, pseudo heads kept, ids deduped');
+  assert.equal(normalized.view.currentGroupId, chain[1], 'unrelated view data preserved');
+});
+
+test('trail and ordinary expansion never touch each other', () => {
+  const { state, chain } = buildChain(2);
+  const withTrail = setTrailExpandedByContext(state, 'folder:x', [chain[0]]);
+  assert.deepEqual(withTrail.view.graphExpandedGroupIds, state.view.graphExpandedGroupIds,
+    'writing trail expansion never changes ordinary expansion');
+
+  const withOrdinary = updateWorkspaceView(withTrail, { graphExpandedGroupIds: [chain[1]] });
+  assert.deepEqual(withOrdinary.view.trailExpandedByContext, { 'folder:x': [chain[0]] },
+    'writing ordinary expansion never changes any trail context');
+
+  // The two context keys stay distinct and independent at the walk level too.
+  const ancestors = pathShape(state, chain).slice(0, -1);
+  const a = visibleGraphItems(state, chain[1], new Set(), false, 'bin', ancestors,
+    new Set([chain[0]]));
+  const b = visibleGraphItems(state, chain[1], new Set(), false, 'bin', ancestors,
+    new Set());
+  const childA = state.groups.find((g) => g.name === 'Folder 1 child 1').id;
+  assert.ok(a.some((i) => i.id === childA));
+  assert.ok(!b.some((i) => i.id === childA), 'a collapsed context reveals nothing');
+});
+
+test('trail context keys separate explorer, root and Bin views', () => {
+  assert.equal(trailContextKey('root', false, 'bin'), 'folder:root');
+  assert.equal(trailContextKey(null, false, 'bin'), 'folder:root');
+  assert.equal(trailContextKey('group-a', false, 'bin'), 'folder:group-a');
+  assert.equal(trailContextKey('group-a', true, 'bin'), 'bin:bin');
+  assert.equal(trailContextKey('group-a', true, 'group-b'), 'bin:group-b');
+  assert.notEqual(trailContextKey('group-a', false, 'bin'), trailContextKey('group-a', true, 'group-b'));
+});
+
+// =============================================================================
+// Safety (standing rule 2, Assignment 003 shape): the ancestors join the
+// creator's real simulation as ordinary unpinned bodies. Pinned items are
+// the creator's arrangement and cannot move by mechanism; unpinned items
+// near the centre settle with the pack. This harness replicates the
+// workspace graph's force configuration.
+// =============================================================================
+
+function settleScene(nodes, links, maxTicks = 800) {
+  const simulation = forceSimulation()
+    .force('cx', forceX(400).strength(0.05))
+    .force('cy', forceY(300).strength(0.05))
+    .force('charge', forceManyBody().strength(-280))
+    .force('collide', forceCollide()
+      .radius((n) => Math.max(n.width, n.height) / 2 + 20)
+      .strength(0.9))
+    .force('link', forceLink()
+      .id((n) => n.id)
+      .distance(145)
+      .strength(0.14))
+    .alphaDecay(0.028)
+    .velocityDecay(0.32);
+  simulation.nodes(nodes);
+  simulation.force('link').links(links.map((link) => ({ source: link.source, target: link.target })));
+  simulation.stop();
+  for (let tick = 0; tick < maxTicks; tick += 1) {
+    simulation.tick();
+    if (simulation.alpha() <= simulation.alphaMin()) return tick + 1;
+  }
+  return maxTicks;
+}
+
+function settleNode(id, x, y, { pinned = false } = {}) {
+  return {
+    id, x, y, vx: 0, vy: 0, width: 124, height: 152,
+    fx: pinned ? x : null, fy: pinned ? y : null,
+  };
+}
+
+test('ancestors joining the folder view leave the arranged (pinned) items untouched', () => {
+  const pinned = [
+    settleNode('p1', 120, 100, { pinned: true }),
+    settleNode('p2', 680, 120, { pinned: true }),
+    settleNode('p3', 100, 500, { pinned: true }),
+    settleNode('p4', 700, 480, { pinned: true }),
+    settleNode('p5', 400, 60, { pinned: true }),
+    settleNode('p6', 400, 540, { pinned: true }),
+  ];
+  const unpinned = [
+    settleNode('u1', 300, 260),
+    settleNode('u2', 500, 250),
+    settleNode('u3', 320, 340),
+    settleNode('u4', 480, 350),
+  ];
+  // The ancestors (Assignment 003): ordinary bodies seeded near the centre,
+  // linked root-to-leaf like the chain the entry prepends.
+  const ancestors = [
+    settleNode('root', 400, 300),
+    settleNode('f1', 420, 300),
+    settleNode('f2', 440, 300),
+  ];
+  const ancestorLinks = [
+    { source: 'root', target: 'f1' },
+    { source: 'f1', target: 'f2' },
+  ];
+
+  const baselineUnpinned = unpinned.map((n) => ({ ...n }));
+  settleScene([...pinned.map((n) => ({ ...n })), ...baselineUnpinned], []);
+  const baseline = new Map(baselineUnpinned.map((n) => [n.id, { x: n.x, y: n.y }]));
+
+  const ticks = settleScene([...pinned, ...unpinned, ...ancestors], ancestorLinks);
+
+  for (const n of pinned) {
+    assert.equal(n.x, n.fx, `${n.id} pinned x untouched`);
+    assert.equal(n.y, n.fy, `${n.id} pinned y untouched`);
+  }
+  const displacements = unpinned.map((n) => {
+    const start = baseline.get(n.id);
+    return Math.hypot(n.x - start.x, n.y - start.y);
+  });
+  const maxDisplacement = Math.max(...displacements);
+  assert.ok(ticks <= 800, `settled within 800 ticks (${ticks})`);
+  assert.ok(maxDisplacement < 300,
+    `the ancestors moved unpinned items at most ${maxDisplacement.toFixed(0)}px`);
+  assert.ok([...pinned, ...unpinned, ...ancestors].every((n) =>
+    Number.isFinite(n.x) && Number.isFinite(n.y)), 'all positions finite');
+  console.log(`[ancestor-perturbation] settle ${ticks} ticks (${(ticks / 60).toFixed(2)}s @60Hz), ` +
+    `pinned displacement 0px, unpinned displacement attributable to the ancestors: ` +
+    `max ${maxDisplacement.toFixed(1)}px`);
 });

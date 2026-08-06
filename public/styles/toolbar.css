@@ -73,7 +73,13 @@
   color: var(--accent);
 }
 
-.breadcrumbs {
+/* The breadcrumb pill is retired: the ancestor chain now renders as ordinary
+   folder bodies in the workspace itself. The element stays in the DOM because
+   dom.js requires it and the render path still fills it, but it is never
+   shown. Remove the element and its render block together, not separately. */
+.breadcrumbs { display: none; }
+
+.breadcrumbs-retired {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

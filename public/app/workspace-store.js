@@ -33,6 +33,11 @@ export function createWorkspaceStore({
     binCurrentId: 'bin',
     binMode: false,
     graphExpanded: new Set(),
+    // The active trail-expansion set for the CURRENT view context
+    // (Assignment 007). Synced by the render path from
+    // view.trailExpandedByContext; each view context has its own set and
+    // defaults to empty. Never seeded from or written into graphExpanded.
+    trailExpanded: new Set(),
     clipboard: null,
     ...initialSession,
   };
@@ -110,6 +115,7 @@ export function createWorkspaceStore({
     },
     addToGraphExpanded: (id) => { session.graphExpanded.add(id); },
     removeFromGraphExpanded: (id) => { session.graphExpanded.delete(id); },
+    setTrailExpanded: (ids) => { session.trailExpanded = new Set(ids); },
     setClipboard: (clipboard) => { session.clipboard = clipboard; },
     canUndo: () => undoStack.length > 0,
     canRedo: () => redoStack.length > 0,

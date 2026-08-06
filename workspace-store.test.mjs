@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
-
 function createHarness({ normalize = (s) => s } = {}) {
   let state = { items: ['root'] };
   const saved = [];
@@ -285,4 +284,16 @@ test('set selection is independent of item selection', () => {
   store.setSelectedSets(['s3']);
   assert.deepEqual([...store.getSession().selected], []);
   assert.deepEqual([...store.getSession().selectedSets], ['s3'], 'and the reverse holds');
+});
+
+test('the session trail-expanded set is distinct from ordinary graph expansion', () => {
+  const h = createHarness();
+  // The session exposes the active trail-expansion set for the current
+  // view context (Assignment 007), separate from graphExpanded.
+  h.store.setGraphExpanded(['g1']);
+  h.store.setTrailExpanded(['g2', 'g3']);
+  assert.deepEqual([...h.store.getSession().trailExpanded], ['g2', 'g3']);
+  assert.deepEqual([...h.store.getSession().graphExpanded], ['g1'], 'ordinary expansion untouched');
+  h.store.setTrailExpanded([]);
+  assert.deepEqual([...h.store.getSession().trailExpanded], []);
 });

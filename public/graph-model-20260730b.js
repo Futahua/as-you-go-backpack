@@ -18,28 +18,49 @@ function identityOf(candidate) {
  * restorable/deletable tile. Unlike the normal graph there's no
  * shared-identity dedup: two placements of the same linked shortcut
  * binned separately are two independent tiles. */
-function collectVisibleBin(state, expanded, binCurrentId = 'bin') {
+function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = [], trailExpanded = new Set()) {
   const result = [];
 
-  function walkBinnedGroup(groupId, depth) {
-    const children = itemsInBinnedGroup(state, groupId);
+  const byIdentity = new Map();
+  ancestors.forEach((entry, index) => {
+    const chainParentId = index === 0 ? null : ancestors[index - 1].id;
+    byIdentity.set(entry.id, {
+      id: entry.id,
+      kind: 'group',
+      depth: index,
+      siblingIndex: 0,
+      siblingCount: 1,
+      parents: chainParentId ? [chainParentId] : [],
+      ancestor: true,
+      trail: true,
+    });
+  });
+
+  function walkBinChildren(groupId, depth, trailBranch) {
+    const children = groupId === 'bin' ? binnedItems(state) : itemsInBinnedGroup(state, groupId);
     children.forEach((child, siblingIndex) => {
+      // The folder we are drilled into is part of an expanded ancestor's
+      // child list; the current folder never renders.
+      if (child.id === binCurrentId) return;
       result.push({
         id: child.id,
-        parentId: groupId,
+        parentId: groupId === 'bin' ? 'bin' : groupId,
         kind: child.kind,
         depth,
         siblingIndex,
         siblingCount: children.length,
+        trail: trailBranch,
       });
-      if (child.kind === 'group' && expanded.has(child.id)) {
-        walkBinnedGroup(child.id, depth + 1);
+      if (child.kind === 'group'
+        && (trailBranch ? trailExpanded.has(child.id) : expanded.has(child.id))) {
+        walkBinChildren(child.id, depth + 1, trailBranch);
       }
     });
   }
 
   const roots = binCurrentId === 'bin' ? binnedItems(state) : itemsInBinnedGroup(state, binCurrentId);
   roots.forEach((candidate, siblingIndex) => {
+    if (candidate.id === binCurrentId) return;
     result.push({
       id: candidate.id,
       parentId: 'bin',
@@ -47,6 +68,7 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin') {
       depth: 0,
       siblingIndex,
       siblingCount: roots.length,
+      trail: false,
       // The folder this item was actually inside when it was sent to the
       // Bin (not its Bin-graph parent, which is always 'bin' at this
       // depth) — lets the renderer draw a "where did this come from" edge.
@@ -62,16 +84,36 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin') {
         : null,
     });
     if (candidate.kind === 'group' && expanded.has(candidate.id)) {
-      walkBinnedGroup(candidate.id, 1);
+      walkBinChildren(candidate.id, 1, false);
     }
+  });
+
+  // The ancestor chain as ordinary Bin bodies, then each expanded ancestor's
+  // children in place (the Bin head's children are the top-level Bin list).
+  // Expanded ancestor descendants are trail items like everywhere else.
+  result.unshift(...[...byIdentity.values()].map(({ parents, ...entry }) => ({
+    ...entry,
+    parentId: parents[0],
+    parentIds: parents,
+  })));
+  ancestors.forEach((entry, index) => {
+    if (trailExpanded.has(entry.id)) walkBinChildren(entry.id, index + 1, true);
   });
 
   return result;
 }
 
-export function visibleGraphItems(state, parentId, expandedSet, binMode = false, binCurrentId = 'bin') {
-  if (binMode) return collectVisibleBin(state, expandedSet, binCurrentId);
-  return collectVisible(state, parentId, expandedSet);
+export function visibleGraphItems(
+  state,
+  parentId,
+  expandedSet,
+  binMode = false,
+  binCurrentId = 'bin',
+  ancestors = [],
+  trailExpanded = new Set(),
+) {
+  if (binMode) return collectVisibleBin(state, expandedSet, binCurrentId, ancestors, trailExpanded);
+  return collectVisible(state, parentId, expandedSet, ancestors, trailExpanded);
 }
 
 /** Set outlines are owned by direct members visible at the current level.
@@ -80,6 +122,19 @@ export function visibleGraphItems(state, parentId, expandedSet, binMode = false,
 export function directSetMemberIdsVisible(set, visibleIds) {
   const direct = new Set(set?.memberIds ?? []);
   return (Array.isArray(visibleIds) ? visibleIds : []).filter((id) => direct.has(id));
+}
+
+/** The visible items that participate in the set system for this view.
+ *
+ * Trail-derived bodies — ancestors and everything revealed beneath an
+ * expanded ancestor — are outside the set system: they render no ring,
+ * glyph, region or effect, and receive no gravity, containment, separation,
+ * exclusion or ejection. One helper, so every consumer agrees; it filters
+ * the current rendering inputs only and never mutates or persists a set.
+ * Persisted membership is untouched: when the same item is later ordinary,
+ * its sets act on it normally again. */
+export function setEligibleItems(items) {
+  return (Array.isArray(items) ? items : []).filter((item) => item.trail !== true);
 }
 
 /** Once a set is eligible to draw at a level, its ring encloses every visible
@@ -93,16 +148,57 @@ export function inheritedSetMemberIdsVisible(set, visibleIds, ancestorsOfNode) {
  * expanded folder reachable from it) and emits one entry per distinct
  * identity, recording every parent it was actually found under so
  * graphEdges can draw an edge from each of them. A shortcut linked into two
- * expanded folders therefore appears once, with two parents recorded. */
-function collectVisible(state, parentId, expanded) {
+ * expanded folders therefore appears once, with two parents recorded.
+ *
+ * `ancestors` prepends the current folder's ancestor chain as ordinary
+ * entries (the trail as folder contents): each ancestor is a real folder
+ * body, marked `ancestor: true` so the workspace can give it the --text
+ * outline, keep it out of selection/deletion, and never persist anything
+ * about it. The current folder itself never appears — the chain is the
+ * path TO here — and expanding an ancestor walks its children in place,
+ * skipping the current folder.
+ *
+ * `trail: true` is the broader derived-branch provenance: every ancestor
+ * body AND everything reached by walking an expanded ancestor (recursively)
+ * is a trail item. Ordinary current-folder traversal yields `trail: false`.
+ * A shared shortcut identity visible through both paths merges into one
+ * body, and real provenance wins — the merged body stays `trail: false`,
+ * keeps its sets and its opacity. The set system and the Trail opacity
+ * slider both read this flag.
+ *
+ * Expansion is split by provenance (Assignment 007): the ordinary
+ * current-folder walk consults only `expanded`, and every trail branch
+ * consults only `trailExpanded`, recursively. The two sets never seed or
+ * mutate each other, and a view with no saved trail choice passes an empty
+ * trail set — every trail folder starts collapsed. */
+function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded = new Set()) {
   const byIdentity = new Map();
   const visitedFolders = new Set();
 
-  function walk(folderId, depth) {
+  ancestors.forEach((entry, index) => {
+    const chainParentId = index === 0 ? null : ancestors[index - 1].id;
+    byIdentity.set(entry.id, {
+      id: entry.id,
+      kind: 'group',
+      depth: index,
+      siblingIndex: 0,
+      siblingCount: 1,
+      parents: chainParentId ? [chainParentId] : [],
+      ancestor: true,
+      trail: true,
+    });
+  });
+
+  function walk(folderId, depth, trailBranch) {
     if (visitedFolders.has(folderId)) return;
     visitedFolders.add(folderId);
     const children = itemsIn(state, folderId);
     children.forEach((child, siblingIndex) => {
+      // An ancestor's children include the folder we are standing in —
+      // that is the whole point of the chain — but the current folder
+      // never renders. A folder cannot be its own child, so this check
+      // is inert for the normal walk.
+      if (child.id === parentId) return;
       const identity = identityOf(child);
       let entry = byIdentity.get(identity);
       if (!entry) {
@@ -113,15 +209,28 @@ function collectVisible(state, parentId, expanded) {
           siblingIndex,
           siblingCount: children.length,
           parents: [],
+          trail: trailBranch,
         };
         byIdentity.set(identity, entry);
+      } else if (!trailBranch) {
+        // Real provenance wins: a shared shortcut visible through both the
+        // ordinary current-folder path and a trail path is one ordinary
+        // body, so the merged entry is never flipped to trail.
+        entry.trail = false;
       }
       entry.parents.push(folderId);
-      const isOpen = child.kind === 'group' && expanded.has(child.id);
-      if (isOpen) walk(child.id, depth + 1);
+      const isOpen = child.kind === 'group'
+        && (trailBranch ? trailExpanded.has(child.id) : expanded.has(child.id));
+      if (isOpen) walk(child.id, depth + 1, trailBranch);
     });
   }
-  walk(parentId, 0);
+  walk(parentId, 0, false);
+  // An expanded ancestor reveals its children in place, exactly like any
+  // expanded folder in the current view — but those children are trail
+  // items, and so are everything reached by expanding them further.
+  ancestors.forEach((entry, index) => {
+    if (trailExpanded.has(entry.id)) walk(entry.id, index + 1, true);
+  });
 
   return [...byIdentity.values()].map(({ parents, ...entry }) => ({
     ...entry,
@@ -137,7 +246,13 @@ export function graphEdges(items) {
   for (const item of items) {
     const parentIds = item.parentIds ?? [item.parentId];
     for (const parentId of parentIds) {
-      if (parentId === ROOT_ID || parentId === 'bin' || !ids.has(parentId)) continue;
+      // An edge draws exactly when both endpoints are visible. The old
+      // skip of ROOT_ID/'bin' parents existed only because those heads
+      // were never nodes; an ancestor chain makes them visible tiles, so
+      // their edges draw like any other — and a head that is not in the
+      // list (e.g. at the root view) still gets no edge, because its id
+      // is not in `ids`.
+      if (!ids.has(parentId)) continue;
       const key = `${parentId}->${item.id}`;
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);

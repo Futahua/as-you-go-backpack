@@ -37,9 +37,13 @@ export function createMarqueeController({
           top: rectangle.top,
           right: rectangle.right,
           bottom: rectangle.bottom,
+          // Ancestor tiles are breadcrumbs, not selection targets — the
+          // same exclusion visibleItemIds applies to select-all and
+          // shift-ranges.
+          ancestor: tile.classList?.contains('ancestor-item') === true,
         };
       })
-      .filter((tile) => tile.right > tile.left && tile.bottom > tile.top);
+      .filter((tile) => tile.right > tile.left && tile.bottom > tile.top && !tile.ancestor);
     commands.updateMarqueeSelection([
       ...drag.baseSelection,
       ...itemsIntersectingMarquee(tiles, bounds),

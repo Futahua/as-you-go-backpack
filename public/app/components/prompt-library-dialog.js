@@ -49,6 +49,7 @@ import {
   getOutlineOpacity,
   getRegionOpacity,
   getTheme,
+  getTrailOpacity,
   getTransparentBackground,
   resetAllHotkeyOverrides,
   resetHotkeyOverride,
@@ -56,6 +57,7 @@ import {
   setOutlineOpacity,
   setRegionOpacity,
   setTheme,
+  setTrailOpacity,
   setTransparentBackground,
 } from '../hotkeys-model.js';
 
@@ -147,6 +149,8 @@ export function createPromptLibraryDialog({
   const edgeOpacityValue = document.querySelector('#edge-opacity-value');
   const outlineOpacitySlider = document.querySelector('#outline-opacity-slider');
   const outlineOpacityValue = document.querySelector('#outline-opacity-value');
+  const trailOpacitySlider = document.querySelector('#trail-opacity-slider');
+  const trailOpacityValue = document.querySelector('#trail-opacity-value');
   const regionOpacitySlider = document.querySelector('#region-opacity-slider');
   const regionOpacityValue = document.querySelector('#region-opacity-value');
   const themeSelect = document.querySelector('#theme-select');
@@ -405,6 +409,7 @@ export function createPromptLibraryDialog({
     { slider: edgeOpacitySlider, output: edgeOpacityValue, get: getEdgeOpacity, set: setEdgeOpacity, label: 'Connector opacity' },
     { slider: outlineOpacitySlider, output: outlineOpacityValue, get: getOutlineOpacity, set: setOutlineOpacity, label: 'Set outline opacity' },
     { slider: regionOpacitySlider, output: regionOpacityValue, get: getRegionOpacity, set: setRegionOpacity, label: 'Region fill opacity' },
+    { slider: trailOpacitySlider, output: trailOpacityValue, get: getTrailOpacity, set: setTrailOpacity, label: 'Trail opacity' },
   ];
 
   function renderOpacityControls() {

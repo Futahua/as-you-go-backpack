@@ -40,6 +40,12 @@ export function createWorkspaceCommands({
   // whose graph node is keyed by its shared record id rather than by any one
   // placement, so it would inherit nothing.
   ancestorsOfNode = null,
+  // Whether an id is an ancestor of the current folder (Assignment 003:
+  // the trail as ordinary folder contents). Ancestors are part of the
+  // path here: the drag-drop commands refuse to bin or move them. They
+  // never enter the selection by construction, so nothing else needs the
+  // predicate.
+  isAncestorItem = () => false,
   syncSelection,
   saveWorkspaceView,
   closeMenu,
@@ -367,7 +373,7 @@ export function createWorkspaceCommands({
     const session = store.getSession();
 
     for (const selectedId of session.selected) {
-      if (group(selectedId)) continue;
+      if (group(selectedId) || windowLayout(selectedId)) continue;
 
       const placementId = visiblePlacementIdFor(selectedId);
       if (placementId) placementIds.set(selectedId, placementId);
@@ -407,10 +413,11 @@ export function createWorkspaceCommands({
         // A cut item can only move to one place, so multi-folder selection is
         // ignored here — only the first destination applies.
         const parentId = destinations[0];
-        const groupIds = clipboard.ids.filter((selectedId) => group(selectedId));
+        const groupIds = clipboard.ids.filter((selectedId) =>
+          group(selectedId) || windowLayout(selectedId));
         const wholeShortcutIds = clipboard.ids.filter((selectedId) => clipboard.collapseWhole.has(selectedId));
         const singlePlacementIds = clipboard.ids
-          .filter((selectedId) => !group(selectedId) && !clipboard.collapseWhole.has(selectedId))
+          .filter((selectedId) => !group(selectedId) && !windowLayout(selectedId) && !clipboard.collapseWhole.has(selectedId))
           .map((selectedId) => clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
           .filter(Boolean);
         if (groupIds.length > 0 || singlePlacementIds.length > 0) {
@@ -421,7 +428,7 @@ export function createWorkspaceCommands({
         }
       } else {
         const ids = clipboard.ids
-          .map((selectedId) => group(selectedId)
+          .map((selectedId) => (group(selectedId) || windowLayout(selectedId))
             ? selectedId
             : clipboard.placementIds.get(selectedId) ?? anyActivePlacementId(selectedId))
           .filter(Boolean);
@@ -465,15 +472,21 @@ export function createWorkspaceCommands({
   }
 
   /** Drops a dragged selection onto the Bin pill: bins every resolved
-   * placement and clears their graph positions. */
+   * placement and clears their graph positions. Ancestors of the current
+   * folder are part of the path here — they can never be deleted. */
   async function dragDropToBin({ itemIds }) {
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
+    const deletable = itemIds.filter((id) => !isAncestorItem(id));
+    if (deletable.length === 0) {
+      setStatus('The path to this folder cannot be deleted.');
+      return;
+    }
     try {
       const next = removeGraphPositions(
-        binSelection(store.getSnapshot(), resolveBinTargets(itemIds)),
+        binSelection(store.getSnapshot(), resolveBinTargets(deletable)),
         ctxId,
-        itemIds,
+        deletable,
       );
       await store.commit(next);
     } catch (error) {
@@ -482,15 +495,22 @@ export function createWorkspaceCommands({
   }
 
   /** Drops a dragged selection into a folder: moves groups and single
-   * placements, collapses whole linked shortcuts, and clears positions. */
+   * placements, collapses whole linked shortcuts, and clears positions.
+   * An ancestor cannot be moved either — dropping it into another folder
+   * would restructure the real tree under the current view. */
   async function dragDropToFolder({ itemIds, placementIds, folderId }) {
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
+    const movable = itemIds.filter((draggedId) => !isAncestorItem(draggedId));
+    if (movable.length === 0) {
+      setStatus('The path to this folder cannot be moved into another folder.');
+      return;
+    }
     try {
-      const groupIds = itemIds.filter((draggedId) => group(draggedId));
-      const wholeShortcutIds = itemIds.filter((draggedId) =>
+      const groupIds = movable.filter((draggedId) => group(draggedId));
+      const wholeShortcutIds = movable.filter((draggedId) =>
         !group(draggedId) && visibleParentCountFor(draggedId) > 1);
-      const singlePlacementIds = itemIds
+      const singlePlacementIds = movable
         .filter((draggedId) => !group(draggedId) && visibleParentCountFor(draggedId) <= 1)
         .map((shortcutId) => placementIds.get(shortcutId) ?? anyActivePlacementId(shortcutId))
         .filter(Boolean);
@@ -501,7 +521,7 @@ export function createWorkspaceCommands({
       for (const shortcutId of wholeShortcutIds) {
         next = collapsePlacements(next, shortcutId, folderId);
       }
-      await store.commit(removeGraphPositions(next, ctxId, itemIds));
+      await store.commit(removeGraphPositions(next, ctxId, movable));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }

@@ -652,3 +652,47 @@ test('opening the picker and confirming immediately commits nothing', async () =
   assert.deepEqual(after.find((s) => s.id === 'A').memberIds, ['i1']);
   assert.deepEqual(after.find((s) => s.id === 'B').memberIds, ['i2']);
 });
+
+// ===========================================================================
+// Ancestor guards (Assignment 003): ancestors of the current folder are part
+// of the path here — the drag-drop commands refuse to bin or move them.
+// ===========================================================================
+
+test('dragDropToBin with only ancestor ids bins nothing and reports', async () => {
+  const h = createHarness({
+    groups: [{ id: 'anc-f1', parentId: 'root', name: 'F1' }],
+    model: { isAncestorItem: (id) => id.startsWith('anc-') },
+  });
+  await h.commands.dragDropToBin({ itemIds: ['anc-f1'] });
+  assert.deepEqual(h.effects.status.at(-1), 'The path to this folder cannot be deleted.');
+  assert.deepEqual(h.store.getSnapshot().binned, undefined, 'nothing was binned');
+});
+
+test('dragDropToBin with mixed ids bins only the non-ancestor ids', async () => {
+  const h = createHarness({
+    groups: [{ id: 'anc-f1', parentId: 'root', name: 'F1' }],
+    model: { isAncestorItem: (id) => id.startsWith('anc-') },
+  });
+  await h.commands.dragDropToBin({ itemIds: ['anc-f1', 's1'] });
+  assert.deepEqual(h.store.getSnapshot().binned, ['s1']);
+  assert.deepEqual(h.store.getSnapshot().positionsRemoved, ['s1']);
+});
+
+test('dragDropToFolder with only ancestor ids moves nothing and reports', async () => {
+  const h = createHarness({
+    groups: [{ id: 'anc-f1', parentId: 'root', name: 'F1' }],
+    model: { isAncestorItem: (id) => id.startsWith('anc-') },
+  });
+  await h.commands.dragDropToFolder({ itemIds: ['anc-f1'], placementIds: new Map(), folderId: 'dest' });
+  assert.deepEqual(h.effects.status.at(-1), 'The path to this folder cannot be moved into another folder.');
+  assert.deepEqual(h.store.getSnapshot().moved, undefined, 'nothing was moved');
+});
+
+test('dragDropToFolder with mixed ids moves only the non-ancestor ids', async () => {
+  const h = createHarness({
+    groups: [{ id: 'anc-f1', parentId: 'root', name: 'F1' }],
+    model: { isAncestorItem: (id) => id.startsWith('anc-') },
+  });
+  await h.commands.dragDropToFolder({ itemIds: ['anc-f1', 'g2'], placementIds: new Map(), folderId: 'dest' });
+  assert.deepEqual(h.store.getSnapshot().moved, ['p-g2', 'dest']);
+});

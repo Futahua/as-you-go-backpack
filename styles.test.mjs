@@ -153,3 +153,16 @@ test('prompt modal separates navigation tabs from create actions', () => {
   const actionRule = dialogCss.match(/\.prompt-library-add-actions\s*\{[^}]*\}/)?.[0] ?? '';
   assert.ok(/border-bottom:\s*1px solid/.test(actionRule), 'create actions get their own separation');
 });
+
+test('trail tiles fade through the existing Trail opacity variable, without animation', () => {
+  // Assignment 005: the whole derived trail branch (ancestors plus expanded
+  // descendants) is styled via .trail-item and the existing
+  // --graph-trail-opacity preference. Static per-tile value — no transition,
+  // no animation, no new colour or preference.
+  const trailRule = itemsCss.match(/\.icon-item\.trail-item\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.ok(/opacity:\s*var\(--graph-trail-opacity,\s*1\)/.test(trailRule),
+    'the trail tile rule must use the existing trail opacity variable');
+  assert.doesNotMatch(trailRule, /transition|animation/, 'no timed visual change');
+  assert.doesNotMatch(itemsCss, /\.icon-item\.ancestor-item\s*\{[^}]*opacity/,
+    'opacity moved off the ancestor-only class onto trail-item');
+});

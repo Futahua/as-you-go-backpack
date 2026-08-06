@@ -30,7 +30,7 @@ export function createPointerController({
   function installShiftListeners() {
     if (shiftKeydown) return;
     shiftKeydown = (event) => {
-      if (event.key === 'Shift' && drag) {
+      if (event.key === 'Shift' && drag && !drag.ancestorOnly) {
         drag.pinOnRelease = true;
         for (const id of drag.itemIds) {
           const node = graph._getNode(id);
@@ -42,7 +42,7 @@ export function createPointerController({
       }
     };
     shiftKeyup = (event) => {
-      if (event.key === 'Shift' && drag) {
+      if (event.key === 'Shift' && drag && !drag.ancestorOnly) {
         drag.pinOnRelease = false;
         for (const id of drag.itemIds) {
           const node = graph._getNode(id);
@@ -113,6 +113,33 @@ export function createPointerController({
       const shell = tile?.closest('.graph-node-shell');
       if (shell && event.pointerType !== 'touch' && !tile.classList.contains('bin-origin-ghost')) {
         const itemId = tile.dataset.id;
+        if (tile.classList.contains('ancestor-item')) {
+          // Assignment 003: an ancestor tile is draggable like any body —
+          // it moves under the pointer and floats again on release. It
+          // never selects (clicks navigate), never pins (even with
+          // Shift), and never persists: pinDraggedNodes would write a
+          // position and releaseDraggedNodes would remove the real
+          // folder's stored record where the ancestor id collides with
+          // one, so neither command is called.
+          drag = {
+            pointerId: event.pointerId,
+            itemIds: [itemId],
+            placementIds: new Map(),
+            primaryNodeId: itemId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startWorldX: null,
+            startWorldY: null,
+            initialPositions: new Map(),
+            pinOnRelease: false,
+            ancestorOnly: true,
+            moved: false,
+            thresholdPassed: false,
+          };
+          closeMenu();
+          event.preventDefault();
+          return;
+        }
         if (!session.selected.has(itemId)) {
           commands.selectItem(itemId, { shiftKey: false, ctrlKey: false, visibleItemIds: [] });
         }
@@ -161,7 +188,7 @@ export function createPointerController({
     if (drag && event.pointerId === drag.pointerId) {
       const session = store.getSession();
       const shiftHeld = event.shiftKey === true;
-      if (shiftHeld !== drag.pinOnRelease) {
+      if (!drag.ancestorOnly && shiftHeld !== drag.pinOnRelease) {
         drag.pinOnRelease = shiftHeld;
         for (const id of drag.itemIds) {
           const node = graph._getNode(id);
@@ -271,7 +298,7 @@ export function createPointerController({
         elements.grid.releasePointerCapture(event.pointerId);
       }
       if (drag.moved) {
-        drag.pinOnRelease = event.shiftKey === true;
+        if (!drag.ancestorOnly) drag.pinOnRelease = event.shiftKey === true;
         removeShiftListeners();
         clearDragTrail();
         setSuppressGraphClick(true);
@@ -281,6 +308,7 @@ export function createPointerController({
           itemIds: [...drag.itemIds],
           placementIds: drag.placementIds,
           pinOnRelease: drag.pinOnRelease,
+          ancestorOnly: drag.ancestorOnly,
         };
         drag = null;
 
@@ -308,6 +336,22 @@ export function createPointerController({
           }
           commands.pinDraggedNodes({ positions });
           graph._setSimulationDecay();
+        } else if (dragCopy.ancestorOnly) {
+          // The gesture was ordinary — the ancestor moved under the pointer
+          // — but nothing is persisted: ancestors never write a graph
+          // position, and releaseDraggedNodes would remove the real
+          // folder's stored record where the ancestor id collides with one.
+          // The body floats again like any unpinned item.
+          graph.ejectTrespassers(dragCopy.itemIds);
+          for (const id of dragCopy.itemIds) {
+            const node = graph._getNode(id);
+            if (node) {
+              node.fx = null;
+              node.fy = null;
+              node.positioned = false;
+            }
+          }
+          graph.reheat(0.25);
         } else {
           graph.ejectTrespassers(dragCopy.itemIds);
           commands.releaseDraggedNodes({ itemIds: dragCopy.itemIds });

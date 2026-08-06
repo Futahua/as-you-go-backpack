@@ -2,19 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createMarqueeController } from './public/app/interactions/marquee-controller.js';
 
-function createHarness() {
+function createHarness({ tiles: tileDefs = null } = {}) {
   const effects = { captured: 0, released: 0 };
   const commandCalls = [];
-  const tiles = [
+  const tiles = tileDefs ?? [
     { id: 'a', rect: { left: 10, top: 10, right: 60, bottom: 60 } },
     { id: 'b', rect: { left: 100, top: 10, right: 150, bottom: 60 } },
   ];
   const elements = {
     grid: {
-      querySelectorAll: () => tiles.map((t) => ({
-        dataset: { id: t.id },
-        getBoundingClientRect: () => t.rect,
-      })),
+      querySelectorAll: () => tiles.map((t) => {
+        const classes = new Set(t.classes ?? []);
+        return {
+          dataset: { id: t.id },
+          getBoundingClientRect: () => t.rect,
+          classList: {
+            contains: (c) => classes.has(c),
+          },
+        };
+      }),
       setPointerCapture: () => { effects.captured += 1; },
       hasPointerCapture: () => true,
       releasePointerCapture: () => { effects.released += 1; },
@@ -95,4 +101,17 @@ test('finish for an unrelated pointer is a no-op', () => {
   assert.equal(moved, null);
   assert.equal(h.effects.released, 0);
   assert.deepEqual(h.commandCalls, [['begin', false]]);
+});
+
+test('marquee selection excludes ancestor tiles', () => {
+  const h = createHarness({
+    tiles: [
+      { id: 'a', rect: { left: 10, top: 10, right: 60, bottom: 60 } },
+      { id: 'anc', rect: { left: 100, top: 10, right: 150, bottom: 60 }, classes: ['ancestor-item'] },
+    ],
+  });
+  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, preserveSelection: false });
+  h.controller.move({ pointerId: 1, clientX: 155, clientY: 55 });
+  const update = h.commandCalls.find(([name]) => name === 'update');
+  assert.deepEqual(update[1], ['a'], 'the ancestor tile is filtered out of the marquee');
 });

@@ -55,7 +55,7 @@ function shortcutRecord(state, shortcutId) {
 
 /** Resolves an id the way the renderer sees it: a group by its own id, or a
  * shortcut placement (by placement id) expanded with its shared data and
- * that placement's own parentId/order — mirroring what itemsIn/binnedItems
+ * that placement's own parentId/order - mirroring what itemsIn/binnedItems
  * emit, so callers can treat any selected id uniformly. */
 function item(state, itemId) {
   const asGroup = group(state, itemId);
@@ -95,7 +95,7 @@ function activeItem(state, candidate) {
 
 /** Walks up from parentId past any binned ancestors to find the nearest
  * still-active folder (or ROOT_ID). Used to restore an item nested inside
- * a binned folder without un-binning that folder — e.g. binning 3 in the
+ * a binned folder without un-binning that folder - e.g. binning 3 in the
  * chain 1>2>3>4>5 and then restoring 5 alone should land it directly under
  * 2, the nearest ancestor that's still active. */
 function nearestActiveAncestorId(state, parentId) {
@@ -127,7 +127,7 @@ function sorted(items) {
 }
 
 /** Expands each shortcut into one entry per active placement in `parentId`.
- * The emitted `id` IS the placement id — that's what gets selected, dragged,
+ * The emitted `id` IS the placement id - that's what gets selected, dragged,
  * moved, and binned. `shortcutId` is the shared record every placement of
  * the same shortcut has in common, used for edits, launching and reveal. */
 function shortcutPlacementsIn(state, parentId) {
@@ -181,7 +181,7 @@ export function binnedItems(state) {
         bin: placement.bin,
         linked: placementCount(candidate) > 1,
         // Whether this shortcut had more than one placement in total
-        // (active + binned) — unlike `linked` above (which only counts
+        // (active + binned) - unlike `linked` above (which only counts
         // currently-active placements, correct for the link badge/fork
         // prompt elsewhere), this stays true even when every placement
         // was binned at once, since the Bin still needs to distinguish
@@ -198,9 +198,9 @@ export function binnedItems(state) {
 }
 
 /** Lists the direct children of a binned folder, for expanding it inside
- * the Bin view. Nothing here was independently binned — a folder's
+ * the Bin view. Nothing here was independently binned - a folder's
  * children are still fully intact, just hidden from the normal view
- * because their ancestor is binned (see isUnderBinnedGroup) — so this
+ * because their ancestor is binned (see isUnderBinnedGroup) - so this
  * intentionally skips the "hidden by binned ancestor" filter itemsIn()
  * applies, while still excluding anything that has since been
  * independently binned itself (it already has its own top-level Bin
@@ -349,6 +349,11 @@ export function normalizeState(raw) {
       // no longer exists must be pruned rather than left dangling, and that
       // cannot be decided until the groups and shortcuts are normalized.
       itemSets: [],
+      // Filled in below, once every folder id is known (see
+      // normalizeTrailExpansionByContext). Defaults to empty everywhere, so
+      // legacy state without this field starts with every trail folder
+      // collapsed.
+      trailExpandedByContext: {},
     },
   };
 
@@ -377,12 +382,19 @@ export function normalizeState(raw) {
     ...state.groups.map((candidate) => candidate.id),
     ...state.shortcuts.map((candidate) => candidate.id),
   ]);
+  // Per-view trail expansion is pruned once every folder id is known: ids
+  // that are no longer valid folders are dropped, the `root` and `bin`
+  // pseudo heads are preserved, and unrelated view fields are untouched.
+  state.view.trailExpandedByContext = normalizeTrailExpansionByContext(
+    raw?.view?.trailExpandedByContext,
+    [ROOT_ID, 'bin', ...state.groups.map((candidate) => candidate.id)],
+  );
   return state;
 }
 
 /** Replaces the whole set list. Sets live in the view rather than beside the
  * items because they are a way of looking at the workspace, not a container in
- * it — an item's place in the folder tree is untouched by what it belongs to.
+ * it - an item's place in the folder tree is untouched by what it belongs to.
  *
  * Members are pruned against the current items on the way in, not only on
  * load: a set that never holds an id the workspace cannot resolve is one that
@@ -396,6 +408,46 @@ export function setItemSets(state, itemSets) {
     ...state,
     view: { ...state.view, itemSets: normalizeItemSets(itemSets, knownItemIds) },
   };
+}
+
+/** The explicit view-context key for trail expansion. Normal explorer views
+ * use `folder:<id>` (root included as `folder:root`) and Bin views use
+ * `bin:<id>` (the Bin top level as `bin:bin`), so the two can never collide.
+ * Trail expansion is remembered per key and defaults every trail folder to
+ * collapsed when a key has no entry. */
+export function trailContextKey(currentGroupId, binMode, binCurrentId) {
+  return binMode ? `bin:${binCurrentId ?? 'bin'}` : `folder:${currentGroupId ?? ROOT_ID}`;
+}
+
+/** Normalizes the per-view trail expansion map. Malformed keys/values are
+ * discarded, ids are deduped, ids that are no longer valid folders are
+ * pruned, and the `root`/`bin` pseudo heads are preserved where meaningful.
+ * An entry that ends up empty is dropped - "collapsed" is the same as
+ * absent. Unknown fields elsewhere in `view` are left untouched. */
+export function normalizeTrailExpansionByContext(value, validIds) {
+  const valid = new Set(validIds);
+  const map = {};
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return map;
+  for (const [key, entry] of Object.entries(value)) {
+    // Only the explicit context keys are accepted: folder:<id> for explorer
+    // views and bin:<id> for Bin views, pseudo heads included.
+    if (typeof key !== 'string' || !(key.startsWith('folder:') || key.startsWith('bin:'))) continue;
+    if (!Array.isArray(entry)) continue;
+    const ids = [...new Set(entry.filter((id) => typeof id === 'string' && valid.has(id)))];
+    if (ids.length === 0) continue;
+    map[key] = ids;
+  }
+  return map;
+}
+
+/** Sets one view context's trail expansion ids. An empty list removes the
+ * key, so a view with no saved choice behaves exactly like a fresh one. */
+export function setTrailExpandedByContext(state, contextKey, ids) {
+  const map = { ...(state.view?.trailExpandedByContext ?? {}) };
+  const unique = [...new Set(ids)];
+  if (unique.length > 0) map[contextKey] = unique;
+  else delete map[contextKey];
+  return { ...state, view: { ...state.view, trailExpandedByContext: map } };
 }
 
 export function migrateActions(actions) {
@@ -628,7 +680,7 @@ export function moveSelection(state, ids, destinationId = ROOT_ID) {
 /** Collapses every one of a shortcut's active placements into a single new
  * placement at `destinationId`. Used when cutting a linked shortcut from a
  * view where all of its placements are currently visible at once (e.g. the
- * top-level graph showing every edge) — the whole shared thing moves,
+ * top-level graph showing every edge) - the whole shared thing moves,
  * rather than any one specific location. Binned placements are untouched. */
 export function collapsePlacements(state, shortcutId, destinationId = ROOT_ID) {
   assertParent(state, destinationId);
@@ -791,7 +843,7 @@ export function restoreSelection(state, ids) {
         bin: undefined,
       };
     }
-    // Never itself binned — just nested inside a binned ancestor. Restoring
+    // Never itself binned - just nested inside a binned ancestor. Restoring
     // it alone reparents it to the nearest still-active ancestor, without
     // touching the binned folder it was pulled out of.
     if (!isUnderBinnedGroup(state, candidate)) return candidate;
