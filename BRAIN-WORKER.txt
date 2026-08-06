@@ -9,10 +9,10 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-06
 #
-# ACTIVE ASSIGNMENT: NONE — 013 AWAITS CREATOR AUTHORIZATION
-#   012/012R/012R2 are accepted and committed in Papers as ad8505c. The next
-#   honest step must run a bounded real helper/PowerShell compatibility probe
-#   against one disposable window, which requires explicit creator permission.
+# ACTIVE ASSIGNMENT: 013 — AUTHORIZED LIVE HELPER COMPATIBILITY PROBE
+#   Creator explicitly authorized the bounded helper + one uniquely titled
+#   disposable test window on 2026-08-06. No creator window, product wiring,
+#   build, install, Papers launch/restart or persistent runtime choice.
 #   005/007/008 still await creator eye checks where applicable.
 #
 # FRESH WORKER HANDOFF
@@ -20,9 +20,8 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 012R2 REVIEW: PASS
-#     BRAIN - Assignment 013 AUTHORIZATION GATE (NOT DISPATCHED)
-#   Do not execute 013 until BRAIN appends explicit creator authorization.
+#     BRAIN - Assignment 013 CREATOR AUTHORIZATION + DISPATCH
+#   Execute Assignment 013 only. Do not reopen or re-execute 003-012R2.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
 #   Papers latest reviewed capability snapshot is ad8505c.
@@ -36,7 +35,7 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   button / deletion guards are all DEAD. Do not port them.
 #
 # GIT STATE
-#   main latest — Papers reviewed through Assignment 012; no active work.
+#   main latest — Papers reviewed through Assignment 012; 013 is active.
 #   Papers ad8505c — reviewed Assignment 012 helper-process ownership seam.
 #   Papers a01b489 — reviewed Assignment 011 bounded JSON-lines transport.
 #   Papers 180ef86 — reviewed Assignment 010/010R capability boundary.
@@ -3852,3 +3851,80 @@ This probe intentionally launches a helper process and one disposable test
 window, so STANDING RULE 5 requires an explicit creator yes. Until BRAIN records
 that authorization and dispatches 013, WORKER must stop and must not execute the
 proposal.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013 CREATOR AUTHORIZATION + DISPATCH
+======================================================================
+
+AUTHORIZATION
+Creator answered "yes" to the explicitly scoped 013 live probe. WORKER may
+launch only the probe-owned helper process(es) needed to test locally available
+PowerShell runtimes and exactly one uniquely titled disposable test window at a
+time. This authorization does not extend to Papers launch/restart, creator
+windows, build/package/install, dependencies, product wiring or persistence.
+
+GOAL
+Prove the reviewed native vocabulary and six-command JSON-lines protocol work
+together as a long-lived helper on this machine, and determine the narrowest
+runtime compatibility fact needed for a later packaging decision.
+
+IMPLEMENTATION LOCATION / SCOPE
+- Work in the As you Go probe area under `probes/native-window/`; do not edit
+  Papers product source in 013.
+- Reuse/adapt the committed 009 P/Invoke/native functions. Do not create a
+  parallel implementation with different matching or mutation semantics.
+- Add a temporary/probe helper and harness/tests only. It may remain as reviewed
+  feasibility evidence, but it is not yet a production dependency or launcher.
+
+SAFETY IDENTITY RULES
+1. Generate a high-entropy unique title for the disposable window and record
+   its PID plus runtime/native identity from the helper's own list response.
+2. Resolve by the unique title only for initial discovery. Require exactly one
+   match; zero or multiple returns typed missing/ambiguous and performs no act.
+3. After discovery, every mutation targets only the returned opaque runtime id
+   and must verify the observed PID/title still match the probe-owned identity
+   before acting. On mismatch, fail closed and clean up by the harness-owned
+   process handle, never by guessing another window.
+4. Never act on a window existing before the probe. Never use broad title
+   substrings, foreground window, process name alone or first-enumerated match.
+
+REQUIRED PROTOCOL PROOF
+- Long-lived stdin/stdout UTF-8 JSON-lines, one response per valid request,
+  requestId/method correlation, multiple sequential and coalesced requests.
+- Exactly the accepted six methods: list, observe, minimize, restore, apply,
+  close. Unknown method, malformed JSON/schema/target/bounds and extra command-
+  like fields fail closed and cannot execute arbitrary text/path/script/handle.
+- Typed success/missing/ambiguous/denied/malformed outcomes as applicable; no
+  guessed target on zero/multiple match.
+- On the single disposable window: observe normal state/bounds; minimize;
+  restore; apply a bounded visible position/size; observe exact/toleranced OS
+  result as documented; close gracefully; verify it disappears.
+- Exercise fragmented UTF-8 input and multiple lines in one write. Protocol
+  stdout must contain JSON only; diagnostics go to stderr and remain bounded in
+  the harness transcript.
+- EOF and explicit harness shutdown terminate the helper without replay. Start
+  a fresh helper and prove it receives no previous mutation automatically.
+
+RUNTIME MATRIX
+- Read-only discover Windows PowerShell 5.1 (`powershell.exe`) and PowerShell 7
+  (`pwsh`) availability/version.
+- Run the same bounded protocol proof on each locally available runtime without
+  installing anything. A runtime-specific failure is evidence, not permission
+  to add a dependency or silently choose another architecture.
+- Record command basename, resolved executable path/version, exit code, all
+  assertions and cleanup verification. Do not record unrelated environment or
+  user-window details.
+
+MANDATORY CLEANUP
+Use finally-style cleanup around every run. Close/terminate only the helper and
+disposable window processes created by the harness, using retained process
+handles if protocol cleanup fails. At checkpoint, verify no probe helper or test
+window remains. If cleanup cannot be proven, stop immediately and report exact
+owned PID/title; do not continue testing.
+
+EVIDENCE / STOP
+Run probe-local fake/schema regressions plus the authorized live matrix. Run
+`git diff --check`; list exact changed files. Append `WORKER - Assignment 013
+CHECKPOINT` with runtime results, protocol assertion counts, window state/bounds
+transitions and explicit cleanup proof. No commit/push and no Papers/As you Go
+product build/install/launch/restart. Stop for BRAIN review.
