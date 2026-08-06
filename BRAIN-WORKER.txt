@@ -9,10 +9,10 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-06
 #
-# ACTIVE ASSIGNMENT: 012R2 — FINAL PROCESS-SEAM VALIDATION
-#   012R fixes the ownership holes and all 221 tests pass. Finish the actual
-#   stream-shape guard and make the backpressure/error regression enter its
-#   claimed phase. No architectural expansion or real process.
+# ACTIVE ASSIGNMENT: NONE — 013 AWAITS CREATOR AUTHORIZATION
+#   012/012R/012R2 are accepted and committed in Papers as ad8505c. The next
+#   honest step must run a bounded real helper/PowerShell compatibility probe
+#   against one disposable window, which requires explicit creator permission.
 #   005/007/008 still await creator eye checks where applicable.
 #
 # FRESH WORKER HANDOFF
@@ -20,12 +20,12 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 012R REVIEW: NARROW CORRECTION REQUIRED
-#     BRAIN - Assignment 012R2 DISPATCH
-#   Execute Assignment 012R2 only. Do not reopen or re-execute 003-012R.
+#     BRAIN - Assignment 012R2 REVIEW: PASS
+#     BRAIN - Assignment 013 AUTHORIZATION GATE (NOT DISPATCHED)
+#   Do not execute 013 until BRAIN appends explicit creator authorization.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
-#   Papers latest reviewed capability snapshot is a01b489.
+#   Papers latest reviewed capability snapshot is ad8505c.
 #   As you Go latest feature/probe snapshot is c87103c before this log update.
 #   The 009 snapshot subject is `probe: prove native window capability`.
 #   539d2af is the reviewed 008 feature snapshot; bbdf681 is pre-008;
@@ -36,7 +36,8 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   button / deletion guards are all DEAD. Do not port them.
 #
 # GIT STATE
-#   main latest — Papers reviewed through Assignment 011; 012R is active.
+#   main latest — Papers reviewed through Assignment 012; no active work.
+#   Papers ad8505c — reviewed Assignment 012 helper-process ownership seam.
 #   Papers a01b489 — reviewed Assignment 011 bounded JSON-lines transport.
 #   Papers 180ef86 — reviewed Assignment 010/010R capability boundary.
 #   As you Go c87103c — reviewed Assignment 009 native feasibility probe.
@@ -3725,3 +3726,129 @@ BOUNDARY / EVIDENCE
 No refactor beyond these points; retain all 012 prohibitions and the two-file
 scope. Preserve earlier dirty Papers files. Rerun focused/full tests, typecheck
 and diff check, append counts, then stop.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 012R2 PICKUP
+======================================================================
+
+UNDERSTOOD — FINAL VALIDATION/TEST PASS IN THE TWO 012 FILES ONLY
+1. COMPLETE CHILD SHAPE VALIDATION: isChildLike now requires every
+   callable — stdin write/onDrain/onError/end; stdout and stderr
+   onChunk/onEnd/end; process onExit/onError/kill. Construction failure
+   cleanup ends every AVAILABLE valid endpoint best-effort (robust when
+   the partial shape lacks an end method) and kills once, exposing no
+   transport. One missing/non-function-method regression per stream
+   group.
+2. BACKPRESSURED STDIN-ERROR PROOF: the fake stdin exposes write-call
+   evidence; the test waits until the write was actually invoked (one
+   write, false), verifies the send is still pending awaiting drain (no
+   drain), then emits the independent stdin error — asserting one write,
+   zero drains, one rejection with the preserved cause, one terminal and
+   full ownership cleanup. A queue-only rejection cannot pass.
+3. ASYNC END REJECTION: a regression where stdin/stdout/stderr end()
+   return REJECTED promises — after a bounded microtask turn: terminal
+   once, every end called once, child killed once, no unhandled
+   rejection, cause not replaced.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 012R2 CHECKPOINT
+======================================================================
+
+THREE POINTS CORRECTED (the two new 012 files only)
+
+1. COMPLETE CHILD SHAPE (helperProcessTransport.ts): isChildLike now
+   validates every required callable — stdin write/onDrain/onError/end,
+   stdout and stderr onChunk/onEnd/end, process onExit/onError/kill —
+   not mere object presence. Construction-failure cleanup ends every
+   AVAILABLE valid endpoint best-effort (robust when the partial shape
+   itself lacks an end method) and kills once. Regressions: 13 cases
+   (one missing/non-function method per stream-group member plus the
+   process methods) each throw 'missing required stdio' at construction,
+   end the available endpoints, and kill exactly once (0 kills only when
+   the kill method itself is the missing one); the existing
+   missing-stdio case now also asserts its available ends were called.
+2. ACTIVE BACKPRESSURE PROOF: the fake stdin exposes write-call
+   evidence; the test sets false-write behavior, calls send, polls until
+   the write was actually invoked (asserting one write and zero drains —
+   the send demonstrably awaits drain), THEN emits the independent stdin
+   error: one write total, zero drains, one rejection carrying the
+   preserved 'stdin error cause', one terminal, and full ownership
+   cleanup (all three ends + one kill). A queue-only rejection cannot
+   pass this test.
+3. ASYNC END REJECTION: a regression where stdin/stdout/stderr end()
+   return REJECTED promises: after a bounded microtask turn the terminal
+   fires once with the close cause, every end was called exactly once,
+   the child was killed exactly once, and no unhandled rejection
+   occurred (vitest fails on unhandled rejections, so the pass is the
+   evidence).
+
+EVIDENCE
+- Focused 010-012: 21 + 24 + 21 = 66 all pass. Full Papers unit suite:
+  23 files / 223 tests, ALL pass. npm run typecheck passes; git diff
+  --check clean (exit 0).
+- Files: only src/main/windows/helperProcessTransport.ts and
+  tests/unit/helperProcessTransport.test.ts. All earlier dirty Papers
+  files byte-for-byte untouched.
+
+BOUNDARY AND STOP
+No refactor beyond these points; injected fakes only; all 012
+prohibitions retained; nothing built, installed, launched, committed or
+pushed. Stopping for BRAIN re-review and the snapshot commit.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 012R2 REVIEW: PASS
+======================================================================
+
+VERDICT
+Accepted. The complete callable child shape is validated before exposure;
+partial valid endpoints are cleaned best-effort; the stdin-error regression
+enters an actual false-write/drain wait; and synchronous plus asynchronous end
+failures remain terminal-once. BRAIN inspected the exact files and reran 66/66
+focused tests, the full Papers suite (23 files / 223 tests), typecheck and diff
+check successfully.
+
+SNAPSHOT
+Papers commit ad8505c (`feat: add owned window helper process transport`):
+- NEW src/main/windows/helperProcessTransport.ts
+- NEW tests/unit/helperProcessTransport.test.ts
+
+Only those files were staged. Every earlier dirty Papers file remains unstaged.
+No process/helper/PowerShell/native window, product wiring, build, install,
+launch or restart occurred.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 013 AUTHORIZATION GATE (NOT DISPATCHED)
+======================================================================
+
+WHY WORK PAUSES HERE
+The pure/injected architecture is now proven through native vocabulary (009),
+typed client/supervisor (010), bounded JSON framing (011) and owned process seam
+(012). Another fake-only layer would add abstraction without reducing the main
+remaining risk: whether the chosen helper runtime works as a long-lived JSON-
+line process on the creator's actual Windows installation and can safely drive
+only a uniquely identified disposable window.
+
+PROPOSED BOUNDED 013
+- Reuse/adapt the already reviewed 009 native P/Invoke probe rather than invent
+  a second window-control implementation.
+- Determine, read-only, which local PowerShell runtimes are available (Windows
+  PowerShell 5.1 and/or PowerShell 7); do not install a runtime or dependency.
+- Build a temporary long-lived JSON-line helper proof outside product wiring.
+- Launch exactly one uniquely titled disposable test window owned by the probe.
+- Through stdin/stdout, prove list/observe/minimize/restore/apply/close using the
+  accepted six-method schema and fail-closed unknown/malformed/ambiguous cases.
+- Prove UTF-8 framing, multiple sequential requests, first-cause exit behavior,
+  and that no command/script/path/handle supplied in a request can escape the
+  fixed vocabulary.
+- Close the disposable window and helper in finally-style cleanup; verify both
+  are gone. Never enumerate-then-act on a nonunique target and never touch any
+  creator window.
+- Record exact runtime/version and evidence. No Papers/As you Go product IPC or
+  UI, no dependency, build/package/install, Papers launch/restart, commit/push,
+  or creator state edit.
+
+AUTHORITY REQUIRED
+This probe intentionally launches a helper process and one disposable test
+window, so STANDING RULE 5 requires an explicit creator yes. Until BRAIN records
+that authorization and dispatches 013, WORKER must stop and must not execute the
+proposal.
