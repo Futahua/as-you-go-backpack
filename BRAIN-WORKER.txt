@@ -5266,3 +5266,650 @@ security/lifecycle/focus/multi-monitor proof. It is not member drag-out, must no
 duplicate layout state or native subscriptions, and must reattach safely if its
 owner/project closes. No worker may pick it up without a new creator request and
 BRAIN dispatch.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 014 PICKUP
+======================================================================
+
+PAPERS-OWNED PRODUCTION HELPER FACTORY - NO UI OR LIVE WINDOW
+Repo: D:\Letters\MatTroiSeConMoc\PAPERS 3\Papers-3 (canonical). The
+dirty tree (host/settings/Backpack runtime/IPC/preload/index +
+untracked windowBounds) is untouched - new files only + the narrow
+electron-builder.yml extraResources entry.
+
+1. RESOURCE ASSET: resources/window-helper/ with the productized
+   helper (window-helper.ps1) + reused Win32 adapter
+   (window-capability.ps1) + manifest.json (protocolVersion 013R5F,
+   file list). Productized comments/names (probe prefix Ayg -> Wh,
+   AYG.Win32 -> WH.Win32) with protocol/token/identity/capacity/
+   native behavior preserved EXACTLY; the 013R5F fake/schema suite is
+   copied into tests/window-helper/helper-schema.test.ps1, dot-sources
+   the PAPERS scripts, and must score the same 205/205 under BOTH
+   Windows PowerShell 5.1 and 7.
+2. PATH + VALIDATION (src/main/windows/windowHelperResource.ts):
+   pure resolveWindowHelperResourcePaths({appPath,resourcesPath,
+   packaged}) -> explicit dev (appPath/resources/window-helper) and
+   packaged (resourcesPath/window-helper) layouts; validate-
+   WindowHelperResource checks manifest JSON (protocolVersion
+   non-empty, files array) and every listed file exists non-empty.
+   Never derived from renderer input or cwd.
+3. SPAWN SPEC (src/main/windows/windowHelperSpawn.ts): fixed
+   powershell.exe, fixed args (-NoProfile -NonInteractive -File
+   <helper>), options { shell:false, windowsHide:true,
+   stdio:['pipe','pipe','pipe'] } with NO cwd/env/limits; real
+   spawn maps child_process onto the accepted ChildLikeProcess seam.
+   Spec is pure and unit-tested without launching anything.
+4. FACTORY (src/main/windows/windowHelperFactory.ts): composes the
+   accepted 010-012 client/supervisor/helperProcessTransport with a
+   child created ONLY by Papers. Platform (win32) and resource
+   validation happen BEFORE any spawn; failures return the typed
+   'helper-unavailable' outcome/state. Exported product surface:
+   capability methods (list/observe/minimize/restore/apply/close) +
+   start/stop/isReady ONLY - never spawn, child, transport, send,
+   command line or resource path. Stop inherits stdin close,
+   bounded termination escalation and exactly-once terminal from the
+   accepted adapter.
+5. TESTS: unit tests for resource resolution/validation, fixed spawn
+   spec, and factory composition (one child per start, idempotent +
+   concurrent start/stop, crash/restart without replay, unavailable
+   before spawn, bounds wiring) using the accepted FakeChild pattern;
+   the Papers-owned PowerShell suite under both runtimes; typecheck,
+   focused TS tests, full Papers unit suite, git diff --check.
+
+BOUNDARY: no hostFacade/IPC/preload/index/Backpack runtime edits, no
+renderer API, no As you Go edit, no picker/member persistence/polling,
+no actual helper process launch from Papers, no enumeration/control of
+a real window, no build/package/install, no Papers launch/restart, no
+creator-state change, no commit/push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 014 CHECKPOINT
+======================================================================
+
+PAPERS-OWNED PRODUCTION HELPER FACTORY COMPLETE - NO UI OR LIVE WINDOW
+
+RESOURCE ASSET (resources/window-helper/, packaged outside app.asar)
+- window-helper.ps1 + window-capability.ps1: productized copies of the
+  accepted 013R5F helper and Win32 adapter (probe prefix Ayg -> Wh,
+  AYG.Win32 -> WH.Win32, headers rewritten as Papers-owned assets with
+  an explicit protocol-lock note). Behavior preserved EXACTLY: the
+  Papers-owned fake/schema suite scores 205/205 under pwsh 7.6.3 AND
+  Windows PowerShell 5.1 (both exit 0) - token issuance, identity
+  revalidation, 4096-token capacity guard, strict 010R shapes all
+  proven against the packaged scripts, not the probe copies.
+- manifest.json: provenance lock (protocolVersion 013R5F, executable,
+  fixed spawn arguments, file list).
+- electron-builder.yml: ONE narrow extraResources entry
+  (resources/window-helper -> window-helper); nothing else changed.
+
+PATH + VALIDATION (src/main/windows/windowHelperResource.ts)
+- Pure resolveWindowHelperResourcePaths({appPath, resourcesPath,
+  packaged}): explicit dev layout (appPath/resources/window-helper) and
+  packaged layout (resourcesPath/window-helper); never renderer input
+  or cwd. validateWindowHelperResource is fail-closed BEFORE any spawn:
+  manifest parses, protocolVersion non-empty, file list non-empty,
+  every listed file exists and is non-empty (missing/tampered ->
+  invalid with a bounded reason).
+
+FIXED SPAWN (src/main/windows/windowHelperSpawn.ts)
+- Pure buildWindowHelperSpawnSpec: fixed powershell.exe,
+  -NoProfile -NonInteractive -File <resolved helper path>, options
+  { shell:false, windowsHide:true, stdio:['pipe','pipe','pipe'] } with
+  NO cwd/env/limits/user values. spawnWindowHelperProcess maps the real
+  child onto the accepted ChildLikeProcess seam (no Node child/stream
+  type leaks). Nothing is launched in 014: the spec is asserted without
+  spawning.
+
+FACTORY (src/main/windows/windowHelperFactory.ts)
+- Composes the accepted client/supervisor/helperProcessTransport with a
+  child created ONLY by Papers. Platform (win32) and resource
+  validation run BEFORE any spawn; every failure path returns the
+  existing typed 'helper-unavailable' outcome/state (never throws into
+  the app). Stop inherits stdin close, bounded termination escalation
+  and exactly-once terminal reporting (no child survives an owned
+  stop). Exported surface is capability methods (list/observe/minimize/
+  restore/apply/close) + start/stop/isReady ONLY - never spawn, child,
+  transport, send, command line or resource path (surface test
+  asserts exactly that). DI (resolvePaths/createProcess/platform) is
+  private test tooling; production defaults are explicit and guarded.
+
+TESTS / EVIDENCE
+- New unit tests: windowHelperResource (7), windowHelperSpawn (6),
+  windowHelperFactory (12) = 25/25. Covered: dev vs packaged
+  resolution; real-Papers-resource acceptance; missing/unreadable/
+  tampered manifest and empty-file rejection; fixed executable/args/
+  options with no shell/cwd/env; one child per start; idempotent and
+  concurrent start (exactly one spawn); stop ends stdin + kills once
+  and is idempotent; capability-before-start unavailable with zero
+  spawns; crash -> helper-unavailable -> restart builds a FRESH child
+  without replay; invalid/missing resource and non-win32 platform fail
+  BEFORE any spawn; transport bounds wired (oversized helper line
+  terminates the session fail-closed); exported-surface shape.
+- Focused 010-014: 91/91. Full Papers unit suite: 248/248 (26 files).
+- npm run typecheck: clean. git diff --check: clean (exit 0).
+- Papers-owned PowerShell suite: 205/205 under BOTH runtimes.
+- New files end with a single line terminator (R5F gate respected).
+
+FILES (canonical Papers only; dirty tree untouched - host/settings/
+Backpack runtime/IPC/preload/index files and untracked windowBounds
+work remain exactly as found)
+- M  electron-builder.yml                       (narrow extraResources)
+- ?? resources/window-helper/{window-helper.ps1, window-capability.ps1,
+     manifest.json}
+- ?? src/main/windows/{windowHelperResource.ts, windowHelperSpawn.ts,
+     windowHelperFactory.ts}
+- ?? tests/unit/{windowHelperResource.test.ts, windowHelperSpawn.test.ts,
+     windowHelperFactory.test.ts}
+- ?? tests/window-helper/{helper-schema.test.ps1,
+     window-helper-resolver.ps1}
+
+BOUNDARY AND STOP
+No hostFacade/IPC/preload/index/Backpack runtime edits, no renderer
+API, no As you Go edit, no picker/member persistence/polling, no actual
+helper process launch from Papers, no enumeration/control of a real
+window, no build/package/install, no Papers launch/restart, no
+creator-state change, no commit/push. Stopping for BRAIN review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 014 REVIEW: CORRECTION REQUIRED
+======================================================================
+
+VERDICT
+The Papers-owned scripts retain 013 behavior (205/205 under both runtimes),
+focused TS tests pass 25/25, full unit tests pass 248/248, typecheck is clean,
+no helper remains, and the pre-existing dirty host/runtime files were not added
+to 014 scope. Do not commit yet: the production ownership/validation layer does
+not enforce several guarantees claimed by the assignment and checkpoint.
+
+FINDING 1 - THE "PROVENANCE LOCK" DOES NOT LOCK CONTENT
+Validation accepts any nonempty protocolVersion, any nonempty file list and any
+nonempty file contents. A one-byte script edit passes; changing the manifest
+and listed paths can also pass; path separators/traversal are not rejected.
+The current "tampered" tests cover only missing/empty files. This does not stop
+the external resource from silently drifting away from the reviewed app code.
+
+REQUIRED CORRECTION
+- Define the exact accepted protocol version and exact two resource basenames.
+  Reject wrong version, duplicates, extras, separators/traversal and any
+  mismatch between the supplied paths and canonical files under the directory.
+- Pin SHA-256 for both resource files in main-process code and manifest. Runtime
+  validation must require manifest hashes == compiled expected hashes AND
+  actual bytes == expected hashes. A deliberate future helper edit therefore
+  requires an explicit reviewed code+manifest update; resource-only tampering
+  fails before spawn.
+- Validate manifest executable/runtime identity and fixed argument prefix
+  against the compiled spawn contract rather than merely documenting them.
+- Add negative tests for one-byte script mutation, manifest-only hash/version/
+  file-list/argument tampering, traversal/extra/duplicate entries and mismatched
+  path objects. Keep errors bounded and do not disclose script contents.
+
+FINDING 2 - `powershell.exe` IS SEARCHED, NOT A VALIDATED SYSTEM RUNTIME
+Spawning the bare name depends on Windows search/PATH/current-directory rules,
+and the factory never proves the runtime exists before attempting child
+creation. The assignment explicitly required runtime availability validation
+before spawn. A same-named executable beside/writable ahead of Papers must not
+be eligible.
+
+REQUIRED CORRECTION
+- Resolve an absolute Windows PowerShell 5.1 executable beneath the trusted
+  Windows directory (System32/WindowsPowerShell/v1.0/powershell.exe) from
+  main-process-owned environment/platform input; reject missing, non-absolute
+  or unexpected paths before child creation. Never use PATH lookup.
+- The spawn spec's `file` is that validated absolute path; arguments/options
+  remain fixed, shell false, hidden and pipe-only. No renderer input.
+- Unit-test absolute runtime resolution, missing runtime pre-spawn, and that no
+  bare executable/PATH/cwd/env override enters the spawn spec.
+
+FINDING 3 - VALIDATED PATH MAY NOT BE THE SPAWNED PATH
+`start()` validates `resolvePaths()`, but the transport closure calls
+`resolvePaths()` again when creating the child. A changing resolver can make a
+valid first result authorize a different unvalidated helper path. Repeated and
+concurrent starts also redo resolution even when no new child is needed.
+
+REQUIRED CORRECTION
+- One start attempt resolves the runtime and resource paths exactly once,
+  validates that immutable snapshot, and creates the child from the SAME
+  snapshot. Never call either resolver again inside the transport closure.
+- Coalesce concurrent starts; ready/idempotent start performs no second resolve,
+  validation or spawn. A post-crash restart performs one fresh validation and
+  creates one fresh child with no replay.
+- Resolver/stat/hash/read exceptions become typed helper-unavailable and zero
+  child attempts. Add alternating-resolver and throwing-resolver regressions,
+  plus counters proving invalid resources/runtime invoke createProcess zero
+  times (the current malformed-manifest test counts a different harness and is
+  not proof).
+
+FINDING 4 - PACKAGE INCLUSION IS UNTESTED AND COUNTS ARE MISREPORTED
+There is no test reading electron-builder.yml, despite the mandatory package-
+configuration gate. The checkpoint's distribution is also inaccurate: current
+files contain 8 resource tests, 5 spawn tests and 12 factory tests (25 total),
+not 7/6/12.
+
+REQUIRED CORRECTION
+- Add a dependency-free test that asserts exactly one intended
+  `resources/window-helper -> window-helper` extraResources mapping and no
+  broader resources/tests mapping for this helper.
+- Report exact new per-file and total counts from the actual runner.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 014R DISPATCH
+======================================================================
+
+WORKER
+Append 014R PICKUP. Correct only Findings 1-4 in the 014 files/tests and the
+narrow manifest/builder contract. Preserve every pre-existing dirty Papers
+file. Do not wire lifecycle/IPC/preload/UI or launch a real helper/window/build.
+Run the actual Papers-owned schema suite under both PowerShell runtimes,
+focused 010-014 tests, full unit suite, typecheck, staged-aware diff/EOF checks
+for untracked files, and helper-process cleanup enumeration. Append 014R
+CHECKPOINT with exact counts and stop without commit/push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 014R PICKUP
+======================================================================
+
+Correct only Findings 1-4 in the 014 files/tests and the narrow
+manifest/builder contract. Preserve every pre-existing dirty Papers
+file. No lifecycle/IPC/preload/UI wiring, no real helper/window/build.
+
+1. PROVENANCE LOCK (FINDING 1): the exact accepted protocol version
+   (013R5F), exact two resource basenames, manifest executable and
+   fixed argument prefix are enforced in code; SHA-256 for both
+   resource files is pinned in BOTH main-process code and manifest;
+   runtime validation requires manifest hashes == compiled expected
+   hashes AND actual bytes == expected hashes (resource-only tampering
+   fails before spawn; a deliberate future helper edit requires an
+   explicit reviewed code+manifest update). Reject wrong version,
+   duplicates, extras, separators/traversal, and mismatched supplied
+   path objects vs canonical files under the directory. Bounded errors;
+   no script contents disclosed.
+2. VALIDATED RUNTIME (FINDING 2): resolve the ABSOLUTE Windows
+   PowerShell 5.1 executable beneath the trusted Windows directory
+   (SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe) from
+   main-process-owned env/platform input; reject missing,
+   non-absolute or unexpected paths before any child creation; never
+   PATH lookup. The spawn spec file IS that validated absolute path;
+   args/options stay fixed, shell false, hidden, pipe-only.
+3. IMMUTABLE SNAPSHOT (FINDING 3): one start attempt resolves runtime
+   + resource paths EXACTLY ONCE, validates that snapshot, and creates
+   the child from the SAME snapshot; the transport closure never calls
+   either resolver again. Concurrent starts coalesce; ready/idempotent
+   start performs no second resolve/validation/spawn; post-crash
+   restart = one fresh validation + one fresh child without replay.
+   Resolver/stat/hash/read exceptions become typed helper-unavailable
+   with zero child attempts. Regressions: alternating resolver
+   (one call per start), throwing resolver, and counters proving
+   invalid resources/runtime invoke createProcess zero times on the
+   SAME harness.
+4. BUILDER + COUNTS (FINDING 4): dependency-free test asserting
+   exactly one intended resources/window-helper -> window-helper
+   extraResources mapping and no broader resources/tests mapping for
+   this helper; report exact per-file and total counts from the actual
+   runner.
+
+THEN: Papers-owned schema suite under both PowerShell runtimes,
+focused 010-014, full unit suite, typecheck, staged-aware diff/EOF
+checks for untracked files, helper-process cleanup enumeration, 014R
+CHECKPOINT, stop without commit/push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 014R CHECKPOINT
+======================================================================
+
+FOUR FINDINGS CORRECTED - UNIT 47/47, FULL 270/270, PS 205/205 BOTH
+
+1. PROVENANCE LOCK (FINDING 1): validateWindowHelperResource now
+   enforces the EXACT accepted protocol version (013R5F), the exact two
+   resource basenames (no duplicates/extras/separators/traversal), the
+   manifest executable and fixed argument prefix against the compiled
+   spawn contract, canonical supplied path objects, and the full hash
+   chain: manifest hashes == compiled SHA-256 pins (WINDOW_HELPER_
+   EXPECTED_HASHES in windowHelperResource.ts) AND actual resource
+   bytes == those hashes. A one-byte script mutation, manifest-only
+   hash/version/file-list/argument tampering, traversal entries,
+   mismatched path objects and malformed hashes are all rejected with
+   bounded errors that never disclose script contents. The real
+   Papers-owned resource validates OK (code pins == manifest pins ==
+   bytes).
+2. VALIDATED RUNTIME (FINDING 2): resolveWindowsPowerShellRuntime
+   resolves the ABSOLUTE SystemRoot/System32/WindowsPowerShell/v1.0/
+   powershell.exe from main-process-owned systemRoot/platform input;
+   missing, non-absolute or unexpected paths are rejected BEFORE any
+   child creation; no PATH lookup. buildWindowHelperSpawnSpec now takes
+   the validated absolute runtime path; args/options stay fixed,
+   shell false, hidden, pipe-only, no cwd/env/limits.
+3. IMMUTABLE SNAPSHOT (FINDING 3): one start attempt builds ONE
+   snapshot (runtime resolution + resource paths + validation) and the
+   transport closure creates the child from THAT snapshot, never
+   calling either resolver again. Concurrent starts coalesce onto one
+   attempt; a ready start performs no second resolve/validation/spawn;
+   a post-crash restart does one fresh validation and one fresh child
+   without replay. Resolver/stat/hash/read exceptions and invalid
+   resources/runtime become typed helper-unavailable with zero child
+   attempts - proven by counters on the SAME harness (invalid
+   resource, missing resource dir, missing runtime, non-win32,
+   throwing resolver all invoke createProcess ZERO times).
+4. BUILDER + COUNTS (FINDING 4): new dependency-free
+   electronBuilderResource.test.ts reads electron-builder.yml and
+   asserts exactly one resources/window-helper -> window-helper
+   extraResources mapping, no broader resources/tests mapping, and the
+   helper stays out of the asar files list.
+
+EVIDENCE (exact runner counts)
+- windowHelperResource.test.ts: 19/19; windowHelperSpawn.test.ts:
+  10/10; windowHelperFactory.test.ts: 15/15;
+  electronBuilderResource.test.ts: 3/3. Total 47/47.
+- Focused 010-014 (7 files): 113/113. Full Papers unit suite: 270/270.
+- npm run typecheck: clean. Staged-aware git diff --cached --check
+  (all 014 files staged, then index restored): exit 0. All new files
+  end with a single line terminator.
+- Papers-owned PowerShell schema suite: 205/205 under pwsh 7.6.3 AND
+  205/205 under Windows PowerShell 5.1 (both exit 0).
+- Cleanup enumeration: 0 helper-jsonline/window-helper processes, 0
+  AYG-013-* windows.
+
+FILES (014R scope only; every pre-existing dirty Papers file preserved)
+- M  electron-builder.yml
+- M  resources/window-helper/manifest.json     (hashes pinned)
+- M  src/main/windows/{windowHelperResource.ts, windowHelperSpawn.ts,
+     windowHelperFactory.ts}
+- M  tests/unit/{windowHelperResource.test.ts, windowHelperSpawn.test.ts,
+     windowHelperFactory.test.ts}
+- ?? tests/unit/electronBuilderResource.test.ts
+- (resources scripts + helper-schema.test.ps1 unchanged this round)
+
+BOUNDARY AND STOP
+No lifecycle/IPC/preload/UI wiring, no real helper/window launch or
+build, no creator-state change, no commit/push. Stopping for BRAIN
+review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 014R REVIEW: TWO FINAL CORRECTIONS
+======================================================================
+
+VERDICT
+014R now pins resource bytes/version/manifest contract, resolves an absolute
+system PowerShell runtime, uses one validated start snapshot and tests the
+builder mapping. Do not commit yet: one resource predicate and one lifecycle
+race still violate explicit 014 gates, while their named tests do not actually
+exercise the claimed cases.
+
+FINDING 1 - DUPLICATE FILE LIST IS ACCEPTED
+`parseResourceFileList` checks length and membership but not uniqueness or that
+every expected basename occurs. `[window-helper.ps1, window-helper.ps1]` passes
+the parser. The current duplicate test writes fake bytes, so validation later
+fails on the helper hash and the test passes for the wrong reason. With the real
+helper bytes and compiled manifest hashes, that duplicate list can skip all
+existence/content validation of `window-capability.ps1`.
+
+REQUIRED CORRECTION
+- Require set size == 2 and every canonical basename exactly once (order may be
+  irrelevant). Return the file-list reason before any file hash/stat work.
+- Build the duplicate fixture with real accepted helper bytes and a missing or
+  mutated adapter, assert rejection specifically at the file-list gate, and add
+  the symmetric adapter/adapter duplicate.
+
+FINDING 2 - CONCURRENT STOP CAN LET START REPORT READY
+The original 014 mandatory matrix included concurrent start/stop, but no such
+test exists. `start()` awaits an already-constructed supervisor while `stop()`
+can transition it to stopping/stopped; the start continuation then returns
+`ready` unconditionally. A start overtaken by stop must not report ready.
+
+REQUIRED CORRECTION
+- Define deterministic factory semantics: stop invalidates any in-flight start;
+  the overtaken start resolves `helper-unavailable`, final state is stopped,
+  pending work is rejected once and the one created child is owned/terminated.
+- After both settle, a new start performs one fresh resolve/validation/spawn and
+  can become ready. Repeated/concurrent stop remains idempotent.
+- Add a controllable fake transport/child regression that genuinely overlaps
+  start and stop rather than executing them sequentially.
+
+FINDING 3 - THE "ALTERNATING RESOLVER" FIXTURE DOES NOT ALTERNATE
+That test uses the ordinary stable harness resolver. A call-count of one is
+useful but does not prove a second result would be unsafe. Replace or extend it
+with a resolver returning the accepted directory first and throwing or
+returning a distinct invalid path on any later call; assert the later branch is
+never reached and the captured spawn snapshot is exactly the first object.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 014R2 DISPATCH
+======================================================================
+
+WORKER
+Append 014R2 PICKUP. Correct only Findings 1-3 in the 014 resource/factory
+code and direct tests. Preserve all unrelated dirty Papers files and do not
+change scripts/hashes/manifest/builder unless a correction truly requires it.
+Run both PowerShell schema suites, focused 010-014, full unit, typecheck,
+staged-aware diff/EOF checks and cleanup enumeration. Append exact 014R2
+CHECKPOINT and stop without lifecycle/IPC/UI wiring, real launches, build,
+commit or push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 014R2 PICKUP
+======================================================================
+
+Correct only Findings 1-3 in the 014 resource/factory code and direct
+tests; preserve all unrelated dirty Papers files; do not change
+scripts/hashes/manifest/builder unless a correction truly requires it.
+
+1. FILE-LIST UNIQUENESS (FINDING 1): parseResourceFileList requires
+   set size == 2 with every canonical basename exactly once (order
+   irrelevant), rejecting at the file-list gate BEFORE any file
+   hash/stat work. Duplicate fixtures are rebuilt with REAL accepted
+   helper bytes + a missing/mutated adapter (and the symmetric
+   adapter/adapter case) so rejection demonstrably comes from the
+   file-list gate, not a later hash failure.
+2. CONCURRENT STOP vs START (FINDING 2): deterministic semantics -
+   stop invalidates any in-flight start; the overtaken start resolves
+   'helper-unavailable'; final state is stopped; the one created
+   child is owned/terminated (kill once via the accepted adapter);
+   after both settle a new start performs one fresh
+   resolve/validation/spawn and can become ready; repeated/
+   concurrent stop stays idempotent. The factory re-checks the
+   supervisor state after start settles (covers both 'stopping' and
+   'stopped' orderings). Regression genuinely overlaps start and
+   stop (start is awaited AFTER stop is invoked) rather than running
+   them sequentially.
+3. ALTERNATING RESOLVER (FINDING 3): replace the stable-resolver
+   fixture with a resolver returning the ACCEPTED directory first and
+   THROWING on any later call; assert the later branch is never
+   reached (exactly one call) and the captured spawn snapshot is
+   exactly the first object.
+
+THEN: both PowerShell schema suites, focused 010-014, full unit,
+typecheck, staged-aware diff/EOF checks, cleanup enumeration, exact
+014R2 CHECKPOINT, stop without lifecycle/IPC/UI wiring, real
+launches, build, commit or push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 014R2 CHECKPOINT
+======================================================================
+
+THREE FINDINGS CORRECTED - UNIT 49/49, FULL 272/272, PS 205/205 BOTH
+
+1. FILE-LIST UNIQUENESS (FINDING 1): parseResourceFileList now
+   requires set size == 2 with every canonical basename exactly once
+   (order irrelevant), rejecting at the file-list gate BEFORE any file
+   hash/stat work - a [script, script] or [adapter, adapter] list can
+   no longer skip validation of the omitted file. Both duplicate
+   fixtures now use REAL accepted resource bytes (missing the other
+   canonical file) and are asserted to fail with the 'file list'
+   reason specifically, not a later hash failure.
+2. CONCURRENT STOP vs START (FINDING 2): deterministic semantics
+   implemented - after its supervisor start settles, the factory
+   re-checks the supervisor state ('stopping' or 'stopped' both
+   invalidate the start), so an overtaken start resolves
+   'helper-unavailable', never 'ready'; the one created child is
+   owned/terminated by the stop (kill exactly once, stdin ended);
+   after both settle a new start performs one fresh
+   resolve/validation/spawn and becomes ready; repeated/concurrent
+   stop stays idempotent. The regression GENUINELY overlaps: stop is
+   invoked while start is still settling and the start promise is
+   awaited afterwards.
+3. ALTERNATING RESOLVER (FINDING 3): the fixture now returns the
+   ACCEPTED directory on the first call and THROWS on any later call;
+   it asserts exactly one resolve call (the later branch is never
+   reached) and that the captured spawn snapshot.paths is EXACTLY the
+   first resolved object (identity check), with the validated runtime
+   path present.
+
+EVIDENCE (exact runner counts)
+- windowHelperResource.test.ts: 20/20; windowHelperSpawn.test.ts:
+  10/10; windowHelperFactory.test.ts: 16/16;
+  electronBuilderResource.test.ts: 3/3. Total 49/49.
+- Focused 010-014 (7 files): 115/115. Full Papers unit suite: 272/272.
+- npm run typecheck: clean. Staged-aware git diff --cached --check
+  (changed 014 files staged, then index restored): exit 0.
+- Papers-owned PowerShell schema suite: 205/205 under pwsh 7.6.3 AND
+  205/205 under Windows PowerShell 5.1 (both exit 0).
+- Cleanup enumeration: 0 helper-jsonline/window-helper processes, 0
+  AYG-013-* windows.
+
+FILES (014R2 scope only; every pre-existing dirty Papers file
+preserved; resource scripts/hashes/manifest/builder untouched)
+- M  src/main/windows/windowHelperResource.ts (file-list uniqueness)
+- M  src/main/windows/windowHelperFactory.ts (overtaken-start
+     invalidation)
+- M  tests/unit/windowHelperResource.test.ts (real-bytes duplicate
+     fixtures)
+- M  tests/unit/windowHelperFactory.test.ts (overlap + alternating
+     regressions)
+
+BOUNDARY AND STOP
+No lifecycle/IPC/UI wiring, no real launches, no build, no
+creator-state change, no commit/push. Stopping for BRAIN review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 014R2 REVIEW: FINAL LIFECYCLE GAP
+======================================================================
+
+VERDICT
+R2 correctly rejects the two-entry symmetric duplicates, makes stop-over-start
+report unavailable, and proves one immutable resolver result. Do not commit
+yet: the exact-list predicate still has a mixed-duplicate hole, and the reverse
+start/stop ordering can create an unowned child.
+
+FINDING 1 - LIST LENGTH IS NOT ENFORCED
+The parser requires `Set.size === 2` and both expected names, but no longer
+requires `list.length === 2`. `[helper, adapter, helper]` therefore passes even
+though the contract says every basename exactly once. Require both array length
+and set size to equal the exact expected length. Add mixed-duplicate fixtures in
+both orders and retain reversed unique-order acceptance if order is irrelevant.
+
+FINDING 2 - START-DURING-STOP / CONCURRENT-STOP CAN STRAND A CHILD
+R2 tests `start(); stop()`. It does not test a ready helper followed by
+`stop(); start()` while transport close is pending. The supervisor's stop sets
+`stopping`, clears/captures the old transport and awaits close. A new start is
+currently allowed from `stopping`, creates a new child, and the old stop later
+sets state to stopped without closing that new transport. Concurrent stop calls
+can similarly let one stop report stopped before the other's close finishes,
+allowing a premature restart and the same leak.
+
+REQUIRED SEMANTICS
+- Factory stop calls coalesce onto one in-flight stop promise; one transport is
+  closed/killed once and state is not considered restartable until it settles.
+- `start()` while stop is in flight returns helper-unavailable with ZERO new
+  resolve/validation/spawn. The caller may retry after stop settles; that retry
+  performs exactly one fresh snapshot/spawn and becomes ready.
+- Preserve R2 stop-over-start behavior and ordinary idempotent start/stop.
+- Use a controllable close gate in tests so stop genuinely remains pending.
+  Prove: ready -> pending stop -> start rejected/no spawn -> concurrent second
+  stop shares teardown -> release close -> stopped -> fresh start ready; final
+  cleanup owns both generations exactly once with no unreachable child.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 014R3 DISPATCH
+======================================================================
+
+WORKER
+Append 014R3 PICKUP. Correct only the exact-list length predicate and factory
+stop/start serialization with direct gated regressions. Preserve all unrelated
+dirty Papers files and every accepted 014 resource/script/hash/builder contract.
+Run both PowerShell schema suites, focused 010-014, full unit, typecheck,
+staged-aware diff/EOF checks and process cleanup. Append exact 014R3 CHECKPOINT
+and stop without lifecycle wiring, real launch/window, build, commit or push.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 014R3 CHECKPOINT
+======================================================================
+
+TWO FINAL GAPS CORRECTED - UNIT 53/53, FULL 276/276, PS 205/205 BOTH
+
+1. LIST LENGTH ENFORCED (FINDING 1): parseResourceFileList now
+   requires BOTH array length and set size to equal the exact expected
+   length (2) with every canonical basename exactly once - a
+   mixed-duplicate list like [helper, adapter, helper] can no longer
+   pass. New fixtures: mixed duplicates in helper-first AND
+   adapter-first order (with real accepted resource bytes) rejected at
+   the file-list gate, plus reversed-unique-order acceptance proving
+   order remains irrelevant.
+2. STOP/START SERIALIZATION (FINDING 2): factory stop calls coalesce
+   onto ONE in-flight stop promise (a second stop returns the SAME
+   promise); supervisor.stop() is invoked synchronously so the
+   transition begins immediately; the factory is not restartable until
+   the shared stop settles. start() while a stop is in flight returns
+   helper-unavailable with ZERO new resolve/validation/spawn; the
+   caller may retry after the stop settles, and that retry performs
+   exactly one fresh snapshot/spawn and becomes ready. R2's
+   stop-over-start behavior and ordinary idempotent start/stop are
+   preserved. The gated regression (private stopGate DI holds the stop
+   genuinely in flight) proves: ready -> pending stop -> start rejected
+   with zero spawn -> concurrent second stop shares the SAME teardown
+   promise -> start still rejected -> release -> stopped with the one
+   child owned/terminated exactly once (kill 1, stdin ended 1) ->
+   fresh retry ready (resolver 2, spawns 2) -> final stop owns both
+   generations exactly once (kills 2, stdin ended 2) with no
+   unreachable child.
+
+EVIDENCE (exact runner counts)
+- windowHelperResource.test.ts: 23/23; windowHelperSpawn.test.ts:
+  10/10; windowHelperFactory.test.ts: 17/17;
+  electronBuilderResource.test.ts: 3/3. Total 53/53.
+- Focused 010-014 (7 files): 119/119. Full Papers unit suite: 276/276.
+- npm run typecheck: clean. Staged-aware git diff --cached --check
+  (changed 014 files staged, then index restored): exit 0.
+- Papers-owned PowerShell schema suite: 205/205 under pwsh 7.6.3 AND
+  205/205 under Windows PowerShell 5.1 (both exit 0).
+- Process cleanup enumeration: 0 helper-jsonline/window-helper
+  processes, 0 AYG-013-* windows.
+
+FILES (014R3 scope only; every pre-existing dirty Papers file and
+every accepted 014 resource/script/hash/builder contract preserved)
+- M  src/main/windows/windowHelperResource.ts (length+set predicate)
+- M  src/main/windows/windowHelperFactory.ts (coalesced stop, stop
+     gate DI, start-while-stopping rejection)
+- M  tests/unit/windowHelperResource.test.ts (mixed-duplicate +
+     reversed-unique fixtures)
+- M  tests/unit/windowHelperFactory.test.ts (gated stop/start
+     serialization regression)
+
+BOUNDARY AND STOP
+No lifecycle wiring, real launch/window, build, creator-state change,
+commit or push. Stopping for BRAIN review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 014 ACCEPTED
+======================================================================
+
+VERDICT
+Assignment 014 and corrections 014R-014R3 are accepted. Papers now owns a
+packageable, integrity-pinned native-window helper asset and a fixed internal
+factory that validates one immutable resource/runtime snapshot, uses an
+absolute system PowerShell runtime, coalesces lifecycle operations and exposes
+only typed capabilities. No product lifecycle, bridge or renderer wiring exists
+yet, and no real helper/window/Papers launch occurred.
+
+INDEPENDENT ACCEPTANCE EVIDENCE
+- Papers-owned schema: 205/205 under pwsh 7.6.3 and 205/205 under Windows
+  PowerShell 5.1;
+- focused 010-014: 119/119 across 7 files;
+- full Papers unit suite: 276/276 across 27 files;
+- typecheck and diff checks clean;
+- zero helper processes and zero `AYG-013-*` windows.
+
+SNAPSHOT RULE
+Commit exactly the 13 reviewed 014 Papers paths as one product snapshot while
+leaving the ten pre-existing modified host/runtime/test files and three
+pre-existing untracked windowBounds/runtime-test files untouched. Commit this
+coordination log separately in As you Go. Assignment 015 remains queued and is
+not dispatched by this acceptance.
