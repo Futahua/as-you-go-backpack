@@ -9,10 +9,10 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-06
 #
-# ACTIVE ASSIGNMENT: 011 — BOUNDED JSON-LINE TRANSPORT PROOF
-#   010R is reviewed, accepted and committed in Papers as 180ef86. Prove only
-#   the byte/line framing and lifecycle seam over injected streams. Do not spawn
-#   a helper, touch a native window, or wire Papers/As you Go product surfaces.
+# ACTIVE ASSIGNMENT: 011R — TRANSPORT LIFECYCLE/BACKPRESSURE CORRECTION
+#   011's ordinary tests pass, but BRAIN found an unguarded supervisor terminal
+#   subscription, a stranded asynchronous write on close, and line-limit/
+#   backpressure edge gaps. Correct only these; retain the no-helper boundary.
 #   005/007/008 still await creator eye checks where applicable.
 #
 # FRESH WORKER HANDOFF
@@ -20,9 +20,9 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 010R REVIEW: PASS
-#     BRAIN - Assignment 011 DISPATCH
-#   Execute Assignment 011 only. Do not reopen or re-execute 003-010R.
+#     BRAIN - Assignment 011 REVIEW: CORRECTION REQUIRED
+#     BRAIN - Assignment 011R DISPATCH
+#   Execute Assignment 011R only. Do not reopen or re-execute 003-010R.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
 #   Papers latest reviewed capability snapshot is 180ef86.
@@ -2796,3 +2796,233 @@ Run the focused tests, full Papers unit suite, `npm run typecheck`, and
 was untouched. Append `WORKER - Assignment 011 CHECKPOINT` with the chosen
 malformed-line policy, byte limits, lifecycle state/evidence and test counts,
 then stop without committing. BRAIN will review and create the snapshot commit.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 011 PICKUP
+======================================================================
+
+UNDERSTOOD
+A Papers-side JSON-lines transport over injected stream-like fakes only;
+nothing is spawned and no real window is controlled.
+
+CHOSEN POLICIES (documented here, tested in the checkpoint)
+- Malformed-line policy: IGNORE. A line that is empty, fails JSON.parse,
+  or fails the 010R deep schema gate is dropped — it satisfies no
+  request, never exposes an untyped payload, and does not kill the
+  session (a helper may emit stray output without being dead).
+- Byte limits: maxLineBytes default 64 KiB and maxReceiveBufferBytes
+  default 256 KiB, both counting ENCODED BYTES. A line that exceeds the
+  line cap, or an unfinished buffer that exceeds the buffer cap, is
+  TERMINAL (fail closed) — memory cannot grow unbounded. The outbound
+  line cap rejects the send without killing the transport.
+- Terminal lifecycle: EOF, read error, write error and explicit close
+  are all terminal and idempotent; endpoints close at most once; no
+  later messages are emitted; pending client requests resolve
+  helper-unavailable exactly once.
+- Supervisor observability: the transport reports unexpected terminal
+  events via an OPTIONAL onTerminal method added to the WindowTransport
+  seam (the only extension to the 010 files, explained in the
+  checkpoint); the supervisor enters crashed, nulls the client and
+  rejects pendings exactly once. Clean stop stays stopped.
+
+FILES
+- NEW src/main/windows/jsonLineTransport.ts — createJsonLineTransport
+  over narrow injected TransportSink (write returns boolean|Promise for
+  backpressure, onDrain, end) and TransportSource (onChunk, onEnd, end).
+  Outbound: TextEncoder UTF-8 JSON + '\n', send() waits for drain after
+  a false write, rejects on write failure/terminal. Inbound: byte-level
+  line framing (LF, CRLF stripped), UTF-8 split across chunks decodes
+  per complete line, delivery through the 010R schema gate.
+- MINIMAL 010 extensions (why in the checkpoint): windowCapabilityTypes
+  .ts gains optional `onTerminal`; windowCapabilitySupervisor.ts
+  subscribes and handles unexpected terminal (crashed, pendings rejected
+  once, no double close).
+- NEW tests/unit/jsonLineTransport.test.ts with FakeSink/FakeSource.
+
+REGRESSIONS COVERED: fragmented UTF-8/JSON; multi-line chunks; LF/CRLF
+mixture; malformed JSON/schema; empty lines; outbound escaping/newline;
+sync + async write failure; backpressure waits for drain then resolves;
+close/error while waiting rejects; byte limits exact/limit+1/oversized
+unterminated; EOF/error/close once + later chunks ignored + supervisor
+rejects pending once; fresh restart replays nothing.
+
+BOUNDARIES: no spawn/PowerShell/socket/pipe/HWND/polling/hook/
+dependency/renderer/As you Go/hostFacade/IPC/preload/persistence/UI/
+build/install/launch/commit. No state.json touch.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 011 CHECKPOINT
+======================================================================
+
+EXACT FILES
+- NEW src/main/windows/jsonLineTransport.ts — createJsonLineTransport
+  over injected TransportSink (write -> boolean|Promise for backpressure,
+  onDrain, end) and TransportSource (onChunk, onEnd, end); platform-
+  neutral, nothing bound to Node child-process objects.
+- NEW tests/unit/jsonLineTransport.test.ts — 15 tests over FakeSink/
+  FakeSource.
+- MINIMALLY EXTENDED (why): windowCapabilityTypes.ts gains ONE optional
+  method on the committed WindowTransport seam — onTerminal(callback) —
+  the only way the supervisor can observe an unexpected helper terminal
+  without polling; windowCapabilitySupervisor.ts subscribes to it: a
+  terminal while `ready` enters `crashed`, nulls the client and rejects
+  every pending request exactly once with helper-unavailable. Deliberate
+  close() during stop() is not reported through the seam, so clean stop
+  stays `stopped`. The committed client and its test file were not
+  changed.
+
+CHOSEN POLICIES (documented in code and tests)
+- Malformed-line policy: IGNORE. Empty lines, invalid JSON, and lines
+  failing the 010R deep schema gate are dropped — they satisfy no
+  request, never expose an untyped payload, and do not kill the session
+  (a helper may emit stray output without being dead). Tested.
+- Byte limits: maxLineBytes 64 KiB and maxReceiveBufferBytes 256 KiB,
+  both counting ENCODED BYTES (byte-level framing; TextDecoder decodes
+  only complete lines). A line over the line cap, or an unfinished
+  buffer over the buffer cap, is TERMINAL (fail closed) — memory cannot
+  grow without bound. The outbound line cap rejects only that send.
+- Terminal lifecycle: EOF, read error, write error and explicit close
+  are terminal and idempotent; sink/source end at most once; no later
+  messages are emitted; drain waiters are rejected; pending client
+  requests resolve helper-unavailable exactly once through the
+  supervisor.
+
+LIFECYCLE EVIDENCE
+- Fragmented UTF-8/JSON byte-by-byte delivery; a multi-byte character
+  split across chunks round-trips; multiple coalesced lines + LF/CRLF
+  mixture deliver in order; empty/malformed/schema-invalid lines are
+  ignored and the valid close line still delivers.
+- Outbound: UTF-8 JSON + exactly one newline; sync and async write
+  failures reject the send and are terminal exactly once; backpressured
+  send does not resolve before drain, resolves on drain, and rejects
+  when the transport terminates while waiting; sends after terminal
+  reject.
+- Byte limits: exact limit accepted, limit+1 terminal, an unterminated
+  oversized stream terminal, outbound over-limit rejects without
+  killing the transport.
+- EOF / read error / explicit close: terminal once, later chunks and
+  repeated terminal events ignored, endpoints closed exactly once.
+- Supervisor integration: EOF on the source crashes the supervisor
+  (state `crashed`, getClient() null) and the pending minimize resolves
+  helper-unavailable exactly once; clean stop stays `stopped`; a fresh
+  restart sends nothing.
+
+EVIDENCE COUNTS
+- Focused transport suite: 15/15. Capability suite (010R): 21/21.
+- Full Papers unit suite: 22 files / 193 tests, ALL pass.
+- npm run typecheck: passes. git diff --check: clean (exit 0).
+
+DIRTY-TREE PROOF
+Only the four committed 010 files could be touched; two were minimally
+extended (types: one optional onTerminal; supervisor: subscription +
+terminal handling) and two were not (client, its test). All earlier
+dirty Papers files (SettingsPane, bridge, backpackProjectRuntime/
+Service, hostFacade, index, hostIpc, preload/host, hostPreload tests,
+windowBounds) remain byte-for-byte untouched and unstaged.
+
+BOUNDARY AND STOP
+No child process, PowerShell, executable discovery, socket, pipe, HWND/
+native call, polling, hook, dependency, renderer, As you Go change,
+hostFacade/IPC/preload/postMessage wiring, persistence, UI, build/
+package, install, launch/restart, commit or push; no state.json touch.
+Stopping for BRAIN review and the snapshot commit.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 011 REVIEW: CORRECTION REQUIRED
+======================================================================
+
+VERDICT
+Do not commit the Papers snapshot yet. The ordinary framing/schema paths are
+well isolated and BRAIN reran the focused 36 tests, full 22-file / 193-test
+suite and typecheck successfully. Three terminal/backpressure boundaries remain
+unsafe or incompletely specified; the passing tests do not exercise them.
+
+FINDING 1 — NEW SUPERVISOR SUBSCRIPTION IS OUTSIDE START FAILURE GUARD
+`constructed.onTerminal(...)` runs after the construction try/catch and after
+state is published as ready. If that subscription throws, `start()` rejects but
+the supervisor remains falsely ready with a live client/transport. This reopens
+the exact partial-subscription failure class fixed in 010R. A transport already
+terminal before registration can also synchronously notify during start; the
+current start then resolves even though the callback changed state to crashed.
+
+REQUIRED CORRECTION
+- Include terminal subscription in the guarded startup transaction.
+- A subscription throw closes the partial transport at most once, clears all
+  references, leaves state crashed/no client, and makes start reject.
+- If late registration synchronously reports that the transport is already
+  terminal, start must not report ready; choose/document a rejected-start
+  contract and retain the original terminal reason.
+- A later start uses a fresh transport and replays nothing.
+
+FINDING 2 — TERMINATION CAN STRAND AN IN-FLIGHT ASYNC WRITE
+`send()` awaits `sink.write(bytes)` before it creates a drain waiter. If write
+returns a promise that is still pending when EOF/error/close occurs, failClosed
+has no waiter to reject. The send promise remains pending indefinitely unless
+the underlying write later settles. Terminal means every outstanding send must
+settle, including one awaiting the write result rather than drain.
+
+REQUIRED CORRECTION
+- Track/race every in-flight send phase against one terminal signal so EOF,
+  read/write error or explicit close promptly rejects writes awaiting either
+  write acceptance or drain.
+- Cleanup listeners/waiters after settlement; repeated terminal events cannot
+  settle or notify twice.
+- Retain the actual terminal cause where available, including for a terminal
+  observer registered after termination.
+
+FINDING 3 — BACKPRESSURE AND LINE-LIMIT CONTRACTS HAVE EDGE GAPS
+Concurrent sends continue calling sink.write after a prior write returned false;
+the transport is therefore not actually respecting the sink's backpressure.
+Also, inbound maxLineBytes excludes LF in the exact-boundary test but temporarily
+counts CR, so an exact-limit payload accepted with LF is rejected with CRLF.
+Outbound counts its LF in the cap, making the same named limit inconsistent in
+the two directions.
+
+REQUIRED CORRECTION
+- Serialize outbound sends. Once a write returns false, do not invoke the next
+  write until drain. Preserve invocation order. A terminal event rejects the
+  queued and active sends; no queued write occurs afterward.
+- Define maxLineBytes consistently as UTF-8 JSON PAYLOAD bytes, excluding the
+  LF or CRLF delimiter, inbound and outbound. Exact-limit LF and CRLF payloads
+  pass; payload limit+1 fails. A CR may exceed the payload cap only while it is
+  the possible CRLF delimiter; if the following byte is not LF, fail closed.
+- Validate configured limits as positive safe integers before subscribing to
+  endpoints; invalid configuration throws without a half-created transport.
+- State coherently whether explicit close notifies `onTerminal`. Preferred:
+  every terminal, including explicit close, notifies once; supervisor clean
+  stop remains stopped because it enters stopping before calling close. Make
+  comments, implementation and tests agree.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 011R DISPATCH
+======================================================================
+
+WORKER: append Assignment 011R PICKUP, correct only the findings above in the
+isolated 010/011 transport files and focused tests, append 011R CHECKPOINT, then
+stop without committing.
+
+MANDATORY NEW REGRESSIONS
+- onTerminal subscription throw => start rejects, crashed/no client, partial
+  transport closed once; fresh retry works with no replay;
+- transport already terminal before supervisor registers => start rejects,
+  crashed/no client, original reason retained; fresh retry works;
+- never-settling async sink.write is promptly rejected by EOF and by explicit
+  close (use a bounded test race so a regression fails instead of hanging);
+- first concurrent send backpressures: second sink.write is not called before
+  drain; after drain sends proceed in invocation order;
+- terminal while one send is active and another queued rejects both, performs
+  no later write, and closes/notifies once;
+- exact UTF-8 payload cap succeeds with both LF and CRLF; payload cap+1 fails;
+  outbound exact payload succeeds although the appended LF makes the frame one
+  byte larger; invalid zero/negative/fractional/NaN/infinite limits throw before
+  endpoint subscription;
+- late terminal observer receives the preserved terminal cause once;
+- all existing 36 focused tests remain green, with assertions updated only to
+  match the now-explicit coherent close policy.
+
+BOUNDARY AND EVIDENCE
+Keep the exact 011 scope: injected fakes only. No process/helper/PowerShell,
+native window, dependency, product IPC/UI/persistence, As you Go change, build,
+install, launch, commit or push. Preserve all earlier dirty Papers files. Run
+focused tests, the full unit suite, typecheck and diff check; report exact files
+and counts, then stop for BRAIN re-review.
