@@ -9,10 +9,10 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-06
 #
-# ACTIVE ASSIGNMENT: 012 — INJECTED HELPER-PROCESS OWNERSHIP SEAM
-#   011/011R/011R2 are accepted and committed in Papers as a01b489. Prove only
-#   safe ownership/lifecycle of an injected child-like process around the JSON
-#   transport. Do not spawn a real process or wire any product surface yet.
+# ACTIVE ASSIGNMENT: 012R — PROCESS OWNERSHIP CORRECTION
+#   012's 215 tests pass, but stdin errors are unobservable, stderr ownership is
+#   not closed, and invalid stderr limits can disable the bound. Correct only
+#   these ownership gaps; still no real process or product wiring.
 #   005/007/008 still await creator eye checks where applicable.
 #
 # FRESH WORKER HANDOFF
@@ -20,9 +20,9 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 011R2 REVIEW: PASS
-#     BRAIN - Assignment 012 DISPATCH
-#   Execute Assignment 012 only. Do not reopen or re-execute 003-011R2.
+#     BRAIN - Assignment 012 REVIEW: CORRECTION REQUIRED
+#     BRAIN - Assignment 012R DISPATCH
+#   Execute Assignment 012R only. Do not reopen or re-execute 003-011R2.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
 #   Papers latest reviewed capability snapshot is a01b489.
@@ -36,7 +36,7 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   button / deletion guards are all DEAD. Do not port them.
 #
 # GIT STATE
-#   main latest — reviewed through Assignment 010R; 011 is active.
+#   main latest — Papers reviewed through Assignment 011; 012R is active.
 #   Papers a01b489 — reviewed Assignment 011 bounded JSON-lines transport.
 #   Papers 180ef86 — reviewed Assignment 010/010R capability boundary.
 #   As you Go c87103c — reviewed Assignment 009 native feasibility probe.
@@ -3238,6 +3238,144 @@ List exact changed files and demonstrate the pre-existing dirty tree was not
 touched. Append `WORKER - Assignment 012 CHECKPOINT`, then stop without commit.
 
 ======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 012 PICKUP
+======================================================================
+
+UNDERSTOOD
+One new adapter owns exactly one injected child-like process and exposes
+the accepted WindowTransport; tests use only fake child/stdin/stdout/
+stderr objects. Launch choice stays separate — no executable paths,
+scripts, args, env or cwd ever enters the public adapter API; the
+zero-argument createProcess() factory is the injection boundary.
+
+DESIGN (no 010/011 seam extension needed)
+- NEW src/main/windows/helperProcessTransport.ts:
+  - `createHelperProcessTransport({ createProcess, maxLineBytes,
+    maxReceiveBufferBytes, maxStderrBytes })` — accepts ONLY the
+    zero-argument factory and sizes; returns WindowTransport.
+  - Child-like contract: { stdin: TransportSink, stdout/stderr:
+    TransportSource, onExit, onError, kill } — reusing the 011 narrow
+    stream interfaces; no raw child_process/stream types.
+  - stdin is adapted directly as the JSON-line sink; stdout is the
+    source. The adapter wires ONE shared terminal path: stdout
+    onEnd/onError, stdin write failure (via the transport's own sink
+    handling), child.onError and child.onExit ALL feed the transport's
+    single idempotent terminal gate through the source's onEnd
+    registration — the FIRST cause is retained, duplicates/reordering
+    notify once, and the endpoints + child.kill() close/terminate at
+    most once.
+  - Explicit close ends stdin, ends the readable side, and requests
+    graceful child termination once — coherent 011 notification policy.
+  - stderr is consumed ONLY as a bounded diagnostic (maxStderrBytes
+    encoded bytes, deterministic truncation): it is never parsed as
+    protocol and never delivered to onMessage; the truncated text is
+    preserved for lifecycle error causes.
+  - Construction failures (factory throw, missing required stdio,
+    stream subscription throw) terminate any partial child once, expose
+    no transport, and throw.
+  - No implicit restart/replay: only the supervisor may call its
+    factory again after crash.
+- NEW tests/unit/helperProcessTransport.test.ts with FakeChild.
+
+MANDATORY REGRESSIONS: fragmented/coalesced stdout through the schema
+gate; stdin false waits for drain; sync/async stdin failure terminal
+once; stdout end/error + stdin error + child error/exit in varied
+orders collapse to one preserved cause and one child termination; close
+twice ends/terminates once; events after close do nothing; factory
+throw / missing stdio / subscription throw clean partial ownership;
+stderr below/exact/over cap by encoded bytes with deterministic
+truncation, never a protocol message; supervisor crash rejects pending
+once and same-supervisor restart creates a SECOND fake process with no
+replay and no reuse of the first; exported surfaces contain no
+executable/script/args/env/cwd or raw process/stream access.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 012 CHECKPOINT
+======================================================================
+
+EXACT FILES (both NEW; the pre-existing dirty Papers tree untouched)
+- src/main/windows/helperProcessTransport.ts — the injected helper-
+  process ownership adapter.
+- tests/unit/helperProcessTransport.test.ts — 13 tests over FakeChild
+  (fake stdin/stdout/stderr + exit/error/kill).
+
+PUBLIC API AND TYPES
+- `createHelperProcessTransport({ createProcess, maxLineBytes,
+  maxReceiveBufferBytes, maxStderrBytes })` -> WindowTransport. The API
+  accepts ONLY the zero-argument factory and byte-limit sizes: no
+  executable path, script, argument, environment map, working directory,
+  raw child or raw stream can enter. The exported surface string test
+  asserts no spawn(/exec(/fork(/child_process/cwd/env/argv/executable
+  appears.
+- `ChildLikeProcess` = { stdin: TransportSink; stdout/stderr:
+  TransportSource; onExit; onError; kill } — reusing the 011 narrow
+  stream interfaces; no Node child_process types in the module.
+
+OWNERSHIP CONTRACT AS IMPLEMENTED
+1. One adapter owns exactly one process; exposes only WindowTransport.
+2. Factory throw exposes no transport; missing required stdio or a
+   stream subscription throw terminates the partial child once and
+   exposes no transport.
+3. stdout EOF/error, stdin write failure, child error and child exit
+   feed ONE shared terminal path (the JSON-line transport's idempotent
+   gate, wired through the source onEnd registration): the FIRST cause
+   is retained; duplicate/reordered signals notify once and
+   close/terminate endpoints + child at most once (killOnce guard).
+4. Explicit close ends stdin, ends the readable side, and requests
+   graceful child termination once; idempotent; coherent 011 terminal
+   notification policy.
+5. Backpressure crosses faithfully (false stdin write + drain behaves
+   exactly as 011); sync and async stdin write failures are terminal
+   once.
+6. stderr is consumed ONLY as a bounded diagnostic: maxStderrBytes
+   (default 4 KiB) of ENCODED bytes, deterministic truncation with a
+   marker, appended to the child-exit terminal cause; never parsed as
+   protocol, never delivered to onMessage, never unbounded.
+7. No implicit restart/replay: only the supervisor calls its factory
+   again after crash.
+8. No raw send/exec/spawn/shell/eval surface reaches product callers.
+
+MANDATORY REGRESSION EVIDENCE (13/13)
+- fragmented + coalesced stdout (UTF-8 split mid-message) reaches the
+  existing framing/schema gate in order;
+- stdin false waits for drain, then resolves;
+- sync AND async stdin write failures reject the send and are terminal
+  once with one child termination;
+- stdout EOF / stdout error / child error / child exit in varied orders
+  collapse to one terminal with the first preserved cause; later
+  duplicate signals change nothing; stdin/stdout end at most once and
+  the child is killed exactly once in every order;
+- explicit close twice: one terminal, one kill, one end each; protocol
+  lines, exit and errors after close do nothing;
+- factory throw / missing stdout / subscription throw each clean partial
+  ownership (kill once) and expose no transport;
+- stderr below / exactly at / over the byte cap: full text preserved
+  below and at the cap, deterministic truncation over the cap (excess
+  never appears), multi-byte UTF-8 counted as bytes, and stderr never
+  becomes a protocol message;
+- supervisor crash rejects the pending minimize once with
+  helper-unavailable; the SAME supervisor restarts to a SECOND fake
+  process (factory called twice), the first process is killed once and
+  not reused, and nothing is replayed to the fresh process.
+
+EVIDENCE COUNTS
+- Focused 010-012: 21 (capability) + 24 (transport) + 13 (adapter) = 58
+  all pass. Full Papers unit suite: 23 files / 215 tests, ALL pass.
+- npm run typecheck passes; git diff --check clean (exit 0).
+- Files: ONLY the two new files above were added. Every earlier dirty
+  Papers file (SettingsPane, bridge, backpackProjectRuntime/Service,
+  hostFacade, index, hostIpc, preload, hostPreload/backpackProject tests,
+  windowBounds) remains byte-for-byte untouched.
+
+BOUNDARY AND STOP
+No child_process.spawn/exec/fork call, no PowerShell/helper execution,
+no executable discovery, no native window, no socket/pipe, no
+dependency, no hostFacade/IPC/preload/renderer/As you Go wiring, no
+persistence, no UI, no build/package/install/launch/restart, no commit,
+no push, no state.json edit. Stopping for BRAIN review and the snapshot
+commit.
+
+======================================================================
 [2026-08-06 Asia/Saigon] BRAIN - Assignment 011R REVIEW: NARROW CORRECTION REQUIRED
 ======================================================================
 
@@ -3365,3 +3503,91 @@ BOUNDARY AND STOP
 No broader refactor, no new product surface, injected fakes only, all
 011 prohibitions retained. Nothing built, installed, launched, committed
 or pushed. Stopping for BRAIN re-review.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 012 REVIEW: CORRECTION REQUIRED
+======================================================================
+
+VERDICT
+Do not commit Papers yet. The adapter is isolated and its ordinary lifecycle,
+backpressure, terminal arbitration and same-supervisor restart are sound in the
+covered cases. BRAIN reran all 58 focused tests, the full 23-file / 215-test
+suite, typecheck and diff check successfully. Three ownership requirements are
+missing despite the green suite.
+
+FINDING 1 — OUT-OF-BAND STDIN ERROR CANNOT BE OBSERVED
+The assignment explicitly requires a stdin error to enter the shared terminal
+path. `ChildLikeProcess.stdin` is only TransportSink, which has write/onDrain/end
+but no error subscription. The adapter covers thrown/rejected writes, not a
+writable stream emitting an error independently after a successful write.
+
+REQUIRED CORRECTION
+- Give only the child-side stdin seam a narrow error subscription; do not widen
+  the accepted generic JSON TransportSink unless necessary.
+- Subscribe during guarded construction and feed it into the same first-cause
+  terminal callback as stdout/child events.
+- A stdin error before, during or after a pending/backpressured write terminates
+  once, rejects the send/pending request once, and later exit/error/EOF signals
+  cannot replace its cause.
+
+FINDING 2 — STDERR OWNERSHIP IS NEVER ENDED
+stderr is subscribed for chunks but its `end()` is never called on explicit
+close or any other terminal path. Its callback also continues collecting data
+after termination (bounded, but still owned). The contract says readable
+ownership is ended/detached; that includes diagnostic stderr, not only stdout.
+
+REQUIRED CORRECTION
+- Include stderr in the adapter's owned readable shutdown. End stdout and
+  stderr at most once each on every terminal/explicit-close/construction-cleanup
+  path the narrow seam permits.
+- Ignore stderr chunks after terminal. Events after close must change neither
+  diagnostics nor terminal state.
+- Endpoint end failures remain best-effort and cannot cause duplicate child
+  termination or replace the first terminal cause.
+
+FINDING 3 — INVALID STDERR CAP CAN REMOVE THE BOUND
+maxStderrBytes is not validated. With NaN, `stderrByteCount >= maxStderrBytes`
+is always false, allowing unbounded accumulation. Infinity has the same effect.
+The claimed encoded-byte bound therefore is not fail-closed for runtime input.
+
+REQUIRED CORRECTION
+- Validate maxStderrBytes before calling createProcess or subscribing anywhere.
+  Choose/document non-negative safe integer (allowing 0 to disable diagnostic
+  retention) or positive safe integer; reject NaN, infinities, fractions and
+  negatives synchronously.
+- Invalid configuration must not invoke createProcess, subscribe, end or kill.
+- At cap 0, if allowed, retain no bytes but mark deterministic truncation when
+  input arrives.
+
+TEST-SURFACE FINDING
+The exported-surface regression stringifies one function and searches a few
+words. That does not establish module exports or return-object keys. Retain it
+if useful, but add direct assertions that the returned object has only the
+WindowTransport keys and exposes no child/stdin/stdout/stderr/kill handle. At
+runtime module exports must contain no spawn/exec/fork function.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 012R DISPATCH
+======================================================================
+
+WORKER: append Assignment 012R PICKUP, correct only the four findings above in
+the two new 012 files, append 012R CHECKPOINT, then stop without committing.
+
+MANDATORY REGRESSIONS
+- independent stdin error is the first preserved terminal cause and collapses
+  later stdout EOF/child error/exit; active backpressured send rejects once;
+- explicit close and each terminal path end stdin, stdout AND stderr once, kill
+  once; repeated/reordered signals and endpoint-end rejection do not duplicate;
+- stderr pushed after close/terminal is ignored;
+- invalid stderr caps (negative, fractional, NaN, +/-Infinity; zero according
+  to chosen policy) throw before factory invocation with zero subscriptions/
+  ends/kills;
+- direct runtime keys prove returned transport exposes only send/onMessage/
+  onTerminal/close and module runtime exports expose no launcher/raw-handle API;
+- retain all existing 58 focused regressions and same-supervisor restart.
+
+BOUNDARY AND EVIDENCE
+No new file beyond the existing two 012 files unless unavoidable. No actual
+spawn/helper/PowerShell, native window, dependency, product wiring, persistence,
+UI, build/install/launch, commit or push. Preserve all earlier dirty Papers
+files. Run focused/full tests, typecheck and diff check; report counts and stop.
