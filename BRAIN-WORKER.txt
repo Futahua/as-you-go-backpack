@@ -9,10 +9,10 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-06
 #
-# ACTIVE ASSIGNMENT: 011R2 — FINAL TRANSPORT EDGE REGRESSIONS
-#   011R fixes the rejected mechanisms and all 201 tests pass. One CR payload
-#   limit check is delayed, and two mandatory tests do not actually prove their
-#   claimed in-flight/same-supervisor scenarios. Make this narrow final pass.
+# ACTIVE ASSIGNMENT: 012 — INJECTED HELPER-PROCESS OWNERSHIP SEAM
+#   011/011R/011R2 are accepted and committed in Papers as a01b489. Prove only
+#   safe ownership/lifecycle of an injected child-like process around the JSON
+#   transport. Do not spawn a real process or wire any product surface yet.
 #   005/007/008 still await creator eye checks where applicable.
 #
 # FRESH WORKER HANDOFF
@@ -20,12 +20,12 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 011R REVIEW: NARROW CORRECTION REQUIRED
-#     BRAIN - Assignment 011R2 DISPATCH
-#   Execute Assignment 011R2 only. Do not reopen or re-execute 003-011R.
+#     BRAIN - Assignment 011R2 REVIEW: PASS
+#     BRAIN - Assignment 012 DISPATCH
+#   Execute Assignment 012 only. Do not reopen or re-execute 003-011R2.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
-#   Papers latest reviewed capability snapshot is 180ef86.
+#   Papers latest reviewed capability snapshot is a01b489.
 #   As you Go latest feature/probe snapshot is c87103c before this log update.
 #   The 009 snapshot subject is `probe: prove native window capability`.
 #   539d2af is the reviewed 008 feature snapshot; bbdf681 is pre-008;
@@ -37,6 +37,7 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # GIT STATE
 #   main latest — reviewed through Assignment 010R; 011 is active.
+#   Papers a01b489 — reviewed Assignment 011 bounded JSON-lines transport.
 #   Papers 180ef86 — reviewed Assignment 010/010R capability boundary.
 #   As you Go c87103c — reviewed Assignment 009 native feasibility probe.
 #   54e3315 — fresh-worker handoff before Assignment 009.
@@ -3138,6 +3139,105 @@ UI/persistence, As you Go change, build, install, launch, commit or
 push. Stopping for BRAIN re-review.
 
 ======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 011R2 REVIEW: PASS
+======================================================================
+
+VERDICT
+Accepted. The CR branch now enforces the payload cap immediately; the
+never-settling tests wait until sink.write is actually active; and both startup
+failure paths restart the same supervisor with a fresh transport and no replay.
+BRAIN inspected the exact diff and reran 45/45 focused tests, the full Papers
+suite (22 files / 202 tests), typecheck and diff check successfully.
+
+SNAPSHOT
+Papers commit a01b489 (`feat: add bounded window capability transport`):
+- NEW src/main/windows/jsonLineTransport.ts
+- src/main/windows/windowCapabilitySupervisor.ts
+- src/main/windows/windowCapabilityTypes.ts
+- NEW tests/unit/jsonLineTransport.test.ts
+
+Only those four isolated files were staged. Every earlier dirty Papers file
+remains unstaged. No process/helper/native window, product wiring, build,
+install, launch or restart occurred.
+
+======================================================================
+[2026-08-06 Asia/Saigon] BRAIN - Assignment 012 DISPATCH
+======================================================================
+
+GOAL — NEXT SMALL PROOF
+Add the Papers-side ownership adapter that can wrap ONE injected child-like
+helper process and expose the already accepted WindowTransport. Tests use only
+fake child/stdin/stdout/stderr objects. This proves process lifecycle and stream
+adaptation before choosing or launching a real packaged helper.
+
+WHY THIS LAYER NOW
+009 proved the native verbs; 010 proved the six-command client/supervisor; 011
+proved bounded JSON framing. The missing seam is safe ownership of a helper
+process. Keep launch choice separate: PowerShell 7 availability on this machine
+is evidence, not yet an accepted packaging dependency.
+
+ALLOWED SCOPE
+- Prefer one new adapter under src/main/windows/ and one focused test file.
+- Minimally extend the 010/011 types/transport only if a fake-process lifecycle
+  cannot otherwise be expressed; justify every extension.
+- Accept an injected zero-argument `createProcess()` factory returning a narrow
+  child-like interface. Do not accept executable paths, scripts, arguments,
+  command strings, environment maps or working directories through the public
+  adapter API. Launch policy belongs to a later main-process composition root.
+- Adapt child stdout chunks/EOF/error to TransportSource; child stdin write/
+  drain/error/end to TransportSink; pass these into createJsonLineTransport.
+
+REQUIRED OWNERSHIP CONTRACT
+1. One adapter owns exactly one process instance. It exposes WindowTransport,
+   not the raw child or raw stream endpoints.
+2. Child factory throw, missing required stdio, or stream subscription throw
+   fails construction closed, best-effort terminates any partial child once,
+   and exposes no transport.
+3. stdout EOF/error, stdin error, child `error`, or child `exit` are one shared
+   terminal event with the first cause retained. Duplicate/reordered terminal
+   signals notify once and close/terminate endpoints/process at most once.
+4. Explicit transport close ends stdin, detaches/ends readable ownership as the
+   narrow fake contract permits, then requests graceful child termination once.
+   It is idempotent and retains the coherent 011 terminal notification policy.
+5. Backpressure crosses the adapter faithfully: a false stdin write plus drain
+   behaves exactly as 011; async/sync write failure is terminal.
+6. Bound stderr diagnostics by encoded bytes with a small configurable cap.
+   Preserve only a truncated diagnostic for lifecycle error text; stderr is
+   never parsed as protocol, never delivered to onMessage, and cannot grow
+   without bound.
+7. No implicit restart and no request replay. The existing supervisor alone may
+   call its injected factory again after crash; a fresh start owns a new fake
+   process and sends nothing.
+8. No raw send/exec/spawn/shell/eval surface reaches product callers. The
+   capability client remains the only command vocabulary.
+
+MANDATORY REGRESSIONS
+- fragmented/coalesced fake stdout reaches the existing framing/schema gate;
+- stdin false waits for drain; sync/async stdin failure terminates once;
+- stdout end/error, stdin error, child error/exit in varied orders collapse to
+  one preserved terminal cause and one child termination;
+- close twice ends/terminates once; events after close do nothing;
+- factory throw, missing stdio and subscription throw clean partial ownership;
+- stderr below/exact/over cap uses encoded bytes, truncates deterministically,
+  and never becomes a protocol message;
+- supervisor crash rejects pending once; same-supervisor restart creates a
+  second fake process, sends/replays nothing, and the first process is not
+  reused;
+- exported product-facing surfaces contain no executable/script/args/env/cwd or
+  raw process/stream access.
+
+OUT OF SCOPE / FORBIDDEN
+No actual child_process.spawn/exec/fork call, PowerShell/helper execution,
+executable discovery, native window, socket/pipe, dependency, product
+hostFacade/IPC/preload/renderer/As you Go wiring, persistence, UI, build,
+package, install, launch/restart, commit or push. No state.json edit.
+
+EVIDENCE AND STOP
+Run focused 010-012 tests, full Papers unit suite, typecheck and diff check.
+List exact changed files and demonstrate the pre-existing dirty tree was not
+touched. Append `WORKER - Assignment 012 CHECKPOINT`, then stop without commit.
+
+======================================================================
 [2026-08-06 Asia/Saigon] BRAIN - Assignment 011R REVIEW: NARROW CORRECTION REQUIRED
 ======================================================================
 
@@ -3198,3 +3298,70 @@ BOUNDARY / EVIDENCE
 No broader refactor and no new product surface. Retain injected fakes only and
 all 011 prohibitions. Preserve earlier dirty Papers files. Rerun focused/full
 tests, typecheck and diff check; report exact files/counts, then stop.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 011R2 PICKUP
+======================================================================
+
+UNDERSTOOD — THREE NARROW POINTS IN THE ISOLATED 011 FILES/TESTS
+1. CR-BRANCH LINE-CAP CHECK: whenever a new CR proves a prior pending CR
+   is payload, immediately compare the updated contentBytes against
+   maxLineBytes and fail closed if exceeded. Regression: maxReceive
+   BufferBytes materially larger than maxLineBytes, feed consecutive CR
+   bytes only, assert the terminal reason is the LINE-payload limit (not
+   the receive-buffer limit) and that termination fires at exactly
+   cap+1 payload bytes (17 CRs no terminal; 18 CRs terminal).
+2. NEVER-SETTLING WRITE: the fake sink gains a writeStarted promise and
+   a write-call counter; both EOF and explicit-close variants wait for
+   writeStarted before terminating (proving the active write-acceptance
+   phase, not the queue), keep the bounded timeout race, and assert
+   sink.write was called exactly once.
+3. SAME-SUPERVISOR RETRY: both startup-failure regressions use ONE
+   supervisor whose factory returns the failing transport first and a
+   fresh healthy transport second; start() is called twice on that SAME
+   supervisor — first rejection/crashed/no client/close-once, then
+   ready/fresh client/zero sends and no replay.
+
+======================================================================
+[2026-08-06 Asia/Saigon] WORKER - Assignment 011R2 CHECKPOINT
+======================================================================
+
+THREE POINTS CORRECTED (narrow, isolated 011 files/tests only)
+
+1. CONSECUTIVE-CR LINE CAP (jsonLineTransport.ts): the `byte === CR`
+   branch now rechecks contentBytes against maxLineBytes immediately
+   whenever a new CR proves the prior pending CR was payload, failing
+   closed on the LINE-payload limit. New regression: maxLineBytes 16 /
+   maxReceiveBufferBytes 256; 17 consecutive CRs (16 payload bytes) do
+   NOT terminate; the 18th CR (cap+1 payload) terminates immediately
+   with the 'payload exceeds' reason (asserted NOT the receive-buffer
+   reason); bytes after terminal change nothing.
+2. NEVER-SETTLING WRITE (test): the fake sink now exposes a writeStarted
+   promise and a write-call counter; both the EOF and the explicit-close
+   variants AWAIT writeStarted before terminating, so they exercise the
+   active write-acceptance phase (not the queued pre-write state), keep
+   the 200 ms bounded race, and assert sink.write was invoked exactly
+   once.
+3. SAME-SUPERVISOR RETRY (test): both startup-failure regressions now
+   use ONE supervisor whose factory returns the failing transport on the
+   first call and a fresh healthy JSON-line transport on the second.
+   start() is called twice on the same supervisor: first rejects with
+   crashed/no client (and, for the subscription-throw case, the partial
+   transport closed exactly once), then the same supervisor reaches
+   ready with a fresh client, attempts === 2 from the same factory, and
+   zero writes — no replay.
+
+EVIDENCE
+- Focused: jsonLineTransport 24 tests + windowCapability 21 tests = 45
+  all pass. Full Papers unit suite: 22 files / 202 tests, ALL pass.
+- npm run typecheck passes; git diff --check clean (exit 0).
+- Files touched: src/main/windows/jsonLineTransport.ts (CR-branch line
+  cap) and tests/unit/jsonLineTransport.test.ts (three regression
+  updates). windowCapabilitySupervisor.ts / windowCapabilityTypes.ts
+  unchanged since 011R. All earlier dirty Papers files byte-for-byte
+  untouched.
+
+BOUNDARY AND STOP
+No broader refactor, no new product surface, injected fakes only, all
+011 prohibitions retained. Nothing built, installed, launched, committed
+or pushed. Stopping for BRAIN re-review.
