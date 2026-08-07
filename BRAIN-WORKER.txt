@@ -7,28 +7,36 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # Append-only below this block. BRAIN edits this block in place.
 #
-# LAST UPDATED: 2026-08-06
+# LAST UPDATED: 2026-08-07
 #
-# ACTIVE ASSIGNMENT: 013R2 — SESSION TOKEN / FINAL CONTRACT PROOF
-#   013R fixes wire types and native containment, but routine observe/list can
-#   overwrite identity for a reused raw HWND. Replace raw handles with stable
-#   session tokens and finish cross-runtime schema evidence.
-#   005/007/008 still await creator eye checks where applicable.
+# ACTIVE ASSIGNMENT: 015R3 — IMPLEMENT THE 015R CORRECTION (12 OUTCOMES)
+#   The Worker twice substituted audits for implementation; 015R and 015R2
+#   were both rejected. Fresh BRAIN independently inspected both dirty trees
+#   on 2026-08-07 and confirmed ALL TWELVE 015R2 outcomes are unimplemented
+#   (source evidence is in the 015R3 DISPATCH block below). A fresh Worker
+#   must now IMPLEMENT them. Nothing is committed until BRAIN verifies
+#   acceptance. Assignment 016 remains gated.
 #
 # FRESH WORKER HANDOFF
 #   The history below is not perfectly chronological: some earlier WORKER
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 013R REVIEW: NARROW ARCHITECTURE CORRECTION REQUIRED
-#     BRAIN - Assignment 013R2 DISPATCH (AUTHORIZED SCOPE CONTINUES)
-#   Execute Assignment 013R2 only. Do not reopen or re-execute 003-013R.
+#     BRAIN - Assignment 015R CORRECTION + DISPATCH
+#     BRAIN - Assignment 015R REJECTED; 015R2 DISPATCH
+#     BRAIN - 015R2 REJECTED + FRESH-BRAIN HANDOFF
+#     BRAIN - 015R3 DISPATCH (FRESH WORKER, IMPLEMENTATION ONLY)
+#   Execute Assignment 015R3 only. Do not reopen or re-execute 003-014.
+#   The two WORKER blocks labelled `Assignment 015 REVIEW (015R)` and
+#   `Assignment 015 REVIEW 2 (015R2)` are REJECTED AUDITS: their keep/defer
+#   decisions (retain subscribeMember, display-only toggle, pid-based
+#   descriptor) are void and they are not design authority.
 #
-# BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
-#   Papers latest reviewed capability snapshot is ad8505c.
-#   As you Go latest feature/probe snapshot is c87103c before this log update.
-#   The 009 snapshot subject is `probe: prove native window capability`.
-#   539d2af is the reviewed 008 feature snapshot; bbdf681 is pre-008;
+# BASE: Papers main @ da3dd6d — reviewed Assignment 014 product snapshot
+#   (`feat: add Papers-owned window helper factory`).
+#   As you Go product base is 539d2af — reviewed Assignment 008 feature
+#   snapshot (`feat: add static window layout workspace item`); every As you
+#   Go commit after it through 16f65ee is docs/coordination only.
 #   5b6d95a is the old pre-trail historical base. Never reset/checkout or
 #   disturb creator changes to reach a historical commit.
 #   Do NOT build on trail/01 or trail/02. The creator rejected both.
@@ -36,18 +44,19 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #   button / deletion guards are all DEAD. Do not port them.
 #
 # GIT STATE
-#   main latest — Papers reviewed through Assignment 012; 013 is active.
-#   Papers ad8505c — reviewed Assignment 012 helper-process ownership seam.
-#   Papers a01b489 — reviewed Assignment 011 bounded JSON-lines transport.
-#   Papers 180ef86 — reviewed Assignment 010/010R capability boundary.
-#   As you Go c87103c — reviewed Assignment 009 native feasibility probe.
-#   54e3315 — fresh-worker handoff before Assignment 009.
-#   539d2af — reviewed Assignment 008 feature snapshot.
-#   bbdf681 — clean pre-008 rollback snapshot.
-#   5b6d95a — historical pre-trail published base; reference only.
-#   trail/01-overlay-checkpoint, trail/02-workspace-items — rejected,
-#     reference only. stash@{0} — broken Assignment 002 work.
-#   Creator requests one commit per reviewed assignment snapshot. WORKER still
+#   Papers da3dd6d — reviewed Assignment 014 helper factory.
+#   Papers dirty tree = recorded pre-015 foreign hunks (SettingsPane.tsx,
+#     bridge.ts, backpackProjectRuntime.ts, backpackProjectService.ts,
+#     hostFacade.ts, hostIpc.ts, preload/host.ts,
+#     backpackProjectService.test.ts, hostPreload.test.ts, the pre-015
+#     index.ts hunks, plus untracked windowBounds.ts, windowBounds.test.ts,
+#     backpackProjectRuntime.test.ts) + 015 work. Pre-015 hunks are
+#     preserved byte-for-byte; no staging/commit ever includes them.
+#   As you Go dirty tree = 015 work (7 files) on top of 16f65ee.
+#   NO 015/015R/015R2 product commit is permitted in either repository
+#   until BRAIN verifies acceptance of 015R3. Assignment 016 remains gated
+#   on accepted + committed 015 in both repositories.
+#   Creator requests one commit per reviewed assignment snapshot. WORKER
 #   appends its checkpoint and stops without committing; BRAIN reviews and
 #   creates the snapshot commit before dispatching the following assignment.
 #
@@ -6515,6 +6524,51 @@ NO CORRECTIONS REQUIRED THIS ROUND. Deliverable stands. 016 queued.
 
 
 ======================================================================
+[2026-08-07 Asia/Saigon] BRAIN - Assignment 015R3 DISPATCH
+IMPLEMENTATION ONLY - NO REVIEW CHECKPOINT
+======================================================================
+
+AUTHORITY
+The creator explicitly ordered: `you do 015R3 DISPATCH IMPLEMENTATION ONLY`.
+This authorizes only implementation of the unfinished 015R correction in the
+canonical Papers and As you Go repositories. No packaging, installation,
+Start Menu replacement, creator-window control, creator-state edits, or 016.
+
+WORKER INSTRUCTION
+Read the complete 015R CORRECTION + DISPATCH and the 015R2 numbered outcome
+list above. Implement every item in source and tests. Do not append a review,
+self-audit, deviation list, or claim completion while leaving an item intact.
+Implementation-only does not mean skip verification: run the required tests,
+typecheck/build, and bounded isolated live proof only after source changes are
+present.
+
+NON-NEGOTIABLE SOURCE CHECKS
+- Persisted descriptor only `{version,executableFingerprint,title}`.
+- Renderer capability only `{version,bindingId}`; helper tokens remain in a
+  bounded private main-process registry.
+- Candidate wire payload has no processId/processPath.
+- IPC and preload gates enforce exact keys and UTF-8 byte bounds.
+- `subscribeMember` is removed; one non-overlapping renderer observer remains,
+  with main-side single-flight/capacity enforcement.
+- Member toggle commits persisted state; missing members have an unlink row.
+- Echo suppression is scoped; first genuine movement is recorded.
+- Bridge pending requests have cap, timeout and cleanup.
+- Shutdown awaits an idempotent stop barrier; no fire-and-forget will-quit.
+- 0x0 bounds regression remains and bounds-null entries are excluded from the
+  onscreen picker.
+
+CHECKPOINT FORMAT
+Append exactly `WORKER - Assignment 015R3 CHECKPOINT` after implementation.
+Include a twelve-row outcome table mapped to 015R2, exact test counts,
+typecheck/build results, fresh restart-proof evidence, and preserved
+pre-existing dirty files. If blocked, report one concrete blocker instead of a
+review narrative. Do not commit/push product changes; stop for BRAIN acceptance.
+
+WORKER
+Append 015R3 PICKUP, implement only, verify, checkpoint, and stop.
+
+
+======================================================================
 [2026-08-07 Asia/Saigon] BRAIN - 015R2 REJECTED + FRESH-BRAIN HANDOFF
 ======================================================================
 
@@ -6532,3 +6586,222 @@ cleanup. A fresh BRAIN must inspect current diffs, treat the complete preceding
 all twelve numbered outcomes. Require source evidence and targeted tests before
 any live proof or acceptance. Assignment 016 remains gated. Preserve all
 pre-015 unrelated Papers dirty hunks and commit nothing until acceptance.
+
+======================================================================
+[2026-08-07 Asia/Saigon] BRAIN - 015R3 DISPATCH (FRESH WORKER, IMPLEMENTATION ONLY)
+INDEPENDENT INSPECTION CONFIRMS THE 015R2 REJECTION; IMPLEMENT ALL TWELVE
+======================================================================
+
+FRESH-BRAIN VERIFICATION — INDEPENDENT, SOURCE-LEVEL
+I do not accept the two WORKER review blocks. I inspected both dirty trees
+myself on 2026-08-07 (Papers @ da3dd6d + dirty, As you Go @ 16f65ee + dirty).
+Every one of the twelve 015R2 outcomes is UNIMPLEMENTED:
+
+ 1. Persisted descriptor is still {version:1,title,processId}:
+    windowCapabilityService.ts:59-63 and :255-259;
+    windowCapabilityIpc.ts:73-82; preload/backpackProject.ts:47-56.
+ 2. The Backpack capability is still {version:1,runtimeToken,title,processId}
+    where runtimeToken IS the helper token; there is no main-owned binding
+    registry: windowCapabilityService.ts:67-72 and :249-254;
+    windowCapabilityIpc.ts:45-55; preload/backpackProject.ts:19-29.
+ 3. Candidate payloads still carry processId and processPath:
+    windowCapabilityService.ts:46-54 and :200-207. The renderer even matches
+    the current member by processId (workspace-20260730b.js:413-415).
+ 4. Both gates accept extra keys (only the apply top level checks key count)
+    and every string bound is a JS char count, not UTF-8 bytes:
+    windowCapabilityIpc.ts:38-43/:45-55/:73-82; preload/backpackProject.ts
+    :12-17/:19-29/:47-56. List accepts ANY payload
+    (windowCapabilityIpc.ts:109 `() => undefined`).
+ 5. subscribeMember remains (windowCapabilityService.ts:102-105/:302-331/
+    :353); the renderer fires setInterval observes with no pending guard
+    (workspace-20260730b.js:647-649); service observe is a straight
+    passthrough with no per-binding single-flight or in-flight cap
+    (windowCapabilityService.ts:263-267).
+ 6. A missing observation only patches a CSS marker; recording continues and
+    the cached capability survives (workspace-20260730b.js:667-672).
+ 7. Member click decides from SAVED member.state and patches DOM only; no
+    live observe, no persisted state update, no queued save
+    (workspace-20260730b.js:520-534).
+ 8. The picker builds rows only from live candidates, so a missing sole
+    member has no unlink row (workspace-20260730b.js:408-431 and :569-584).
+ 9. Echo suppression is one global boolean `suppressNextObservation`
+    (workspace-20260730b.js:616/:620/:629/:662-664).
+10. host-bridge.js pending Map has no cap, no timeout and no cleanup
+    (host-bridge.js:14-28).
+11. Quit is still `app.on('will-quit', () => { void service.stop(); })`
+    (src/main/index.ts:390-392).
+12. The 0x0 wire fix is present (window-helper.ps1:145-150/:174/:294) but
+    listCandidates never excludes bounds:null observations from picker
+    candidates (windowCapabilityService.ts:193-210).
+
+KEEP FROM THE REJECTED ROUNDS (verified present — do not regress)
+- window-helper.ps1 bounds:null wire fix plus its direct PS schema
+  regression (helper-schema.test.ps1, 217 assertions).
+- First-list timeout retry and bounded double-timeout path
+  (windowCapabilityService.ts:181-187 and its tests).
+- closeWindowLayoutPicker nulling pickerCandidates
+  (workspace-20260730b.js:562-567).
+- manifest.json / windowHelperResource.ts EOF cosmetics (single hash line).
+
+THE ASSIGNMENT — 015R3
+This is an IMPLEMENTATION assignment. The complete contracts in
+`BRAIN - Assignment 015R CORRECTION + DISPATCH` and `BRAIN - Assignment 015R
+REJECTED; 015R2 DISPATCH` remain authoritative and are restated here so the
+target list is self-contained. Implement every item under CORRECTION 1-6,
+all twelve outcomes below, and every TARGETED REGRESSION. An audit, a
+deviation report, or a "current behavior is close enough" argument is a
+refusal, not a checkpoint. The rejected review blocks' keep/defer decisions
+are void.
+
+THE TWELVE REQUIRED OUTCOMES
+ 1. Persisted descriptor is exactly
+    `{version:1,executableFingerprint,title}`. Compute the sha256
+    fingerprint in trusted Papers main from a normalized helper-observed
+    executable path (deterministic normalization, tested). Persist only the
+    fingerprint and the bounded exact title: never raw path, PID, HWND,
+    helper token or binding id. Re-resolution enumerates already-visible
+    eligible windows, recomputes the fingerprint host-side, matches
+    fingerprint + exact title, and stays fail-closed (0 = missing, >1 =
+    ambiguous). A descriptor never launches anything.
+ 2. The Backpack runtime capability is exactly `{version:1,bindingId}`.
+    Papers main mints bounded opaque binding ids and retains the
+    binding-id -> helper-token mapping privately in a bounded registry with
+    an explicit eviction/cleanup policy; stop() clears it. Every
+    observe/minimize/restore/apply call looks up a currently issued binding
+    and fails closed otherwise. Helper restart invalidates prior tokens, so
+    stale bindings fail closed and the renderer recovers via fresh
+    descriptor resolution. Persisted state contains neither binding ids nor
+    helper tokens.
+ 3. Candidate payloads sent to Backpack contain NO processPath and NO
+    processId: only opaque host-issued candidate id, bounded title, bounded
+    application label (host-derived from the trusted executable, e.g. the
+    bounded file stem), bounded icon and the static live state needed by
+    the picker. The renderer's processId-based member matching
+    (workspace-20260730b.js:413-415) is removed.
+ 4. BOTH gates (windowCapabilityIpc.ts and preload/backpackProject.ts)
+    enforce exact allowed keys at every nested level — capability,
+    descriptor, bounds, apply payload, and the list payload, which must be
+    exactly empty and is rejected before service invocation when non-empty.
+    All string bounds are UTF-8 byte limits, not char counts. Finite/ranged
+    bounds and exact versioned capability/descriptor shapes everywhere.
+ 5. Delete `subscribeMember` entirely (interface, implementation, export,
+    tests). The renderer keeps exactly ONE pull timer for the sole active
+    recording layout and never overlaps polls: while an observation is
+    pending, ticks are skipped/coalesced. Papers deduplicates concurrent
+    observation for the same issued binding (one in-flight helper call) and
+    caps total distinct in-flight observation work.
+ 6. A missing/invalid-binding observation stops recording, drops the cached
+    capability for that member, and is shown visibly; a later Activate
+    performs fresh fail-closed resolution from the persisted descriptor.
+ 7. A member minimize/restore click first observes current live state,
+    performs the OPPOSITE of the live state (not the stale saved intent),
+    updates the persisted member state and queues the coalesced save — even
+    when that layout is not recording. CSS-only patching is insufficient.
+ 8. Opening a populated layout's picker ALWAYS offers its persisted sole
+    member as an actionable unlink row, even when that window is currently
+    missing (render it from the persisted descriptor + cached icon + last
+    known/missing state; it needs no live candidate entry). Other
+    candidates remain inert in the one-member slice. Unlink is data-only
+    and never closes the window.
+ 9. Keep Activate's bounds + state behavior, but make echo suppression
+    operation/member-scoped (not one global blind boolean): it covers the
+    programmatic apply it belongs to and cannot discard the first genuine
+    creator move after Activate.
+10. host-bridge.js pending calls get a finite cap, a per-request timeout
+    and deterministic cleanup, with fake-timer tests. Keep only named
+    window methods plus the legacy named methods; no arbitrary request
+    escape hatch. Legacy response routing must stay covered by tests.
+11. Quit uses a guarded, idempotent, AWAITED stop barrier: prevent the
+    first owned quit, await the bounded service stop, then resume quitting
+    exactly once; stop failure and no-start cases still quit. No
+    fire-and-forget `will-quit` remains. Preserve every pre-015 index.ts
+    hunk byte-for-byte; only the 015 hunks (imports, construction,
+    registration, will-quit) are reworked.
+12. Keep the 0x0 wire regression, and exclude bounds:null observations from
+    the onscreen picker candidate list host-side (one malformed desktop
+    entry must not discard the list, and must never reach the picker).
+
+ADDITIONAL BOUNDS (CORRECTION 3, REQUIRED)
+- Bound trusted helper path/title input BEFORE hashing/label/icon work.
+- Bound the icon data URL by BYTES as well as cache count; deduplicate icon
+  work including concurrent in-flight requests for the same identity.
+
+TARGETED REGRESSIONS (ALL REQUIRED)
+Papers tests must prove: descriptor survives changed PID; raw path and PID
+absent from project candidate/descriptor payloads; runtime token hidden;
+unissued/evicted binding denied; exact unknown-key rejection at both gates
+(inject an extra key into capability, descriptor, bounds and list payload,
+rejected before service invocation); UTF-8 byte boundaries; 0x0 helper
+observation becomes bounds:null and is not a candidate; oversized
+icon/path/title bounded; observation single-flight/cap; registry/observer
+cleanup; awaited idempotent quit (normal quit, repeated quit signal, stop
+failure, no-start).
+As you Go tests must prove: no PID/path/binding/token persists; bridge
+pending cap/timeout cleanup; no overlapping poll; missing stops recording
+and later Activate re-resolves; inactive member click persists state;
+missing member can always unlink; activation echo suppression does not
+swallow the next real move; member-only patches do not reheat/rebuild the
+graph.
+
+WORKING-TREE SAFETY
+The recorded pre-015 Papers dirty set is preserved byte-for-byte and never
+staged: src/host/SettingsPane.tsx, src/host/bridge.ts,
+src/main/backpacks/backpackProjectRuntime.ts,
+src/main/backpacks/backpackProjectService.ts, src/main/hostFacade.ts,
+src/main/ipc/hostIpc.ts, src/preload/host.ts,
+tests/unit/backpackProjectService.test.ts, tests/unit/hostPreload.test.ts,
+the pre-015 src/main/index.ts hunks (electron import additions,
+windowBounds/screen composition, savedBounds BaseWindow spread,
+saveWindowBounds/clearWindowBounds, close/closed lifecycle split), and
+untracked src/main/windowBounds.ts, tests/unit/windowBounds.test.ts,
+tests/unit/backpackProjectRuntime.test.ts. Inspect the overlapping index.ts
+hunks before editing. Prefer new focused tests so existing dirty tests stay
+untouched.
+
+VERIFICATION ORDER — SOURCE EVIDENCE BEFORE LIVE PROOF
+1. Papers: focused 010-015R suites, PS schema suite on BOTH runtimes
+   (pwsh and Windows PowerShell 5.1), full unit suite, typecheck,
+   `npm run build`.
+2. As you Go: focused model/bridge/renderer/pointer tests, then full suite;
+   classify ONLY the three recorded pre-existing failures
+   (styles.test.mjs:140, toolbar-controller.test.mjs:168/:218).
+3. `git diff --check`, EOF checks, and the helper manifest hash pin against
+   the compiled helper.
+4. Only after all of the above is green: the bounded live proof.
+
+LIVE ACCEPTANCE (015R2 CONTRACT, RESTATED)
+Repeat the authorized isolated proof. The durability proof MUST keep the one
+disposable target alive while the owned Papers instance and its helper fully
+exit, then start a fresh owned Papers instance/helper and resolve the saved
+fingerprint+title descriptor. Record old and new owned Papers/helper PIDs
+(or equivalent process evidence), the fresh binding id, successful target
+resolution/geometry, zero forbidden persisted keys (grep the isolated
+state.json for runtimeId/hwnd/token/processId/path/bindingId), and final
+zero owned processes/windows. Same safety boundaries: never touch creator
+windows/data, never package/install, never update the Start Menu target.
+
+AUTHORITY
+The existing creator authorization for the 015 slice remains valid: build
+canonical Papers and control ONE uniquely titled disposable test window in
+an isolated Papers/userData/project session. This dispatch does not
+authorize manipulating creator windows, packaging/installing, updating the
+Start Menu build, committing, pushing, or starting Assignment 016. Standing
+rule 7 applies: files are CRLF; use line indices and assert each mutation
+landed on disk.
+
+STOP
+Append `WORKER - Assignment 015R3 PICKUP` (plain-language HERMES ritual)
+before editing. Append `WORKER - Assignment 015R3 CHECKPOINT` only after
+implementation and verification, containing: a 12-row outcome table mapping
+each outcome above to its implementation anchor and tests; exact suite
+counts for both repos and both PS runtimes; the live restart evidence
+(old/new owned PIDs, fresh binding id, resolution/geometry, forbidden-key
+grep, cleanup); and the hunk-level dirty-tree separation report. If any
+outcome cannot be implemented, append one precise BLOCKER and stop; do not
+label a review as completion. Do not commit/push, package/install, touch
+creator state, update the Start Menu target, or start Assignment 016.
+Assignment 016 remains gated until 015R3 is accepted and committed in both
+repositories.
+
+WORKER
+Append 015R3 PICKUP, implement the correction now, checkpoint, and stop.
