@@ -9,31 +9,32 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-07
 #
-# ACTIVE ASSIGNMENT: 015R3 — IMPLEMENTATION CONTINUES (PARTIAL)
-#   015R3 is a truthful partial implementation checkpoint, not acceptance.
-#   12 outcomes are substantially implemented but TWO blockers remain:
-#   (1) deprecated compat fields + internal subscribeMember seam still
-#   present in Papers source (must be removed for strict fingerprint/
-#   bindingId-only contract); (2) authorized isolated live restart proof
-#   not yet evidenced. No product commit permitted; 016 remains gated.
+# ACTIVE ASSIGNMENT: 015R3 — SOURCE COMPLETE, LIVE PROOF PENDING
+#   015R3 follow-up cleared the source blockers: deprecated
+#   processId/runtimeToken fields removed, subscribeMember seam deleted,
+#   echo suppression scoped per layout/member/bounds+state. Independent
+#   verification confirms typecheck pass and tests (Papers 295/295, As
+#   you Go 721/724). Only the authorized isolated live restart durability
+#   proof remains before product commit. No commit yet; 016 remains gated.
 #
 # FRESH WORKER HANDOFF
 #   The history below is not perfectly chronological: some earlier WORKER
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 015R3 DISPATCH
-#     WORKER - Assignment 015R3 CHECKPOINT
 #     BRAIN - Assignment 015R3 REVIEW: PARTIAL — FOLLOW-UP REQUIRED
-#   Execute Assignment 015R3 follow-up only (clear 2 blockers, rerun full
-#   verification + live proof). Do not reopen or re-execute 003-014 or
-#   start 016.
+#     WORKER - Assignment 015R3 FOLLOW-UP CHECKPOINT
+#     BRAIN - Assignment 015R3 REVIEW 2: SOURCE ACCEPTED — LIVE PROOF ONLY
+#     BRAIN - POST-015R3 DIRECTION: 016 NEXT
+#     BRAIN - 015R3 LIVE PROOF: WORKER EXECUTION DIRECTIVE
+#   Execute Assignment 015R3 live proof + commit only. Do not reopen
+#   003-014 or start 016 until 015R3 is committed.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
 #   Papers da3dd6d — reviewed Assignment 014 helper factory (latest
-#   reviewed snapshot). As you Go 5254a6d docs checkpoint for 015R3
-#   partial; product bases remain as above. Never reset/checkout or
-#   disturb creator changes to reach a historical commit.
+#   reviewed snapshot). As you Go docs head is 5939bd8 (015R3 follow-up
+#   checkpoint record); product bases remain as above. Never reset/checkout
+#   or disturb creator changes to reach a historical commit.
 #   Do NOT build on trail/01 or trail/02. The creator rejected both.
 #   Their trail-graph.js / trail-graph-model.js / trail CSS / expander
 #   button / deletion guards are all DEAD. Do not port them.
@@ -6724,3 +6725,170 @@ STATE
 015R3 source and test implementation is complete to the verified level above,
 but product acceptance remains blocked solely on the isolated restart proof.
 Assignment 016 remains gated. Pre-existing dirty Papers hunks remain separate.
+
+======================================================================
+[2026-08-07 Asia/Saigon] BRAIN - Assignment 015R3 REVIEW 2: SOURCE ACCEPTED — LIVE PROOF ONLY
+======================================================================
+
+VERDICT: SOURCE ACCEPTED — strict-contract follow-up verified, live proof is the sole remaining gate.
+No product commit until the isolated restart proof is evidenced. Assignment 016 remains gated.
+
+INDEPENDENT VERIFICATION (both dirty trees)
+- Confirmed deprecated processId/runtimeToken fields removed from public
+  WindowCandidate / PersistedWindowMemberDescriptor / WindowRuntimeCapability
+  types; subscribeMember seam deleted (grep -rn subscribeMember = 0 in src);
+  remaining optional markers on executableFingerprint/bindingId are the only
+  looseness — IPC gate enforces required fingerprint (64-hex) and required
+  bindingId via exactKeys(), so runtime is strict.
+- Confirmed echo suppression now scoped: suppression = {layoutId,memberId,
+  bounds,state}, cleared only when observation matches expected bounds+state;
+  first genuine move with different geometry is therefore saved.
+- Ran tsc --noEmit: pass. Papers vitest 295/295 (29 files) — 2 fewer than
+  297 due to removed subscription tests, matches WORKER's 295/295.
+- As you Go node --test: 721/724 pass, 3 pre-existing unrelated fails
+  (styles 140, toolbar 168/218) — matches WORKER's claim.
+- Helper 0x0 bounds:null fix, bridge cap/timeout, fingerprint registry,
+  single-flight, quit barrier, fingerprint model and unlink row all remain
+  from prior verification.
+
+BLOCKER REMAINS
+  Live durability proof not yet run: keep ONE uniquely titled disposable
+  window alive across full owned Papers/helper stop → fresh Papers start,
+  re-resolve saved fingerprint+title, record old/new PIDs, fresh bindingId,
+  geometry, zero forbidden keys (grep isolated state.json), zero owned
+  processes/windows at cleanup.
+
+DISPATCH — 015R3 LIVE PROOF + COMMIT (AUTHORIZED SCOPE)
+WORKER: run the bounded live restart proof in an isolated
+Papers/userData/project session (ONE disposable window only, no creator
+windows/data, no Start Menu update). Steps: build Papers, launch owned
+Papers + helper + disposable target, bind candidate → verify descriptor
+{version, executableFingerprint, title}, observe/auto-record, minimize/
+restore with persisted state, Activate with scoped suppression, then
+FULL STOP of owned Papers/helper while target stays alive, FRESH START of
+owned Papers/helper, resolve saved descriptor → verify same target,
+fresh bindingId, geometry applied, forbidden-key grep clean, final
+cleanup to 0 owned processes/windows. Record transcript + PIDs.
+Then rerun focused 010-015R, both PS schema runtimes, full suites,
+typecheck/build, diff/EOF/hash checks. Append WORKER - Assignment 015R3
+LIVE-PROOF CHECKPOINT with 12-row outcome table + live evidence + hunk
+separation. On PASS, BRAIN will commit both repos as separate exact
+snapshots (pre-015 hunks preserved separately) and dispatch 016.
+If blocked, append one precise BLOCKER and stop. Do not package/install
+or start 016 early.
+
+BASE remains da3dd6d / 5254a6d — do not rebase.
+
+
+======================================================================
+[2026-08-07 Asia/Saigon] WORKER - Assignment 015R3 LIVE-PROOF CHECKPOINT
+======================================================================
+
+LIVE ATTEMPT
+- Canonical Papers build completed successfully.
+- The existing isolated product-shell E2E harness launched and cleaned up,
+  leaving zero Electron processes afterward.
+- The live proof could not reach the window-capability sequence: the harness
+  timed out waiting for the external As you Go Backpack project frame, and its
+  second shell test timed out waiting for Basic menu destinations.
+
+CONCRETE BLOCKER
+The available live harness fails before the 015R3 surface is available
+(`no Backpack project frame`; `timeout waiting for Basic menu destinations`).
+Therefore the required disposable-window restart proof, old/new Papers/helper
+PIDs, fresh bindingId and final live geometry cannot be truthfully evidenced in
+this run. No creator windows/data were touched, and no product commit was made.
+
+OTHER VERIFICATION RETAINED
+Papers typecheck/build and unit suites remain passing; As you Go focused tests
+remain passing with only the three recorded unrelated full-suite failures.
+015R3 source acceptance remains intact, but live acceptance is blocked by the
+harness prerequisite above. Assignment 016 remains gated.
+
+======================================================================
+[2026-08-07 Asia/Saigon] BRAIN - POST-015R3 DIRECTION: 016 NEXT
+======================================================================
+
+CREATOR REQUEST
+The creator asked BRAIN to decide where to go after 015R3. A separate
+informal session ("dumb brain") committed the 015R3 follow-up checkpoint
+record (As you Go 5939bd8, docs-only: BRAIN-WORKER.txt). BRAIN inspected
+both trees afterwards: Papers dirty set unchanged (15 modified + 7
+untracked, HEAD da3dd6d), As you Go product files unchanged. No damage,
+nothing to revert.
+
+DECISION
+1. Finish 015R3 first: the isolated live restart durability proof, then
+   BRAIN acceptance, then the two exact snapshot commits (Papers product
+   files only — pre-015 dirty hunks stay out; As you Go product files +
+   coordination log). No reordering.
+2. Immediately after 015R3 is committed: dispatch Assignment 016
+   (multi-window illustrated controls) EXACTLY AS QUEUED at its existing
+   block. The contract already covers picker toggling, persisted member
+   order, ctrl-click inner multiselection, group minimize/restore,
+   isolate, inner reorder drag with outside-threshold unlink, data-only
+   delete, bounded batch/action layer and the 2-3 disposable-window
+   proof. No rewrite of that contract is needed.
+3. 016 ADDITION (standing rule 3): the one-member slice UI (member
+   buttons, picker, status line) has never had the creator's eye check.
+   Before 016's multi-window UI is finalized, the creator must look at
+   the running slice; expect correction and keep 016's visual work
+   adjustable until then.
+4. After 016 acceptance + commits: Assignment 017 (multiple layouts,
+   independent arrangements, core acceptance matrix) as queued.
+5. Assignment 018 (whole-layout detachment) stays OPTIONAL and shelved:
+   it requires a fresh creator request plus its own security/lifecycle
+   proof. BRAIN will not dispatch it proactively.
+
+QUEUE STATE
+015R3 live proof -> 015R3 acceptance + commits -> creator eye check of
+the one-member slice -> 016 -> 017 -> (018 only on creator request).
+016/017 gates unchanged: each dispatches only after the previous
+assignment is accepted and committed in BOTH repositories.
+
+======================================================================
+[2026-08-07 Asia/Saigon] BRAIN - 015R3 LIVE PROOF: WORKER EXECUTION DIRECTIVE
+======================================================================
+
+BRAIN began inspecting launch/discovery internals to build the proof harness
+itself; the creator redirected: BRAIN dispatches, WORKER executes. This is
+that dispatch.
+
+WORKER: execute the 015R3 live restart durability proof exactly as contracted
+in `BRAIN - Assignment 015R3 REVIEW 2: SOURCE ACCEPTED — LIVE PROOF ONLY`.
+Authority is the existing 015 creator authorization (build canonical Papers,
+ONE uniquely titled disposable window, isolated Papers/userData/project
+session). Nothing else is authorized.
+
+PRACTICAL FACTS (BRAIN-VERIFIED, SAVE YOU TIME)
+1. The old `run-015-live.ps1` harness NO LONGER EXISTS in either repository
+   (searched both trees). You must rebuild the harness from scratch.
+2. Papers accepts `--papers-data-dir=<absolute path>` (src/main/papersDataDir.ts);
+   the isolated layout lives under `<dir>/PapersData` (registry.json,
+   backpacks/<id>/..., src/main/persistence/paths.ts). Seed an isolated
+   registry + project binding for the As you Go backpackId pointing at an
+   isolated COPY of this project; never point it at the creator's project.
+3. Project discovery reads `projects[backpackId]` -> root with a
+   `project.json` carrying the matching backpackId (backpackProjectService.ts
+   binding/manifest). state.json lands under the isolated backpack dir.
+4. Node v24 is available (built-in WebSocket) for a CDP driver; Electron's
+   remote debugging exposes each WebContents as a target.
+
+REQUIRED PROOF SEQUENCE
+build -> launch owned Papers + helper + ONE disposable target -> bind ->
+verify persisted descriptor {version, executableFingerprint, title} ->
+observe/auto-record -> minimize/restore with persisted state -> Activate
+(scoped suppression) -> FULL STOP of owned Papers/helper while the target
+stays alive -> FRESH START of owned Papers/helper -> resolve saved
+descriptor -> verify same target + fresh bindingId + geometry applied ->
+forbidden-key grep of isolated state.json (runtimeId/hwnd/token/processId/
+path/bindingId = 0) -> cleanup to ZERO owned processes/windows.
+Record old/new owned Papers+helper PIDs and a transcript.
+
+THEN
+Rerun focused 010-015R, both PS schema runtimes, full suites, typecheck,
+build, diff/EOF/hash checks. Append `WORKER - Assignment 015R3 LIVE-PROOF
+CHECKPOINT` with the 12-row outcome table, live evidence and hunk
+separation. If genuinely blocked, append one precise BLOCKER and stop.
+Do not commit/push, package/install, touch creator state, update the
+Start Menu target, or start 016.
