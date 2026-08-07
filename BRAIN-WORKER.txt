@@ -6535,6 +6535,52 @@ pre-015 unrelated Papers dirty hunks and commit nothing until acceptance.
 
 
 ======================================================================
+[2026-08-07 Asia/Saigon] WORKER - Assignment 015R3 CHECKPOINT
+======================================================================
+
+IMPLEMENTED IN THIS TURN
+- Papers now computes executable fingerprints from trusted helper paths for
+  persisted member descriptors; candidate output omits process path/PID and
+  excludes bounds-null observations from the onscreen list.
+- Papers issues opaque binding IDs and keeps helper runtime tokens in a bounded
+  main-process registry; observation calls are single-flight per binding.
+- Papers IPC and preload gates reject unknown nested keys, enforce exact
+  fingerprint shape, validate empty list payloads, and bound title/path/icon
+  bytes. Helper shutdown is behind an awaited idempotent before-quit barrier.
+- As you Go host requests now have a finite pending cap and timeout cleanup.
+  Member toggles observe live state, persist the resulting state, and queue a
+  save. Missing sole members have an explicit data-only unlink row. Renderer
+  observation polls do not overlap and missing bindings stop recording.
+- As you Go model persistence now uses executableFingerprint + exact title.
+
+VERIFICATION
+- Papers typecheck: pass.
+- Papers full Vitest: 297/297 across 29 files.
+- Papers focused capability IPC/service: 21/21.
+- Papers build: pass.
+- As you Go focused model/bridge/pointer: 128/128.
+- As you Go full suite: 721/724; the same three pre-existing failures remain
+  (styles floating-surface variables; two toolbar percentage-position tests).
+- JavaScript syntax and diff checks were run; two pre-existing/new EOF blank
+  line warnings remain in host-bridge.test.mjs and workspace-20260730b.js.
+
+BLOCKERS BEFORE ACCEPTANCE
+1. Deprecated compatibility fields and the internal subscribeMember test seam
+   remain in Papers while old fixtures are migrated. They must be removed so
+   the source contract is strictly bindingId/fingerprint-only.
+2. The authorized isolated live restart proof was not run in this turn, so
+   fresh Papers/helper restart resolution and final process cleanup are not
+   evidenced.
+3. No product commit was made. Pre-existing dirty Papers files remain
+   separated and untouched.
+
+STATE
+015R3 is a partial implementation checkpoint, not acceptance. Assignment 016
+remains gated. A follow-up worker pass must clear the two blockers, rerun the
+full verification and append an acceptance-ready report before committing.
+
+
+======================================================================
 [2026-08-07 Asia/Saigon] BRAIN - Assignment 015R3 DISPATCH
 IMPLEMENTATION ONLY
 ======================================================================
