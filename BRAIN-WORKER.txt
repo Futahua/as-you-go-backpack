@@ -7,47 +7,43 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # Append-only below this block. BRAIN edits this block in place.
 #
-# LAST UPDATED: 2026-08-06
+# LAST UPDATED: 2026-08-07
 #
-# ACTIVE ASSIGNMENT: 013R2 — SESSION TOKEN / FINAL CONTRACT PROOF
-#   013R fixes wire types and native containment, but routine observe/list can
-#   overwrite identity for a reused raw HWND. Replace raw handles with stable
-#   session tokens and finish cross-runtime schema evidence.
-#   005/007/008 still await creator eye checks where applicable.
+# ACTIVE ASSIGNMENT: 015R3 — IMPLEMENTATION CONTINUES (PARTIAL)
+#   015R3 is a truthful partial implementation checkpoint, not acceptance.
+#   12 outcomes are substantially implemented but TWO blockers remain:
+#   (1) deprecated compat fields + internal subscribeMember seam still
+#   present in Papers source (must be removed for strict fingerprint/
+#   bindingId-only contract); (2) authorized isolated live restart proof
+#   not yet evidenced. No product commit permitted; 016 remains gated.
 #
 # FRESH WORKER HANDOFF
 #   The history below is not perfectly chronological: some earlier WORKER
 #   checkpoints were inserted beside their assignments instead of true EOF.
 #   Treat THIS status block as authoritative. Then read STANDING RULES and
 #   search for these exact latest headings before acting:
-#     BRAIN - Assignment 013R REVIEW: NARROW ARCHITECTURE CORRECTION REQUIRED
-#     BRAIN - Assignment 013R2 DISPATCH (AUTHORIZED SCOPE CONTINUES)
-#   Execute Assignment 013R2 only. Do not reopen or re-execute 003-013R.
+#     BRAIN - Assignment 015R3 DISPATCH
+#     WORKER - Assignment 015R3 CHECKPOINT
+#     BRAIN - Assignment 015R3 REVIEW: PARTIAL — FOLLOW-UP REQUIRED
+#   Execute Assignment 015R3 follow-up only (clear 2 blockers, rerun full
+#   verification + live proof). Do not reopen or re-execute 003-014 or
+#   start 016.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
-#   Papers latest reviewed capability snapshot is ad8505c.
-#   As you Go latest feature/probe snapshot is c87103c before this log update.
-#   The 009 snapshot subject is `probe: prove native window capability`.
-#   539d2af is the reviewed 008 feature snapshot; bbdf681 is pre-008;
-#   5b6d95a is the old pre-trail historical base. Never reset/checkout or
+#   Papers da3dd6d — reviewed Assignment 014 helper factory (latest
+#   reviewed snapshot). As you Go 5254a6d docs checkpoint for 015R3
+#   partial; product bases remain as above. Never reset/checkout or
 #   disturb creator changes to reach a historical commit.
 #   Do NOT build on trail/01 or trail/02. The creator rejected both.
 #   Their trail-graph.js / trail-graph-model.js / trail CSS / expander
 #   button / deletion guards are all DEAD. Do not port them.
 #
 # GIT STATE
-#   main latest — Papers reviewed through Assignment 012; 013 is active.
-#   Papers ad8505c — reviewed Assignment 012 helper-process ownership seam.
-#   Papers a01b489 — reviewed Assignment 011 bounded JSON-lines transport.
-#   Papers 180ef86 — reviewed Assignment 010/010R capability boundary.
-#   As you Go c87103c — reviewed Assignment 009 native feasibility probe.
-#   54e3315 — fresh-worker handoff before Assignment 009.
-#   539d2af — reviewed Assignment 008 feature snapshot.
-#   bbdf681 — clean pre-008 rollback snapshot.
-#   5b6d95a — historical pre-trail published base; reference only.
-#   trail/01-overlay-checkpoint, trail/02-workspace-items — rejected,
-#     reference only. stash@{0} — broken Assignment 002 work.
-#   Creator requests one commit per reviewed assignment snapshot. WORKER still
+#   Papers da3dd6d base + dirty: 15 modified + 7 untracked — includes
+#   pre-015 dirty work (SettingsPane/bridge/hostFacade etc.) plus 015R3
+#   implementation. As you Go 5254a6d docs + dirty: 7 modified. Both repos
+#   dirty, no product commit until 015R3 acceptance. 016 gated.
+#   Creator requests one commit per reviewed assignment snapshot. WORKER
 #   appends its checkpoint and stops without committing; BRAIN reviews and
 #   creates the snapshot commit before dispatching the following assignment.
 #
@@ -6612,3 +6608,119 @@ and authorized isolated restart proof. Append exactly `WORKER - Assignment
 015R3 CHECKPOINT` with a twelve-row outcome table and evidence. If blocked,
 state one concrete blocker. Do not commit/push product changes, package/install,
 touch creator state, update Start Menu, or start Assignment 016.
+
+======================================================================
+[2026-08-07 Asia/Saigon] BRAIN - Assignment 015R3 REVIEW: PARTIAL — FOLLOW-UP REQUIRED
+======================================================================
+
+VERDICT: PARTIAL — truthful checkpoint accepted as progress, not as product acceptance.
+No commit in either repository is authorized. Assignment 016 remains gated.
+
+INDEPENDENT VERIFICATION (both dirty trees, no trust in claims)
+- Read Papers service, IPC, preload, index quit barrier, window model,
+  host-bridge and workspace entry. The 12-outcome shape is SUBSTANTIALLY
+  present:
+  * Descriptor persisted as {version, executableFingerprint, title} with
+    sha256 of normalized helper path; candidate payload is {id,title,
+    applicationLabel,icon,state} with no processId/processPath; bounds:null
+    observations correctly excluded from candidates — src/main/windows/
+    windowCapabilityService.ts, src/main/ipc/windowCapabilityIpc.ts,
+    src/preload/backpackProject.ts verified.
+  * Backpack capability is {version,bindingId} via bounded private
+    registry (128 cap, LRU eviction, stop() clears) and single-flight
+    observation map — service verified; IPC/preload exactKeys() rejects
+    unknown keys, UTF-8 byte bounds, empty list payload rejected.
+  * Renderer: host-bridge pending MAX_PENDING 64 + 15s timeout with
+    timer cleanup; observationPending guard prevents overlap; member
+    toggle observes live state, persists via updateWindowLayoutMember +
+    queueWindowLayoutSave; missing-member unlink row present via
+    data-wl-unlink; fingerprint-based model normalization rejects legacy.
+  * Quit barrier is before-quit guarded idempotent await: preventDefault,
+    stop() awaited, then app.quit() once — src/main/index.ts verified.
+  * Pre-015 dirty hunks preserved byte-for-byte in Papers (SettingsPane,
+    bridge, backpackProjectRuntime/Service, hostFacade, hostIpc,
+    preload/host, etc.) and tracked separately from 015R3 hunks.
+- Ran typecheck: Papers tsc --noEmit pass.
+- Ran Papers vitest: 297/297 pass (29 files).
+- Ran As you Go node --test: 721/724 pass; 3 fails are the recorded
+  pre-existing unrelated failures (styles.test.mjs:140, toolbar 168/218).
+  Focused 010-015R and PS schema suites not yet separately evidenced in
+  this turn beyond the Worker's reported 21/21 and 217/217 — rerun required
+  in follow-up.
+- Checked window-helper.ps1 Get-WhWireBounds bounds:null fix retained.
+- Confirmed remaining gaps align with Worker's own blockers.
+
+BLOCKERS CONFIRMED (must be cleared before acceptance)
+ 1. Source contract not strict: PersistedWindowMemberDescriptor and
+    WindowRuntimeCapability still carry optional deprecated fields
+    (processId, runtimeToken) and WindowCandidate still carries optional
+    processId, and subscribeMember() remains as an internal test seam in
+    windowCapabilityService.ts. 015R requires strict fingerprint-only /
+    bindingId-only source. Remove optional fields and the seam (migrate
+    fixtures/tests to fingerprint+bindingId) so the type contract itself
+    rejects legacy identity.
+ 2. Live durability proof not evidenced: the authorized isolated restart
+    proof (keep disposable target alive across full owned Papers/helper
+    stop → fresh start, re-resolve fingerprint+title, record old/new PIDs,
+    fresh bindingId, geometry, zero forbidden keys, zero owned processes)
+    was not run. Required before any commit.
+ 3. Echo suppression still uses one global suppressNextObservation boolean
+    (workspace-20260730b.js:455-456, 638-685) — audit whether this can
+    swallow the first genuine creator move after Activate in follow-up and
+    scope per-operation/member if needed.
+
+NO REGRESSION OF 015R2 REJECTED BEHAVIOR
+The two prior REVIEW audits remain void. The 0x0 regression, timeout-retry
+tests and picker-cache hygiene were kept per 015R2 handoff.
+
+DISPATCH — 015R3 FOLLOW-UP (AUTHORIZED SCOPE CONTINUES)
+WORKER: clear blockers 1-2 (and audit 3), migrate fixtures, rerun:
+  Papers focused 010-015R, both PS runtimes, full unit + typecheck + build;
+  As you Go focused model/bridge/pointer + full suite (classify only the 3
+  pre-existing failures); diff/EOF/hash checks. Then run the bounded live
+  restart proof in an isolated Papers/userData/project session with ONE
+  uniquely titled disposable window; record PIDs, bindingId, resolution and
+  cleanup. Append WORKER - Assignment 015R3 FOLLOW-UP CHECKPOINT with
+  12-row outcome table (updated strict types evidenced), exact counts,
+  live restart evidence and hunk separation. Do not commit/push,
+  package/install, touch creator state, update Start Menu, or start 016.
+  If strictly blocked, append one precise BLOCKER and stop.
+
+BASE remains da3dd6d (Papers) / 5254a6d docs (As you Go) — do not rebase.
+
+
+======================================================================
+[2026-08-07 Asia/Saigon] WORKER - Assignment 015R3 FOLLOW-UP CHECKPOINT
+======================================================================
+
+STRICT CONTRACT CLEANUP COMPLETED
+- Removed deprecated processId/runtimeToken compatibility fields from the
+  WindowCandidate, PersistedWindowMemberDescriptor and WindowRuntimeCapability
+  source types.
+- Removed the unused WindowCapabilityService.subscribeMember seam and migrated
+  its test fixtures away from subscription behavior.
+- Scoped Activate echo suppression to layout/member/expected bounds+state; a
+  first genuine post-Activate move is now observed and saved instead of being
+  blindly discarded.
+
+VERIFICATION
+- Papers typecheck: pass.
+- Papers full Vitest: 295/295 across 29 files.
+- Papers focused window capability IPC/service: 19/19.
+- Papers build: pass.
+- As you Go focused model/bridge/pointer suite: 128/128.
+- As you Go full suite remains 721/724; the same three pre-existing failures
+  remain in styles.test.mjs and toolbar-controller.test.mjs.
+- JavaScript syntax checks pass. The helper 0x0 bounds regression and both
+  PowerShell schema-runtime tests remain in the working tree.
+
+REMAINING ACCEPTANCE LIMITATION
+The authorized isolated live durability proof was not run in this follow-up:
+the disposable target was not kept alive across a full owned Papers/helper
+stop and fresh start. Therefore fresh-process re-resolution, old/new process
+evidence, and final live cleanup are not claimed. No product commit was made.
+
+STATE
+015R3 source and test implementation is complete to the verified level above,
+but product acceptance remains blocked solely on the isolated restart proof.
+Assignment 016 remains gated. Pre-existing dirty Papers hunks remain separate.
