@@ -6532,3 +6532,37 @@ cleanup. A fresh BRAIN must inspect current diffs, treat the complete preceding
 all twelve numbered outcomes. Require source evidence and targeted tests before
 any live proof or acceptance. Assignment 016 remains gated. Preserve all
 pre-015 unrelated Papers dirty hunks and commit nothing until acceptance.
+
+
+======================================================================
+[2026-08-07 Asia/Saigon] BRAIN - Assignment 015R3 DISPATCH
+IMPLEMENTATION ONLY
+======================================================================
+
+The creator has a new BRAIN. Continue from the rejected 015R2 handoff above.
+This is an implementation assignment, not another review assignment.
+
+Read the complete 015R correction contract and implement all twelve outcomes
+in the canonical Papers and As you Go repositories. The Worker must change
+source and tests; it must not merely audit, restate deviations, or claim that
+the old architecture is acceptable. Preserve unrelated pre-015 dirty work.
+
+Required source evidence before checkpoint:
+- descriptor is exactly version + executableFingerprint + title;
+- renderer capability is exactly version + bindingId, with helper tokens private
+  to a bounded Papers-main registry;
+- candidate payload has no PID or process path;
+- IPC and preload use exact-key, UTF-8-byte-bounded schemas;
+- unused subscribeMember is removed; one non-overlapping observer remains with
+  main-side single-flight/capacity enforcement;
+- member toggles persist state, missing members can unlink, and echo suppression
+  cannot swallow the first genuine move;
+- bridge requests have cap/timeout/cleanup;
+- shutdown awaits an idempotent helper stop barrier;
+- 0x0 bounds regression remains and bounds-null candidates are excluded.
+
+After implementation, run the required focused/full suites, typecheck/build,
+and authorized isolated restart proof. Append exactly `WORKER - Assignment
+015R3 CHECKPOINT` with a twelve-row outcome table and evidence. If blocked,
+state one concrete blocker. Do not commit/push product changes, package/install,
+touch creator state, update Start Menu, or start Assignment 016.
