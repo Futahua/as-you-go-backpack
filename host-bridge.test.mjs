@@ -233,3 +233,109 @@ test('host bridge ignores messages that do not come from the parent frame', asyn
   });
   assert.equal(await promise, 'clips');
 });
+
+test('host bridge window candidate methods post the enumerated protocol and unwrap shapes', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+
+  const candidatesPromise = host.windowCandidates();
+  const sentList = mock.parent.messages[0].message;
+  assert.equal(sentList.type, 'papers:project:window-candidates');
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentList.requestId, ok: true,
+    outcome: 'success',
+    candidates: [{ id: 'c1', title: 'Window A', processId: 1001, processPath: 'p', icon: 'data:icon', state: 'normal' }],
+  });
+  assert.deepEqual(await candidatesPromise, {
+    outcome: 'success',
+    candidates: [{ id: 'c1', title: 'Window A', processId: 1001, processPath: 'p', icon: 'data:icon', state: 'normal' }],
+    error: null,
+  });
+
+  const bindPromise = host.bindWindowCandidate('c1');
+  const sentBind = mock.parent.messages[1].message;
+  assert.equal(sentBind.type, 'papers:project:window-bind-candidate');
+  assert.equal(sentBind.candidateId, 'c1');
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentBind.requestId, ok: true,
+    outcome: 'success',
+    capability: { version: 1, runtimeToken: 'Ta', title: 'Window A', processId: 1001 },
+    descriptor: { version: 1, title: 'Window A', processId: 1001 },
+  });
+  assert.deepEqual(await bindPromise, {
+    outcome: 'success',
+    capability: { version: 1, runtimeToken: 'Ta', title: 'Window A', processId: 1001 },
+    descriptor: { version: 1, title: 'Window A', processId: 1001 },
+    observation: null,
+    error: null,
+  });
+});
+
+test('host bridge window observation/control methods carry the capability and unwrap outcomes', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const capability = { version: 1, runtimeToken: 'Ta', title: 'Window A', processId: 1001 };
+
+  const observe = host.observeWindowCapability(capability);
+  const sentObserve = mock.parent.messages[0].message;
+  assert.equal(sentObserve.type, 'papers:project:window-observe-capability');
+  assert.deepEqual(sentObserve.capability, capability);
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentObserve.requestId, ok: true,
+    outcome: 'success', observation: { runtimeId: 'Ta', title: 'Window A', processId: 1001, processPath: 'p', state: 'minimized', bounds: { x: 1, y: 2, width: 300, height: 200 } },
+  });
+  const observed = await observe;
+  assert.equal(observed.outcome, 'success');
+  assert.equal(observed.observation.state, 'minimized');
+
+  const minimized = host.minimizeWindowCapability(capability);
+  const sentMin = mock.parent.messages[1].message;
+  assert.equal(sentMin.type, 'papers:project:window-minimize-capability');
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentMin.requestId, ok: true,
+    outcome: 'success', observation: { runtimeId: 'Ta', title: 'Window A', processId: 1001, processPath: 'p', state: 'minimized', bounds: null },
+  });
+  assert.equal((await minimized).outcome, 'success');
+
+  const restored = host.restoreWindowCapability(capability);
+  const sentRestore = mock.parent.messages[2].message;
+  assert.equal(sentRestore.type, 'papers:project:window-restore-capability');
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentRestore.requestId, ok: true,
+    outcome: 'missing', error: 'gone',
+  });
+  assert.deepEqual(await restored, { outcome: 'missing', observation: null, error: 'gone' });
+
+  const applied = host.applyWindowCapability(capability, { x: 5, y: 6, width: 400, height: 300 });
+  const sentApply = mock.parent.messages[3].message;
+  assert.equal(sentApply.type, 'papers:project:window-apply-capability');
+  assert.deepEqual(sentApply.bounds, { x: 5, y: 6, width: 400, height: 300 });
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentApply.requestId, ok: true,
+    outcome: 'success', observation: { runtimeId: 'Ta', title: 'Window A', processId: 1001, processPath: 'p', state: 'normal', bounds: { x: 5, y: 6, width: 400, height: 300 } },
+  });
+  assert.equal((await applied).outcome, 'success');
+
+  const resolved = host.resolveWindowDescriptor({ version: 1, title: 'Window A', processId: 1001 });
+  const sentResolve = mock.parent.messages[4].message;
+  assert.equal(sentResolve.type, 'papers:project:window-resolve-descriptor');
+  assert.deepEqual(sentResolve.descriptor, { version: 1, title: 'Window A', processId: 1001 });
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentResolve.requestId, ok: true,
+    outcome: 'missing', error: 'no visible window matches',
+  });
+  assert.deepEqual(await resolved, { outcome: 'missing', observation: null, error: 'no visible window matches' });
+});
+
+test('host bridge surfaces window capability failures as rejected outcomes, never as commands', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const pending = host.windowCandidates();
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:window-candidates');
+  assert.ok(!('method' in sent) && !('command' in sent) && !('action' in sent), 'no arbitrary method field is posted');
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sent.requestId, ok: false, error: 'denied',
+  });
+  await assert.rejects(pending, /denied/);
+});

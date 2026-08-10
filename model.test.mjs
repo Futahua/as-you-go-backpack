@@ -34,6 +34,9 @@ import {
   trailContextKey,
   setTrailExpandedByContext,
   createWindowLayout,
+  addWindowLayoutMember,
+  removeWindowLayoutMember,
+  updateWindowLayoutMember,
   itemsIn,
   binnedItems,
   setItemSets,
@@ -1339,8 +1342,13 @@ test('window-layout records normalize, prune malformed entries and survive reloa
   assert.equal(normalized.windowLayouts.find((w) => w.name === 'Bad bin').bin, undefined, 'malformed bin dropped');
   assert.deepEqual(
     normalized.windowLayouts.find((w) => w.name === 'Bad arr').arrangement,
-    { version: 1, members: [] },
-    'malformed arrangement defaults to the versioned empty shape',
+    { version: 2, members: [] },
+    'a version-2 empty arrangement survives normalization',
+  );
+  assert.deepEqual(
+    normalized.windowLayouts.find((w) => w.name === 'Valid').arrangement,
+    { version: 2, members: [] },
+    'legacy version-1 arrangement upgrades safely to the versioned empty shape',
   );
   assert.equal(normalized.windowLayouts.find((w) => w.name === 'Valid').name, 'Valid');
   assert.deepEqual(normalized.windowLayouts.find((w) => w.name === 'Valid').bin,
@@ -1397,6 +1405,104 @@ test('deleting a folder cleans up the window layouts inside it', () => {
   state = binSelection(state, [folder], '2026-01-01T00:00:00.000Z');
   const deleted = permanentlyDelete(state, [folder]);
   assert.equal(deleted.windowLayouts.length, 0, 'the nested layout died with its folder');
+});
+
+// Assignment 015: one-member model/UI slice - ordered membership with a
+// stable persisted descriptor and per-layout arrangement.
+// =============================================================================
+
+function memberFixture(overrides = {}) {
+  return {
+    id: 'member-1',
+    descriptor: { version: 1, title: 'Window A', executableFingerprint: 'a'.repeat(64) },
+    bounds: { x: 10, y: 20, width: 300, height: 200 },
+    state: 'normal',
+    ...overrides,
+  };
+}
+
+test('addWindowLayoutMember appends an ordered member with its persisted descriptor only', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'Studio' });
+  const layoutId = state.windowLayouts[0].id;
+  const member = memberFixture();
+  state = addWindowLayoutMember(state, layoutId, member);
+  const layout = state.windowLayouts[0];
+  assert.deepEqual(layout.arrangement, {
+    version: 2,
+    members: [{ id: 'member-1', descriptor: { version: 1, title: 'Window A', executableFingerprint: 'a'.repeat(64) }, bounds: { x: 10, y: 20, width: 300, height: 200 }, state: 'normal' }],
+  });
+  assert.ok(JSON.stringify(layout.arrangement).includes('Window A'), 'descriptor title persisted');
+  assert.ok(!JSON.stringify(layout.arrangement).includes('runtime'), 'no runtime identity persisted');
+  assert.ok(!JSON.stringify(layout.arrangement).includes('hwnd'), 'no HWND persisted');
+  assert.ok(!JSON.stringify(layout.arrangement).includes('token'), 'no token persisted');
+});
+
+test('addWindowLayoutMember rejects duplicate members and invalid descriptors', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'Studio' });
+  const layoutId = state.windowLayouts[0].id;
+  state = addWindowLayoutMember(state, layoutId, memberFixture());
+  assert.throws(() => addWindowLayoutMember(state, layoutId, memberFixture()), /already a member/);
+  assert.throws(() => addWindowLayoutMember(state, layoutId, memberFixture({ id: 'other', descriptor: { version: 2, title: 'X', executableFingerprint: 'a'.repeat(64) } })), /invalid/);
+  assert.throws(() => addWindowLayoutMember(state, layoutId, memberFixture({ id: 'other', descriptor: { version: 1, title: '', executableFingerprint: 'a'.repeat(64) } })), /invalid/);
+  assert.throws(() => addWindowLayoutMember(state, layoutId, memberFixture({ id: 'other', descriptor: { version: 1, title: 'X', executableFingerprint: 'bad' } })), /invalid/);
+  assert.throws(() => addWindowLayoutMember(state, 'nope', memberFixture()), /not found/);
+});
+
+test('removeWindowLayoutMember unlinks data-only and updateWindowLayoutMember patches the arrangement', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'Studio' });
+  const layoutId = state.windowLayouts[0].id;
+  state = addWindowLayoutMember(state, layoutId, memberFixture());
+  state = updateWindowLayoutMember(state, layoutId, 'member-1', {
+    bounds: { x: 40, y: 50, width: 400, height: 250 },
+    state: 'minimized',
+  });
+  assert.deepEqual(state.windowLayouts[0].arrangement.members[0].bounds, { x: 40, y: 50, width: 400, height: 250 });
+  assert.equal(state.windowLayouts[0].arrangement.members[0].state, 'minimized');
+  assert.equal(state.windowLayouts[0].arrangement.members[0].descriptor.executableFingerprint, 'a'.repeat(64), 'descriptor untouched');
+
+  state = removeWindowLayoutMember(state, layoutId, 'member-1');
+  assert.deepEqual(state.windowLayouts[0].arrangement, { version: 2, members: [] });
+  assert.throws(() => removeWindowLayoutMember(state, 'nope', 'member-1'), /not found/);
+});
+
+test('normalization rejects runtime identity and malformed members, preserving legacy upgrades', () => {
+  const raw = {
+    schemaVersion: 1,
+    groups: [],
+    shortcuts: [],
+    windowLayouts: [{
+      id: 'wl', name: 'Studio', parentId: 'root',
+      arrangement: {
+        version: 2,
+        members: [
+          memberFixture(),
+          { id: 'leak', descriptor: { version: 1, title: 'Bad', executableFingerprint: 'b'.repeat(64) }, runtimeId: 'Tabc', hwnd: 12345, token: 'T123', bounds: null, state: 'normal' },
+          { id: 'bad-bounds', descriptor: { version: 1, title: 'BB', executableFingerprint: 'c'.repeat(64) }, bounds: { x: 0, y: 0, width: -5, height: 10 }, state: 'normal' },
+          { id: 'bad-state', descriptor: { version: 1, title: 'BS', executableFingerprint: 'd'.repeat(64) }, bounds: null, state: 'maximized' },
+          { id: 'dup', descriptor: { version: 1, title: 'D', executableFingerprint: 'e'.repeat(64) }, bounds: null, state: 'normal' },
+          { id: 'dup', descriptor: { version: 1, title: 'D2', executableFingerprint: 'f'.repeat(64) }, bounds: null, state: 'normal' },
+        ],
+      },
+    }],
+  };
+  const normalized = normalizeState(raw);
+  const members = normalized.windowLayouts[0].arrangement.members;
+  assert.equal(members.length, 5, 'malformed member FIELDS are cleaned, duplicate ids removed; only invalid descriptors are dropped');
+  assert.equal(members.filter((member) => member.id === 'dup').length, 1, 'duplicate member ids pruned');
+  assert.deepEqual(members[0], memberFixture(), 'the valid member survives intact');
+  const cleanedLeak = members.find((member) => member.descriptor.title === 'Bad');
+  assert.ok(cleanedLeak, 'the member carrying runtime fields survives');
+  assert.deepEqual(Object.keys(cleanedLeak).sort(), ['bounds', 'descriptor', 'id', 'state'],
+    'runtimeId/hwnd/token fields are rejected and never persisted');
+  assert.equal(members.find((member) => member.descriptor.title === 'BB').bounds, null, 'malformed bounds are dropped, not stored');
+  assert.equal(members.find((member) => member.descriptor.title === 'BS').state, 'normal', 'unsupported state normalizes to normal');
+  assert.ok(!JSON.stringify(normalized).includes('hwnd'), 'HWND never persists');
+  assert.ok(!JSON.stringify(normalized).includes('runtimeId'), 'runtimeId never persists');
+  const reloaded = normalizeState(JSON.parse(JSON.stringify(normalized)));
+  assert.deepEqual(reloaded.windowLayouts[0].arrangement, normalized.windowLayouts[0].arrangement, 'member save/reload round trip');
 });
 
 test('window-layout ids are valid set members and trail provenance follows 005', () => {

@@ -47,11 +47,66 @@ function windowLayout(state, windowLayoutId) {
   return state.windowLayouts?.find((candidate) => candidate.id === windowLayoutId) ?? null;
 }
 
-/** The versioned, empty arrangement shape a window-layout record carries in
- * this proof. Native member data lands here in a later proof without a
- * migration: readers default missing/malformed shapes to this. */
+/** The versioned, empty arrangement shape a window-layout record carries.
+ * Version 2 holds the ordered membership: each member carries a stable
+ * persisted descriptor (never a runtimeId, token or HWND) plus the
+ * saved arrangement (bounds + normal/minimized intent) for this layout. */
 function emptyWindowLayoutArrangement() {
-  return { version: 1, members: [] };
+  return { version: 2, members: [] };
+}
+
+/** Validates one persisted window-layout member. The descriptor is the
+ * only persisted identity: runtimeId/HWND/token fields are rejected
+ * outright (dropped), never stored. Bounds must be finite with positive
+ * width/height; state must be normal or minimized; anything else is
+ * dropped so a malformed member can never become authority. */
+function normalizeWindowLayoutMember(member) {
+  if (!member || typeof member !== 'object' || Array.isArray(member)) return null;
+  const id = typeof member.id === 'string' && member.id ? member.id : null;
+  const descriptor = member.descriptor;
+  if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor)) return null;
+  if (descriptor.version !== 1) return null;
+  const title = typeof descriptor.title === 'string' ? descriptor.title.trim() : '';
+  const executableFingerprint = descriptor.executableFingerprint;
+  if (!id || !title || typeof executableFingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(executableFingerprint)) {
+    return null;
+  }
+  let bounds = null;
+  if (member.bounds && typeof member.bounds === 'object' && !Array.isArray(member.bounds)) {
+    const b = member.bounds;
+    if (hasNumber(b.x) && hasNumber(b.y) && hasNumber(b.width) && hasNumber(b.height)
+      && Number.isFinite(b.x) && Number.isFinite(b.y) && Number.isFinite(b.width) && Number.isFinite(b.height)
+      && b.width > 0 && b.height > 0) {
+      bounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+    }
+  }
+  const state = member.state === 'minimized' ? 'minimized' : 'normal';
+  return {
+    id,
+    descriptor: { version: 1, title, executableFingerprint: executableFingerprint.toLowerCase() },
+    bounds,
+    state,
+  };
+}
+
+/** Normalizes one persisted arrangement: version 2 members are validated
+ * deeply; legacy version 1 (008) and malformed shapes become the empty
+ * version 2 arrangement so old records upgrade safely. */
+function normalizeWindowLayoutArrangement(arrangement) {
+  if (!arrangement || typeof arrangement !== 'object' || Array.isArray(arrangement)) {
+    return emptyWindowLayoutArrangement();
+  }
+  if (arrangement.version !== 2) return emptyWindowLayoutArrangement();
+  if (!Array.isArray(arrangement.members)) return emptyWindowLayoutArrangement();
+  const members = [];
+  const seen = new Set();
+  for (const rawMember of arrangement.members) {
+    const member = normalizeWindowLayoutMember(rawMember);
+    if (!member || seen.has(member.id)) continue;
+    seen.add(member.id);
+    members.push(member);
+  }
+  return { version: 2, members };
 }
 
 /** Finds the shortcut record and one specific placement by that placement's
@@ -295,12 +350,7 @@ function normalizeWindowLayouts(raw) {
           },
         }
         : {}),
-      arrangement: candidate.arrangement && typeof candidate.arrangement === 'object'
-        && !Array.isArray(candidate.arrangement)
-        && candidate.arrangement.version === 1
-        && Array.isArray(candidate.arrangement.members)
-        ? { version: 1, members: candidate.arrangement.members }
-        : emptyWindowLayoutArrangement(),
+      arrangement: normalizeWindowLayoutArrangement(candidate.arrangement),
     });
   }
   return records;
@@ -595,6 +645,69 @@ export function createWindowLayout(state, { name = 'Window layout', parentId = R
       icon: null,
       arrangement: emptyWindowLayoutArrangement(),
     }],
+  };
+}
+
+/** Adds one member (from a host bind: stable descriptor + optional first
+ * arrangement) to a window-layout's ordered membership. Data-only: nothing
+ * here launches, moves or closes a window. */
+export function addWindowLayoutMember(state, windowLayoutId, member) {
+  const layout = windowLayout(state, windowLayoutId);
+  if (!layout) throw new Error('Window layout not found.');
+  const normalized = normalizeWindowLayoutMember(member);
+  if (!normalized) throw new Error('Window layout member is invalid.');
+  if (layout.arrangement.members.some((existing) => existing.id === normalized.id)) {
+    throw new Error('This window is already a member of the layout.');
+  }
+  const members = [...layout.arrangement.members, normalized];
+  return {
+    ...state,
+    windowLayouts: state.windowLayouts.map((candidate) =>
+      candidate.id === windowLayoutId
+        ? { ...candidate, arrangement: { version: 2, members } }
+        : candidate),
+  };
+}
+
+/** Removes one member by its membership id. Data-only: the window itself
+ * is never closed or moved. */
+export function removeWindowLayoutMember(state, windowLayoutId, memberId) {
+  const layout = windowLayout(state, windowLayoutId);
+  if (!layout) throw new Error('Window layout not found.');
+  const members = layout.arrangement.members.filter((member) => member.id !== memberId);
+  return {
+    ...state,
+    windowLayouts: state.windowLayouts.map((candidate) =>
+      candidate.id === windowLayoutId
+        ? { ...candidate, arrangement: { version: 2, members } }
+        : candidate),
+  };
+}
+
+/** Patches one member's saved arrangement (bounds/state) for a layout.
+ * Data-only; used by the bounded live observer. */
+export function updateWindowLayoutMember(state, windowLayoutId, memberId, patch) {
+  const layout = windowLayout(state, windowLayoutId);
+  if (!layout) throw new Error('Window layout not found.');
+  const members = layout.arrangement.members.map((member) => {
+    if (member.id !== memberId) return member;
+    const next = { ...member };
+    if (patch && typeof patch === 'object') {
+      if (patch.bounds === null || (patch.bounds && typeof patch.bounds === 'object')) {
+        next.bounds = patch.bounds;
+      }
+      if (patch.state === 'minimized' || patch.state === 'normal') {
+        next.state = patch.state;
+      }
+    }
+    return next;
+  });
+  return {
+    ...state,
+    windowLayouts: state.windowLayouts.map((candidate) =>
+      candidate.id === windowLayoutId
+        ? { ...candidate, arrangement: { version: 2, members } }
+        : candidate),
   };
 }
 

@@ -472,15 +472,17 @@ test('an ancestor dragged onto the Bin pill still reaches the guarded command', 
 });
 
 // ===========================================================================
-// Interior window-layout controls (Assignment 008): the graph drag excludes
-// any pointerdown on a <button> by design (the expander uses the same
-// seam), so pressing a disabled miniature control never begins dragging.
+// Interior window-layout controls (Assignments 008, 015): the graph drag
+// excludes any pointerdown on a <button> by design (the expander uses the
+// same seam), so pressing a member button or the picker/activate controls
+// toggles/opens the window-layout UI and never begins outer dragging.
 // ===========================================================================
 
 test('pointerdown on an interior window-layout control never begins graph dragging', () => {
   const h = createHarness();
   h.graphNodes.set('wl1', node('wl1', 100, 100));
   const control = fakeNode();
+  control.className = 'window-layout-member normal';
   control.closest = (sel) => (sel === 'button' || sel === '[data-expand]' ? control : null);
   const tile = fakeNode();
   tile.closest = (sel) => (sel === '.icon-item' || sel === '.graph-node-shell' ? tile : null);

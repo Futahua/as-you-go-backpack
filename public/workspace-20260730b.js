@@ -39,6 +39,9 @@ import {
   setItemSets,
   setTrailExpandedByContext,
   createWindowLayout,
+  addWindowLayoutMember,
+  removeWindowLayoutMember,
+  updateWindowLayoutMember,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -362,35 +365,383 @@ function descriptionMarkup(candidate) {
     : '';
 }
 
-// Assignment 008: deterministic fixture members for the static window-layout
-// proof. Render-time only — the persisted record always carries an empty
-// members array; native member data arrives in a later proof. Buttons are
-// ordered purely for layout clarity and never represent desktop positions.
-const WINDOW_LAYOUT_FIXTURE_VERSION = 1;
-const WINDOW_LAYOUT_FIXTURE_MEMBERS = [
-  { id: 'fixture-a', label: 'Win A', state: 'open' },
-  { id: 'fixture-b', label: 'Win B', state: 'minimized' },
-  { id: 'fixture-c', label: 'Win C', state: 'maximized' },
-  { id: 'fixture-d', label: 'Win D', state: 'missing' },
-];
-
-/** The compact static miniature inside a window-layout shell: one small
- * button per fixture member plus three disabled group controls. Every
- * button is disabled and never calls the host; pressing one also never
- * begins graph dragging, because the graph drag excludes <button>
- * pointerdowns by design. */
-function windowLayoutBodyMarkup() {
-  const members = WINDOW_LAYOUT_FIXTURE_MEMBERS.map((member) =>
-    `<button class="window-layout-member ${member.state}" data-wl-member="${member.id}" type="button" disabled title="${escapeHtml(member.label)} — ${member.state}">${escapeHtml(member.label)}</button>`)
-    .join('');
-  return `<div class="window-layout-body" aria-label="Fixture window group — static proof">
-    <div class="window-layout-members">${members}</div>
+/** The compact live body inside a window-layout shell: one button per
+ * persisted member (program icon, exact title, static state marker), a
+ * picker host, Activate, and a status line. Buttons never begin outer
+ * graph dragging because the graph drag excludes <button> pointerdowns
+ * by design (Assignment 015). */
+function windowLayoutBodyMarkup(candidate) {
+  const members = (candidate.arrangement?.members ?? []).map((member) =>
+    windowLayoutMemberMarkup(candidate.id, member)).join('');
+  const emptyHint = (candidate.arrangement?.members ?? []).length === 0
+    ? '<div class="window-layout-empty" data-wl-empty="true">No window picked</div>'
+    : '';
+  const status = windowLayoutStatusText(candidate.id);
+  return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" aria-label="Window group">
+    <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
     <div class="window-layout-controls">
-      <button class="window-layout-control minimize-all" type="button" disabled title="Minimize all — not part of this proof">—</button>
-      <button class="window-layout-control restore-all" type="button" disabled title="Restore / open all — not part of this proof">▢</button>
-      <button class="window-layout-control save-positions" type="button" disabled title="Save current positions — not part of this proof">⤓</button>
+      <button class="window-layout-control wl-pick" type="button" data-wl-pick="${escapeHtml(candidate.id)}">Pick onscreen window</button>
+      <button class="window-layout-control wl-activate" type="button" data-wl-activate="${escapeHtml(candidate.id)}"${(candidate.arrangement?.members ?? []).length === 0 ? ' disabled' : ''}>Activate</button>
     </div>
+    <div class="window-layout-picker" data-wl-picker="${escapeHtml(candidate.id)}"></div>
+    <div class="window-layout-status" data-wl-status="${escapeHtml(candidate.id)}">${escapeHtml(status)}</div>
   </div>`;
+}
+
+function windowLayoutMemberMarkup(layoutId, member) {
+  const icon = windowLayoutMemberIcon(layoutId, member.id);
+  const iconMarkup = icon
+    ? `<img class="window-layout-member-icon" src="${escapeHtml(icon)}" alt="" data-wl-member-icon="${escapeHtml(member.id)}">`
+    : `<span class="window-layout-member-icon placeholder" data-wl-member-icon="${escapeHtml(member.id)}" aria-hidden="true"></span>`;
+  const stateClass = member.state === 'minimized' ? 'minimized' : 'normal';
+  return `<button class="window-layout-member ${stateClass}" data-wl-member="${escapeHtml(member.id)}" data-wl-layout="${escapeHtml(layoutId)}" type="button" title="${escapeHtml(member.descriptor.title)} - ${stateClass}">
+    ${iconMarkup}
+    <span class="window-layout-member-label">${escapeHtml(member.descriptor.title)}</span>
+    <span class="window-layout-member-state ${stateClass}" aria-hidden="true"></span>
+  </button>`;
+}
+
+/** Picker list markup: compact rows from the host candidate list. In
+ * unlink mode only the current member's row is actionable; the others are
+ * inert so a click can never accidentally replace or duplicate a member
+ * in this one-member slice. */
+function windowLayoutPickerMarkup(layoutId, candidates) {
+  const mode = windowLayoutPickerMode(layoutId);
+  const layout = windowLayoutFromState(layoutId);
+  const member = layout?.arrangement?.members?.[0] ?? null;
+  const persistedRow = mode === 'unlink' && member
+    ? `<button class="window-layout-pick-candidate current-member" data-wl-unlink="${escapeHtml(member.id)}" data-wl-pick="${escapeHtml(layoutId)}" type="button" title="Remove ${escapeHtml(member.descriptor.title)}">
+      <span class="window-layout-pick-icon placeholder" aria-hidden="true"></span>
+      <span class="window-layout-pick-label">${escapeHtml(member.descriptor.title)}</span>
+      <span class="window-layout-pick-state">remove</span>
+    </button>`
+    : '';
+  const rows = candidates.map((candidate) => {
+    const isCurrentMember = member !== null
+      && candidate.title === member.descriptor.title;
+    const disabled = mode === 'unlink' && !isCurrentMember;
+    return `<button class="window-layout-pick-candidate${isCurrentMember ? ' current-member' : ''}" data-wl-pick-candidate="${escapeHtml(candidate.id)}" data-wl-pick="${escapeHtml(layoutId)}" type="button" title="${escapeHtml(candidate.title)}"${disabled ? ' disabled' : ''}>
+      ${candidate.icon
+        ? `<img class="window-layout-pick-icon" src="${escapeHtml(candidate.icon)}" alt="">`
+        : '<span class="window-layout-pick-icon placeholder" aria-hidden="true"></span>'}
+      <span class="window-layout-pick-label">${escapeHtml(candidate.title)}</span>
+      <span class="window-layout-pick-state ${escapeHtml(candidate.state)}">${escapeHtml(candidate.state)}</span>
+    </button>`;
+  }).join('');
+  return `<div class="window-layout-picker-panel">
+    <div class="window-layout-picker-head">Pick an onscreen window${mode === 'unlink' ? ' - click the member to remove it' : ''}
+      <button class="window-layout-picker-close" data-wl-picker-close="true" type="button" title="Close picker">×</button>
+    </div>
+    <div class="window-layout-picker-list">${persistedRow}${rows || (persistedRow ? '' : '<div class="window-layout-empty">No eligible windows</div>')}</div>
+  </div>`;
+}
+
+function windowLayoutPickerMode(layoutId) {
+  const layout = state.windowLayouts?.find((candidate) => candidate.id === layoutId);
+  return (layout?.arrangement?.members ?? []).length > 0 ? 'unlink' : 'bind';
+}
+
+// ---- window-layout runtime (Assignment 015) --------------------------------
+// One explicit active-recording layout at a time. Capabilities and icons are
+// ephemeral session state (never persisted); descriptors are the only
+// durable member identity and resolve fail-closed against visible windows.
+const windowLayoutRuntime = {
+  activeRecordingLayoutId: null,
+  capabilities: new Map(),   // memberId -> capability (ephemeral)
+  icons: new Map(),          // memberId -> data URL (ephemeral)
+  pickerOpenFor: null,
+  pickerCandidates: null,
+  recordingTimer: null,
+  observationPending: false,
+  suppression: null,
+  saveTimer: null,
+};
+
+const WINDOW_LAYOUT_OBSERVE_CADENCE_MS = 500;
+const WINDOW_LAYOUT_SAVE_DEBOUNCE_MS = 300;
+
+function windowLayoutFromState(layoutId) {
+  return state.windowLayouts?.find((candidate) => candidate.id === layoutId) ?? null;
+}
+
+function windowLayoutMemberFromState(layoutId, memberId) {
+  return windowLayoutFromState(layoutId)?.arrangement?.members
+    .find((member) => member.id === memberId) ?? null;
+}
+
+function windowLayoutStatusText(layoutId) {
+  const layout = windowLayoutFromState(layoutId);
+  if (!layout) return '';
+  if ((layout.arrangement?.members ?? []).length === 0) return 'Pick a window to begin';
+  if (windowLayoutRuntime.activeRecordingLayoutId === layoutId) return 'Recording';
+  return 'Not recording';
+}
+
+function setWindowLayoutStatus(layoutId, text) {
+  const status = document.querySelector(`[data-wl-status="${CSS.escape(layoutId)}"]`);
+  if (status) status.textContent = text;
+}
+
+function windowLayoutMemberIcon(layoutId, memberId) {
+  const cached = windowLayoutRuntime.icons.get(memberId);
+  if (cached !== undefined) return cached;
+  const member = windowLayoutMemberFromState(layoutId, memberId);
+  if (!member) return null;
+  // Lazy host-side re-enrichment after reload: match the persisted
+  // descriptor against the trusted candidate list (bounded, cached).
+  void host.windowCandidates().then((result) => {
+    if (result.outcome !== 'success') return;
+    const match = result.candidates.find((candidate) =>
+      candidate.title === member.descriptor.title && candidate.icon);
+    if (!match) return;
+    windowLayoutRuntime.icons.set(memberId, match.icon);
+    const img = document.querySelector(`[data-wl-member-icon="${CSS.escape(memberId)}"]`);
+    if (img) img.src = match.icon;
+  }).catch(() => undefined);
+  return null;
+}
+
+async function capabilityForMember(layoutId, memberId) {
+  const member = windowLayoutMemberFromState(layoutId, memberId);
+  if (!member) return null;
+  const cached = windowLayoutRuntime.capabilities.get(memberId);
+  if (cached) return cached;
+  const resolved = await host.resolveWindowDescriptor(member.descriptor);
+  if (resolved.outcome !== 'success') {
+    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(resolved.outcome));
+    return null;
+  }
+  windowLayoutRuntime.capabilities.set(memberId, resolved.capability);
+  return resolved.capability;
+}
+
+function windowLayoutStatusForOutcome(outcome) {
+  if (outcome === 'missing') return 'Window not visible';
+  if (outcome === 'ambiguous') return 'Ambiguous match';
+  if (outcome === 'helper-unavailable') return 'Helper unavailable';
+  if (outcome === 'timeout') return 'Timed out';
+  return 'Failed';
+}
+
+async function handleWindowLayoutMemberClick(layoutId, memberId) {
+  const member = windowLayoutMemberFromState(layoutId, memberId);
+  if (!member) return;
+  const capability = await capabilityForMember(layoutId, memberId);
+  if (!capability) return;
+  const observed = await host.observeWindowCapability(capability);
+  if (observed.outcome !== 'success' || !observed.observation) {
+    if (observed.outcome === 'missing') {
+      windowLayoutRuntime.capabilities.delete(memberId);
+      stopWindowLayoutRecording();
+    }
+    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(observed.outcome));
+    return;
+  }
+  const liveState = observed.observation.state === 'minimized' ? 'minimized' : 'normal';
+  const targetState = liveState === 'minimized' ? 'restore' : 'minimize';
+  const result = targetState === 'restore'
+    ? await host.restoreWindowCapability(capability)
+    : await host.minimizeWindowCapability(capability);
+  if (result.outcome !== 'success') {
+    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
+    return;
+  }
+  const nextState = targetState === 'restore' ? 'normal' : 'minimized';
+  store.replace(updateWindowLayoutMember(state, layoutId, memberId, {
+    state: nextState,
+    bounds: observed.observation.bounds,
+  }));
+  patchWindowLayoutMember(layoutId, memberId, nextState);
+  queueWindowLayoutSave();
+}
+
+function patchWindowLayoutMember(layoutId, memberId, stateValue) {
+  const button = document.querySelector(`[data-wl-member="${CSS.escape(memberId)}"]`);
+  if (!button) return;
+  button.classList.remove('normal', 'minimized');
+  button.classList.add(stateValue);
+  const marker = button.querySelector('.window-layout-member-state');
+  if (marker) {
+    marker.className = `window-layout-member-state ${stateValue}`;
+  }
+}
+
+async function openWindowLayoutPicker(layoutId) {
+  windowLayoutRuntime.pickerOpenFor = layoutId;
+  const pickerHost = document.querySelector(`[data-wl-picker="${CSS.escape(layoutId)}"]`);
+  if (!pickerHost) return;
+  pickerHost.innerHTML = '<div class="window-layout-picker-panel"><div class="window-layout-empty">Loading candidates…</div></div>';
+  const result = await host.windowCandidates();
+  if (windowLayoutRuntime.pickerOpenFor !== layoutId) return; // closed meanwhile
+  if (result.outcome !== 'success') {
+    pickerHost.innerHTML = `<div class="window-layout-picker-panel"><div class="window-layout-empty">${escapeHtml(windowLayoutStatusForOutcome(result.outcome))}</div></div>`;
+    return;
+  }
+  windowLayoutRuntime.pickerCandidates = result.candidates;
+  pickerHost.innerHTML = windowLayoutPickerMarkup(layoutId, result.candidates);
+}
+
+function closeWindowLayoutPicker() {
+  windowLayoutRuntime.pickerOpenFor = null;
+  windowLayoutRuntime.pickerCandidates = null;
+  const pickerHost = document.querySelector('[data-wl-picker]');
+  if (pickerHost) pickerHost.innerHTML = '';
+}
+
+async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
+  const layout = windowLayoutFromState(layoutId);
+  if (!layout) return;
+  const members = layout.arrangement?.members ?? [];
+  if (members.length > 0) {
+    // Sole member selected again: unlink (data-only). Only the member's
+    // own row is actionable in unlink mode; any other row is inert.
+    const member = members[0];
+    const next = removeWindowLayoutMember(state, layoutId, member.id);
+    windowLayoutRuntime.capabilities.delete(member.id);
+    windowLayoutRuntime.icons.delete(member.id);
+    stopWindowLayoutRecording();
+    store.commit(next);
+    closeWindowLayoutPicker();
+    saveWorkspaceView();
+    return;
+  }
+  const bound = await host.bindWindowCandidate(candidateId);
+  if (bound.outcome !== 'success') {
+    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(bound.outcome));
+    return;
+  }
+  const memberId = crypto.randomUUID();
+  const member = {
+    id: memberId,
+    descriptor: bound.descriptor,
+    bounds: null,
+    state: 'normal',
+  };
+  const next = addWindowLayoutMember(state, layoutId, member);
+  windowLayoutRuntime.capabilities.set(memberId, bound.capability);
+  const icon = (windowLayoutRuntime.pickerCandidates ?? [])
+    .find((candidate) => candidate.id === candidateId)?.icon ?? null;
+  if (icon) windowLayoutRuntime.icons.set(memberId, icon);
+  store.commit(next);
+  closeWindowLayoutPicker();
+  setWindowLayoutStatus(layoutId, 'Bound - press Activate to record');
+  saveWorkspaceView();
+}
+
+async function activateWindowLayout(layoutId) {
+  const layout = windowLayoutFromState(layoutId);
+  if (!layout) return;
+  const member = layout.arrangement?.members?.[0];
+  if (!member) return;
+  const capability = await capabilityForMember(layoutId, member.id);
+  if (!capability) return;
+  windowLayoutRuntime.suppression = { layoutId, memberId: member.id, bounds: member.bounds, state: member.state };
+  if (member.bounds) {
+    const applied = await host.applyWindowCapability(capability, member.bounds);
+    if (applied.outcome !== 'success') {
+      windowLayoutRuntime.suppression = null;
+      setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(applied.outcome));
+      return;
+    }
+  }
+  const restored = member.state === 'minimized'
+    ? await host.minimizeWindowCapability(capability)
+    : await host.restoreWindowCapability(capability);
+  if (restored.outcome !== 'success') {
+    windowLayoutRuntime.suppression = null;
+    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(restored.outcome));
+    return;
+  }
+  setActiveWindowLayoutRecording(layoutId);
+  setWindowLayoutStatus(layoutId, 'Recording');
+}
+
+function setActiveWindowLayoutRecording(layoutId) {
+  stopWindowLayoutRecording();
+  windowLayoutRuntime.activeRecordingLayoutId = layoutId;
+  const layout = windowLayoutFromState(layoutId);
+  const member = layout?.arrangement?.members?.[0];
+  if (!member) return;
+  void (async () => {
+    const capability = await capabilityForMember(layoutId, member.id);
+    if (!capability) return;
+    if (windowLayoutRuntime.activeRecordingLayoutId !== layoutId) return;
+    windowLayoutRuntime.recordingTimer = setInterval(() => {
+      void observeWindowLayoutMember(layoutId, member.id, capability);
+    }, WINDOW_LAYOUT_OBSERVE_CADENCE_MS);
+  })();
+}
+
+async function observeWindowLayoutMember(layoutId, memberId, capability) {
+  if (windowLayoutRuntime.activeRecordingLayoutId !== layoutId) return;
+  const layout = windowLayoutFromState(layoutId);
+  if (!layout || layout.bin) {
+    // The layout was deleted or binned: stop observing; never keep a
+    // timer alive for an inactive/no-consumer layout.
+    stopWindowLayoutRecording();
+    return;
+  }
+  if (windowLayoutRuntime.observationPending) return;
+  windowLayoutRuntime.observationPending = true;
+  const result = await host.observeWindowCapability(capability);
+  windowLayoutRuntime.observationPending = false;
+  if (result.outcome !== 'success') {
+    if (result.outcome === 'missing') {
+      patchWindowLayoutMember(layoutId, memberId, 'missing');
+      windowLayoutRuntime.capabilities.delete(memberId);
+      stopWindowLayoutRecording();
+      setWindowLayoutStatus(layoutId, 'Window not visible');
+    }
+    return;
+  }
+  const observation = result.observation;
+  if (!observation) return;
+  const suppression = windowLayoutRuntime.suppression;
+  if (suppression && suppression.layoutId === layoutId && suppression.memberId === memberId) {
+    const sameBounds = JSON.stringify(suppression.bounds) === JSON.stringify(observation.bounds);
+    const sameState = (suppression.state === 'minimized' && observation.state === 'minimized')
+      || (suppression.state !== 'minimized' && observation.state !== 'minimized');
+    windowLayoutRuntime.suppression = null;
+    if (sameBounds && sameState) return;
+  }
+  const stateValue = observation.state === 'minimized' ? 'minimized' : 'normal';
+  const next = updateWindowLayoutMember(state, layoutId, memberId, {
+    bounds: observation.bounds,
+    state: stateValue,
+  });
+  store.replace(next);
+  patchWindowLayoutMember(layoutId, memberId, stateValue);
+  queueWindowLayoutSave();
+}
+
+function queueWindowLayoutSave() {
+  clearTimeout(windowLayoutRuntime.saveTimer);
+  windowLayoutRuntime.saveTimer = setTimeout(() => {
+    saveWorkspaceView();
+  }, WINDOW_LAYOUT_SAVE_DEBOUNCE_MS);
+}
+
+function stopWindowLayoutRecording() {
+  if (windowLayoutRuntime.recordingTimer) {
+    clearInterval(windowLayoutRuntime.recordingTimer);
+    windowLayoutRuntime.recordingTimer = null;
+  }
+  if (windowLayoutRuntime.activeRecordingLayoutId) {
+    setWindowLayoutStatus(windowLayoutRuntime.activeRecordingLayoutId, 'Not recording');
+    windowLayoutRuntime.activeRecordingLayoutId = null;
+  }
+}
+
+function handleWindowLayoutUnlink(layoutId, memberId) {
+  const layout = windowLayoutFromState(layoutId);
+  if (!layout || !memberId) return;
+  const next = removeWindowLayoutMember(state, layoutId, memberId);
+  windowLayoutRuntime.capabilities.delete(memberId);
+  windowLayoutRuntime.icons.delete(memberId);
+  stopWindowLayoutRecording();
+  store.commit(next);
+  closeWindowLayoutPicker();
+  saveWorkspaceView();
 }
 
 const graph = createGraphController();
@@ -1320,7 +1671,7 @@ function createGraphController() {
       isExpanded,
       session.binMode,
       state.view.iconSize,
-      candidate.kind === 'window-layout' ? WINDOW_LAYOUT_FIXTURE_VERSION : 0,
+      candidate.kind === 'window-layout' ? ((candidate.arrangement?.version ?? 0) + '|' + (candidate.arrangement?.members ?? []).map((m) => m.id + ':' + m.state).join(',')) : 0,
     ]);
     if (node.contentSignature !== signature) {
       node.contentSignature = signature;
@@ -1330,7 +1681,7 @@ function createGraphController() {
         + `<div class="item-icon">${iconMarkup(candidate)}</div>`
         + `<strong>${escapeHtml(candidate.name)}</strong>`
         + `${descriptionMarkup(candidate)}`
-        + `${candidate.kind === 'window-layout' ? windowLayoutBodyMarkup() : ''}`;
+        + `${candidate.kind === 'window-layout' ? windowLayoutBodyMarkup(candidate) : ''}`;
       hydrateNodeIcons(node.shell);
     }
     node.width = node.shell.offsetWidth || (state.view.iconSize + 42);
@@ -1369,7 +1720,7 @@ function createGraphController() {
       + `<div class="item-icon">${iconMarkup(candidate)}</div>`
       + `<strong>${escapeHtml(candidate.name)}</strong>`
       + `${descriptionMarkup(candidate)}`
-      + `${candidate.kind === 'window-layout' ? windowLayoutBodyMarkup() : ''}`;
+      + `${candidate.kind === 'window-layout' ? windowLayoutBodyMarkup(candidate) : ''}`;
 
     shell.append(iconItem);
     nodeLayer.append(shell);
@@ -1385,7 +1736,7 @@ function createGraphController() {
       isExpanded,
       session.binMode,
       state.view.iconSize,
-      candidate.kind === 'window-layout' ? WINDOW_LAYOUT_FIXTURE_VERSION : 0,
+      candidate.kind === 'window-layout' ? ((candidate.arrangement?.version ?? 0) + '|' + (candidate.arrangement?.members ?? []).map((m) => m.id + ':' + m.state).join(',')) : 0,
     ]);
 
     node.width = shell.offsetWidth || (state.view.iconSize + 42);
@@ -2007,6 +2358,42 @@ elements.grid.addEventListener('click', (event) => {
     saveWorkspaceView();
     return;
   }
+  // Assignment 015: window-layout member/control clicks are handled here
+  // and never fall through to selection, navigation or graph drag.
+  const windowLayoutBody = event.target.closest('.window-layout-body');
+  if (windowLayoutBody) {
+    const memberButton = event.target.closest('[data-wl-member]');
+    if (memberButton) {
+      void handleWindowLayoutMemberClick(memberButton.dataset.wlLayout, memberButton.dataset.wlMember);
+      return;
+    }
+    const pickCandidate = event.target.closest('[data-wl-pick-candidate]');
+    if (pickCandidate) {
+      void handleWindowLayoutPickCandidate(pickCandidate.dataset.wlPick, pickCandidate.dataset.wlPickCandidate);
+      return;
+    }
+    const unlink = event.target.closest('[data-wl-unlink]');
+    if (unlink) {
+      void handleWindowLayoutUnlink(unlink.dataset.wlPick, unlink.dataset.wlUnlink);
+      return;
+    }
+    const pickerClose = event.target.closest('[data-wl-picker-close]');
+    if (pickerClose) {
+      closeWindowLayoutPicker();
+      return;
+    }
+    const pickButton = event.target.closest('[data-wl-pick]');
+    if (pickButton) {
+      void openWindowLayoutPicker(pickButton.dataset.wlPick);
+      return;
+    }
+    const activateButton = event.target.closest('[data-wl-activate]');
+    if (activateButton) {
+      void activateWindowLayout(activateButton.dataset.wlActivate);
+      return;
+    }
+    return;
+  }
   const tile = event.target.closest('.icon-item');
   if (tile) {
     if (suppressGraphClick) {
@@ -2211,6 +2598,19 @@ elements.grid.addEventListener('contextmenu', (event) => {
 document.addEventListener('click', (event) => {
   if (!elements.menu.hidden && !event.target.closest('#context-menu') && !event.target.closest('.icon-item')) {
     closeMenu();
+  }
+});
+
+// Escape (or a click anywhere else) closes an open window-layout picker
+// without changing anything (Assignment 015).
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && windowLayoutRuntime.pickerOpenFor) {
+    closeWindowLayoutPicker();
+  }
+});
+document.addEventListener('click', (event) => {
+  if (windowLayoutRuntime.pickerOpenFor && !event.target.closest('[data-wl-picker]')) {
+    closeWindowLayoutPicker();
   }
 });
 

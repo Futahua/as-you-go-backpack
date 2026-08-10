@@ -13,11 +13,22 @@ const HOST_RESULT = 'papers:host:result';
  * workspace. */
 export function createHostBridge(window) {
   const pending = new Map();
+  const MAX_PENDING = 64;
+  const REQUEST_TIMEOUT_MS = 15000;
 
   function request(type, detail = {}) {
+    if (pending.size >= MAX_PENDING) {
+      return Promise.reject(new Error('Host request capacity reached.'));
+    }
     const requestId = crypto.randomUUID();
     window.parent.postMessage({ type, requestId, ...detail }, '*');
-    return new Promise((resolve, reject) => pending.set(requestId, { resolve, reject }));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(requestId);
+        reject(new Error('Host request timed out.'));
+      }, REQUEST_TIMEOUT_MS);
+      pending.set(requestId, { resolve, reject, timer });
+    });
   }
 
   window.addEventListener('message', (event) => {
@@ -25,6 +36,7 @@ export function createHostBridge(window) {
     const task = pending.get(event.data.requestId);
     if (!task) return;
     pending.delete(event.data.requestId);
+    clearTimeout(task.timer);
     if (!event.data.ok) {
       task.reject(new Error(event.data.error || 'The request could not be completed.'));
       return;
@@ -39,6 +51,32 @@ export function createHostBridge(window) {
         mime: event.data.mime,
         finalOrigin: event.data.finalOrigin,
         title: event.data.title ?? null,
+      });
+      return;
+    }
+    if ('candidates' in event.data) {
+      task.resolve({
+        outcome: event.data.outcome,
+        candidates: event.data.candidates ?? [],
+        error: event.data.error ?? null,
+      });
+      return;
+    }
+    if ('capability' in event.data || 'observation' in event.data) {
+      task.resolve({
+        outcome: event.data.outcome,
+        capability: event.data.capability ?? null,
+        descriptor: event.data.descriptor ?? null,
+        observation: event.data.observation ?? null,
+        error: event.data.error ?? null,
+      });
+      return;
+    }
+    if ('outcome' in event.data) {
+      task.resolve({
+        outcome: event.data.outcome,
+        observation: event.data.observation ?? null,
+        error: event.data.error ?? null,
       });
       return;
     }
@@ -65,5 +103,18 @@ export function createHostBridge(window) {
     resolveDroppedTargets: (files) =>
       request('papers:project:resolve-dropped-targets', { files }),
     copyText: (text) => request('papers:project:copy-text', { text }),
+    windowCandidates: () => request('papers:project:window-candidates'),
+    bindWindowCandidate: (candidateId) =>
+      request('papers:project:window-bind-candidate', { candidateId }),
+    observeWindowCapability: (capability) =>
+      request('papers:project:window-observe-capability', { capability }),
+    minimizeWindowCapability: (capability) =>
+      request('papers:project:window-minimize-capability', { capability }),
+    restoreWindowCapability: (capability) =>
+      request('papers:project:window-restore-capability', { capability }),
+    applyWindowCapability: (capability, bounds) =>
+      request('papers:project:window-apply-capability', { capability, bounds }),
+    resolveWindowDescriptor: (descriptor) =>
+      request('papers:project:window-resolve-descriptor', { descriptor }),
   };
 }

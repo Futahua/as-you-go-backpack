@@ -158,11 +158,11 @@
   word-break: break-word;
 }
 
-/* Window-layout items (Assignment 008, static proof). The shell widens so
-   the compact fixture miniature fits; the simulation keeps measuring the
-   rendered shell, so collision uses the real footprint. Restrained static
-   styles from existing tokens; every interior control is disabled and no
-   animation exists. */
+/* Window-layout items (Assignments 008, 015). The shell widens so the
+   compact live body fits; the simulation keeps measuring the rendered
+   shell, so collision uses the real footprint. Restrained static styles
+   from existing tokens; interior buttons never start outer graph drag
+   and the live observer patches only member interiors. */
 .graph-node-shell.window-layout-shell {
   width: clamp(148px, calc(var(--icon-size) + 84px), calc(var(--icon-size) + 100px));
 }
@@ -201,36 +201,163 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  align-items: center;
   gap: 4px;
+  min-height: 26px;
 }
 .window-layout-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--surface-raised);
   color: var(--text-secondary);
   font-size: 9px;
   line-height: 1;
-  padding: 4px 5px;
-  cursor: default;
+  padding: 3px 5px;
+  cursor: pointer;
+  max-width: 150px;
+}
+.window-layout-member-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
+.window-layout-member-icon.placeholder {
+  display: inline-block;
+  background: var(--surface-muted);
+  border-radius: 3px;
+}
+.window-layout-member-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.window-layout-member-state {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success, #4caf50);
+  flex: none;
+}
+.window-layout-member-state.minimized {
+  background: var(--text-muted);
+}
+.window-layout-member-state.missing {
+  background: var(--danger, #e57373);
 }
 .window-layout-member.minimized { background: var(--surface-muted); }
-.window-layout-member.maximized { border-width: 2px; }
-.window-layout-member.missing { opacity: 0.5; text-decoration: line-through; }
+.window-layout-member.missing { opacity: 0.55; }
+.window-layout-empty {
+  color: var(--text-muted);
+  font-size: 9px;
+  text-align: center;
+  padding: 2px;
+}
 .window-layout-controls {
   display: flex;
   justify-content: center;
   gap: 4px;
 }
 .window-layout-control {
-  width: 22px;
-  height: 20px;
   border: 1px solid var(--border-strong);
   border-radius: 5px;
   background: var(--surface-raised);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.window-layout-control:disabled {
+  opacity: 0.5;
   cursor: default;
+}
+.window-layout-picker {
+  display: contents;
+}
+.window-layout-picker-panel {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  padding: 4px;
+}
+.window-layout-picker-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 9px;
+  padding: 2px 2px 4px;
+}
+.window-layout-picker-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.window-layout-picker-list {
+  display: grid;
+  gap: 2px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.window-layout-pick-candidate {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 4px;
+  text-align: left;
+  cursor: pointer;
+}
+.window-layout-pick-candidate:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-soft);
+}
+.window-layout-pick-candidate:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.window-layout-pick-candidate.current-member {
+  border-color: var(--border-strong);
+  background: var(--surface-soft);
+}
+.window-layout-pick-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex: none;
+}
+.window-layout-pick-icon.placeholder {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  background: var(--surface-muted);
+  border-radius: 3px;
+}
+.window-layout-pick-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.window-layout-pick-state {
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+.window-layout-status {
+  color: var(--text-muted);
+  font-size: 8px;
+  text-align: center;
 }
 
 .icon-grid[data-view="graph"] {

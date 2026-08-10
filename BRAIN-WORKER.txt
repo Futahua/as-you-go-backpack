@@ -7,15 +7,24 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # Append-only below this block. BRAIN edits this block in place.
 #
-# LAST UPDATED: 2026-08-07
+# LAST UPDATED: 2026-08-10
 #
-# ACTIVE ASSIGNMENT: 015R3 — SOURCE COMPLETE, LIVE PROOF PENDING
-#   015R3 follow-up cleared the source blockers: deprecated
-#   processId/runtimeToken fields removed, subscribeMember seam deleted,
-#   echo suppression scoped per layout/member/bounds+state. Independent
-#   verification confirms typecheck pass and tests (Papers 295/295, As
-#   you Go 721/724). Only the authorized isolated live restart durability
-#   proof remains before product commit. No commit yet; 016 remains gated.
+# ACTIVE ASSIGNMENT: 016 PHASE A — ONE-MEMBER EYE-CHECK PREP
+#   015R3 is ACCEPTED. The rebuilt isolated live proof passed 35/35 across
+#   a full owned Papers/helper restart while its one disposable target stayed
+#   alive; fresh fingerprint+title resolution, geometry application, forbidden-
+#   key cleanliness and zero owned-process cleanup were independently reviewed.
+#   Papers snapshot commit: 59a71fc. As you Go product + coordination snapshot
+#   is the current main head (`git log -1`). 016 implementation must not begin
+#   until WORKER prepares the existing one-member slice for creator eye check.
+#
+# CREATOR DELEGATION — 2026-08-10
+#   The creator delegates product, architecture, sequencing, correction,
+#   review and acceptance decisions to BRAIN. BRAIN must resolve ordinary
+#   ambiguity itself from accepted intent and choose the smallest reversible
+#   path. Do not return technical choices to the creator. Return only when a
+#   genuine human eye/use check is required. Existing safety, creator-data,
+#   release/install and real-window authority boundaries remain in force.
 #
 # FRESH WORKER HANDOFF
 #   The history below is not perfectly chronological: some earlier WORKER
@@ -25,25 +34,27 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #     BRAIN - Assignment 015R3 REVIEW: PARTIAL — FOLLOW-UP REQUIRED
 #     WORKER - Assignment 015R3 FOLLOW-UP CHECKPOINT
 #     BRAIN - Assignment 015R3 REVIEW 2: SOURCE ACCEPTED — LIVE PROOF ONLY
+#     WORKER - Assignment 015R3 LIVE-PROOF CHECKPOINT
 #     BRAIN - POST-015R3 DIRECTION: 016 NEXT
 #     BRAIN - 015R3 LIVE PROOF: WORKER EXECUTION DIRECTIVE
-#   Execute Assignment 015R3 live proof + commit only. Do not reopen
-#   003-014 or start 016 until 015R3 is committed.
+#   WORKER: execute only the latest EOF eye-check-prep directive and STOP with
+#   the isolated running slice ready for the creator. Do not reopen 003-015 or
+#   implement multi-window 016 behavior before BRAIN records the eye-check result.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
-#   Papers da3dd6d — reviewed Assignment 014 helper factory (latest
-#   reviewed snapshot). As you Go docs head is 5939bd8 (015R3 follow-up
-#   checkpoint record); product bases remain as above. Never reset/checkout
+#   Papers 59a71fc — accepted Assignment 015R3 one-window capability.
+#   As you Go current main head — accepted 015R3 product + coordination
+#   snapshot. Never reset/checkout
 #   or disturb creator changes to reach a historical commit.
 #   Do NOT build on trail/01 or trail/02. The creator rejected both.
 #   Their trail-graph.js / trail-graph-model.js / trail CSS / expander
 #   button / deletion guards are all DEAD. Do not port them.
 #
 # GIT STATE
-#   Papers da3dd6d base + dirty: 15 modified + 7 untracked — includes
-#   pre-015 dirty work (SettingsPane/bridge/hostFacade etc.) plus 015R3
-#   implementation. As you Go 5254a6d docs + dirty: 7 modified. Both repos
-#   dirty, no product commit until 015R3 acceptance. 016 gated.
+#   Papers 59a71fc + dirty: the preserved pre-015 modified/untracked work only.
+#   As you Go accepted 015R3 product/log snapshot + untracked live-proof
+#   evidence harness. No creator state is tracked or touched. 016 is gated on
+#   the running one-member eye check.
 #   Creator requests one commit per reviewed assignment snapshot. WORKER
 #   appends its checkpoint and stops without committing; BRAIN reviews and
 #   creates the snapshot commit before dispatching the following assignment.
@@ -6892,3 +6903,229 @@ CHECKPOINT` with the 12-row outcome table, live evidence and hunk
 separation. If genuinely blocked, append one precise BLOCKER and stop.
 Do not commit/push, package/install, touch creator state, update the
 Start Menu target, or start 016.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - CREATOR DECISION DELEGATION ACCEPTED
+======================================================================
+
+CREATOR DIRECTION
+The creator asks BRAIN to make decisions on their behalf and return only for
+eye checks.
+
+BRAIN OPERATING CONTRACT
+- BRAIN owns product interpretation, architecture, prioritization, sequencing,
+  correction scope, review, acceptance and commit decisions within the active
+  authorized work. WORKER receives bounded outcome contracts, not questions for
+  the creator to solve.
+- Ordinary ambiguity is resolved from the creator's accepted product truth,
+  decision history, reported problems, real-use evidence and the smallest
+  reversible implementation. BRAIN does not invent a universal rule from one
+  Backpack or ask the creator to choose technical architecture.
+- BRAIN returns to the creator only for a genuine human visual/use judgment.
+  Assignment 016's one-member running-slice eye check and Assignment 017's core
+  milestone eye/use evaluation remain the planned creator touchpoints.
+- This delegation does not erase safety boundaries: preserve creator data and
+  unrelated dirty work; do not control creator application windows; do not
+  infer release/install authority from source work; keep destructive or
+  machine-wide operations inside explicit recorded authority.
+
+PRODUCT INTENT CONFIRMED
+BRAIN has read the canonical Papers pickup contract and current PRODUCT,
+DECISIONS, ARCHITECTURE, PROBLEMS, ACCEPTANCE, PROJECTS and
+SYNCTHING_AND_DATA records, plus the As you Go README/ARCHITECTURE and queued
+014-018 roadmap. The controlling intent is: Papers is a restrained personal
+Windows layer and stable host; Backpacks acquire their own shapes through real
+use; As you Go is a machine-local independent project; reuse existing products
+and workspace mechanisms; preserve durable creator work; keep runtime authority
+private, bounded and fail-closed; and accept visible behavior in the running
+experience rather than from source claims alone.
+
+IMMEDIATE DECISION
+No roadmap change. 015R3 remains gated only on the re-dispatched isolated live
+restart proof. After a passing WORKER checkpoint, BRAIN reviews and makes the
+two exact snapshot commits, then advances to the required running-slice eye
+check and Assignment 016. No creator question is pending now.
+
+=====================================================================
+[2026-08-10 Asia/Saigon] WORKER - Assignment 015R3 LIVE-PROOF CHECKPOINT
+=====================================================================
+
+LIVE RESTART DURABILITY PROOF: PASS - 35/35 ASSERTIONS, BOTH SESSIONS,
+ONE DISPOSABLE TARGET, ISOLATED Papers/userData/PROJECT COPY.
+
+HARNESS REBUILT FROM SCRATCH (the old run-015-live.ps1 exists nowhere)
+probes/015r3-live-proof/ (As you Go, untracked; Papers untouched):
+- disposable-window.ps1: ONE uniquely titled WinForms window (AYG-015R3-<pid>-<8hex>).
+- control-window.ps1: harness window control REUSING the reviewed 009/013
+  adapter (exact-title fail-closed resolve; get-state/get-bounds/minimize/
+  restore/move/close).
+- cdp.mjs + run-015r3-live-proof.mjs: raw CDP driver (Node 24 built-in
+  WebSocket, --remote-debugging-port) against the built app; Browser.close
+  quits through the real before-quit barrier. No playwright.
+- proof-015r3-transcript.txt (35 steps), proof-session1.png,
+  proof-session2.png (best-effort host captures).
+En-route finding: Papers restores the last active Backpack on boot, so the
+harness handles both the card-click path and the already-open surface path
+(recorded; no product change needed).
+
+LIVE EVIDENCE (transcript at probes/015r3-live-proof/proof-015r3-transcript.txt)
+- Session 1 (owned): Papers main PID 38052; helper PID 31212.
+- Disposable target AYG-015R3-58532-8ef88953 (PID 58532) launched FIRST and
+  kept alive across the entire restart.
+- Real UI: blank right-click -> New window layout -> picker row (exact title)
+  -> bind -> member button -> Activate -> Recording.
+- Persisted member (isolated copy state.json):
+  {id, descriptor: {version:1, title:"AYG-015R3-58532-8ef88953",
+  executableFingerprint:"656870b7a837ffb1e8c22c3dc5bfb387c113804399f06d16fa6a7a1dba65bb4d"},
+  bounds:null, state:"normal"} - exactly three descriptor keys.
+- Auto-record: external move to 300,220 520x340 persisted within cadence.
+- Member click -> minimized (persisted 'minimized'); click -> normal
+  (persisted 'normal'); target geometry unchanged after the cycle.
+- FULL STOP: Browser.close -> before-quit barrier -> clean exit; helper PIDs
+  after close = 0; target still resolvable (state normal).
+- Session 2 (fresh owned): Papers main PID 52280; helper PID 26324 (NEW, old
+  31212 never reused); saved descriptor re-resolved by fingerprint+title to
+  the SAME still-alive target; Activate applied the saved geometry
+  520x340@300,220 (read back exactly); member bounds/state intact.
+- Forbidden-key grep of the isolated state.json: 0 matches
+  (runtimeId/hwnd/token/processId/processPath/bindingId/candidate); the
+  harness's recursive key scan also reports clean after BOTH sessions.
+- Cleanup: target gracefully closed; 0 owned helper processes; 0 owned test
+  electron processes; 0 AYG-015R3 windows; the creator's running Papers
+  (5 Papers.exe processes) untouched throughout.
+
+TWELVE-OUTCOME TABLE (015R3 dispatch numbered list)
+ 1 descriptor exactly {version, executableFingerprint, title} .... LIVE PASS
+ 2 capability exactly {version, bindingId}, tokens main-private ..... PASS
+   (source-verified; live: no token/bindingId ever persisted)
+ 3 candidate payload has no PID/process path ...................... PASS
+   (source-verified; live persisted record has none)
+ 4 IPC+preload exact-key UTF-8 byte-bounded schemas, empty list
+   payload rejected ............................................... PASS
+   (source-verified, 015R3 REVIEW 2 reran)
+ 5 subscribeMember deleted; one non-overlapping renderer timer;
+   main-side single-flight observation/capacity ................... PASS
+   (grep subscribeMember in src = 0; live 500ms cadence observed)
+ 6 missing/invalid observation stops recording and invalidates the
+   cached binding; later Activate freshly resolves ................ PASS
+   (live: fresh-session Activate re-resolved after full restart)
+ 7 inactive member click observes live state, opposite action,
+   persists resulting state, queues save .......................... LIVE PASS
+ 8 missing sole member always has an actionable data-only unlink row  PASS
+   (source-verified; not exercised live - target never went missing)
+ 9 echo suppression scoped per layout/member/bounds+state; first
+   genuine move not discarded .................................... LIVE PASS
+   (the post-Activate move was auto-recorded)
+10 host bridge pending cap/timeout/deterministic cleanup .......... PASS
+   (source-verified: MAX_PENDING 64, 15s timeout, timer cleanup)
+11 quit uses guarded idempotent awaited stop barrier .............. LIVE PASS
+   (Browser.close -> before-quit -> clean exit, helper 0)
+12 0x0 bounds regression kept; bounds-null observations excluded
+   from picker candidates ........................................ PASS
+   (PS suite 217/217 incl. zero-rect fixtures; service source)
+
+VERIFICATION (this pass)
+- Papers: npm run typecheck pass; npm run build pass; focused 010-015R
+  window-capability 72/72 (resource 23, spawn 10, factory 17,
+  electronBuilderResource 3, service 14, ipc 5); full vitest 295/295
+  (29 files); PS schema helper-schema.test.ps1 217/217 under pwsh 7.6.3 AND
+  217/217 under Windows PowerShell 5.1; git diff --check exit 0.
+- As you Go: focused model/bridge/pointer 128/128; full suite 724 tests,
+  721 pass, 3 fail - the recorded pre-existing trio only (styles.test.mjs:140;
+  toolbar-controller.test.mjs:168 + :218). git diff --check exit 2 = the two
+  RECORDED pre-existing EOF blank-line warnings only (host-bridge.test.mjs:342,
+  workspace-20260730b.js:2989) - unchanged from the implementation pass,
+  formatting-only, left for BRAIN's commit gate.
+- Resource hash chain: window-helper.ps1 and window-capability.ps1 bytes ==
+  manifest hashes == compiled pins in windowHelperResource.ts (all three
+  layers match; the live helper start also exercised validation pre-spawn).
+
+HUNK SEPARATION
+- Papers tree: EXACTLY the pre-existing dirty set (15 modified + 7 untracked,
+  HEAD da3dd6d) - nothing added, nothing touched by this proof.
+- As you Go tree: the pre-existing 7 modified + BRAIN-WORKER.txt + the new
+  untracked probes/015r3-live-proof/ directory (7 files). No product source
+  was changed by this proof; no commit, no push, no package/install, no
+  Start Menu update, no creator state (the isolated proof used a copy).
+
+STOP: live restart durability proof complete and passing. Awaiting BRAIN
+review; on acceptance BRAIN makes the two exact snapshot commits, then the
+running-slice eye check and Assignment 016 as queued.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - Assignment 015R3 ACCEPTED + COMMITTED
+======================================================================
+
+VERDICT
+ACCEPTED. The strict source contract and isolated restart durability gate both
+pass. Assignment 015 is complete; 003-015 remain closed unless the creator
+reports a fresh defect.
+
+INDEPENDENT REVIEW
+- Read the 35/35 transcript and reviewed its harness/artifacts. One uniquely
+  titled disposable target (PID 58532) stayed alive while owned Papers/helper
+  session 1 (38052/31212) fully stopped and fresh session 2 (52280/26324)
+  started. The new helper re-resolved the same target from exact title plus
+  executable fingerprint and reapplied 520x340@300,220 exactly.
+- Persisted state used exactly descriptor {version, executableFingerprint,
+  title}; forbidden runtimeId/hwnd/token/processId/processPath/bindingId/
+  candidate keys were zero after both sessions. Cleanup left zero owned test
+  Electron/helper/target processes; the creator's running Papers was untouched.
+- Independently reran Papers typecheck and focused capability suites: pass
+  (69/69 across the discovered five files). Independently reran As you Go
+  model/bridge/pointer: 128/128. Worker's broader evidence remains Papers
+  295/295, both helper schema runtimes 217/217, build pass, and As you Go
+  721/724 with only the three previously classified unrelated failures.
+- Source review confirms candidate and persistence payloads expose no PID/path,
+  helper tokens remain Papers-main-private behind bounded binding ids,
+  observation is single-flight, bridge requests are capped/timed, echo
+  suppression is operation/member/bounds/state scoped, and quit awaits the
+  idempotent owned stop barrier.
+- The two screenshots are blank host-shell captures and are NOT visual evidence.
+  Acceptance relies on the executable transcript/state/process proof. Human
+  visual acceptance is deliberately the next gate.
+
+COMMIT GATE
+BRAIN removed only trailing blank EOF lines from three new Papers files and two
+015 As you Go files after temporary staging exposed them; no logic changed.
+Papers staged exactly the ten 015 paths, with only the dedicated capability
+imports/composition/quit-barrier hunks from dirty index.ts. All pre-015
+settings/window-bounds/host/runtime/test hunks remained unstaged. Papers exact
+snapshot commit: 59a71fc (`feat: add durable one-window layout capability`).
+The As you Go exact snapshot contains its seven 015 product/test files plus this
+coordination log; the live-proof harness remains untracked evidence.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - Assignment 016 PHASE A DISPATCH
+RUNNING ONE-MEMBER SLICE FOR CREATOR EYE CHECK — NO 016 IMPLEMENTATION YET
+======================================================================
+
+PURPOSE
+Prepare the already-accepted 015 one-member controller for the creator's human
+eye/use check before multi-window visual work is finalized. This is presentation
+of existing behavior, not implementation of 016.
+
+WORKER
+- Use an isolated Papers data directory and isolated COPY of As you Go. Build
+  canonical Papers if required; launch one owned Papers instance and ONE
+  uniquely titled disposable target only. Never touch creator state/windows or
+  the Start Menu installation.
+- Through the real UI, create one window-layout item, bind the disposable
+  target, and leave the item in its most informative stable state: program icon,
+  member button, picker/controls and status legible. Arrange it where the creator
+  can inspect without hunting. Provide both Papers themes in sequence only if
+  switching is safe and does not destroy the prepared state; otherwise begin in
+  the creator's current theme and BRAIN will request the second view after the
+  first judgment.
+- Visual safety statement before launch: affected area is only the compact
+  window-layout item/picker and static state marker; update rate is user action
+  or bounded status refresh, with no repeating opacity/fill/luminance/hue
+  animation and no large-area flashing.
+- Append `WORKER - Assignment 016 PHASE A EYE CHECK READY` with owned PIDs,
+  exact visible state and cleanup instructions, then STOP while the isolated
+  eye-check windows remain open. Do not implement picker multi-toggle,
+  multiselection, group actions, isolate, reorder or drag-out yet.
+
+AFTER THE EYE CHECK
+The creator reports only the visual/use judgment to BRAIN. BRAIN converts it
+into any correction contract or dispatches the queued Assignment 016 behavior.
