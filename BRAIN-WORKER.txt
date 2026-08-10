@@ -9,14 +9,24 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # LAST UPDATED: 2026-08-10
 #
-# ACTIVE ASSIGNMENT: 016 PHASE A — ONE-MEMBER EYE-CHECK PREP
-#   015R3 is ACCEPTED. The rebuilt isolated live proof passed 35/35 across
-#   a full owned Papers/helper restart while its one disposable target stayed
-#   alive; fresh fingerprint+title resolution, geometry application, forbidden-
-#   key cleanliness and zero owned-process cleanup were independently reviewed.
-#   Papers snapshot commit: 59a71fc. As you Go product + coordination snapshot
-#   is the current main head (`git log -1`). 016 implementation must not begin
-#   until WORKER prepares the existing one-member slice for creator eye check.
+# ACTIVE ASSIGNMENT: 016R5/017P — ACCEPTANCE AUDIT + CORE IMPLEMENTATION PREP
+#   015R3 source/durability is accepted at Papers 59a71fc / As you Go d651bb2.
+#   Creator eye check rejected the dedicated Activate control and prominent
+#   Recording state: they were BRAIN inventions, are unnecessary, unreliable
+#   and can move windows offscreen. Per creator direction, fold their removal
+#   and safe contextual icon behavior into Assignment 016 rather than a separate
+#   correction pass. 016 also includes task-worthy picker filtering and a new
+#   direct onscreen picking mode: green outlines for this layout's members,
+#   blue hover wash to add and red hover wash to remove; the list remains the
+#   secondary path. Initial 016 source/live proof is substantial, but BRAIN
+#   found production input-capture, cancellation, display-lifecycle and schema
+#   gaps. The direct-hover same-task dedup correction is now source-accepted.
+#   Startup capture/show/focus intent now survives the preload retry rebuild.
+#   Stable-code integration and gate-readiness validation pass. The creator is
+#   now AFK and has explicitly granted unobstructed use of the interactive
+#   desktop, so the automated native-input rows may run in an isolated instance.
+#   Creator-only visual judgments are bundled for the creator's return. BRAIN is
+#   closing the 016 functional snapshot and preparing 017's non-visual core.
 #
 # CREATOR DELEGATION — 2026-08-10
 #   The creator delegates product, architecture, sequencing, correction,
@@ -37,9 +47,8 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #     WORKER - Assignment 015R3 LIVE-PROOF CHECKPOINT
 #     BRAIN - POST-015R3 DIRECTION: 016 NEXT
 #     BRAIN - 015R3 LIVE PROOF: WORKER EXECUTION DIRECTIVE
-#   WORKER: execute only the latest EOF eye-check-prep directive and STOP with
-#   the isolated running slice ready for the creator. Do not reopen 003-015 or
-#   implement multi-window 016 behavior before BRAIN records the eye-check result.
+#   WORKER: execute only the latest EOF Assignment 016R directive, append its
+#   checkpoint and STOP without committing. Do not reopen 003-015 or start 017.
 #
 # BASE: use current main at the latest reviewed snapshot commit (`git log -1`).
 #   Papers 59a71fc — accepted Assignment 015R3 one-window capability.
@@ -52,9 +61,9 @@ AS YOU GO — BRAIN / WORKER COORDINATION LOG
 #
 # GIT STATE
 #   Papers 59a71fc + dirty: the preserved pre-015 modified/untracked work only.
-#   As you Go accepted 015R3 product/log snapshot + untracked live-proof
-#   evidence harness. No creator state is tracked or touched. 016 is gated on
-#   the running one-member eye check.
+#   As you Go d651bb2 + dirty coordination checkpoint/evidence only before 016.
+#   Untracked proof/eye-check harnesses are evidence. No creator state is tracked
+#   or touched. Assignment 017 remains gated on 016 acceptance and commits.
 #   Creator requests one commit per reviewed assignment snapshot. WORKER
 #   appends its checkpoint and stops without committing; BRAIN reviews and
 #   creates the snapshot commit before dispatching the following assignment.
@@ -7129,3 +7138,1704 @@ WORKER
 AFTER THE EYE CHECK
 The creator reports only the visual/use judgment to BRAIN. BRAIN converts it
 into any correction contract or dispatches the queued Assignment 016 behavior.
+
+=====================================================================
+[2026-08-10 Asia/Saigon] WORKER - Assignment 016 PHASE A EYE CHECK READY
+=====================================================================
+
+THE RUNNING ONE-MEMBER SLICE IS PREPARED AND LEFT OPEN FOR THE CREATOR.
+
+VISUAL SAFETY STATEMENT (standing rule 2) - stated before launch:
+Affected area: only the compact window-layout item and its picker panel, plus
+the static member state marker. Update rate: user action or the bounded 500ms
+status refresh of the single active layout; no repeating opacity/fill/
+luminance/hue animation and no large-area flashing. The item settles once on
+creation like any ordinary fresh item.
+
+OWNED PROCESSES (isolated test instance; the creator's real Papers, 5
+Papers.exe processes, is untouched and must not be closed)
+- Owned Papers instance: main PID 54960 (isolated data dir
+  D:\Programs\evTEMP\papers-016a-eyechk-9BCEhy; CDP port 64063).
+- Owned helper: PID 34668 (system powershell.exe running the Papers-owned
+  window-helper.ps1).
+- Disposable target: PID 50852, unique title AYG-015R3-50852-c8744387
+  (a small WinForms window on the desktop).
+The instance was verified stable for 2.5+ minutes after the harness command
+ended (WMI-detached launch; the harness driver exited, the instance stayed
+running). Preparation log + machine-readable state:
+probes/016-phase-a/driver.log and probes/016-phase-a/eye-check-state.json.
+
+EXACT VISIBLE STATE (verified through the real UI, light theme = the
+creator's current default; no state.json preference is set in their copy)
+- One window-layout item in the As you Go root view with:
+  * member button showing the member program icon (loaded) + static
+    'normal' state marker, title tooltip "AYG-015R3-50852-c8744387 - normal";
+  * controls "Pick onscreen window" and "Activate" (Activate enabled);
+  * status line "Recording" (single active-recording layout, 500ms bounded
+    observation of the bound member);
+  * the picker panel LEFT OPEN with 28 candidate rows, each with program
+    icon, exact title and static state label; the bound member's data-only
+    unlink row ("remove") is the first row.
+- Real flow used: blank right-click -> New window layout -> picker ->
+  bind the disposable target -> Activate -> Recording -> picker reopened.
+- No 016 behavior exists or was implemented: no picker multi-toggle,
+  multiselection, group actions, isolate, reorder or drag-out.
+
+THEME NOTE
+The workspace theme lives in the project's own preferences (default light;
+the creator's real preferences carry no theme). No UI toggle exists in this
+build. The dark view can be shown safely later by a preference-seeded restart
+of the SAME isolated session (state persists; nothing is destroyed) - BRAIN
+should request it after the first judgment.
+
+CLEANUP INSTRUCTIONS (after the eye check)
+1. Close the disposable target when done:
+   pwsh -NoProfile -NonInteractive -File "D:\Letters\MatTroiSeConMoc\Papers\Backpack projects\As you Go\probes\015r3-live-proof\control-window.ps1" -Title "AYG-015R3-50852-c8744387" -Action close
+2. Close the eye-check Papers window normally (its window title bar; it is
+   the test instance, main PID 54960, isolated data dir
+   D:\Programs\evTEMP\papers-016a-eyechk-9BCEhy). Its helper stops with it.
+3. Never close the creator's real Papers.
+
+STOP: instance left open for the creator's eye/use judgment. No commit, no
+push, no product source change, no 016 implementation. Awaiting BRAIN.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - Assignment 016 DISPATCH
+MULTI-WINDOW CONTROLS WITH CREATOR EYE-CHECK CORRECTION
+======================================================================
+
+GATE AND CREATOR CORRECTION
+015R3 is accepted and committed in both repositories. The creator completed
+the one-member eye check and corrected BRAIN's invented UI: no dedicated
+Activate button and no prominent Recording furniture. Those controls are
+unnecessary, do not work reliably and the apply path can move windows
+offscreen. Per creator direction, this correction belongs inside 016 rather
+than a standalone pass.
+
+FIRST: CLEAN UP THE EYE-CHECK SESSION
+Close only the isolated eye-check target/Papers instance/helper recorded in the
+latest WORKER checkpoint (target 50852/title AYG-015R3-50852-c8744387; Papers
+54960; helper 34668). Use normal close/owned cleanup, verify all three are gone,
+and do not touch the creator's real Papers processes or data.
+
+CREATOR-REQUIRED INTERACTION MODEL
+- Remove the dedicated Activate control and every affirmative `Recording`
+  status presentation. Status space remains available for missing, denied,
+  partial or error outcomes. Internal observation may continue, but ordinary
+  tracking is implicit rather than a mode the creator must operate.
+- Adding a window captures its current valid bounds/state immediately; the
+  creator never has to press another button to make the member useful.
+- A program-icon member occurrence is contextual to its containing layout.
+  When the same real window belongs to several layouts, choosing its icon in
+  Layout A selects Layout A's saved arrangement for that member; choosing it in
+  Layout B selects Layout B's. Subsequent live movement records only into the
+  chosen layout context, leaving the other layout's saved member unchanged.
+- Preserve normal click toggle without making context switching destructive:
+  an icon click from a different layout context safely restores/applies that
+  occurrence and selects its context; a later click in the already-current
+  context toggles minimize/restore. Ctrl-click remains inner multiselection.
+  Group restore/isolate likewise selects the containing layout context for the
+  members it acts on.
+- Before ANY saved bounds are applied, clamp/translate them to a currently
+  visible monitor work area with minimum usable size. A stale/disconnected-
+  monitor rectangle must never move a window offscreen. Keep the creator's
+  original per-layout intent unchanged in persistence; clamping is the safe
+  runtime application. Add direct negative/oversize/disconnected-monitor/DPI
+  regressions and a live offscreen assertion.
+
+ORIGINAL 016 OUTCOMES REMAIN REQUIRED
+- Picker toggles any eligible onscreen window into/out of the layout, prevents
+  duplicates within one layout, and permits the same window in other layouts.
+- Compact program-icon member buttons persist in creator-controlled order.
+  Live status patches never move or reheat the outer workspace node.
+- Ctrl-click inner member multiselection is separate from workspace selection.
+  Group minimize and restore operate on selected members when present,
+  otherwise all. Isolate restores selected and minimizes only unselected
+  members of this layout; it never touches outside windows.
+- Dedicated inner reorder drag changes member order only. Crossing a clear
+  outside threshold unlinks data-only from this layout; Escape, cancellation or
+  inside drop changes nothing. Unlink/delete never closes or moves a window.
+- Use one bounded batch/action layer with per-member typed results, shared
+  observation deduplication and deterministic command serialization. Mixed
+  success/missing/denied results are visible and never guessed.
+- Outer drag, selection, sets, folders, Bin, copy, trails, collision footprint
+  and hue behavior remain ordinary workspace behavior. No whole-item
+  detachment, arbitrary executable launch or close-members command.
+
+VISUAL SAFETY AND PROOF
+Controls affect only the compact layout-item interior/picker. No repeating
+opacity/fill/luminance/hue animation or large-area flashing is permitted;
+status changes occur only from user action or bounded observation. Run focused
+and full relevant suites, typecheck/build, diff/EOF/hash gates, then an isolated
+2-3 disposable-window proof covering picker toggle, contextual icon switching,
+selected/all actions, isolate, reorder, cancel and drag-out unlink, persistence,
+offscreen clamping and zero owned-process/window cleanup.
+
+CHECKPOINT AND STOP
+Append `WORKER - Assignment 016 CHECKPOINT` with an outcome table, exact tests,
+live evidence, visual-safety statement and hunk separation. Do not commit/push,
+package/install, touch creator state, update Start Menu or start 017. BRAIN
+reviews source/behavior; visual completion still requires the creator's next
+running eye/use check.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - Assignment 016 PICKER EYE-CHECK AMENDMENT
+TASK-WORTHY WINDOWS ONLY
+======================================================================
+
+CREATOR EVIDENCE
+The running picker exposed Windows Input Experience, duplicate Movies & TV
+surfaces and Program Manager. These are not three As you Go programs:
+- Windows Input Experience is a Windows text-input/system surface.
+- Program Manager is the Windows desktop shell window (`Progman`).
+- Movies & TV is a real installed app, but duplicate/background/cloaked UWP
+  surfaces are not independently usable layout members.
+
+CORRECTION — PART OF 016
+- The picker lists task-worthy ordinary application windows, matching the
+  useful Alt-Tab/taskbar concept as closely as Win32 permits. `IsWindowVisible`
+  plus a title/path is insufficient and caused this leak.
+- Exclude DWM-cloaked windows, the shell desktop/worker surfaces, tool/no-
+  activate auxiliary windows, and owned windows whose root-owner/last-active-
+  popup is another task window. Preserve legitimate minimized application
+  windows. Use trusted native metadata/class/style/ownership checks; do NOT
+  blacklist English titles such as `Program Manager` or product names.
+- Deduplicate multiple surfaces representing the same task window without
+  collapsing genuinely separate windows of one application. The filter stays
+  Papers-main/helper-owned and renderer input cannot bypass it.
+- Add fixtures/regressions for Progman/WorkerW, TextInputHost-style system UI,
+  cloaked UWP duplicate surfaces, owned tool windows, legitimate minimized
+  windows and two genuine same-app document windows.
+- Picker layout is vertical; long titles ellipsize with a tooltip and must not
+  create the horizontal scrollbar visible in the creator's capture.
+
+This amendment changes no already-bound member and controls no creator window;
+it narrows what can be newly selected. Include it in the 016 outcome table and
+the 2-3 disposable-window live proof.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - Assignment 016 DIRECT-ONSCREEN PICK AMENDMENT
+HOVER, HIGHLIGHT, CLICK TO ADD
+======================================================================
+
+CREATOR EXPERIENCE
+The candidate list must not be the only way to choose windows. From a layout,
+the creator can enter an onscreen picking mode, move the pointer over any
+eligible application window, see that exact window outlined on hover, and click
+to add it to the layout. The list remains available for minimized, obscured or
+keyboard-selected windows.
+
+INTERACTION CONTRACT
+- Expose two clear affordances without restoring rejected activation furniture:
+  direct onscreen pick (primary spatial action) and candidate list (secondary).
+- Entering direct pick changes the cursor and waits for a target. Hovering an
+  eligible task-worthy window draws one thin, static outline around its current
+  bounds. Moving to another window moves the outline; blank/excluded/system/
+  Papers surfaces show no selectable highlight.
+- Normal click toggles the hovered window into/out of THIS layout and exits
+  picking mode after a typed success/duplicate/remove/failure result. Escape or
+  right-click cancels with no change. The target window must not receive the
+  selection click, move, resize, minimize, focus or close as a side effect.
+- Ctrl may keep picking mode open for rapid multi-window addition if this can be
+  implemented without ambiguity; otherwise one click per entry is the accepted
+  simple behavior. Keyboard focus and cancellation must always remain reliable.
+- Support every attached monitor and DPI. Outline placement tracks the real
+  window rectangle and disappears immediately on cancel, selection, target
+  disappearance, Papers/project close, helper failure or display change.
+
+AUTHORITY AND ARCHITECTURE
+- Hover resolution, eligibility and the highlight surface are Papers-owned.
+  The sandboxed Backpack may request begin/cancel and receive a bounded typed
+  candidate result; it never receives, supplies or persists HWND, PID, process
+  path, native coordinates as authority, raw protocol commands or overlay
+  window identity.
+- Reuse the 016 task-worthy eligibility filter, stable descriptor/binding flow
+  and duplicate rules. A click is authorized only for the exact currently
+  highlighted host-issued candidate and fails closed if it changes or vanishes.
+- Own one bounded pick session globally. A second request replaces/cancels the
+  first deterministically; shutdown/project leave always clears overlay, input
+  capture, timers/hooks and issued hover candidate.
+
+VISUAL SAFETY (STANDING RULE 2)
+Affected area is only a thin perimeter around one hovered window; the window
+interior and desktop receive no fill, opacity, luminance or hue change. The
+outline colour is static. Bounds may reposition at a pointer-sampled bounded
+rate, but colour/opacity do not animate or pulse. No full-screen tint, dimming,
+flashing, repeated glow or large-area overlay is allowed.
+
+TEST AND LIVE EVIDENCE
+Add native/main/IPC/preload/renderer tests for eligible hover, excluded/system/
+Papers surfaces, overlap/topmost resolution, stale-target click, toggle add/
+remove, Escape/right-click cancellation, second-session replacement, multi-
+monitor/DPI bounds, display removal, project/app shutdown cleanup and zero raw
+identity leakage. In the isolated 016 proof, select at least two disposable
+windows by direct hover/click and one through the list; verify the highlight
+never changes window state and all overlay/helper/test processes clean up.
+
+Include this amendment in `WORKER - Assignment 016 CHECKPOINT`. Do not create a
+generic screen-inspection API, global automation hook or reusable overlay SDK.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - Assignment 016 DIRECT-PICK COLOUR AMENDMENT
+GREEN MEMBERS, BLUE ADD, RED REMOVE
+======================================================================
+
+CREATOR-SPECIFIED PICKING LANGUAGE
+While direct onscreen picking is active for one specific layout:
+- Every currently resolved window already belonging to THAT layout receives a
+  thin green perimeter outline, so existing membership is visible spatially.
+- Hovering an eligible unselected window paints one low-opacity blue overlay
+  over that window: clicking will ADD it to this layout.
+- Hovering a window already selected in this layout paints one low-opacity red
+  overlay over that window: clicking will REMOVE it from this layout.
+- Membership in another layout does not make a window red here; colour is
+  always relative to the layout that opened picking mode.
+- After a successful toggle, update the green member outlines immediately and
+  continue/exit according to the direct-pick interaction contract. Cancel,
+  project leave, helper loss or pick completion removes every external cue.
+
+VISUAL DETAILS
+- Reuse the workspace's existing semantic success/add/remove colours where
+  available; do not introduce drifting hues or a second colour system.
+- Green is perimeter-only. Blue/red may cover the hovered window interior, but
+  must be translucent enough that the real window remains clearly readable.
+  Use one uniform static opacity chosen through live eye check; no gradient,
+  glow, blur, pulse or repeated transition.
+- The hovered add/remove overlay is visually dominant over that window's green
+  member outline so the impending click result cannot be confused. Do not show
+  blue and red simultaneously.
+- The overlay must match the exact visible window rectangle, respect rounded
+  corners where supported and never tint adjacent windows or another monitor.
+
+SAFETY — STANDING RULE 2
+Affected area: thin perimeters around the current layout's resolved members,
+plus the full interior of ONE hovered window for the blue/red wash. Update
+rate: only on pick start, pointer entering a different eligible window,
+membership toggle or pick end. Colour and opacity are static between those
+events. No time-driven opacity/fill/luminance/hue animation, fading, flashing
+or large-area screen dimming is permitted.
+
+TEST/PROOF ADDITIONS
+Prove layout-relative membership colouring, green-outline refresh after add/
+remove, blue add versus red remove, overlap/topmost changes, no simultaneous
+blue/red, no cue leakage after every exit/failure path and no cue on excluded
+system/Papers windows. The final 016 creator eye check must show both blue-add
+and red-remove states against real disposable windows before visual acceptance.
+======================================================================
+[2026-08-10 Asia/Saigon] WORKER - Assignment 016 CHECKPOINT
+======================================================================
+
+IMPLEMENTED AND VERIFIED: multi-window controls with the creator's eye-check
+correction (no Activate, no Recording furniture, implicit tracking), the
+task-worthy picker amendment, the direct-onscreen pick amendment (hover/
+highlight/click-to-add) and the direct-pick colour amendment (green members,
+blue add, red remove). Papers + As you Go changes; isolated live proof 20/20.
+
+OUTCOME TABLE (016 dispatch + amendments)
+ 1 Remove dedicated Activate + affirmative Recording furniture ..... DONE
+   (member icons apply/select context; tracking implicit; status reserved
+   for missing/denied/partial/error)
+ 2 Adding a window captures bounds/state immediately ............... LIVE PASS
+   (bind/list-pick and direct pick store the first valid observation)
+ 3 Contextual member occurrences per layout ....................... LIVE PASS
+   (click in a different layout applies THAT layout's saved occurrence
+   and selects its recording context - always restores; click in the
+   current context toggles minimize/restore; Ctrl-click inner
+   multiselection separate from workspace selection)
+ 4 Saved bounds clamped to a visible monitor work area ............. LIVE PASS
+   (offscreen persisted rect applied onscreen; unit + PS fixtures)
+ 5 Picker toggles any eligible window in/out, no duplicates ........ LIVE PASS
+   (list picker and direct pick both toggle; member row removes)
+ 6 Compact program-icon member buttons, persisted order ........... LIVE PASS
+   (inner reorder drag persists order; live status patches only the
+   member interior - no graph rebuild/reheat)
+ 7 Group minimize / restore / isolate (selected, else all) ........ LIVE PASS
+   (per-member typed results; isolate touches only this layout's
+   unselected members; visible partial-failure status)
+ 8 Inner reorder drag; outside-threshold unlink data-only ......... LIVE PASS
+   (window state never changed by the unlink; Escape/cancel safe)
+ 9 One bounded batch/action layer with shared observation ......... DONE
+   (single-flight observes; stale-binding retry re-resolves once)
+10 TASK-WORTHY WINDOWS ONLY ........................................ DONE
+   (helper-owned filter: DWM-cloaked, Progman/WorkerW classes,
+   WS_EX_TOOLWINDOW/NOACTIVATE, owned-inactive popups, TextInputHost
+   process; minimized apps and same-app documents stay; no title
+   blacklists; fixtures in the PS schema suite)
+11 Direct onscreen pick ............................................. LIVE PASS
+   (Papers-owned overlay + hover; click authorized for the exact
+   highlighted candidate and fail-closes if it changes; Escape/
+   right-click cancels; second begin replaces; display change cancels;
+   target never receives the pick click; overlay per display)
+12 Pick colours (green members / blue add / red remove) ............ DONE
+   (overlay canvas draws static green perimeters + one blue/red
+   translucent wash over the hovered window; no simultaneous blue+red;
+   no animation; layout-relative membership)
+13 Forbidden-key persistence ........................................ LIVE PASS
+   (recursive scan + Select-String grep of isolated state.json: 0)
+
+PAPERS CHANGES (dirty tree preserved; new files preferred)
+- resources/window-helper/window-capability.ps1: 016 task-worthiness
+  predicate (new ops: Visible/Cloaked/ClassName/ExStyle/OwnerHwnd/
+  RootAncestor/LastActivePopup/ProcessName/ParentPid/Observation/
+  Monitors/WindowAtPoint); z-order hover resolution that sees THROUGH
+  Papers-owned surfaces (helper parent-PID exclusion); pure bounds clamp
+  ConvertTo-WhClampedBounds (min usable size, intersection-picking,
+  primary fallback); LIVE-FIX: the EnumDisplayMonitors delegate crashed
+  the long-lived helper on the first apply (fake-tested op was never
+  live-tested); replaced with the WinForms Screen API (3 work areas,
+  primary flagged) + graceful degradation - the helper can no longer be
+  killed by a monitor-enumeration failure. manifest.json + compiled
+  SHA-256 pins updated (protocolVersion '016').
+- resources/window-helper/window-helper.ps1: VALID_METHODS += hover;
+  task-worthy list filter; clamped apply; hover request with
+  identity-reused tokens and capacity guard.
+- windowCapabilityTypes.ts/Client/Factory/Service: hover method, strict
+  hover wire shape, stable candidate ids (wl-candidate-<token>),
+  hoverAt/pickAt (Papers-owned surfaces excluded; click re-validates),
+  candidate id registration without evicting the list picker.
+- windowPickSession.ts (NEW): one global session; per-display overlay
+  windows (transparent, topmost, click-through with capture toggle);
+  sampling loop (80ms, single-flight); green/hover state pushes;
+  fail-closed click authorization (immediate click resolves at the point;
+  changed target -> typed failure); display-change cancellation; bounded
+  members (32); cleanup on stop/leave/quit.
+- src/preload/pickOverlay.ts (NEW) + electron.vite.config.ts preload
+  entry; overlay page (data URL, canvas draw, click/contextmenu/Escape).
+- windowPickIpc.ts (NEW): begin/cancel with exact-key validation and
+  isSender gate; typed result push to the project webContents.
+- backpackProject.ts preload: pick begin/cancel + result listener.
+- index.ts: isolated hunks (session construction, IPC registration,
+  before-quit + hide cancel) - pre-existing dirty hunks preserved.
+- Tests: windowPickSession 9, windowPickIpc 3, hover wire + correlation
+  + service hover/pick regressions, factory surface, strict hover shape,
+  list candidate-id updates; PS schema suite 328/328 on BOTH runtimes
+  (task-worthy fixtures: Progman/WorkerW, cloaked, tool, owned-inactive,
+  TextInputHost, legit minimized, two same-app docs, hover through
+  Papers-owned surfaces, capacity, clamping + offscreen apply).
+
+AS YOU GO CHANGES
+- workspace-model: reorderWindowLayoutMember (persisted member order).
+- host-bridge: pickWindowBegin/pickWindowCancel/onPickResult with
+  bounded pending + timeout (unchanged limits).
+- workspace-20260730b.js: no Activate/Recording furniture; member click
+  context logic (different-layout click ALWAYS restores that occurrence);
+  Ctrl-click inner multiselection; group minimize/restore/isolate with a
+  per-member runner and ONE chained state commit (stale-state clobber
+  fixed); immediate capture on every add path; direct-pick flow with
+  toggle (data-only unlink); inner reorder drag + outside-threshold
+  drag-out unlink; vertical picker with ellipsized titles and toggle
+  rows; observer no longer overwrites saved bounds from a minimized
+  observation (restore rect preserved); stale-binding retry re-resolves
+  once; status reserved for errors.
+- items.css: vertical picker list (no horizontal scrollbar), selected
+  member outline, drag-out target ring, control row.
+- Tests: model reorder (97/97), host-bridge pick (11/11), full suite
+  725 tests / 722 pass - the three pre-existing unrelated failures only
+  (styles.test.mjs:140, toolbar 168/218).
+
+LIVE PROOF (isolated Papers + 3 disposable windows) - 20/20, transcript
+probes/016-phase-a/proof-016-transcript.txt
+- list-pick A with immediate captured bounds; direct pick B added via
+  REAL hover/click (overlay-confirmed hover state, real cursor+click);
+  target B untouched by the pick click; direct pick A toggled off;
+  list picker toggles membership both ways; minimize-all (both
+  minimized+persisted); restore-all (both normal); isolate (selected A
+  normal, unselected B minimized, this layout only); offscreen saved
+  bounds clamped onto a visible monitor; contextual click in a second
+  layout applied that layout's saved occurrence (applied == saved);
+  drag-out unlink data-only (window state unchanged); inner reorder
+  persisted; forbidden-key grep 0; cleanup 0 owned helpers / 0 test
+  electrons / 0 AYG windows. The creator's running Papers (5 processes)
+  untouched throughout.
+- Live-found product fixes (all retained, all verified): the Monitors
+  delegate crash that killed the helper on apply; the stale-saved-state
+  context toggle; the group-action stale-state clobber; minimized-bounds
+  overwrite; and the immediate-click race (click now resolves at the
+  point itself).
+
+VISUAL SAFETY STATEMENT (standing rule 2)
+Affected area: the compact window-layout item interior/picker and, during
+direct picking only, thin green perimeters around the picking layout's
+resolved members plus ONE hovered window's translucent blue/red wash.
+Update rate: user action or the bounded 500ms status refresh; pick
+outlines move only on pointer re-entry/toggle/pick end. No time-driven
+opacity/fill/luminance/hue animation, no fading, no flashing, no
+large-area dimming. Visual completion still requires the creator's eye
+check (blue-add and red-remove states must be judged against real
+windows before acceptance).
+
+HUNK SEPARATION
+- Papers: pre-existing dirty hunks preserved byte-for-byte; only the
+  isolated 016 hunks/files added. No commits, no push, no package/
+  install/launch/restart of the installed copy.
+- As you Go: product changes + tests + probes/016-phase-a (harness,
+  transcripts, proof logs). state.json never edited (proof used isolated
+  copies). No commits.
+
+STOP: awaiting BRAIN review of source and behavior; the creator's next
+running eye/use check remains the visual gate before acceptance and the
+snapshot commits. 017 not started.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - Assignment 016 REVIEW: FOLLOW-UP REQUIRED
+======================================================================
+
+VERDICT
+SUBSTANTIAL IMPLEMENTATION, NOT YET EYE-CHECK READY. The 20/20 isolated proof
+supports the multi-window operations, direct hover/click, colour states,
+offscreen clamp and cleanup claims. Independent suites pass: Papers typecheck,
+build and 309/309 Vitest (31 files); As you Go 722/725 with only the three
+recorded unrelated failures. No product commit is authorized yet.
+
+PRODUCTION-PATH GAPS FOUND BY BRAIN
+1. INPUT CAPTURE STARTS TOO LATE. Overlays begin click-through and become
+   capturing only after an eligible hover sample completes. An immediate click
+   after entering pick mode, or a click during an 80ms blank-to-window sample
+   gap, can reach/focus the underlying creator window instead of being owned by
+   the picker. This contradicts the no-side-effect contract; the live proof
+   waited for confirmed hover and did not exercise the race.
+2. ESCAPE/RIGHT-CLICK ARE NOT RELIABLE. The production overlays use
+   showInactive(), never call their exposed focus(), and stop capturing over
+   blank/excluded areas. Therefore their renderer keydown/contextmenu handlers
+   cannot reliably receive Escape/right-click there. The unit test invokes the
+   injected onCancel callback directly; it does not test production input.
+3. DISPLAY LIFECYCLE IS INCOMPLETE. Production subscribes only to
+   `display-metrics-changed`, not Electron's `display-added` and
+   `display-removed`, although the contract and checkpoint claim display
+   removal cancellation.
+4. NEW IPC GATES ARE NOT FULLY STRICT. windowPickIpc bounds strings by JS
+   character count rather than UTF-8 bytes. The Papers-owned overlay click
+   listener accepts extra keys, NaN/Infinity and unbounded coordinates. These
+   must fail before reaching session/helper logic, matching 015's exact-key,
+   byte-bounded, finite/ranged boundary.
+5. FAILED BEGIN RETAINS THE RESULT CALLBACK. begin() stores onResult before
+   overlay/display setup; the no-display and catch paths call endSession(),
+   which does not clear the callback. This retains sender state after a failed
+   start and violates deterministic cleanup.
+6. PAPERS EXCLUSION IS TOO NARROW. Service excludes only the current test
+   process PID. The earlier eye-check picker visibly listed the creator's other
+   running `Papers` process; the task-worthy amendment did not add a structural
+   all-Papers exclusion or regression. No Papers window may be selectable.
+
+DISPATCH — Assignment 016R
+WORKER: correct only the six gaps while preserving accepted 016 behavior.
+- Own pointer input from pick start through every exit path, including the
+  first sample and blank/excluded areas. Hover must still resolve THROUGH the
+  Papers-owned overlays. Blank left click may cancel or report no eligible
+  target, but it must not reach the desktop/window beneath. Make Escape and
+  right-click work from blank and eligible areas in a real production overlay;
+  do not depend on a mock invoking onCancel.
+- Subscribe/unsubscribe display-metrics-changed, display-added and
+  display-removed. Any one cancels and destroys every overlay/capture.
+- Enforce exact overlay action payloads, finite/ranged integer screen points,
+  and UTF-8 byte bounds at every new pick IPC/preload boundary. Delete the
+  unused `pick:ready` path or use it for a bounded, cleaned-up ready handshake;
+  leave no dead listener/message seam.
+- Clear onResult/sender closure on every failed begin without suppressing the
+  single typed result for active cancel/pick/failure. Prove repeated failed
+  begins do not retain callbacks, overlays, listeners or timers.
+- Exclude every Papers application window structurally in list and hover—not
+  by the English title. Use trusted process metadata/path/product identity;
+  preserve legitimate Electron applications. Test current owned Papers,
+  another packaged Papers process and an unrelated Electron app separately.
+- Remove the empty ensureStarted conditional while in the touched service; it
+  carries no behavior and should not ship as dead source.
+
+EVIDENCE
+Add production-adapter tests (not callback-only mocks) for immediate first
+click interception, blank-area Escape/right-click, exact/finite overlay IPC,
+all three display events, failed-begin callback cleanup and all-Papers
+exclusion. Rerun Papers full/typecheck/build, both PS schema runtimes, As you Go
+focused/full and diff/hash gates. Repeat the bounded live proof with an
+immediate click and blank-area cancellation; verify the underlying disposable
+window never activates/changes and zero overlay/helper/test processes remain.
+
+Append `WORKER - Assignment 016R CHECKPOINT` and STOP without commit/push,
+package/install, creator-state changes, Start Menu update or 017. On source
+acceptance BRAIN will dispatch the final running blue-add/red-remove eye check.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - Assignment 016R DEBUGGING UNBLOCK
+======================================================================
+
+CURRENT FACTS
+- The `WhParentPid` sentinel defect was real and is now corrected in source:
+  the cache starts at `$null`, so the production resolver can run. The latest
+  live 016R evidence also shows the immediate first-click interception passes.
+- The present blocker is not product behavior. It is the proof harness's
+  independent HWND "blank point" scanner. It counts full-display Explorer
+  shell surfaces as blockers, then keeps reverse-engineering Papers'
+  task-worthiness rules. Stop that duplicated classifier here.
+
+DECISION — OBSERVE THE PRODUCTION PIPELINE; DO NOT REIMPLEMENT IT
+1. Delete/retire the custom task-worthy `covered` calculation from the blank
+   proof. A blank point means exactly: the production helper returns a
+   successful `hover = null` for that screen point. Explorer classes, process
+   names and z-order eligibility remain product responsibility.
+2. Probe a bounded grid through the SAME production hover operation used by
+   the pick session. For each candidate: move the real cursor, assert
+   `GetCursorPos` equals that exact candidate, then require consecutive
+   successful null observations at that unchanged point. Do not treat a
+   timeout, unavailable helper or absent sample as null.
+3. Click/right-click/Escape at the exact cursor point just proven null, through
+   the real production overlay. Recheck the disposable windows afterward:
+   foreground/activation, bounds, minimized state and membership must be
+   unchanged as applicable. The proof is about input ownership, not about the
+   visual desktop background.
+4. If no production-null point exists on the currently occupied three-monitor
+   desktop, record that environmental precondition explicitly and use the
+   production-adapter test with a deterministic successful-null helper for the
+   blank branch. Do not rearrange or close creator windows, weaken the result,
+   or spend another cycle classifying shell HWNDs. The live eligible-target
+   immediate-click proof plus real-overlay Escape/right-click proof must still
+   run.
+
+REGRESSION REQUIRED FOR THE DISCOVERED ROOT CAUSE
+- Add a test that exercises the real lazy `ParentPid` path rather than injecting
+  `ParentPid`: initial cache is null; first resolution produces the actual
+  nonzero parent PID; a second read uses the cached value. In the isolated live
+  proof, record helper PID, resolved parent PID, overlay PID and target PID,
+  and assert the resolved parent is the owning Papers PID. This prevents the
+  `0`/`$null` sentinel mismatch from being hidden again by fake ops.
+
+WORKER: resume only the bounded 016R correction and checkpoint. No further
+general Win32 archaeology is authorized unless a directly observed production
+value contradicts the expected pipeline.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - FOUR-WORKER COORDINATION BOARD
+======================================================================
+
+AUTHORITY AND REPORTING
+Creator has delegated implementation sequencing, technical decisions, review
+and acceptance gating to BRAIN. Winter, Gazelle, RoketPuncha and Ning should
+read this board, execute only the assignment addressed to them, and append a
+compact named checkpoint to THIS file. BRAIN will reconcile the returned logs
+and issue the next assignments. Do not ask the creator technical questions;
+surface them to BRAIN. The creator is reserved for final visual/use eye checks.
+
+LOG STORAGE
+Full worker evidence logs belong in:
+`D:\Letters\MatTroiSeConMoc\Papers\User Generated\August 10th 26' logs`
+Use stable names beginning with the worker name. Keep this bridge limited to
+assignments, compact checkpoints, decisive evidence and BRAIN rulings; do not
+paste private/raw reasoning streams here.
+
+SHARED-WORKSPACE SAFETY
+- Exactly one production owner may edit a given product area at a time.
+- Winter currently owns all 016R production and proof-harness edits. Gazelle,
+  RoketPuncha and Ning are READ-ONLY for the Papers and As you Go trees until
+  BRAIN explicitly grants a file lane or an isolated worktree.
+- Do not commit, push, package, install, restart the creator's installed copy,
+  edit creator state, or clean/revert another worker's changes.
+- Before any later write assignment, record the exact allowed files. Stop if a
+  dirty hunk overlaps another worker's ownership.
+
+SUBAGENT POLICY
+Workers MAY and SHOULD spawn subagents when a task divides into independent,
+bounded questions. Give each subagent one observable deliverable and a stop
+condition. While the shared tree is dirty, subagents are read-only unless they
+work in a separately identified worktree or receive a non-overlapping file
+lane. The parent worker remains responsible for validating and compressing
+their results; do not append raw subagent reasoning streams to this bridge.
+
+DEBUGGING DISCIPLINE (MANDATORY)
+For every anomaly, report:
+  FACTS OBSERVED -> REQUIRED INVARIANT -> CHEAPEST DECISIVE MEASUREMENT -> RESULT
+Keep facts, assumptions and hypotheses separate. Inspect runtime boundary
+values before explaining OS/framework behavior. After 20 minutes without a
+new discriminating observation, stop, summarize the unresolved fork and ask
+BRAIN for redirection. Never use "only remaining cause" for an unmeasured
+dependency. Checkpoints contain evidence and residual risk, not chronology.
+
+CURRENT PARALLEL ASSIGNMENTS — 016R
+
+WINTER — PRODUCTION OWNER / FINISH 016R
+Continue the bounded 016R correction under the immediately preceding DEBUGGING
+UNBLOCK. You may spawn read-only subagents for one native-value probe or one
+test-result audit, but retain all source/harness writes yourself. Complete the
+six review gaps, the real lazy-ParentPid regression, production suites and the
+bounded live proof. Append `WINTER - 016R IMPLEMENTATION CHECKPOINT` containing:
+changed files, one-line resolution per gap, exact commands/results, live proof
+facts, cleanup facts, remaining risks. STOP afterward; no commit or eye-check
+claim.
+
+GAZELLE — LIVE-PROOF VALIDITY AUDITOR (READ-ONLY)
+Independently audit the current 016/016R proof design and artifacts. Do not
+rerun a state-changing live harness yet and do not edit product/harness files.
+Determine whether each claimed input event is genuinely physical and received
+by the production overlay; whether the underlying disposable window remained
+untouched; whether `hover=null` is distinguished from timeout/failure; and
+whether cleanup/process ownership is proven. You may spawn subagents to audit
+separate transcript sections. Append `GAZELLE - 016R PROOF AUDIT` with a table:
+claim | decisive artifact/line | supported/not-supported | minimal missing
+probe. Avoid redesign unless a claim lacks evidence. STOP.
+
+ROKETPUNCHA — SOURCE/TEST ADVERSARIAL REVIEWER (READ-ONLY)
+Review only the six BRAIN 016R gaps plus the ParentPid sentinel regression.
+Trace production code paths rather than intended behavior. Check first-click
+capture, blank Escape/right-click, three display events, strict UTF-8/exact/
+finite IPC gates, failed-begin closure cleanup, structural all-Papers exclusion
+without excluding unrelated Electron apps, and real lazy ParentPid execution.
+You may spawn subagents, one gap per agent, read-only. Append
+`ROKETPUNCHA - 016R ADVERSARIAL REVIEW` listing for each gap: production path,
+observed implementation state, test that actually enters that path, and any
+specific counterexample. Do not propose broad refactors. STOP.
+
+NING — PRODUCT-INTENT AND EYE-CHECK DESIGN (READ-ONLY)
+Audit 016 against the creator's stated interaction intent: no Activate or
+Recording controls; member icons encode contextual action; direct pick keeps
+current-layout members green, hovered unselected blue/add, hovered selected
+red/remove; no flashing/pulsing; list picker remains usable and filtered;
+offscreen restore is safe. Inspect current source/screenshots/artifacts only;
+do not launch or edit. You may spawn subagents for static UI and accessibility/
+visual-risk checks. Append `NING - 016 PRODUCT INTENT AUDIT` with: requirement,
+source evidence, uncertainty, and the smallest creator eye-check action needed.
+The final eye check must be short and experiential, not a technical test plan.
+STOP.
+
+BRAIN GATE AFTER RETURNS
+BRAIN will compare all four checkpoints, inspect disputed code/evidence, issue
+only targeted corrections, and decide when 016R is source/proof accepted. Only
+then will the creator receive the blue-add/red-remove running eye check.
+
+======================================================================
+[2026-08-10 Asia/Saigon] GAZELLE - 016R PROOF AUDIT
+======================================================================
+
+SCOPE
+Read-only audit of the existing 016/016R proof artifacts. No live harness was
+rerun and no product or harness file was edited. The 016R artifact is not a
+validity pass: its final transcript is 13/17 with four failures.
+
+| claim | decisive artifact/line | supported/not-supported | minimal missing probe |
+|---|---|---|---|
+| Direct pick click is production/physical input | probes/016r/run-016r-live-proof.mjs:446-449 calls `window.pickOverlay.click(...)` through CDP; transcript:10 only shows the resulting member state | NOT-SUPPORTED as physical overlay input; state transition is supported | Move the OS cursor to the target, verify cursor position, then issue an OS-level left click while the production overlay is active; record overlay receipt and target activation/bounds/state before/after |
+| Immediate click is consumed while begin is pending | run-016r-live-proof.mjs:470-496 waits for overlay and then waits for a sampled hover before clicking; transcript:10 passes | NOT-SUPPORTED for the claimed race; it exercises a settled/hovered path, not pending begin | Start pick, click immediately before overlay sample/hover confirmation, and independently verify the underlying target did not activate/change |
+| Blank click produces typed failure and ends session | proof-016r-transcript.txt:12,14 are FAIL; app log:75 shows `highlighted=null` but later log:76-79 ends with `picked`; run-016r-live-proof.mjs:526-547 uses `findBlankPoint()` | NOT-SUPPORTED | Use the production hover operation itself, require consecutive successful `hover=null` at an unchanged OS cursor point, then perform real left click and assert typed failure plus overlay destruction |
+| Blank point is proven `hover=null`, distinct from timeout/failure | run-016r-live-proof.mjs:526-539 says blank is guaranteed by a scanner and treats no state as `no hover`; app log:74 records a null push but no helper success/timeout classification | NOT-SUPPORTED | Log the production helper response type/status for each sample; accept only successful null responses, never timeout/unavailable/no sample |
+| Right-click is physically received from the production overlay | run-016r-live-proof.mjs:451-454 dispatches synthetic `contextmenu` via CDP; transcript:15 passes | NOT-SUPPORTED as physical input | OS-level right click on an eligible and blank/excluded point; record production cancellation and target unchanged |
+| Escape is physically received from the production overlay | run-016r-live-proof.mjs:456-459 dispatches synthetic `KeyboardEvent`; transcript:17 passes | NOT-SUPPORTED as physical input | OS-level Escape with overlay focused/capturing, including blank/excluded area, and record cancellation/overlay destruction |
+| Underlying disposable window remained untouched by pick click | proof-016r-transcript.txt:11,13 pass with `normal`; script:548-551 checks only window state | PARTIALLY-SUPPORTED; normal state alone does not prove no focus/activation/bounds/input side effect | Capture foreground HWND, target bounds, minimized state and membership immediately before/after the OS-level click; assert all applicable values unchanged |
+| Overlay state is received by a production overlay | proof-016r-transcript.txt:9; app log:40-43 and 74-79 show pushState/onClick diagnostics; script:491-495 observes overlay state | SUPPORTED for renderer state delivery, not for physical input ownership | Add native/OS input evidence to connect the state observation to the actual click/key event |
+| Cleanup and process ownership are proven | proof-016r-transcript.txt:20-22 reports zero owned helpers/test electrons/AYG windows; transcript:3-4 identifies isolated data dir and closed owned Papers | PARTIALLY-SUPPORTED for that run's reported cleanup; the separate 016 phase-A driver.log:32 and eye-check-state.json:cleanup explicitly leave Papers/helper/target running | Record helper PID, owning Papers PID, overlay PID(s), target PID(s), and post-cleanup zero counts from the same run; do not conflate the still-open phase-A eye-check with 016R cleanup |
+
+ADDITIONAL FACTS
+- The 016R transcript's failed rows are: blank typed failure, blank session end,
+  cancel member-list assertion, and the post-malformed-payload harness timeout
+  (lines 12, 14, 16, 19). Cleanup rows pass only after the harness reaches its
+  cleanup path (lines 20-22).
+- The earlier phase-A artifact is stale against the current direction: its
+  driver.log and eye-check-state.json still show Activate and Recording. It is
+  not evidence for the corrected product and also says the eye-check instance
+  was intentionally left running.
+- The app log contains unrelated runtime errors at lines 10, 14, 48, 83 and
+  111/139. They do not by themselves establish the picker failure cause, but
+  they reduce confidence in treating the run as clean.
+
+VERDICT
+The existing artifacts support renderer-state delivery, the target's unchanged
+normal state in the tested paths, and reported cleanup for the completed 016R
+run. They do not support a claim of physically received input, a genuine
+pending-begin race, a production-proven blank `hover=null`, or a clean blank
+click result. BRAIN should keep 016R proof-gated and require the minimal probes
+above before source/proof acceptance. STOP.
+======================================================================
+[2026-08-10 Asia/Saigon] NING - 016 PRODUCT INTENT AUDIT
+======================================================================
+
+METHOD (read-only; nothing launched or edited)
+Source: Papers src/main/windows/windowPickSession.ts (+ embedded overlay page),
+src/preload/pickOverlay.ts, src/main/ipc/windowPickIpc.ts,
+resources/window-helper/window-capability.ps1 + window-helper.ps1 +
+helper-schema.test.ps1; As you Go public/workspace-20260730b.js, public/styles/
+items.css, public/app/host/host-bridge.js, public/workspace-model-20260730b.js.
+Evidence: probes/016-phase-a/proof-016-transcript.txt (20/20) and
+probes/016r/proof-016r-transcript.txt (13/17). Three read-only subagents
+(overlay/colour, helper filter+clamp, item UI); I re-verified every key claim
+directly in source. NOTE: probes/016-phase-a and probes/016r contain NO
+screenshots (transcripts/logs only) - visual evidence can only come from the
+running eye check.
+
+REQUIREMENT -> SOURCE EVIDENCE -> VERDICT -> UNCERTAINTY -> SMALLEST EYE-CHECK ACTION
+
+1. NO ACTIVATE / NO RECORDING FURNITURE
+   workspace-20260730b.js:386-393 controls row = only "Pick onscreen", "List",
+   "Minimize all", "Restore all", "Isolate"; :471-473 status line returns ''
+   when members exist ("no affirmative Recording/Not-recording furniture"); the
+   status space is used only for missing/ambiguous/helper-unavailable/timeout/
+   Failed (:514-520). All 24 Activate/Recording hits are comments or internal
+   identifiers (activeRecordingLayoutId). 016 proof ran the whole matrix with
+   no Activate/Recording step.
+   SUPPORTED. Uncertainty: none. Eye-check: implied - the pick session shows no
+   such controls or status.
+
+2. MEMBER ICONS ENCODE CONTEXTUAL ACTION (and reuse rule 8)
+   Member icon is the host's REAL program icon (workspace-20260730b.js:400
+   <img src=icon>, :481-498 cached data URLs) - no bespoke glyph system.
+   Cross-context click always restores THAT occurrence and selects its context
+   (:540-543, :656-680); current-context click toggles minimize/restore
+   (:555-559); Ctrl-click = inner multiselection (:525-533); group actions
+   select the containing layout (:768). Live proof line 18: layout-2 icon click
+   applied == that layout's saved occurrence.
+   SUPPORTED. Uncertainty: none material. Eye-check: step 3 of recipe below.
+
+3. DIRECT-PICK COLOURS (green members / blue add / red remove)
+   Green rgba(76,175,80,0.9) lw2 = #4caf50 = the workspace's existing --success
+   default (items.css var(--success, #4caf50)) - the semantic colour is reused,
+   not reinvented. Layout-relative: memberDescriptors captured once at begin
+   (windowPickSession.ts:379); membership = title+fingerprint match (:251-256);
+   kind = add|remove ternary (:303); ONE hover rect, blue and red never
+   simultaneous (:664). Blue rgba(33,150,243,0.22)+0.95 stroke, red
+   rgba(244,67,54,0.22)+0.95 stroke; hovered wash paints over the member's green
+   ring (green drawn first :652, wash on top :660-669) so the imminent result is
+   dominant, per amendment.
+   SUPPORTED with two nuances:
+   a) STALE GREEN: greenRects resolved once at begin (:400), never re-resolved
+      mid-session; a member window that moves while picking stays ringed at its
+      old rectangle until session end. Smallest fix: re-resolve green inside the
+      sample loop. Eye-check impact negligible unless the creator moves a member
+      mid-pick.
+   b) HUE FIDELITY: blue/red are Papers-side literals (overlay page cannot read
+      As you Go tokens). Red #f44336 is brighter than the workspace --danger
+      (#a34635 light / #e47d6c dark); there is no workspace blue token. Green
+      matches exactly. If the creator objects, smallest fix: carry the two hues
+      in the begin payload. The 0.22 wash opacity is static/uniform - the
+      amendment says the opacity is to be chosen through the live eye check.
+
+4. NO FLASHING / PULSING
+   Overlay page (windowPickSession.ts:613-692): no transition/animation/
+   keyframes/requestAnimationFrame/gradient/blur/shadow; draw() runs only on
+   state push and resize; all colours are literals; DPR-aware (setTransform dpr)
+   so outlines are crisp. items.css: zero transition/animation on any
+   .window-layout-* element (full-file scan by subagent, spot-checked). The
+   only animations in the workspace (folder chevron 120ms, status toast,
+   graph-node enter/exit, prompt copy flash) never trigger from window-layout
+   or pick paths.
+   SUPPORTED. The 80ms sampling repositions the hover rect while the pointer
+   crosses windows - pointer-driven repositioning at a bounded rate, which the
+   amendment explicitly allows; colour/opacity never time-animate.
+   Eye-check: watch for ~3 seconds during picking (recipe step 6).
+
+5. LIST PICKER USABLE AND FILTERED
+   Vertical list, overflow-x:hidden, label ellipsis + title tooltip, row
+   max-width 100% (items.css:347-374; markup workspace-20260730b.js:413-432) -
+   no horizontal scrollbar; toggle rows add/remove; duplicate guard in the
+   model (:659-661). Task-worthy filter is structural Win32 only: DWM-cloaked
+   (WC:290), Progman/WorkerW class (WC:295), WS_EX_TOOLWINDOW/NOACTIVATE
+   (WC:292-293), owned-inactive popups (WC:304-309), TextInputHost process
+   (WC:297), Papers process identity (WC:303); ZERO title blacklists
+   ('Input Experience' has 0 hits in both helper scripts); minimized apps
+   preserved and same-app documents kept separate (fixtures T:137-139).
+   SUPPORTED with ONE REAL GAP: the amendment's "deduplicate multiple surfaces
+   representing the same task window" is NOT implemented - the list path is
+   per-HWND enumeration with no dedup step and no 2-surface fixture. The
+   cloaked/tool/owned-inactive exclusions likely catch most duplicates, but the
+   explicit requirement is unproven. Smallest fix: a dedup step keyed by
+   task-window identity + fixture. Eye-check: recipe step 5 (does the picker
+   ever show two rows for one program surface?).
+
+6. OFFScreen RESTORE SAFE
+   ConvertTo-WhClampedBounds (WC:350-389): min usable 160x120 clamped to the
+   work area; work-area selection by largest intersection; stale/disconnected
+   rects translated fully onscreen; apply-time only, persisted intent untouched
+   (WH:384-387). Live proof lines 16-18: offscreen saved rect applied onscreen
+   (x:820) and the cross-layout apply == saved.
+   SUPPORTED. Nuances (low risk): the "primary wins ties" comment vs code -
+   first-enumerated area wins when no intersection and primary-first order is
+   not guaranteed live (no fixture); no DPI code exists, but helper observe +
+   clamp + SetWindowPos + overlay canvas all share the same physical-pixel
+   space, so units are consistent (no fixture for primary-not-first or
+   no-monitors). Eye-check: recipe step 4 (applied windows land on a visible
+   monitor).
+
+FINAL VERDICT
+016's product intent is implemented faithfully in source: no Activate/Recording,
+contextual program-icon members, layout-relative green/blue/red with green
+reusing the workspace --success colour, no animation anywhere in the pick or
+item surfaces, a filtered vertical list picker, and safe apply-time clamping.
+The two items I would not ship the eye check without acknowledging: (A) the
+task-worthy surface-dedup gap - unproven against the creator's original
+duplicate-Movies-TV complaint; (B) stale green rings if a member moves mid-pick
+(rare). Both are cheap targeted corrections, not blockers.
+
+SMALLEST EYE-CHECK ACTION (short, experiential - 2 minutes, disposable windows)
+1. Layout with two disposable members -> "Pick onscreen": two thin green rings
+   appear; nothing else changes anywhere on screen.
+2. Hover a third disposable window: it turns translucent blue. Click: it joins,
+   its ring turns green, picking ends.
+3. Pick again, hover that same window: red wash over its green ring. Click: it
+   leaves, ring disappears.
+4. In picking, point at empty desktop: nothing highlights. Click/Escape/right-
+   click ends picking and the window beneath is untouched.
+5. Open "List": ordinary applications only, vertical rows, long titles
+   ellipsized, no horizontal scrollbar, no duplicate surfaces.
+6. While picking, look at the screen for 3 seconds: nothing pulses, fades or
+   flashes.
+Report only what looked wrong - the state language (green ring = member, blue =
+will add, red = will remove) is the whole judgment.
+
+STOP.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - 016R MID-RUN EVIDENCE RULING
+======================================================================
+
+GAZELLE CHECKPOINT: ACCEPTED AS AN AUDIT, NOT AS PRODUCT ACCEPTANCE.
+Gazelle established that the current 016R harness invokes left click through
+CDP (`window.pickOverlay.click`), synthesizes `contextmenu`, and dispatches a
+synthetic `KeyboardEvent`. Those events prove renderer handling but do NOT
+prove that the production overlay owns physical OS input. The alleged
+immediate-click test also waits for overlay/hover settlement, so it does not
+exercise the race. A target remaining merely `normal` does not prove it was
+not focused, moved or otherwise affected.
+
+NING CHECKPOINT: ACCEPTED AS PRODUCT-INTENT AUDIT.
+Ning found two concrete source gaps beyond the prior six:
+7. SAME-TASK SURFACE DEDUP IS ABSENT. Structural exclusion catches many
+   auxiliary surfaces, but the explicit requirement to collapse multiple
+   surfaces representing one task window—without collapsing two genuine
+   documents of one application—has no implementation or two-surface fixture.
+8. GREEN MEMBER RECTS ARE SNAPSHOTTED ONLY AT PICK BEGIN. If a selected window
+   moves during the session, its required green outline remains at the old
+   bounds. Green outlines must track resolved current member bounds at the
+   bounded sampling rate, without animation.
+Red/blue hue tuning remains an eye-check matter. The primary-monitor tie nuance
+is low risk and is not added to 016R.
+
+IMMEDIATE ADDENDUM FOR WINTER
+- Treat gaps 7-8 as part of the current 016R production correction. Implement
+  narrowly and add discriminating fixtures/tests.
+- Replace CDP/synthetic evidence for the acceptance rows with real OS cursor,
+  left-click, right-click and Escape input delivered to the production
+  overlay. Instrument receipt on the production path. For every before/after
+  assertion record cursor point, foreground HWND, target HWND/bounds/show
+  state, membership, overlay/session state and owned PIDs. Immediate means the
+  OS click is issued after begin invocation without waiting for a hover sample.
+- CDP may remain only for setup/observation; it cannot be the claimed input.
+- Continue using production successful-null responses as the blank oracle.
+  Timeout, helper failure and missing samples are never null.
+
+ADDENDUM FOR ROKETPUNCHA
+If the review is not already complete, add read-only checks for gaps 7-8 and
+whether the revised proof truly crosses the native OS input boundary. Do not
+delay the checkpoint to redesign the harness.
+
+Gazelle and Ning remain stopped. BRAIN will make no final decision until
+Winter and RoketPuncha return their named checkpoints and full logs.
+
+======================================================================
+[2026-08-10 Asia/Saigon] ROKETPUNCHA - 016R ADVERSARIAL REVIEW
+======================================================================
+
+SCOPE
+Read-only adversarial review of the six BRAIN 016R gaps plus the ParentPid
+sentinel regression against the current Papers working tree (HEAD 59a71fc,
+016R dirty) and the probes/016r/ artifacts. Nothing was edited. Seven
+read-only subagents were used (one gap per agent); every disputed claim
+was re-verified directly against source, tests and transcript.
+
+GAP 1 - FIRST-CLICK CAPTURE ............................. RESOLVED IN SOURCE
+Production path: windowPickSession.ts begin() :383-403 - overlays created
+:385, then setCapture(true) :395 and overlay focus :396 run SYNCHRONOUSLY
+before the first await (resolveGreenRects :400) and before the sampling
+timer :403. Overlay build :501 applies click-through only while hidden
+(show:false, captureOn=false); ready-to-show :522-529 shows only after
+capture is on. A click before the first sample is owned by onClick
+:312-342: fresh hoverAt at the click point :320-328, blank -> typed
+failed :324, nothing reaches the window beneath.
+Observed state: BRAIN's mechanism (capture only after an eligible hover
+sample) does not exist; comment :391-394 names the 016R requirement.
+Test entering the path: windowPickSession.test.ts:320 "016R: immediate
+click on the first overlay resolves the session" drives the real session
+onClick through the wired fake overlay; :309 asserts capture/focus before
+any sample; :339 asserts a blank click keeps capture on.
+Live: proof-016r-transcript.txt:10-11 immediate click passes against the
+real overlay/helper chain.
+Counterexample: none at session level. Residual (untested by any test or
+live step): the window between begin() and the overlay's first paint
+(show:false until ready-to-show) has no input ownership; native
+setIgnoreMouseEvents-on-hidden-window semantics are untested by design.
+
+GAP 2 - BLANK-AREA ESCAPE/RIGHT-CLICK ......... RESOLVED IN SOURCE, TEST GAP
+Production path: overlay page keydown Escape + contextmenu -> cancel
+(windowPickSession.ts:682-688) -> pickOverlay.ts:20-22 -> main pick:cancel
+sender-gated :509-515 -> onCancel :344-346. Focus is called at begin :396
+and at first paint :528 ("showInactive alone leaves keyboard focus on the
+window beneath", :518-521); overlay is focusable:true :489; capture is
+never re-enabled as click-through mid-session (:298-300, :552).
+Observed state: BRAIN's "never call their exposed focus()" and "stop
+capturing over blank/excluded areas" claims are contradicted by the tree;
+the "unit test invokes the injected onCancel directly" claim is TRUE.
+Test entering the path: NONE in production form - windowPickSession.test
+.ts:188 invokes the injected handlers.onCancel directly (:202); the 016R
+tests only assert capture/focus flags on fake overlays.
+Live: transcript:15,17 pass, but via CDP-synthetic events (harness
+:456-459, :560) - the page handler, preload, IPC and sender gate run for
+real; OS-level key delivery to the overlay is not evidenced.
+
+GAP 3 - DISPLAY LIFECYCLE ................................ RESOLVED IN SOURCE
+Production path: windowPickSession.ts:598-601 subscribes the single cancel
+callback to display-metrics-changed, display-added AND display-removed;
+teardown :602-606 removes all three; handler :397-399 ends with cancelled
+and endSession() closes every overlay/timer/capture/subscription.
+Observed state: BRAIN's "subscribes only to display-metrics-changed" does
+not match the tree; no other src/main module subscribes to display events
+(grep-verified).
+Test entering the path: windowPickSession.test.ts:381 "016R: display
+lifecycle changes (added/removed/metrics) cancel the session" emits
+display-removed through the fake screen's real listener registry (:59-80,
+mirrors the three-event wiring) and asserts cancellation + overlay close;
+the electron screen.on hop is not exercised (acceptable boundary).
+Counterexample: none found.
+
+GAP 4 - STRICT IPC GATES ................................ RESOLVED IN 016 FILES
+Production path: windowPickIpc.ts:39 parseBoundedString uses
+Buffer.byteLength(raw,'utf8') (UTF-8 BYTES, not JS chars); exactKeys at
+:47,:69,:90; member bound :71; descriptor version/fingerprint :50-55.
+Overlay click: windowPickSession.ts:503-508 sender gate + parseOverlayClick
+:48-58 (exact {x,y}, typeof number, Number.isSafeInteger, |v|<=65536);
+draw state sanitized :92-117. pickOverlay.ts:17-19 forwards clicks
+unvalidated - the main gate is the sole protection (Papers-owned surface,
+sender-id gated; acceptable).
+Observed state: the char-count gate BRAIN attributed to windowPickIpc
+actually lives in the pre-existing 015 file windowCapabilityIpc.ts:44
+(raw.length); the 016 boundaries are strictly tighter.
+Test entering the path: windowPickSession.test.ts:399 parseOverlayClick
+(extra key :406, NaN :408, fraction :409, unsafe :410, +-65537 :411/414);
+windowPickIpc.test.ts:41,:64 begin/cancel gates.
+Missing: no UTF-8 multibyte byte-limit fixture anywhere in tests/; no test
+drives the full preload -> ipcMain.on click wiring (:514-515); the point
+range 65536 vs 015's 32768 (WINDOW_CAPABILITY_MAX_BOUNDS) is unaligned but
+harmless.
+Counterexample: {x:40000,y:0} passes the pick gate yet fails 015's 32768
+gate - unreachable from real screen coordinates.
+
+GAP 5 - FAILED-BEGIN CALLBACK CLEANUP ..................... RESOLVED IN SOURCE
+Production path: windowPickSession.ts:380 onResult is assigned AFTER
+member validation :375-378; the no-display path :387-389 and the catch
+:405-409 both call endSession(), which clears onResult :225 (plus
+overlays/timer/capture/subscription); deliver() nulls before invoke
+:215-221; endWith() copies then endSession() :244-249. windowPickIpc.ts
+:76-83 holds no persistent listener (per-invoke closure).
+Observed state: BRAIN's mechanism ("endSession does not clear the
+callback") no longer exists; no failed-begin path retains sender state.
+Test entering the path: windowPickSession.test.ts:361 "a failed begin
+delivers no result and leaves no capture behind" enters the catch path
+(createOverlay throws) and asserts no result + not active.
+Not covered: the no-display branch (getAllDisplays never returns [] in
+tests), repeated failed begins, or fail-then-succeed proving only the
+fresh callback fires.
+Counterexample: getAllDisplays:()=>[] -> begin stores A :380, :388
+endSession() nulls A, returns failed; a later begin stores only B; the
+old sender closure is unreachable. Unreachable nit: an ipcMain.on leak
+between registration :514 and overlays.push :385 would need a synchronous
+throw where none can occur.
+
+GAP 6 - STRUCTURAL ALL-PAPERS EXCLUSION .............................. PARTIAL
+Production path: helper window-capability.ps1:303 excludes process name
+'Papers' inside Test-WhTaskWorthy - the SAME predicate gates list
+(window-helper.ps1:317) and hover (:323-324); hover additionally excludes
+the helper's parent PID :324. The TS service layer excludes only the
+current PID: windowCapabilityService.ts:157 (list) and :297 (hover).
+Observed state: the exclusion exists structurally at the helper and the
+eye-check leak (the creator's OTHER running Papers) is name-covered for
+the packaged build; but the trigger is the process NAME exactly 'Papers'
+(comment :298-302 claims the packaged Papers.exe reports that name - not
+live-verified). A dev run (electron .), renamed or differently-named
+build bypasses it in list, and is hover-excluded only when it is the
+helper's own parent.
+Test entering the path: helper-schema.test.ps1:453 asserts the Papers
+fixture (ProcessName='Papers') is absent from LIST; :452 asserts an
+unrelated Electron app (Code) stays. NOT covered: any hover point inside
+the Papers fixture rect (0,600,800,900 - no hover test targets it), the
+parent-PID hover branch :324 (fake ParentPid 999999 never matches any
+fixture), a second Papers PID at the TS service layer, and the service's
+hoverAt/pickAt have NO test at all (only a fake hover op at
+windowCapabilityService.test.ts:60).
+Counterexample: the creator's installed Papers (name 'Papers', PID !=
+current) is excluded in list and hover via :303; a renamed/dev Papers is
+pickable in list.
+
+PARENTPID SENTINEL .............................. FIXED AND REGRESSION-TESTED
+Production path: window-capability.ps1:107 cache initialized ; lazy
+guard :150-153 (null -> WMI query -> cache; catch caches 0, which is NOT
+null, so the next call re-queries - fail-safe); consumer
+Resolve-WhTaskWindowAtPoint :322-324.
+Observed state: the 0/ sentinel mismatch is gone; the 016R root cause
+cannot recur (a cached 0 would not short-circuit the query).
+Test entering the path: helper-schema.test.ps1:520-531 - the REAL lazy op
+is captured at :19-23 before the fake ops replace the registry, then:
+cache starts null :524-525, first resolution runs the real WMI op and
+asserts nonzero :526-527, cache equality :528, second read reuses
+:529-530. This is the required regression, run with the suite on both
+runtimes.
+Counterexample: none in source. Residual: the DEBUGGING UNBLOCK's live
+PID-identity assertion (helper PID, resolved parent PID, overlay PID,
+target PID, parent == owning Papers PID) is NOT evidenced - the transcript
+records only target PIDs (line 6) and "owned papers pid: closed" (line 4);
+resolved parent and overlay PIDs are absent. The harness still carries the
+retired independent blank-point scanner (run-016r-live-proof.mjs:297-353)
+whose four failed rows appear at transcript:12,14,16,19 - harness state,
+Winter-owned, not a source defect.
+
+VERDICT
+Source-level: five of the six gaps (1,2,3,4,5) are resolved in the current
+tree, with tests entering their production paths at session level; gap 6 is
+partial (list-tested name-based exclusion; hover and second-PID paths
+untested); the ParentPid sentinel is fixed with a real lazy-path
+regression. Remaining evidence gaps, not source defects: (a) no test or
+live step proves input ownership during the pre-first-paint window or
+OS-level key delivery (gaps 1-2); (b) no UTF-8 byte-boundary or full
+preload->ipcMain click-wiring test (gap 4); (c) no hover-point or TS-layer
+Papers-exclusion test (gap 6); (d) no live parent==Papers PID assertion
+(ParentPid). No broad refactor proposed. STOP.
+
+======================================================================
+[2026-08-10 Asia/Saigon] ROKETPUNCHA - 016R ADVERSARIAL REVIEW - MID-RUN
+CORRECTION ADDENDUM (BRAIN: REAL OS INPUT, GAP 7, GAP 8, BEFORE/AFTER)
+======================================================================
+
+GAP 7 - SAME-TASK SURFACE DEDUPLICATION ............................ UNRESOLVED
+Production path: window-capability.ps1 Test-WhTaskWorthy :284-311 excludes
+DWM-cloaked surfaces (comment :276 - duplicate/background UWP surfaces),
+tool/no-activate, Progman/WorkerW, TextInputHost, Papers, and owned
+windows whose root-owner's last-active popup is a DIFFERENT window :304-309.
+There is no task-level grouping: two visible, non-cloaked surfaces of the
+same task (main window + its active owned popup) both survive as separate
+candidates. window-helper.ps1:317 list and :335-339 hover emit every
+surviving observation; no deduplication keyed on a task/window identity
+exists anywhere in the helper or the TS service.
+Observed state: the only "duplicate" handling is cloaking; the 016
+amendment's "deduplicate multiple surfaces representing the same task
+window without collapsing genuinely separate windows" has no mechanism.
+Test entering the path: helper-schema.test.ps1:451 asserts WH-TEST-OWNED-
+ACTIVE STAYS listed (an owned active popup is a separate candidate from
+its owner) - this fixture demonstrates the gap rather than closing it;
+:455 covers the cloaked-duplicate case only. No test asserts two surfaces
+of one task collapse to one candidate, nor that two genuine same-app
+document windows (WH-TEST-DOC-1/2, :450) stay separate after any dedup.
+Counterexample: app with main window + active owned popup -> both listed
+as independent candidates for one task; direct pick can select either.
+Unrelated to this gap but consistent: Resolve-WhUniqueTarget (tests
+:364/:427-437) is the fail-closed unique-target resolver, not list dedup.
+
+GAP 8 - LIVE GREEN-OUTLINE REPOSITIONING .......................... UNRESOLVED
+Production path: windowPickSession.ts greenRects are resolved ONCE in
+begin() (:400 resolveGreenRects, :402 pushState(null)) and never
+re-resolved; sample() :284-310 updates only the hover rect (:304); the
+green list stays frozen for the session's lifetime. endWith() :244-249
+ends the session on every successful toggle, so there is no refresh after
+add/remove within a session either.
+Observed state: if a member window moves/resizes while a pick session is
+open, its green perimeter stays at the stale begin-time rectangle; the
+colour amendment's "update the green member outlines immediately" and
+"green-outline refresh after add/remove" are not implemented as live
+behavior.
+Test entering the path: windowPickSession.test.ts:133 asserts initial
+green rendering only; no test moves a member's bounds mid-session and
+asserts the pushed state's green rect updates (and none can pass, since
+the code never re-resolves).
+Counterexample: member window A is dragged 200px while the picker is
+open -> the next pushState still carries A's begin-time rect; a
+hover/click that relies on the green outline would read stale geometry.
+
+INPUT-EVIDENCE REQUIREMENT (BRAIN correction) ................. NOT MET
+Every 016R input event in the current harness is CDP-synthesized:
+overlayClick/overlayRightClick/overlayEscape dispatch window.pickOverlay
+.click/contextmenu/keydown through client.evaluate (run-016r-live-proof
+.mjs:448-459), and the unit suite drives session handlers through fake
+overlays. The production overlay page handler, preload and sender-gated
+IPC run for real, but OS-level mouse/key delivery to the overlay and the
+capture semantics of setIgnoreMouseEvents are never exercised. No
+SendInput/SetCursorPos-based physical input exists (the harness only
+moves the OS cursor for hover-point parking). Acceptance per BRAIN must
+use real OS mouse/keyboard input with GetCursorPos verification before
+any physical click/key, and recheck the target afterward.
+
+BEFORE/AFTER UNDERLYING-WINDOW SAFETY EVIDENCE ................... NOT MET
+Transcript rows 11 and 13 record only the disposable targets' state
+('normal'): proof-016r-transcript.txt:11,13. No foreground HWND,
+activation state, bounds or membership snapshot is captured immediately
+before/after each physical input event; the harness's get-bounds helper
+exists (run-016r-live-proof.mjs:199) but is not wired into the
+before/after assertions. The GAZELLE audit's "capture foreground HWND,
+target bounds, minimized state and membership before/after" requirement
+is un-evidenced.
+
+UPDATED VERDICT
+Six of the eight gaps (1,2,3,4,5,ParentPid) are resolved in source with
+session-level tests entering their production paths; gap 6 is partial
+(name-based exclusion, list-tested only); gaps 7 and 8 are UNRESOLVED in
+source. Acceptance additionally requires physical OS input evidence and
+before/after window-safety snapshots, neither of which the current
+artifacts provide. No broad refactor proposed. STOP.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - ROKETPUNCHA REVIEW ADJUDICATION
+======================================================================
+
+RoketPuncha's checkpoint is accepted and RoketPuncha remains stopped.
+Winter is already implementing gaps 7-8 and native OS input evidence; do not
+restart or broaden that work. The remaining acceptance delta is exactly:
+
+1. Add the missing UTF-8 multibyte byte-boundary fixture for the new pick IPC.
+2. Add failed-begin coverage for no-display and repeated fail/fail/succeed,
+   proving only the fresh callback fires and no capture/listener/timer remains.
+3. Prove list AND hover exclude the creator's other packaged Papers process in
+   the isolated live run while an unrelated Electron application remains
+   eligible. Process-name filtering is conditionally acceptable for the
+   packaged product only if the live executable/process identity is recorded;
+   do not invent a broader executable-identity subsystem during this run.
+4. Record helper PID, resolved parent PID, isolated owning Papers PID, overlay
+   PID(s) and target PID(s), with parent == isolated owning Papers. The creator's
+   Papers must only be observed/enumerated, never activated, moved or closed.
+5. Real OS input plus complete before/after safety snapshots remain mandatory.
+
+The pre-first-paint interval is not a separate new feature request: acceptance
+requires capture before the overlay becomes interactable and an OS click as
+soon as the overlay exists, without waiting for hover. Do not chase impossible
+input against a window that has not yet been created/shown.
+
+WINTER: finish the current bounded implementation/proof, append the named
+checkpoint and stop. Escalate only a directly measured contradiction.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - WINTER LIVE DPI CONTRADICTION RULING
+======================================================================
+
+OBSERVED CONTRADICTION
+On a non-primary/scaled display, the production sampler reports successful
+`hover=null` at a stationary cursor point, but a physical click at that same
+apparent point selects Settings/another window. This is NOT evidence that no
+blank point exists, and it must not be converted into an environmental-pass
+row. It is evidence that the sampler/helper and native click may be using
+different coordinate spaces.
+
+ONE DECISIVE MEASUREMENT — DO THIS BEFORE MORE THEORY
+At one stationary point on the 100% primary and one on a scaled display, record
+in the same instant:
+- native Win32 `GetCursorPos` physical coordinates;
+- Electron `screen.getCursorScreenPoint()` coordinates;
+- containing display bounds and `scaleFactor`;
+- the exact x/y sent to helper `hover` and the HWND/bounds it resolves;
+- the overlay's calculated screen click x/y.
+Do not infer any of these values. Compare the observed ratios/offsets to the
+display scale factor and negative monitor origin.
+
+DECISION AFTER MEASUREMENT
+- If the spaces differ, establish one canonical boundary and convert exactly
+  once. Electron display/BrowserWindow coordinates are DIP; the Win32 helper
+  and physical input must receive the coordinate space their APIs actually
+  observe. Use Electron's supported screen conversion where applicable; do
+  not hand-roll a scale multiplication that breaks negative/mixed-DPI origins.
+  Add a mixed-DPI/negative-origin regression around the conversion boundary.
+- Once a blank oracle is established, the native input primitive must issue
+  button down/up at the CURRENT cursor location without repositioning it from
+  a coordinate expressed in another space.
+- A successful production-null immediately followed by a picked window remains
+  a FAIL until the coordinate contradiction is resolved. The approved fallback
+  applies only when no successful-null point exists—not when null and click
+  disagree.
+
+OTHER CURRENT HARNESS DECISIONS
+- Comparing show-state objects by JSON key order is invalid; compare fields.
+- After a successful pick destroys the focused overlay, Windows may promote the
+  underlying topmost window. Prove overlay focus immediately BEFORE input and
+  prove target bounds/show/membership are unchanged AFTER; do not require a
+  destroyed overlay to remain foreground.
+- Remove the temporary `DEBUG-HOVER` output before checkpoint.
+
+WINTER: time-box this measurement to 20 minutes. If values do not identify a
+single conversion boundary, append the five observed values and STOP for BRAIN
+instead of generating another system-level hypothesis tree.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - SHARED INTERACTIVE DESKTOP RULING
+======================================================================
+
+NEW ENVIRONMENT FACT
+The creator is concurrently using this same Windows input desktop for unrelated
+work. Winter's latest evidence records ChatGPT as foreground during a proof and
+OpenCode occupying a point the harness was treating as a stable blank probe.
+The OS cursor, foreground HWND, z-order, window bounds and eligible stack are
+global mutable state. A human and an automated SendInput harness cannot both
+control them while producing deterministic before/after evidence.
+
+RULING
+- Stop all further physical cursor/click/right-click/Escape live-proof runs and
+  coordinate archaeology on the creator's active desktop now. Current native
+  proof failures are INCONCLUSIVE unless the harness recorded an uninterrupted
+  exclusive interval; they are neither product passes nor product failures.
+- Do not classify the hover/click mismatch as DPI, environment-pass, or product
+  defect from this contaminated run. Preserve the measurements as diagnostic
+  artifacts only. Remove temporary per-sample/DEBUG instrumentation before the
+  checkpoint unless it is intentionally bounded production-safe tracing.
+- Finish deterministic source work and noninteractive tests only: gaps 1-8,
+  UTF-8 fixture, repeated/no-display failed-begin tests, PS fixtures/pins, full
+  typecheck/build/unit suites and diff/cleanup review.
+- Append `WINTER - 016R SOURCE CHECKPOINT — LIVE INPUT GATE DEFERRED`, listing
+  exact results and the remaining live rows. STOP afterward.
+
+FINAL LIVE GATE
+BRAIN will combine the deferred physical-input proof with the creator's final
+running eye-check session. It requires a short explicitly exclusive interval
+in which the creator does not move the mouse, type, switch windows, or launch/
+close applications while the automated native rows run. This is a test-fixture
+requirement, not a new product requirement. Do not build a VM, alternate
+desktop, RDP session or new DPI subsystem during 016R merely to avoid it.
+
+======================================================================
+[2026-08-10 Asia/Saigon] WINTER - 016R SOURCE CHECKPOINT - LIVE INPUT GATE DEFERRED
+======================================================================
+
+SOURCE STATE (all deterministic work per the SHARED INTERACTIVE DESKTOP
+RULING; no physical-input live proof was rerun after the ruling).
+
+CHANGED FILES (Winter-owned lanes)
+Papers (D:\Letters\MatTroiSeConMoc\PAPERS 3\Papers-3):
+- resources/window-helper/window-helper.ps1          gap 7: list path merges same-task surfaces
+- resources/window-helper/window-capability.ps1       gap 7: Merge-WhTaskSurfaces; ParentPid cache starts $null (sentinel fix, prior WORKER pass, kept)
+- resources/window-helper/manifest.json               pins updated for both PS files
+- src/main/windows/windowHelperResource.ts            pin constants aligned with manifest+disk hashes
+- src/main/windows/windowPickSession.ts               gaps 1-5, 8; four bounded receipt-trace lines (below)
+- src/main/ipc/windowPickIpc.ts                       UTF-8 BYTE-bound parseBoundedString (prior pass; now fixture-tested)
+- src/preload/pickOverlay.ts                          no ready seam (prior pass)
+- tests/unit/windowPickSession.test.ts                gap 8 test; no-display, repeated-failed, fail-then-succeed tests
+- tests/unit/windowPickIpc.test.ts                    UTF-8 multibyte byte-limit fixture
+- tests/window-helper/helper-schema.test.ps1          gap 7 fixtures 0x1616/0x1717/0x1818/0x1919 + dedup asserts; hover-path fixtures (Papers null, Code eligible, parent-PID null, 0x2020); lazy ParentPid regression :19-23/:520-531; DEBUG-HOVER removed; list count 12
+As you Go (D:\Letters\MatTroiSeConMoc\Papers\Backpack projects\As you Go):
+- probes/016r/run-016r-live-proof.mjs                 real-OS-input harness: move-only/get-cursor/right-click/escape/get-show/get-foreground actions, before/after input probes (cursor, foreground HWND, target bounds/show, membership, overlays, PIDs), production-pipeline blank oracle (per-display overlay read, GetCursorPos asserted, consecutive success+null only), PID-chain facts row; retained for the deferred exclusive-interval gate
+- probes/016r/coord-probe/                            coordinate measurement artifacts (main.js ESM-boot broken, measure.cjs partial run) - preserved per ruling, not rerun
+- probes/015r3-live-proof/control-window.ps1          cursor/input actions (above)
+- probes/native-window/window-capability.ps1          POINT struct, GetCursorPos, keybd_event, right-click constants, GetForegroundWindow
+
+GAP RESOLUTIONS (one line each)
+1 first-click capture: setCapture(true)+overlay focus run synchronously in begin before any await; click-through never re-enabled mid-session; unit :309/:339; live receipt onClick(highlighted=null)->endWith picked.
+2 blank Escape/right-click: overlay shows and focuses at first paint (ready-to-show); capture stays on over blank areas; real-OS right-click/Escape receipts recorded (onCancel received -> endWith cancelled) in the deferred harness.
+3 display lifecycle: screen.onDisplayChange subscribes display-metrics-changed/display-added/display-removed; any fires cancel + full teardown; unit :381.
+4 strict IPC gates: parseOverlayClick exact {x,y}, safe integers, |v|<=65536; sanitizeOverlayState exact keys/finite/bounded; pick:click/pick:cancel sender-scoped per overlay webContentsId; windowPickIpc strings bounded by UTF-8 bytes; UTF-8 fixture added.
+5 failed-begin cleanup: endWith copies the callback then endSession clears it; failed begins deliver nothing; tests: failed-begin, no-display (getAllDisplays=[]), repeated failed begins, fail-then-succeed (only fresh callback fires).
+6 structural all-Papers exclusion: helper excludes process name 'Papers' in Test-WhTaskWorthy (list+hover); PS fixtures: Papers absent from list, hover over Papers rect null, unrelated Electron (Code) stays in list and at point, helper-parent-owned surface hover null.
+7 (Ning) same-task dedup: Merge-WhTaskSurfaces collapses an owned popup of the same process into its root for LIST; two genuine documents of one app (no owner chain) both stay; fixtures + 3 asserts.
+8 (Ning) green tracking: greenRects re-resolved every WINDOW_PICK_GREEN_REFRESH_EVERY=8 samples (~640 ms), static outlines, no animation; unit test proves moved bounds propagate into pushed states.
+ParentPid: cache sentinel fixed (starts $null); REAL lazy op regression (initial null, first WMI resolution nonzero, cache equality, second read reuses) runs on both PS runtimes; live PID-chain row added to the harness (deferred).
+
+EXACT COMMANDS / RESULTS
+- npm run typecheck / build (Papers): clean; built in ~400 ms.
+- npm test (Papers vitest): 31 files, 320 passed, 0 failed.
+- pwsh -File tests/window-helper/helper-schema.test.ps1: 397 passed, 0 failed.
+- powershell -File tests/window-helper/helper-schema.test.ps1: 397 passed, 0 failed.
+- npm test (As you Go): 722 pass / 3 fail - only the pre-existing unrelated styles.test.mjs:140, toolbar-controller.test.mjs:168, :218.
+- Pins verified: helper 6aa6bf42678a15a64f853111d6c4b96b623c0cdada68c2958fc00c4d01f72b22, adapter 4e22e31a6edea84ed3d38f56d9b6976f7bdb09f05c58beb7c64b5975430d438a == manifest == windowHelperResource.ts constants.
+- node --check probes/016r/run-016r-live-proof.mjs: clean.
+
+LIVE PROOF FACTS (contaminated run - INCONCLUSIVE per BRAIN ruling, preserved
+as diagnostic artifacts only; not passes, not failures)
+- Receipt tracing on the production path (kept intentionally bounded, one
+  console.error per user action/outcome, no per-sample logging): begin/onClick/
+  onCancel/endWith lines appeared in the app log for every session.
+- Immediate REAL OS left-click (SetCursorPos+mouse_event) after begin resolved
+  the pick: [016r-diag] onClick x=1020 y=290 ... endWith picked; B added.
+- REAL OS right-click: onCancel received -> endWith cancelled.
+- REAL OS Escape (keybd_event): onCancel received -> endWith cancelled;
+  foreground HWND before the key was the Papers overlay (pid 5096).
+- Blank row: at (480,-810) the sampler reported hover=null but the physical
+  click picked a window (OpenCode area) and added it - the exact
+  null-vs-click disagreement BRAIN forbids classifying; left as a FAIL row.
+- Coordinate measurement artifacts (coord-probe): native GetCursorPos matched
+  the sent point at both (500,400) primary and (480,-810) scaled; the helper
+  resolved Chrome/OpenCode identically at sent and native coordinates; the
+  Electron screen.getCursorScreenPoint leg is missing (probe ESM boot failure;
+  not rerun per ruling). No conversion boundary was established.
+
+CLEANUP FACTS
+- End of the last live run: zero owned helpers, zero test electrons, zero AYG
+  windows. Post-checkpoint sweep: 0 helper processes, 0 test electron
+  processes, 0 AYG windows. No commits, no pushes, no installs; creator's
+  installed Papers untouched; pre-existing dirty hunks preserved.
+
+REMAINING LIVE ROWS (deferred to the exclusive-interval gate)
+- (1) immediate real-OS left-click: picked in the contaminated run; needs the
+  exclusive interval for the before/after foreground + untouched-target rows.
+- (2) blank real-OS click: needs a production-null point under an exclusive
+  interval; the coordinate contradiction must be re-measured with the creator
+  idle before any blank row can pass.
+- (2/5) real-OS right-click and Escape cancels: receipts evidenced; rerun under
+  exclusivity for the full probe rows.
+- (6) malformed-payload resilience + real click after garbage.
+- Baseline real hover+click; live PID-chain facts row.
+
+REMAINING SOURCE RISKS
+- Pre-first-paint window (overlay show:false until ready-to-show) has no input
+  ownership by design; a click issued before first paint can reach the window
+  beneath (RoketPuncha residual, untested at OS level).
+- Service-level hoverAt/pickAt still have no dedicated TS unit test; the
+  helper-level exclusion paths are fixture-tested (list, hover-at-Papers-rect,
+  parent-PID branch), the TS currentPid check is not.
+- The coordinate disagreement (sampler null vs click picked) remains
+  UNCLASSIFIED: the DIP-vs-physical hypothesis was not measured; the deferred
+  gate must re-measure at one stationary point with an exclusive interval.
+- The 016R harness keeps its blank-point fallback ONLY for the case where no
+  successful-null point exists; a null/click disagreement stays a FAIL row.
+
+STOP - no commit, no eye-check claim.
+======================================================================
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - COORDINATION HUB + PREPARATION WAVE
+======================================================================
+
+HUB
+The supported four-worker registry/mailbox is located at:
+`D:\Letters\MatTroiSeConMoc\Papers\User Generated\August 10th 26' logs`
+- Double-click `worker-hub.cmd` for refresh, mailbox, inbox and explicit wake.
+- `worker-mailbox.jsonl` is append-only. A passive ping grants no authority.
+- Wake uses supported `opencode run --session`; never wake a session that is
+  already sampling/running. No OpenCode database writes are permitted.
+- `gazelle-1.log` is automatic; `gazelle-general.log` remains curated and must
+  never be overwritten by the hub/updater.
+
+PING DISCIPLINE
+Use pings only for blocker, evidence-request, handoff, conflict or concise info.
+No ping chains and no worker-to-worker reassignment. BRAIN owns file lanes and
+priority. Check inbox at pickup and before checkpoint. If a ping can wait for a
+normal checkpoint, do not wake the recipient.
+
+PARALLEL PREPARATION WAVE — READ-ONLY, MAXIMUM 25 MINUTES EACH
+No product edits, harness edits, commits, launches or bridge appends. Each worker
+writes only the named separate report in the shared logs directory, then stops.
+Subagents are optional only for truly independent read-only questions.
+
+GAZELLE
+Audit Winter's 016R SOURCE CHECKPOINT against the actual current diff and tests.
+Prioritize contradictions capable of invalidating source acceptance; do not
+repeat already closed findings or require the deferred physical-input rows.
+Output: `gazelle-016r-final-source-audit.md` with PASS/BLOCKED, at most five
+decisive findings, exact evidence, and smallest correction. Curated conclusion
+only; proprietary reasoning is neither requested nor expected.
+
+ROKETPUNCHA
+Delta-review only files changed after your prior adversarial checkpoint. Verify
+gaps 6-8, ParentPid tests, UTF-8 and failed-begin coverage, pins, and absence of
+temporary debug/per-sample logging. Output:
+`roketpuncha-016r-delta-review.md` with changed-path coverage and actionable
+counterexamples only. Do not reopen gaps 1-5 unless the delta regressed them.
+
+NING
+Turn the deferred live rows plus your product-intent audit into one exclusive
+creator-idle gate lasting at most three minutes. Separate automated native rows
+from the creator's visual judgments and define an immediate abort/cleanup rule
+if the creator moves the mouse or foreground changes unexpectedly. Output:
+`ning-016r-exclusive-eyecheck.md`. Do not run it.
+
+WINTER
+After the long 016R implementation, do only a light read-only dependency map for
+queued 017 (multiple layouts, independent arrangements, core acceptance matrix).
+Identify reusable 015/016 mechanisms, likely file lanes, coupling hazards and
+questions answerable from current source. No design invention and no 017 code.
+Output: `winter-017-dependency-map.md`, maximum two pages.
+
+BRAIN will review these four files once present, make the 016 source ruling,
+prepare the exclusive live/eye gate, and only dispatch 017 implementation after
+016 acceptance plus authorized snapshot commits.
+
+======================================================================
+[2026-08-10 Asia/Saigon] BRAIN - FOUR-WORKER REVIEW RULING + 016R2
+======================================================================
+
+REVIEW RESULT
+The preparation wave completed 4/4. Winter's dependency map is accepted as
+read-only preparation; Ning's exclusive gate is accepted as a draft. Source is
+NOT yet accepted. BRAIN independently verified two concrete blockers:
+
+1. PRE-FIRST-PAINT OWNERSHIP. BrowserWindows are created `show:false`.
+   `begin()` calls capture/focus while they are hidden; production only shows
+   them asynchronously inside `ready-to-show`. A hidden native window cannot
+   swallow mouse/keyboard input. The synchronous fake test proves call order,
+   not native ownership. The overlay must be visible and capturing before the
+   begin path advertises/behaves as started; input arriving before renderer
+   readiness may be swallowed fail-closed, but never reach the window beneath.
+2. DIRECT-PICK DEDUP ASYMMETRY. `Merge-WhTaskSurfaces` is used only for list.
+   Hover walks the unmerged z-order and may return an active owned popup that
+   the list deliberately collapsed into its root, allowing two identities for
+   one task. Direct hover/click must map that owned surface to the same root task
+   identity while preserving two genuine ownerless documents of one app.
+
+016R2 CORRECTION — TWO PARALLEL WRITABLE LANES ONLY
+No other product files, commits, launches, physical input or 017 implementation.
+
+GAZELLE — STARTUP OWNERSHIP OWNER
+Writable files only:
+- Papers `src/main/windows/windowPickSession.ts`
+- Papers `tests/unit/windowPickSession.test.ts`
+Make each native overlay visible with capture enabled synchronously in the begin
+task, before sampling/green resolution and before the path can return started.
+Renderer readiness may still validate/retry the sandboxed preload, but must not
+be the first moment the native surface exists onscreen. Preserve transparent,
+static visuals, focus reliability, failure cleanup and multi-display teardown.
+Add an adapter-level ordering test that distinguishes hidden from visible;
+synchronous handler fakes alone are insufficient. Run focused test/typecheck.
+Write `workers/gazelle/reports/gazelle-016r2-startup.md` beneath the shared logs
+directory, acknowledge the ping and STOP.
+
+ROKETPUNCHA — DIRECT DEDUP OWNER
+Writable files only:
+- Papers `resources/window-helper/window-capability.ps1`
+- Papers `tests/window-helper/helper-schema.test.ps1`
+- Papers `resources/window-helper/manifest.json`
+- Papers `src/main/windows/windowHelperResource.ts`
+When the topmost point-containing surface is an owned surface whose same-process
+root is present/task-worthy, return the root task observation—the same identity
+the list keeps. Do not simply merge then hit-test root bounds: hovering a popup
+area outside root bounds must still resolve the root task. Preserve two genuine
+ownerless same-app documents. Add popup-first z-order and popup-only-area hover
+fixtures plus document-separation regressions. Update/verify pins; run both PS
+runtimes. Write `workers/roketpuncha/reports/roketpuncha-016r2-direct-dedup.md` beneath
+the shared logs directory, acknowledge and STOP.
+
+WHY ONLY TWO WORKERS NOW
+These are the only independent writable lanes. Winter and Ning remain stopped
+so they do not review moving code or collide with source owners. When both
+reports land, BRAIN will dispatch Winter and Ning concurrently for integration
+and gate validation. This reduces elapsed time without manufacturing work.
+
+REPORT LOCATION POLICY (ALL FUTURE WAVES)
+Every worker artifact must be written beneath the shared logs directory at
+`workers/<worker>/reports`, `workers/<worker>/logs`, or
+`workers/<worker>/dispatch`. The shared root is reserved for coordination
+launchers/state. Do not append worker reports to the root or to BRAIN-WORKER.txt
+unless BRAIN explicitly requests a compact checkpoint there.
+
+[2026-08-10 Asia/Saigon] BRAIN - 016R2 REVIEW: STARTUP PRESERVATION CORRECTION
+----------------------------------------------------------------------------
+ROKETPUNCHA LANE ACCEPTED IN SOURCE
+The direct-pick dedup correction maps owned same-process popup surfaces to the
+same root task identity used by the list, including popup-only points outside
+the root bounds, while preserving distinct ownerless documents. Its focused
+PowerShell suites and resource pins pass. This lane is closed pending the later
+integration wave.
+
+GAZELLE LANE PARTIAL — ONE STARTUP INVARIANT STILL OPEN
+The new visible-overlay seam closes the original hidden-first-paint gap, but
+`begin()` currently shows before enabling capture. That creates a brief visible
+click-through surface. In addition, the one allowed preload retry destroys the
+visible overlay and creates a new `show:false` BrowserWindow after `begin()` has
+returned; desired shown/focused state is not persisted, so the replacement can
+recreate the ownership gap.
+
+016R2R — GAZELLE IS THE SOLE WRITABLE OWNER
+Writable files only:
+- Papers `src/main/windows/windowPickSession.ts`
+- Papers `tests/unit/windowPickSession.test.ts`
+
+Required correction:
+1. In the synchronous begin path, establish capture first, then show every
+   overlay, then focus the primary overlay. No visible click-through interval.
+2. In the production adapter, persist desired capture, shown and focused state.
+   Reapply all desired state to every internally rebuilt native window in the
+   same safe order: capture, show, focus. The preload retry replacement must
+   never remain hidden or click-through while the session is active.
+3. Add adapter-level retry coverage proving that the second native window
+   receives capture -> show -> focus before renderer readiness; a pure handler
+   ordering fake is not sufficient.
+
+Preserve the single-retry limit, sender/preload validation gates, transparent
+static visuals, failure cleanup and multi-display teardown. Run the focused
+unit test and typecheck. Write the result to
+`workers/gazelle/reports/gazelle-016r2r-startup-preservation.md`, acknowledge
+the mailbox ping and STOP. Do not launch the product, inject physical input,
+commit, or edit any other file.
+
+WINTER, ROKETPUNCHA AND NING remain stopped. After Gazelle reports, BRAIN will
+dispatch Winter and Ning concurrently for stable-code integration and gate
+validation.
+
+[2026-08-10 Asia/Saigon] BRAIN - 016R2R ACCEPTED; 016R3 FINAL VALIDATION WAVE
+----------------------------------------------------------------------------
+GAZELLE SOURCE ACCEPTED
+Independent BRAIN inspection confirms `begin()` now establishes capture before
+show and focus, and the production adapter reapplies persisted capture, shown
+and focused intent to each replacement native window in that order before its
+load/readiness path. Focused unit tests pass 21/21 and typecheck passes.
+
+One evidence weakness remains: the new retry test invokes the desired-state
+helper against two fakes directly; it does not exercise the production
+adapter's preload-failure rebuild wiring. Treat this as a regression-coverage
+closure, not a production blocker.
+
+016R3 — TWO PARALLEL, NON-OVERLAPPING LANES
+
+WINTER — INTEGRATION AND REGRESSION OWNER
+Writable file only if needed:
+- Papers `tests/unit/windowPickSession.test.ts`
+Do not edit production source. First add or strengthen an adapter-level test
+that drives the actual `createPickSessionFromService` BrowserWindow lifecycle:
+first native window fails preload validation, the one allowed replacement is
+created, and that replacement receives capture -> show -> focus before its own
+`ready-to-show`. The test must fail if the adapter forgets to reapply desired
+state on `build()`; calling `applyPickOverlayDesiredState` twice manually is not
+sufficient. Then run the focused unit test, Papers full unit suite, typecheck,
+build, both PowerShell helper suites and pin verification. Review the combined
+016 diff for integration regressions and forbidden Activate/Recording UI. Do
+not launch the product, inject physical input, commit or edit any other file.
+Write `workers/winter/reports/winter-016r3-integration.md`, acknowledge and STOP.
+
+NING — FINAL GATE READINESS AUDITOR (READ-ONLY)
+Review the now-stable source and all 016R2/R2R reports. Revalidate the accepted
+creator-visible contract: no Activate/Recording controls; icon click retains
+existing layout behavior; picker list is secondary; direct onscreen picking
+shows green selected outlines, blue unselected hover/add and red selected
+hover/remove; no animation; offscreen clamping; same-task dedup; fail-closed
+input ownership and cleanup. Audit the exclusive live/eye recipe against the
+final implementation and return the shortest deterministic creator procedure,
+including exact start/stop/cleanup evidence and a hard <=3 minute exclusive
+desktop budget. Do not edit source, launch, inject input or commit. Write
+`workers/ning/reports/ning-016r3-gate-readiness.md`, acknowledge and STOP.
+
+GAZELLE AND ROKETPUNCHA remain stopped. BRAIN will review both reports and only
+then request the creator's exclusive desktop interval for the combined native
+input proof and visual eyecheck.
+
+[2026-08-10 Asia/Saigon] BRAIN - 016R3 ACCEPTED; 016R4 AFK NATIVE GATE
+--------------------------------------------------------------------
+FINAL STABLE-CODE VERDICT: PASS
+Winter added the real production-adapter preload-retry lifecycle regression.
+Papers passes 22 focused session tests, 323/323 full unit tests, typecheck,
+build, 469/469 helper schema tests on both PowerShell runtimes and byte-exact
+resource pins. Ning's stable-source contract audit found no blocker.
+
+CREATOR AUTHORIZATION
+The creator is AFK and explicitly authorizes unobstructed actions on the shared
+interactive desktop. Use this interval for automated native input. This does
+not authorize touching the creator's installed Papers instance or unrelated
+windows; use only the isolated test instance and disposable owned targets.
+
+NING — 016R4 EXCLUSIVE AUTOMATED NATIVE-GATE OWNER
+Use the existing `probes/016r` production-path harness and the accepted 016R3
+gate recipe. Run the automated native rows only: real OS left click, blank/null
+click, right click, Escape, coordinate truth on primary plus one scaled display,
+sender/payload rejection, PID chain, all-Papers exclusion, before/after target
+state and bounded production receipts. Do not make creator visual judgments.
+
+Hard rules:
+- Hard 3-minute input interval, with a watchdog and immediate cleanup on abort.
+- Isolated data dir, isolated Papers/helper and disposable uniquely titled
+  target windows only. Never activate, move, minimize or close the creator's
+  installed Papers or unrelated windows.
+- Record each row PASS, FAIL, ABORTED or INCONCLUSIVE from evidence. Never
+  convert a disagreement into a pass.
+- The coordinate-truth row must directly record Win32 cursor, Electron cursor,
+  display bounds/scale, sent hover coordinates and overlay click coordinates.
+- After the run, prove zero owned helper/test Electron/disposable processes and
+  restore cursor/foreground where safely possible.
+- No product-source edits, no commits. If the existing proof harness needs one
+  mechanical correction merely to run, edit only beneath `probes/016r`, rerun
+  once, and disclose the exact change. Do not debug beyond ten minutes; report
+  the blocker and clean up instead.
+
+Write `workers/ning/reports/ning-016r4-native-gate.md`, acknowledge and STOP.
+WINTER, GAZELLE AND ROKETPUNCHA remain stopped. After the report, BRAIN will
+independently inspect artifacts and retain only the short visual eyecheck for
+the creator's return.
+
+[2026-08-10 Asia/Saigon] CREATOR ROADMAP NOTE — DEFERRED UNTIL AFTER 016
+------------------------------------------------------------------------
+Layout controls should become visually minimal and hotkey-driven. Preserve the
+current accepted layout behavior during 016; BRAIN will define the compact UI,
+discoverable hotkey model and conflict-safe key mapping in a later assignment.
+
+[2026-08-11 Asia/Saigon] BRAIN INTERVENTION — 016R4 EXECUTE, DO NOT EXPAND
+---------------------------------------------------------------------------
+The preparation cap has expired. Stop extending `run-016r4-native-gate.mjs`.
+Preserve it as a diagnostic artifact but do not finish or execute the new
+runner in this wave. Execute the already-proven `run-016r-live-proof.mjs` now
+against the isolated instance, with a hard three-minute process timeout and
+strict cleanup. Use the already-passing `coord-probe/self-test.cjs` result for
+the active primary display. Record the scaled-display leg as NOT RUN because
+only one display is connected. Record any rows absent from the proven harness
+as NOT RUN and cite existing deterministic test/source evidence separately;
+do not add more harness code to manufacture coverage. Write the existing
+016R4 report target, acknowledge and STOP. No further file edits are allowed.
+
+[2026-08-11 Asia/Saigon] CREATOR OVERNIGHT AUTHORIZATION + PARALLEL REVIEW
+---------------------------------------------------------------------------
+The creator directs BRAIN to complete all non-visual engineering, automated
+proofs and checkpoints while they sleep, then present one bundled creator
+checkpoint. Easily customizable UI/UX (minimal layout controls, hotkey design,
+styling and subjective polish) remains final work. This authorizes BRAIN to
+source-accept and snapshot stable functional slices before the bundled visual
+eyecheck; it does not authorize 018 or arbitrary creator-window manipulation.
+
+THREE PARALLEL READ-ONLY LANES — NO SOURCE EDITS OR LAUNCHES
+
+ROKETPUNCHA — 016R5 ACCEPTANCE + COMMIT-BOUNDARY AUDITOR
+Independently inspect Ning's 016R4 report, gate stdout/stderr/transcript,
+Winter/Gazelle/Roket 016 reports, both repository statuses and the accepted
+015R3 baselines. Classify every native red row as product failure, harness
+defect, environmental precondition or missing evidence. Verify cleanup and
+identify the exact 016 snapshot file set per repository, explicitly excluding
+unfinished `run-016r4-native-gate.mjs` and disposable evidence artifacts that
+should not enter the product snapshot. Report blockers, if any; otherwise give
+a commit-ready verdict. Write
+`workers/roketpuncha/reports/roketpuncha-016r5-acceptance-audit.md`, acknowledge
+and STOP.
+
+WINTER — 017 CORE ACCEPTANCE-MATRIX OWNER
+Turn the queued Assignment 017 contract and your dependency map into a concrete
+test-first acceptance matrix. Inspect current source/tests to distinguish
+behavior already implemented from genuine gaps. Specify exact invariants for
+active recording persistence, L1->L2->L1 independent geometry, active-only
+observation, ordered partial switching, echo suppression, reload/helper
+restart, missing/ambiguous recovery and clamp. Identify the smallest writable
+file lanes and non-overlapping tests. Do not invent UI, hotkeys, close-members
+or safe launch. Write `workers/winter/reports/winter-017-acceptance-matrix.md`,
+acknowledge and STOP.
+
+GAZELLE — 017 MINIMAL RUNTIME-DESIGN OWNER
+Audit the current As You Go model/runtime for the smallest architecture-safe
+017 implementation. Decide precisely how the explicit persisted active layout
+id, switching transaction, partial policy, per-layout live observation and
+echo suppression should work using existing Papers APIs. Preserve exactly one
+recording layout, inactive byte-stability and existing contextual icon click.
+Keep easily adjustable UI/UX out. Give exact files/functions/tests and flag
+whether Papers needs any change. Write
+`workers/gazelle/reports/gazelle-017-runtime-design.md`, acknowledge and STOP.
+
+NING remains stopped after 016R4. BRAIN reviews all three reports, snapshots
+016 if clean, then dispatches non-overlapping 017 implementation lanes.
+
+[2026-08-11 Asia/Saigon] CREATOR AUTHORIZATION — ASSIGNMENT 018 DETACHMENT
+---------------------------------------------------------------------------
+The creator explicitly requests whole-layout detachment and authorizes BRAIN to
+work on Assignment 018 while they sleep. 018 is no longer optional/gated by a
+new product-scope decision, but implementation remains technically sequenced
+after 017's state and ownership contracts stabilize. UI polish remains final.
+
+NING — 018 DETACHMENT ARCHITECTURE PREP (READ-ONLY)
+Audit current Papers Backpack runtime/window ownership and As You Go layout
+controller DOM/state. Design the smallest Papers-owned detached utility window
+that moves the WHOLE layout controller beyond Papers while retaining exactly
+one persisted workspace item identity and one runtime owner. Specify detach,
+reattach, project close, host restart, focus, display disconnect, multi-monitor
+clamp, renderer crash and cleanup behavior. State how the detached surface
+shares state/actions without duplicating subscriptions, helpers or persistence.
+No source edits, launches, arbitrary browser window, second layout model or UI
+polish. Identify exact security boundary, IPC/preload API, file lanes, tests and
+the dependency on 017. Write
+`workers/ning/reports/ning-018-detachment-architecture.md`, acknowledge and STOP.
+
+[2026-08-11 Asia/Saigon] CREATOR ROADMAP — POST-MILESTONE MAJOR REFACTOR
+---------------------------------------------------------------------------
+After 016-018 behavior is implemented, verified and snapshot-stable, prepare a
+separate major refactoring phase. It must preserve accepted behavior and use
+small reviewable snapshots, not a simultaneous feature rewrite. The plan must
+cover: explicit ownership boundaries between Papers and Backpack; separation
+of model, runtime orchestration, native capability and rendering; elimination
+of duplicated layout/session state; typed transaction/result primitives;
+centralized lifecycle/cleanup; test fixtures and harness consolidation;
+removal of obsolete diagnostics/dead paths; file/module sizing; dependency
+direction; documentation and migration safety. Begin with a dependency and
+complexity audit, define characterization tests, then refactor lane by lane.
+Do not execute the major refactor until the creator has accepted the milestone
+behavior or BRAIN has frozen a complete behavioral contract and rollback point.

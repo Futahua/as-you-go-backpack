@@ -15,6 +15,7 @@ export function createHostBridge(window) {
   const pending = new Map();
   const MAX_PENDING = 64;
   const REQUEST_TIMEOUT_MS = 15000;
+  const pickListeners = new Set();
 
   function request(type, detail = {}) {
     if (pending.size >= MAX_PENDING) {
@@ -32,7 +33,15 @@ export function createHostBridge(window) {
   }
 
   window.addEventListener('message', (event) => {
-    if (event.source !== window.parent || event.data?.type !== HOST_RESULT) return;
+    if (event.source !== window.parent) return;
+    // 016: the Papers-owned direct-pick session pushes one typed result.
+    if (event.data?.type === 'papers:project:window-pick-result') {
+      for (const listener of pickListeners) {
+        listener(event.data.result);
+      }
+      return;
+    }
+    if (event.data?.type !== HOST_RESULT) return;
     const task = pending.get(event.data.requestId);
     if (!task) return;
     pending.delete(event.data.requestId);
@@ -116,5 +125,12 @@ export function createHostBridge(window) {
       request('papers:project:window-apply-capability', { capability, bounds }),
     resolveWindowDescriptor: (descriptor) =>
       request('papers:project:window-resolve-descriptor', { descriptor }),
+    // 016: direct onscreen pick (Papers-owned overlay + eligibility).
+    pickWindowBegin: (members) => request('papers:project:window-pick-begin', { members }),
+    pickWindowCancel: () => request('papers:project:window-pick-cancel'),
+    onPickResult: (callback) => {
+      pickListeners.add(callback);
+      return () => pickListeners.delete(callback);
+    },
   };
 }

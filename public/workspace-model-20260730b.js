@@ -711,6 +711,27 @@ export function updateWindowLayoutMember(state, windowLayoutId, memberId, patch)
   };
 }
 
+/** Reorders one member to a new index within the layout's persisted member
+ * order (016 inner reorder drag). Data-only; never touches the window. */
+export function reorderWindowLayoutMember(state, windowLayoutId, memberId, toIndex) {
+  const layout = windowLayout(state, windowLayoutId);
+  if (!layout) throw new Error('Window layout not found.');
+  const members = [...layout.arrangement.members];
+  const fromIndex = members.findIndex((member) => member.id === memberId);
+  if (fromIndex === -1) throw new Error('Window layout member not found.');
+  const targetIndex = Math.max(0, Math.min(toIndex, members.length - 1));
+  if (fromIndex === targetIndex) return state;
+  const [moved] = members.splice(fromIndex, 1);
+  members.splice(targetIndex, 0, moved);
+  return {
+    ...state,
+    windowLayouts: state.windowLayouts.map((candidate) =>
+      candidate.id === windowLayoutId
+        ? { ...candidate, arrangement: { version: 2, members } }
+        : candidate),
+  };
+}
+
 export function createShortcut(state, shortcut) {
   const name = String(shortcut.name ?? '').trim();
   const target = String(shortcut.target ?? '').trim();

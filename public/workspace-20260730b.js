@@ -42,6 +42,7 @@ import {
   addWindowLayoutMember,
   removeWindowLayoutMember,
   updateWindowLayoutMember,
+  reorderWindowLayoutMember,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -366,22 +367,27 @@ function descriptionMarkup(candidate) {
 }
 
 /** The compact live body inside a window-layout shell: one button per
- * persisted member (program icon, exact title, static state marker), a
- * picker host, Activate, and a status line. Buttons never begin outer
+ * persisted member (program icon, exact title, static state marker), group
+ * controls, a picker host and a status line. Buttons never begin outer
  * graph dragging because the graph drag excludes <button> pointerdowns
- * by design (Assignment 015). */
+ * by design (Assignment 015/016). No Activate control and no affirmative
+ * Recording furniture (016 creator correction): adding a member captures
+ * its bounds/state immediately and tracking is implicit. */
 function windowLayoutBodyMarkup(candidate) {
   const members = (candidate.arrangement?.members ?? []).map((member) =>
     windowLayoutMemberMarkup(candidate.id, member)).join('');
   const emptyHint = (candidate.arrangement?.members ?? []).length === 0
-    ? '<div class="window-layout-empty" data-wl-empty="true">No window picked</div>'
+    ? '<div class="window-layout-empty" data-wl-empty="true">No windows yet</div>'
     : '';
   const status = windowLayoutStatusText(candidate.id);
   return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" aria-label="Window group">
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
     <div class="window-layout-controls">
-      <button class="window-layout-control wl-pick" type="button" data-wl-pick="${escapeHtml(candidate.id)}">Pick onscreen window</button>
-      <button class="window-layout-control wl-activate" type="button" data-wl-activate="${escapeHtml(candidate.id)}"${(candidate.arrangement?.members ?? []).length === 0 ? ' disabled' : ''}>Activate</button>
+      <button class="window-layout-control wl-pick" type="button" data-wl-pick="${escapeHtml(candidate.id)}" title="Pick an onscreen window directly">Pick onscreen</button>
+      <button class="window-layout-control wl-list" type="button" data-wl-list="${escapeHtml(candidate.id)}" title="Choose from the list of onscreen windows">List</button>
+      <button class="window-layout-control wl-min-all" type="button" data-wl-min-all="${escapeHtml(candidate.id)}" title="Minimize all members">Minimize all</button>
+      <button class="window-layout-control wl-restore-all" type="button" data-wl-restore-all="${escapeHtml(candidate.id)}" title="Restore/open all members">Restore all</button>
+      <button class="window-layout-control wl-isolate" type="button" data-wl-isolate="${escapeHtml(candidate.id)}" title="Restore the selected members and minimize the rest of this layout">Isolate</button>
     </div>
     <div class="window-layout-picker" data-wl-picker="${escapeHtml(candidate.id)}"></div>
     <div class="window-layout-status" data-wl-status="${escapeHtml(candidate.id)}">${escapeHtml(status)}</div>
@@ -401,49 +407,36 @@ function windowLayoutMemberMarkup(layoutId, member) {
   </button>`;
 }
 
-/** Picker list markup: compact rows from the host candidate list. In
- * unlink mode only the current member's row is actionable; the others are
- * inert so a click can never accidentally replace or duplicate a member
- * in this one-member slice. */
+/** Picker list markup (016): a vertical list of compact rows from the host
+ * candidate list. Every row toggles: a row whose title matches an existing
+ * member removes it (data-only), any other row binds it. */
 function windowLayoutPickerMarkup(layoutId, candidates) {
-  const mode = windowLayoutPickerMode(layoutId);
   const layout = windowLayoutFromState(layoutId);
-  const member = layout?.arrangement?.members?.[0] ?? null;
-  const persistedRow = mode === 'unlink' && member
-    ? `<button class="window-layout-pick-candidate current-member" data-wl-unlink="${escapeHtml(member.id)}" data-wl-pick="${escapeHtml(layoutId)}" type="button" title="Remove ${escapeHtml(member.descriptor.title)}">
-      <span class="window-layout-pick-icon placeholder" aria-hidden="true"></span>
-      <span class="window-layout-pick-label">${escapeHtml(member.descriptor.title)}</span>
-      <span class="window-layout-pick-state">remove</span>
-    </button>`
-    : '';
+  const members = layout?.arrangement?.members ?? [];
   const rows = candidates.map((candidate) => {
-    const isCurrentMember = member !== null
-      && candidate.title === member.descriptor.title;
-    const disabled = mode === 'unlink' && !isCurrentMember;
-    return `<button class="window-layout-pick-candidate${isCurrentMember ? ' current-member' : ''}" data-wl-pick-candidate="${escapeHtml(candidate.id)}" data-wl-pick="${escapeHtml(layoutId)}" type="button" title="${escapeHtml(candidate.title)}"${disabled ? ' disabled' : ''}>
+    const isCurrentMember = members.some((member) => candidate.title === member.descriptor.title);
+    return `<button class="window-layout-pick-candidate${isCurrentMember ? ' current-member' : ''}" data-wl-pick-candidate="${escapeHtml(candidate.id)}" data-wl-pick="${escapeHtml(layoutId)}" type="button" title="${escapeHtml(candidate.title)}">
       ${candidate.icon
         ? `<img class="window-layout-pick-icon" src="${escapeHtml(candidate.icon)}" alt="">`
         : '<span class="window-layout-pick-icon placeholder" aria-hidden="true"></span>'}
       <span class="window-layout-pick-label">${escapeHtml(candidate.title)}</span>
-      <span class="window-layout-pick-state ${escapeHtml(candidate.state)}">${escapeHtml(candidate.state)}</span>
+      <span class="window-layout-pick-state ${escapeHtml(candidate.state)}">${isCurrentMember ? 'remove' : escapeHtml(candidate.state)}</span>
     </button>`;
   }).join('');
   return `<div class="window-layout-picker-panel">
-    <div class="window-layout-picker-head">Pick an onscreen window${mode === 'unlink' ? ' - click the member to remove it' : ''}
+    <div class="window-layout-picker-head">Choose an onscreen window (click a member row to remove it)
       <button class="window-layout-picker-close" data-wl-picker-close="true" type="button" title="Close picker">×</button>
     </div>
-    <div class="window-layout-picker-list">${persistedRow}${rows || (persistedRow ? '' : '<div class="window-layout-empty">No eligible windows</div>')}</div>
+    <div class="window-layout-picker-list">${rows || '<div class="window-layout-empty">No eligible windows</div>'}</div>
   </div>`;
 }
 
-function windowLayoutPickerMode(layoutId) {
-  const layout = state.windowLayouts?.find((candidate) => candidate.id === layoutId);
-  return (layout?.arrangement?.members ?? []).length > 0 ? 'unlink' : 'bind';
-}
-
-// ---- window-layout runtime (Assignment 015) --------------------------------
-// One explicit active-recording layout at a time. Capabilities and icons are
-// ephemeral session state (never persisted); descriptors are the only
+// ---- window-layout runtime (Assignment 015/016) ----------------------------
+// One explicit active-recording layout at a time, tracked IMPLICITLY (no
+// Activate button, no affirmative Recording furniture - 016 creator
+// correction): adding a window captures its bounds/state immediately and
+// recording follows the last-touched layout context. Capabilities and icons
+// are ephemeral session state (never persisted); descriptors are the only
 // durable member identity and resolve fail-closed against visible windows.
 const windowLayoutRuntime = {
   activeRecordingLayoutId: null,
@@ -455,6 +448,8 @@ const windowLayoutRuntime = {
   observationPending: false,
   suppression: null,
   saveTimer: null,
+  selectedMembers: new Map(), // layoutId -> Set<memberId> (inner multiselect)
+  pickUnsubscribe: null,
 };
 
 const WINDOW_LAYOUT_OBSERVE_CADENCE_MS = 500;
@@ -472,9 +467,10 @@ function windowLayoutMemberFromState(layoutId, memberId) {
 function windowLayoutStatusText(layoutId) {
   const layout = windowLayoutFromState(layoutId);
   if (!layout) return '';
-  if ((layout.arrangement?.members ?? []).length === 0) return 'Pick a window to begin';
-  if (windowLayoutRuntime.activeRecordingLayoutId === layoutId) return 'Recording';
-  return 'Not recording';
+  if ((layout.arrangement?.members ?? []).length === 0) return 'Pick an onscreen window or open the list';
+  // No affirmative Recording/Not-recording furniture; the status line is
+  // reserved for missing, denied, partial or error outcomes.
+  return '';
 }
 
 function setWindowLayoutStatus(layoutId, text) {
@@ -523,9 +519,28 @@ function windowLayoutStatusForOutcome(outcome) {
   return 'Failed';
 }
 
-async function handleWindowLayoutMemberClick(layoutId, memberId) {
+async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false) {
   const member = windowLayoutMemberFromState(layoutId, memberId);
   if (!member) return;
+  if (ctrlKey) {
+    // 016 inner multiselection: separate from workspace selection.
+    const selected = new Set(windowLayoutRuntime.selectedMembers.get(layoutId) ?? []);
+    if (selected.has(memberId)) selected.delete(memberId);
+    else selected.add(memberId);
+    windowLayoutRuntime.selectedMembers.set(layoutId, selected);
+    syncWindowLayoutMemberSelection(layoutId);
+    return;
+  }
+  windowLayoutRuntime.selectedMembers.delete(layoutId);
+  syncWindowLayoutMemberSelection(layoutId);
+  // 016 contextual occurrences: an icon click from a DIFFERENT layout (or
+  // with no active context) applies THIS layout's saved arrangement for the
+  // member and selects this layout's recording context. A click in the
+  // already-current context toggles minimize/restore.
+  if (windowLayoutRuntime.activeRecordingLayoutId !== layoutId) {
+    await selectWindowLayoutContext(layoutId, memberId);
+    return;
+  }
   const capability = await capabilityForMember(layoutId, memberId);
   if (!capability) return;
   const observed = await host.observeWindowCapability(capability);
@@ -592,13 +607,15 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
   const layout = windowLayoutFromState(layoutId);
   if (!layout) return;
   const members = layout.arrangement?.members ?? [];
-  if (members.length > 0) {
-    // Sole member selected again: unlink (data-only). Only the member's
-    // own row is actionable in unlink mode; any other row is inert.
-    const member = members[0];
-    const next = removeWindowLayoutMember(state, layoutId, member.id);
-    windowLayoutRuntime.capabilities.delete(member.id);
-    windowLayoutRuntime.icons.delete(member.id);
+  const row = (windowLayoutRuntime.pickerCandidates ?? [])
+    .find((candidate) => candidate.id === candidateId);
+  // 016 toggle: a row matching an existing member removes it (data-only);
+  // any other row binds the window and captures its state immediately.
+  const existing = row ? members.find((member) => member.descriptor.title === row.title) : null;
+  if (existing) {
+    const next = removeWindowLayoutMember(state, layoutId, existing.id);
+    windowLayoutRuntime.capabilities.delete(existing.id);
+    windowLayoutRuntime.icons.delete(existing.id);
     stopWindowLayoutRecording();
     store.commit(next);
     closeWindowLayoutPicker();
@@ -611,11 +628,16 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     return;
   }
   const memberId = crypto.randomUUID();
+  // 016: adding a window captures its current valid bounds/state immediately;
+  // the creator never presses another button to make the member useful.
+  const observed = await host.observeWindowCapability(bound.capability);
   const member = {
     id: memberId,
     descriptor: bound.descriptor,
-    bounds: null,
-    state: 'normal',
+    bounds: observed.outcome === 'success' && observed.observation?.bounds
+      ? observed.observation.bounds : null,
+    state: observed.outcome === 'success' && observed.observation?.state === 'minimized'
+      ? 'minimized' : 'normal',
   };
   const next = addWindowLayoutMember(state, layoutId, member);
   windowLayoutRuntime.capabilities.set(memberId, bound.capability);
@@ -624,18 +646,19 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
   if (icon) windowLayoutRuntime.icons.set(memberId, icon);
   store.commit(next);
   closeWindowLayoutPicker();
-  setWindowLayoutStatus(layoutId, 'Bound - press Activate to record');
+  setActiveWindowLayoutRecording(layoutId);
   saveWorkspaceView();
 }
 
-async function activateWindowLayout(layoutId) {
-  const layout = windowLayoutFromState(layoutId);
-  if (!layout) return;
-  const member = layout.arrangement?.members?.[0];
+/** 016 contextual application: applies THIS layout's saved arrangement for
+ * the member (echo-suppressed per operation/member) and selects this layout
+ * as the sole recording context. */
+async function selectWindowLayoutContext(layoutId, memberId) {
+  const member = windowLayoutMemberFromState(layoutId, memberId);
   if (!member) return;
-  const capability = await capabilityForMember(layoutId, member.id);
+  const capability = await capabilityForMember(layoutId, memberId);
   if (!capability) return;
-  windowLayoutRuntime.suppression = { layoutId, memberId: member.id, bounds: member.bounds, state: member.state };
+  windowLayoutRuntime.suppression = { layoutId, memberId, bounds: member.bounds, state: member.state };
   if (member.bounds) {
     const applied = await host.applyWindowCapability(capability, member.bounds);
     if (applied.outcome !== 'success') {
@@ -644,16 +667,186 @@ async function activateWindowLayout(layoutId) {
       return;
     }
   }
-  const restored = member.state === 'minimized'
-    ? await host.minimizeWindowCapability(capability)
-    : await host.restoreWindowCapability(capability);
+  // A click from a DIFFERENT layout context always RESTORES that occurrence
+  // (per the creator's contextual model); only a click in the already-current
+  // context toggles minimize/restore, so the saved state is never used here.
+  const restored = await host.restoreWindowCapability(capability);
   if (restored.outcome !== 'success') {
     windowLayoutRuntime.suppression = null;
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(restored.outcome));
     return;
   }
   setActiveWindowLayoutRecording(layoutId);
-  setWindowLayoutStatus(layoutId, 'Recording');
+}
+
+/** 016 group actions (selected members when any are selected, otherwise all):
+ * minimize, restore/open (applies saved bounds), or isolate (restore the
+ * targets, minimize only the unselected members OF THIS LAYOUT). One bounded
+ * per-member loop with typed results; partial failures are visible. */
+async function runGroupMemberAction(layoutId, member, action, results, patches) {
+  const started = Date.now();
+  const capability = await capabilityForMember(layoutId, member.id);
+  if (!capability) return 'missing';
+  const observed = await host.observeWindowCapability(capability);
+  if (observed.outcome !== 'success' || !observed.observation) {
+    return observed.outcome;
+  }
+  let result = null;
+  let nextState = observed.observation.state === 'minimized' ? 'minimized' : 'normal';
+  if (action === 'minimize') {
+    result = await host.minimizeWindowCapability(capability);
+    nextState = 'minimized';
+  } else {
+    windowLayoutRuntime.suppression = { layoutId, memberId: member.id, bounds: member.bounds, state: member.state };
+    if (member.bounds) result = await host.applyWindowCapability(capability, member.bounds);
+    if (!result || result.outcome === 'success') {
+      result = await host.restoreWindowCapability(capability);
+    }
+    windowLayoutRuntime.suppression = null;
+    nextState = 'normal';
+  }
+  results.push({ memberId: member.id, outcome: result.outcome });
+  if (result.outcome === 'success') {
+    patches.push({ memberId: member.id, state: nextState });
+    patchWindowLayoutMember(layoutId, member.id, nextState);
+  }
+  return result.outcome;
+}
+
+async function windowLayoutGroupAction(layoutId, action) {
+  const layout = windowLayoutFromState(layoutId);
+  if (!layout) return;
+  const members = layout.arrangement?.members ?? [];
+  if (members.length === 0) return;
+  const selected = windowLayoutRuntime.selectedMembers.get(layoutId);
+  const targets = selected && selected.size > 0
+    ? members.filter((member) => selected.has(member.id)) : members;
+  const results = [];
+  const patches = [];
+  for (const member of targets) {
+    const outcome = await runGroupMemberAction(layoutId, member, action, results, patches);
+    // A stale binding (helper restart) fails the first observe with missing:
+    // drop it, re-resolve ONCE, and retry the full action.
+    if (outcome === 'missing') {
+      windowLayoutRuntime.capabilities.delete(member.id);
+      const freshCapability = await capabilityForMember(layoutId, member.id);
+      if (freshCapability) {
+        const retried = await runGroupMemberAction(layoutId, member, action, results, patches);
+        if (retried !== 'missing') continue;
+      }
+      results.push({ memberId: member.id, outcome: 'missing' });
+    }
+  }
+  if (action === 'isolate') {
+    const unselected = selected && selected.size > 0
+      ? members.filter((member) => !selected.has(member.id)) : [];
+    for (const member of unselected) {
+      const capability = await capabilityForMember(layoutId, member.id);
+      if (!capability) {
+        results.push({ memberId: member.id, outcome: 'missing' });
+        continue;
+      }
+      const result = await host.minimizeWindowCapability(capability);
+      results.push({ memberId: member.id, outcome: result.outcome });
+      if (result.outcome === 'success') {
+        patches.push({ memberId: member.id, state: 'minimized' });
+        patchWindowLayoutMember(layoutId, member.id, 'minimized');
+      }
+    }
+  }
+  // Chain every member patch into ONE next state and commit once, so a later
+  // patch can never clobber an earlier one with stale state.
+  let nextState = state;
+  for (const patch of patches) {
+    nextState = updateWindowLayoutMember(nextState, layoutId, patch.memberId, { state: patch.state });
+  }
+  if (patches.length > 0) store.replace(nextState);
+  queueWindowLayoutSave();
+  const failed = results.filter((result) => result.outcome !== 'success').length;
+  if (failed > 0) setWindowLayoutStatus(layoutId, `${failed} of ${results.length} members failed`);
+  else setWindowLayoutStatus(layoutId, '');
+  setActiveWindowLayoutRecording(layoutId);
+}
+
+/** 016 direct onscreen pick: begin the Papers-owned pick session for THIS
+ * layout and wait for its single typed result (Escape/right-click cancels). */
+async function beginWindowLayoutDirectPick(layoutId) {
+  const layout = windowLayoutFromState(layoutId);
+  if (!layout) return;
+  closeWindowLayoutPicker();
+  const members = (layout.arrangement?.members ?? []).map((member) => member.descriptor);
+  let result = null;
+  try {
+    // 016R: subscribe to the result push BEFORE awaiting begin, so a pick
+    // that completes while begin() is still resolving (immediate click on an
+    // eligible window) is never missed. A failed begin removes the listener
+    // again; the main-side session clears onResult on failure, so nothing
+    // can deliver afterwards.
+    const beginPromise = host.pickWindowBegin(members);
+    const pickPromise = new Promise((resolve) => {
+      windowLayoutRuntime.pickUnsubscribe = host.onPickResult(resolve);
+    });
+    const begin = await beginPromise;
+    if (begin.outcome !== 'started') {
+      windowLayoutRuntime.pickUnsubscribe?.();
+      windowLayoutRuntime.pickUnsubscribe = null;
+      setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
+      return;
+    }
+    result = await pickPromise;
+  } catch {
+    windowLayoutRuntime.pickUnsubscribe?.();
+    windowLayoutRuntime.pickUnsubscribe = null;
+    setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
+    return;
+  } finally {
+    windowLayoutRuntime.pickUnsubscribe?.();
+    windowLayoutRuntime.pickUnsubscribe = null;
+  }
+  if (result.outcome !== 'picked' || !result.capability || !result.descriptor) {
+    if (result.outcome === 'cancelled') setWindowLayoutStatus(layoutId, '');
+    else setWindowLayoutStatus(layoutId, result.error || 'Pick failed');
+    return;
+  }
+  const current = windowLayoutFromState(layoutId);
+  if (!current) return;
+  const existing = (current.arrangement?.members ?? [])
+    .find((member) => member.descriptor.title === result.descriptor.title);
+  if (existing) {
+    // Toggled off: data-only unlink, never closes or moves the window.
+    const next = removeWindowLayoutMember(state, layoutId, existing.id);
+    windowLayoutRuntime.capabilities.delete(existing.id);
+    windowLayoutRuntime.icons.delete(existing.id);
+    stopWindowLayoutRecording();
+    store.commit(next);
+    saveWorkspaceView();
+    return;
+  }
+  const memberId = crypto.randomUUID();
+  const observed = await host.observeWindowCapability(result.capability);
+  const member = {
+    id: memberId,
+    descriptor: result.descriptor,
+    bounds: observed.outcome === 'success' && observed.observation?.bounds
+      ? observed.observation.bounds : null,
+    state: observed.outcome === 'success' && observed.observation?.state === 'minimized'
+      ? 'minimized' : 'normal',
+  };
+  const next = addWindowLayoutMember(state, layoutId, member);
+  windowLayoutRuntime.capabilities.set(memberId, result.capability);
+  if (result.candidate?.icon) windowLayoutRuntime.icons.set(memberId, result.candidate.icon);
+  store.commit(next);
+  setActiveWindowLayoutRecording(layoutId);
+  saveWorkspaceView();
+}
+
+function syncWindowLayoutMemberSelection(layoutId) {
+  const selected = windowLayoutRuntime.selectedMembers.get(layoutId);
+  const container = document.querySelector(`[data-wl-members="${CSS.escape(layoutId)}"]`);
+  if (!container) return;
+  for (const button of container.querySelectorAll('[data-wl-member]')) {
+    button.classList.toggle('selected', Boolean(selected?.has(button.dataset.wlMember)));
+  }
 }
 
 function setActiveWindowLayoutRecording(layoutId) {
@@ -705,8 +898,10 @@ async function observeWindowLayoutMember(layoutId, memberId, capability) {
     if (sameBounds && sameState) return;
   }
   const stateValue = observation.state === 'minimized' ? 'minimized' : 'normal';
+  // A minimized window's rectangle is its taskbar/minimized rect, never a
+  // valid arrangement: record the state but KEEP the saved restore bounds.
   const next = updateWindowLayoutMember(state, layoutId, memberId, {
-    bounds: observation.bounds,
+    bounds: stateValue === 'minimized' ? undefined : observation.bounds,
     state: stateValue,
   });
   store.replace(next);
@@ -726,10 +921,7 @@ function stopWindowLayoutRecording() {
     clearInterval(windowLayoutRuntime.recordingTimer);
     windowLayoutRuntime.recordingTimer = null;
   }
-  if (windowLayoutRuntime.activeRecordingLayoutId) {
-    setWindowLayoutStatus(windowLayoutRuntime.activeRecordingLayoutId, 'Not recording');
-    windowLayoutRuntime.activeRecordingLayoutId = null;
-  }
+  windowLayoutRuntime.activeRecordingLayoutId = null;
 }
 
 function handleWindowLayoutUnlink(layoutId, memberId) {
@@ -2337,6 +2529,101 @@ async function runMenuAction(action) {
   if (action === 'delete-sets') return commands.deleteSelectedSets();
 }
 
+// 016 inner member drag: reorder within the layout, or unlink (data-only)
+// beyond a clear outside threshold. Never starts outer graph drag and never
+// moves/resizes/minimizes/closes the external window.
+let windowLayoutDrag = null; // { layoutId, memberId, startX, startY, moved, pointerId }
+let windowLayoutDragJustMoved = false;
+const WINDOW_LAYOUT_DRAG_THRESHOLD_PX = 8;
+const WINDOW_LAYOUT_DROP_OUT_PX = 40;
+
+elements.grid.addEventListener('pointerdown', (event) => {
+  const member = event.target.closest('[data-wl-member]');
+  if (!member || event.ctrlKey || event.button !== 0) return;
+  windowLayoutDrag = {
+    layoutId: member.dataset.wlLayout,
+    memberId: member.dataset.wlMember,
+    startX: event.clientX,
+    startY: event.clientY,
+    moved: false,
+    pointerId: event.pointerId,
+  };
+});
+
+elements.grid.addEventListener('pointermove', (event) => {
+  const drag = windowLayoutDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < WINDOW_LAYOUT_DRAG_THRESHOLD_PX) return;
+  drag.moved = true;
+  const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
+  const button = document.querySelector(`[data-wl-member="${CSS.escape(drag.memberId)}"]`);
+  if (!members || !button) return;
+  const row = members.getBoundingClientRect();
+  const outside = event.clientY < row.top - WINDOW_LAYOUT_DROP_OUT_PX
+    || event.clientY > row.bottom + WINDOW_LAYOUT_DROP_OUT_PX
+    || event.clientX < row.left - WINDOW_LAYOUT_DROP_OUT_PX
+    || event.clientX > row.right + WINDOW_LAYOUT_DROP_OUT_PX;
+  members.classList.toggle('wl-drag-out', outside);
+  if (outside) return;
+  const buttons = [...members.querySelectorAll('[data-wl-member]')];
+  let targetIndex = buttons.length - 1;
+  for (let index = 0; index < buttons.length; index += 1) {
+    const rect = buttons[index].getBoundingClientRect();
+    if (event.clientX < rect.left + rect.width / 2) { targetIndex = index; break; }
+  }
+  const currentIndex = buttons.indexOf(button);
+  if (currentIndex === -1 || targetIndex === currentIndex) return;
+  button.remove();
+  const children = [...members.children];
+  const at = Math.max(0, Math.min(targetIndex, children.length));
+  members.insertBefore(button, children[at] ?? null);
+});
+
+elements.grid.addEventListener('pointerup', (event) => {
+  const drag = windowLayoutDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  windowLayoutDrag = null;
+  const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
+  if (!members) return;
+  const row = members.getBoundingClientRect();
+  const outside = event.clientY < row.top - WINDOW_LAYOUT_DROP_OUT_PX
+    || event.clientY > row.bottom + WINDOW_LAYOUT_DROP_OUT_PX
+    || event.clientX < row.left - WINDOW_LAYOUT_DROP_OUT_PX
+    || event.clientX > row.right + WINDOW_LAYOUT_DROP_OUT_PX;
+  members.classList.remove('wl-drag-out');
+  const layout = windowLayoutFromState(drag.layoutId);
+  if (!layout) return;
+  if (!drag.moved) return; // plain click: handled by the click delegation
+  windowLayoutDragJustMoved = true;
+  if (outside) {
+    // Escape-like cancel path: data-only unlink, never closes or moves it.
+    handleWindowLayoutUnlink(drag.layoutId, drag.memberId);
+    return;
+  }
+  const buttons = [...members.querySelectorAll('[data-wl-member]')];
+  const toIndex = buttons.findIndex((button) => button.dataset.wlMember === drag.memberId);
+  if (toIndex === -1) return;
+  const next = reorderWindowLayoutMember(state, drag.layoutId, drag.memberId, toIndex);
+  store.commit(next);
+  saveWorkspaceView();
+});
+
+elements.grid.addEventListener('pointercancel', (event) => {
+  const drag = windowLayoutDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  windowLayoutDrag = null;
+  const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
+  if (members) members.classList.remove('wl-drag-out');
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && windowLayoutDrag) {
+    windowLayoutDrag = null;
+    const members = document.querySelector('[data-wl-members].wl-drag-out');
+    if (members) members.classList.remove('wl-drag-out');
+  }
+});
+
 elements.grid.addEventListener('click', (event) => {
   event.stopPropagation();
   const expandButton = event.target.closest('[data-expand]');
@@ -2358,13 +2645,17 @@ elements.grid.addEventListener('click', (event) => {
     saveWorkspaceView();
     return;
   }
-  // Assignment 015: window-layout member/control clicks are handled here
+  // Assignment 015/016: window-layout member/control clicks are handled here
   // and never fall through to selection, navigation or graph drag.
   const windowLayoutBody = event.target.closest('.window-layout-body');
   if (windowLayoutBody) {
     const memberButton = event.target.closest('[data-wl-member]');
     if (memberButton) {
-      void handleWindowLayoutMemberClick(memberButton.dataset.wlLayout, memberButton.dataset.wlMember);
+      if (windowLayoutDragJustMoved) {
+        windowLayoutDragJustMoved = false;
+        return;
+      }
+      void handleWindowLayoutMemberClick(memberButton.dataset.wlLayout, memberButton.dataset.wlMember, event.ctrlKey);
       return;
     }
     const pickCandidate = event.target.closest('[data-wl-pick-candidate]');
@@ -2382,14 +2673,29 @@ elements.grid.addEventListener('click', (event) => {
       closeWindowLayoutPicker();
       return;
     }
-    const pickButton = event.target.closest('[data-wl-pick]');
-    if (pickButton) {
-      void openWindowLayoutPicker(pickButton.dataset.wlPick);
+    const directPick = event.target.closest('[data-wl-pick]');
+    if (directPick) {
+      void beginWindowLayoutDirectPick(directPick.dataset.wlPick);
       return;
     }
-    const activateButton = event.target.closest('[data-wl-activate]');
-    if (activateButton) {
-      void activateWindowLayout(activateButton.dataset.wlActivate);
+    const listButton = event.target.closest('[data-wl-list]');
+    if (listButton) {
+      void openWindowLayoutPicker(listButton.dataset.wlList);
+      return;
+    }
+    const minAll = event.target.closest('[data-wl-min-all]');
+    if (minAll) {
+      void windowLayoutGroupAction(minAll.dataset.wlMinAll, 'minimize');
+      return;
+    }
+    const restoreAll = event.target.closest('[data-wl-restore-all]');
+    if (restoreAll) {
+      void windowLayoutGroupAction(restoreAll.dataset.wlRestoreAll, 'restore');
+      return;
+    }
+    const isolate = event.target.closest('[data-wl-isolate]');
+    if (isolate) {
+      void windowLayoutGroupAction(isolate.dataset.wlIsolate, 'isolate');
       return;
     }
     return;

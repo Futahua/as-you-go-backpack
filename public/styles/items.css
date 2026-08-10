@@ -359,6 +359,32 @@
   font-size: 8px;
   text-align: center;
 }
+/* 016: vertical picker list (no horizontal scrollbar), selected inner
+ * members, drag-out removal target, compact group controls. */
+.window-layout-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.window-layout-pick-candidate {
+  max-width: 100%;
+}
+.window-layout-member.selected {
+  outline: 2px solid var(--folder-color, currentColor);
+  outline-offset: -2px;
+}
+.window-layout-members.wl-drag-out {
+  box-shadow: inset 0 0 0 2px var(--text-danger, crimson);
+}
+.window-layout-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+}
 
 .icon-grid[data-view="graph"] {
   display: block;

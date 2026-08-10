@@ -37,6 +37,7 @@ import {
   addWindowLayoutMember,
   removeWindowLayoutMember,
   updateWindowLayoutMember,
+  reorderWindowLayoutMember,
   itemsIn,
   binnedItems,
   setItemSets,
@@ -1397,6 +1398,25 @@ test('window layouts move, bin, restore and delete like single-parent items', ()
   assert.equal(deleted.windowLayouts.length, 0, 'permanent delete removes the record');
 });
 
+test('reorderWindowLayoutMember reorders the persisted member order only', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'W', parentId: ROOT_ID });
+  const wl = state.windowLayouts[0];
+  const m1 = { id: 'm1', descriptor: { version: 1, title: 'A', executableFingerprint: 'a'.repeat(64) }, bounds: null, state: 'normal' };
+  const m2 = { id: 'm2', descriptor: { version: 1, title: 'B', executableFingerprint: 'b'.repeat(64) }, bounds: null, state: 'normal' };
+  const m3 = { id: 'm3', descriptor: { version: 1, title: 'C', executableFingerprint: 'c'.repeat(64) }, bounds: null, state: 'normal' };
+  state = addWindowLayoutMember(state, wl.id, m1);
+  state = addWindowLayoutMember(state, wl.id, m2);
+  state = addWindowLayoutMember(state, wl.id, m3);
+  state = reorderWindowLayoutMember(state, wl.id, 'm1', 2);
+  assert.deepEqual(state.windowLayouts[0].arrangement.members.map((m) => m.id), ['m2', 'm3', 'm1'], 'm1 moved to index 2');
+  const unchanged = reorderWindowLayoutMember(state, wl.id, 'm1', 2);
+  assert.equal(unchanged, state, 'same-index reorder is a no-op');
+  state = reorderWindowLayoutMember(state, wl.id, 'm3', 0);
+  assert.deepEqual(state.windowLayouts[0].arrangement.members.map((m) => m.id), ['m3', 'm2', 'm1'], 'm3 moved to the front');
+  assert.throws(() => reorderWindowLayoutMember(state, wl.id, 'nope', 0), /member not found/);
+  assert.throws(() => reorderWindowLayoutMember(state, 'nope', 'm1', 0), /not found/);
+});
 test('deleting a folder cleans up the window layouts inside it', () => {
   let state = emptyState();
   state = createGroup(state, 'Folder');
