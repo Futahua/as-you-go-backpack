@@ -38,6 +38,7 @@ import {
   removeWindowLayoutMember,
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
+  setActiveWindowLayoutId,
   itemsIn,
   binnedItems,
   setItemSets,
@@ -1657,4 +1658,109 @@ test('ancestors joining the folder view leave the arranged (pinned) items untouc
   console.log(`[ancestor-perturbation] settle ${ticks} ticks (${(ticks / 60).toFixed(2)}s @60Hz), ` +
     `pinned displacement 0px, unpinned displacement attributable to the ancestors: ` +
     `max ${maxDisplacement.toFixed(1)}px`);
+});
+
+
+// Assignment 017I1: persisted active-recording layout id (Winter model lane).
+// =============================================================================
+
+function activeFixtureState() {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'L1' });
+  const l1 = state.windowLayouts[0].id;
+  state = createWindowLayout(state, { name: 'L2' });
+  const l2 = state.windowLayouts[1].id;
+  return { state, l1, l2 };
+}
+
+test('017I1: activeWindowLayoutId defaults null and normalizes legacy/unknown/binned ids', () => {
+  const legacy = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
+  assert.equal(legacy.activeWindowLayoutId, null, 'legacy state without the field defaults to null');
+
+  const { state, l1 } = activeFixtureState();
+  const stale = normalizeState({
+    schemaVersion: 1, groups: [], shortcuts: [],
+    windowLayouts: state.windowLayouts, activeWindowLayoutId: 'window-layout-gone',
+  });
+  assert.equal(stale.activeWindowLayoutId, null, 'unknown/stale active id normalizes to null');
+
+  const valid = normalizeState({
+    schemaVersion: 1, groups: [], shortcuts: [],
+    windowLayouts: state.windowLayouts, activeWindowLayoutId: l1,
+  });
+  assert.equal(valid.activeWindowLayoutId, l1, 'existing non-binned active id is kept');
+
+  const binned = binSelection(state, [l1], '2026-07-30T00:00:00.000Z');
+  const binnedRaw = normalizeState({
+    schemaVersion: 1, groups: [], shortcuts: [],
+    windowLayouts: binned.windowLayouts, activeWindowLayoutId: l1,
+  });
+  assert.equal(binnedRaw.activeWindowLayoutId, null, 'binned active id normalizes to null');
+
+  assert.equal(normalizeState({
+    schemaVersion: 1, groups: [], shortcuts: [],
+    windowLayouts: state.windowLayouts, activeWindowLayoutId: 5,
+  }).activeWindowLayoutId, null, 'non-string active id normalizes to null');
+});
+
+test('017I1: activeWindowLayoutId round-trips through normalizeState', () => {
+  const { state, l1 } = activeFixtureState();
+  const set = setActiveWindowLayoutId(state, l1);
+  const reloaded = normalizeState(JSON.parse(JSON.stringify(set)));
+  assert.equal(reloaded.activeWindowLayoutId, l1, 'save/reload round-trip keeps the active id');
+});
+
+test('017I1: setActiveWindowLayoutId switches, clears and rejects unknown/binned ids', () => {
+  const { state, l1, l2 } = activeFixtureState();
+  assert.equal(setActiveWindowLayoutId(state, l1).activeWindowLayoutId, l1, 'set L1');
+  assert.equal(setActiveWindowLayoutId(setActiveWindowLayoutId(state, l1), l2).activeWindowLayoutId, l2, 'switch L1 -> L2');
+  assert.equal(setActiveWindowLayoutId(setActiveWindowLayoutId(state, l1), null).activeWindowLayoutId, null, 'null clears the id');
+  assert.equal(setActiveWindowLayoutId(state, 'window-layout-unknown').activeWindowLayoutId, null, 'unknown id is rejected');
+  assert.equal(setActiveWindowLayoutId(setActiveWindowLayoutId(state, l1), 'window-layout-unknown').activeWindowLayoutId, l1, 'rejected set keeps the current value');
+  assert.equal(setActiveWindowLayoutId(state, '').activeWindowLayoutId, null, 'empty string is rejected');
+  const binned = binSelection(state, [l1], '2026-07-30T00:00:00.000Z');
+  assert.equal(setActiveWindowLayoutId(binned, l1).activeWindowLayoutId, null, 'binned id is rejected');
+});
+
+test('017I1: active id never selects a layout nested under a binned folder', () => {
+  let state = emptyState();
+  state = createGroup(state, 'Folder');
+  const folder = state.groups[0].id;
+  state = createWindowLayout(state, { name: 'L1', parentId: folder });
+  const l1 = state.windowLayouts[0].id;
+  const binned = binSelection(state, [folder], '2026-07-30T00:00:00.000Z');
+  assert.equal(setActiveWindowLayoutId(binned, l1).activeWindowLayoutId, null, 'layout under a binned folder is rejected');
+  assert.equal(normalizeState({
+    schemaVersion: 1, groups: binned.groups, shortcuts: [],
+    windowLayouts: binned.windowLayouts, activeWindowLayoutId: l1,
+  }).activeWindowLayoutId, null, 'layout under a binned folder normalizes to null');
+});
+
+test('017I1: setActiveWindowLayoutId leaves every arrangement byte-stable', () => {
+  const { state, l1 } = activeFixtureState();
+  const member = {
+    id: 'm1',
+    descriptor: { version: 1, title: 'W', executableFingerprint: 'a'.repeat(64) },
+    bounds: { x: 10, y: 20, width: 300, height: 200 },
+    state: 'normal',
+  };
+  const withMember = addWindowLayoutMember(state, l1, member);
+  const before = JSON.stringify(withMember.windowLayouts);
+  assert.equal(JSON.stringify(setActiveWindowLayoutId(withMember, l1).windowLayouts), before, 'setting the active id leaves arrangements byte-stable');
+  assert.equal(JSON.stringify(setActiveWindowLayoutId(withMember, null).windowLayouts), before, 'clearing the active id leaves arrangements byte-stable');
+});
+
+test('017I1: binning or deleting the active layout clears it; restore never reactivates', () => {
+  // Binning the active layout clears it immediately.
+  const { state, l1 } = activeFixtureState();
+  const set = setActiveWindowLayoutId(state, l1);
+  const binned = binSelection(set, [l1], '2026-07-30T00:00:00.000Z');
+  assert.equal(binned.activeWindowLayoutId, null, 'binning the active layout clears the id');
+  const restored = restoreSelection(binned, [l1]);
+  assert.equal(restored.activeWindowLayoutId, null, 'restore never reactivates the id implicitly');
+
+  // Permanently deleting the active layout keeps it cleared.
+  const binnedAgain = binSelection(restored, [l1], '2026-07-30T00:00:00.000Z');
+  const deleted = permanentlyDelete(binnedAgain, [l1]);
+  assert.equal(deleted.activeWindowLayoutId, null, 'deleting the active layout clears the id');
 });

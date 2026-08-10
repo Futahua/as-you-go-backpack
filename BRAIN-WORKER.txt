@@ -8839,3 +8839,208 @@ direction; documentation and migration safety. Begin with a dependency and
 complexity audit, define characterization tests, then refactor lane by lane.
 Do not execute the major refactor until the creator has accepted the milestone
 behavior or BRAIN has frozen a complete behavioral contract and rollback point.
+
+[2026-08-11 Asia/Saigon] BRAIN — 016 FUNCTIONAL ACCEPTED + SNAPSHOTTED
+---------------------------------------------------------------------------
+Independent acceptance audit found no product blocker. The 17/20 native run's
+three red rows are respectively an assertion artifact, an unavailable blank
+point and a CDP harness connection failure during the known preload retry. Real
+OS left-click/right-click/Escape, focus ownership, payload rejection, typed
+state, cleanup, full unit suites, typecheck/build, both PS runtimes and pins
+pass. Creator-visible judgments remain bundled for return.
+
+Accepted snapshots:
+- Papers `7acffa8` — `feat: add direct window layout picking`
+- As You Go `e004418` — `feat: complete multi-window layout controls`
+Only reviewed 016 hunks/files entered the snapshots. Existing creator dirty
+Papers work and all probe/evidence directories remain unstaged and untouched.
+
+ASSIGNMENT 017I1 — TWO PARALLEL NON-OVERLAPPING IMPLEMENTATION LANES
+No launches, physical input, commits, UI/hotkey work, Papers edits or 018 code.
+
+WINTER — 017 MODEL OWNER
+Writable files only:
+- `public/workspace-model-20260730b.js`
+- `model.test.mjs`
+Implement top-level persisted `activeWindowLayoutId`, default null and
+independent of contents. Normalize it only to an existing non-binned layout id,
+otherwise null. Export a data-only `setActiveWindowLayoutId(state, idOrNull)`
+that rejects an unknown/binned id and leaves every arrangement byte-stable.
+All model operations that bin or permanently delete the active layout must
+clear the field immediately; restore must not reactivate implicitly. Cover
+legacy default, valid/stale/binned normalization, round trip, switching,
+delete/bin clearing and independent arrangement bytes. Run model tests and
+full AYG suite; report the three known unrelated failures separately. Write
+`workers/winter/reports/winter-017i1-model.md`, acknowledge and STOP.
+
+GAZELLE — 017 PURE RUNTIME-CONTROLLER OWNER
+Writable files only:
+- new `public/app/window-layout-runtime.js`
+- new `window-layout-runtime.test.mjs`
+Implement a dependency-injected controller, not workspace wiring or UI. It
+owns one serialized/generation-guarded switch transaction, ephemeral
+capabilities keyed by layout/member (never persisted), per-member suppression
+keyed by layout/member/generation, one bounded active observation scheduler and
+typed per-member results. Switch order: stop old generation; persist/select
+new id through an injected callback; resolve members in persisted order; apply
+saved bounds then saved minimized/normal state; collect typed outcomes; start
+recording all successful members under the accepted partial policy (zero
+successes means no timer but id retained for retry). Stale async results never
+write. Observe every active member; inactive layout bytes never change;
+matching application echoes are swallowed once and the next genuine move is
+recorded; minimized observations preserve saved restore bounds. Provide stop,
+retry/reconcile and capability invalidation seams for helper restart/project
+close. Tests must use fake clock/host and prove ordering, L1->L2->L1,
+partial/zero success, races, suppression, recovery and cleanup. Run the new
+test directly. Write `workers/gazelle/reports/gazelle-017i1-runtime.md`,
+acknowledge and STOP.
+
+ROKETPUNCHA remains stopped until integration; NING continues 018 read-only
+architecture prep. BRAIN will integrate only after both 017I1 lanes pass.
+
+[2026-08-11 Asia/Saigon] BRAIN — 017I1 ACCEPTED; 017I2 INTEGRATION
+---------------------------------------------------------------------------
+Winter's persisted active-layout model passes 103/103 focused tests and the
+full suite adds no failures (728 pass, the same three unrelated failures).
+Gazelle's pure dependency-injected controller passes 7/7 direct tests. BRAIN
+reviewed both diffs; their file boundaries do not overlap and Papers needs no
+017 change. Ning's 018 architecture prep is accepted for sequencing after 017.
+
+ROKETPUNCHA — 017I2 SOLE RUNTIME-INTEGRATION OWNER
+Writable files only:
+- `public/workspace-20260730b.js`
+- `public/app/window-layout-runtime.js` (corrections only if integration proves)
+- `window-layout-runtime.test.mjs`
+- new `window-layout-integration.test.mjs`
+- `package.json` (add both tests to the full command)
+Do not edit the model/model tests, Papers, styling, markup, hotkeys or 018.
+
+Wire `createWindowLayoutRuntime` and `setActiveWindowLayoutId` into the existing
+window-layout feature. Remove/retire the old recording timer, global
+observationPending and single suppression path so exactly one controller owns
+recording. Required behavior:
+- bootstrap reconciles the persisted active id without inventing one;
+- a context-changing member click switches the WHOLE target layout in persisted
+  member order; same-context click keeps its existing individual toggle;
+- add/pick/group actions select/persist the target context and leave one active
+  observer; bin/delete/unlink of the active layout/member cannot leave a timer;
+- the persist-active callback updates state through the model and queues a
+  prompt save; observation callback patches only the controller's active
+  layout and preserves minimized restore bounds;
+- typed partial outcomes update status without altering saved intent for
+  missing/ambiguous members; zero-success retains the selected id for retry but
+  runs no timer;
+- generation guards prevent stale switch/observe results from writing;
+- project teardown stops runtime without a late save or duplicated helper work.
+
+Preserve 016 direct pick, list picker, icon clicks, group actions, inner
+selection/reorder/unlink and no Activate/Recording furniture. Add an integration
+test that exercises the real wiring boundary (not only the pure controller):
+persisted bootstrap, L1->L2->L1 shared member X/Y, inactive arrangement exact
+bytes, all active members observed, partial/zero success, echo then real move,
+bin/delete stop and teardown. Run both 017 tests and full AYG suite. Write
+`workers/roketpuncha/reports/roketpuncha-017i2-integration.md`, acknowledge and
+STOP. No launch, physical input or commit.
+
+NING — POST-MILESTONE REFACTOR PLAN OWNER (READ-ONLY)
+Using the now-accepted 016 snapshots, in-flight 017 module split and accepted
+018 architecture, produce the requested major refactor plan. Measure module
+sizes/dependency directions, identify duplicated state/lifecycle/test fixtures
+and obsolete diagnostics, then propose ordered rollback-safe phases with
+characterization gates and exact snapshot boundaries. The plan must preserve
+behavior and start only after 018 acceptance. No source edits. Write
+`workers/ning/reports/ning-post-milestone-refactor-plan.md`, acknowledge and
+STOP.
+
+WINTER and GAZELLE remain stopped pending integration review.
+
+GAZELLE — 018 ARCHITECTURE CHALLENGE (READ-ONLY, PARALLEL)
+Compare Ning's accepted-prep document-mediator design against this simpler
+candidate: the existing workspace renderer remains the sole model, controller,
+observer and persistence owner; the detached BrowserWindow is a thin remote
+view receiving a bounded sanitized layout view-model and emitting enumerated
+commands that Papers sender-scopes and forwards to the owning workspace
+webContents. The workspace item becomes a summary tile but its renderer-owned
+controller remains authoritative. On workspace/project close the detached
+surface closes. No second store, optimistic revision, model instance or save
+queue exists. Determine whether this fully satisfies whole-controller
+detachment, crash/reattach/focus/pick/multi-monitor/security requirements and
+the repo boundary. Identify any behavior it cannot support, compare complexity
+and failure modes, then issue a decisive architecture recommendation and exact
+file/test lanes. No edits. Write
+`workers/gazelle/reports/gazelle-018-architecture-ruling.md`, acknowledge and
+STOP.
+
+[2026-08-11 Asia/Saigon] BRAIN — 018 ARCHITECTURE FROZEN; PAPERS HOST LANE
+---------------------------------------------------------------------------
+Gazelle's challenge is accepted. The thin remote view is rejected because it
+does not move controller ownership. Ning's concurrent document mediator is
+also deferred because two simultaneously editable surfaces are not required.
+Assignment 018 uses EXCLUSIVE CONTROLLER HANDOFF: detach stops the workspace
+owner before the detached owner starts; the workspace item is an inert summary;
+reattach flushes/stops the detached owner before the workspace reloads durable
+state and resumes. Exactly one controller, observer, debounce owner, pick owner
+and helper-facing surface may exist. Papers remains a generic host and must not
+know As You Go's model, layout vocabulary or document shape.
+
+WINTER — 018H1 PAPERS GENERIC DETACHED-SURFACE OWNER
+Writable Papers files only (create the narrowest equivalents if current module
+names make one path inappropriate):
+- `src/main/backpacks/backpackSurfaceRegistry.ts` (new)
+- `src/main/windows/windowDetachSession.ts` (new)
+- `src/main/ipc/windowDetachIpc.ts` (new)
+- `src/preload/detachedBackpackSurface.ts` (new)
+- `src/main/index.ts` (composition/teardown hunks only)
+- `electron.vite.config.ts` (preload entry only)
+- matching new focused Vitest files for the above modules
+Do not edit existing 016 capability/pick behavior, Backpack project model,
+As You Go files, styles, installed Papers, versioning or release files.
+
+Implement a generic, fail-closed Papers-owned detached Backpack surface seam:
+- allowed-sender registry binds workspace/detached webContents to one project
+  identity and opaque surface token; every request validates live sender and
+  exact project/token ownership;
+- one BrowserWindow per registered project/surface request, sandboxed narrow
+  preload, no Node exposure, no arbitrary URL/path/command, no As You Go names;
+- open/readiness/focus/reattach/close messages use exact-key bounded schemas;
+  detached entry URL must be derived only from the already-validated registered
+  project entry and an enumerated detached mode, never renderer input;
+- lifecycle is idempotent across renderer crash, project close, display loss
+  and app shutdown; unregister senders, cancel any sender-scoped pick, close
+  once, leave no helper/window/process leak;
+- clamp restored and live detached bounds to a visible display work area and
+  re-clamp on display removal without moving unrelated creator windows;
+- provide an explicit ownership transfer handshake with ready/activate and
+  flush/stop acknowledgements so As You Go can prove no overlap. Papers routes
+  bounded opaque state/commands only between registered surfaces; it does not
+  interpret, persist or mediate the Backpack document.
+
+Tests must prove sender rejection/spoof resistance, exact-key/size rejection,
+one-window identity, ready/activate ordering, flush/stop before close,
+crash/project-close/shutdown idempotence, display clamp and cleanup. Use fakes;
+no launch, physical input or creator-window manipulation. Read Papers HERMES
+and current architecture/docs before editing, inspect the dirty tree and
+preserve all unrelated creator changes. Run focused tests, Papers full Vitest,
+typecheck and build. Do not commit. Write
+`workers/winter/reports/winter-018h1-papers-host.md`, acknowledge and STOP.
+
+GAZELLE and NING remain stopped. ROKETPUNCHA continues sole 017I2 integration.
+After 017I2 is accepted, BRAIN dispatches a non-overlapping As You Go 018 lane
+against Winter's frozen host protocol.
+
+[2026-08-11 Asia/Saigon] NING — 017I3 INDEPENDENT ACCEPTANCE AUDIT (READ-ONLY)
+---------------------------------------------------------------------------
+RoketPuncha's 017I2 report is ready. Independently review the exact uncommitted
+017 model/runtime/integration diff against Winter's acceptance matrix and the
+creator's product intent. Do not edit any source, run Papers, use physical
+input, or commit. Directly inspect and, where useful, run the two focused 017
+tests. Prioritize actual runtime values and ownership boundaries over intended
+comments. In particular prove or falsify: persisted bootstrap; whole-layout
+switch ordering; same-context individual toggle; L1->L2->L1 independence;
+every active member observed; inactive byte stability; partial/zero policy;
+echo then genuine move; helper invalidation/retry; immediate or bounded stop on
+unlink/bin/delete; no late save; and exactly one recording controller/timer.
+Look for races between bootstrap/switch/reconcile/pagehide and for integration
+tests that accidentally exercise a reimplementation rather than production
+wiring. Classify findings by blocker/correction/eyecheck-only. Write
+`workers/ning/reports/ning-017i3-acceptance-audit.md`, acknowledge and STOP.

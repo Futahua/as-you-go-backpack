@@ -19,6 +19,11 @@ export function emptyState() {
     groups: [],
     shortcuts: [],
     windowLayouts: [],
+    // 017: the persisted active-recording layout id, independent of layout
+    // contents. Defaults to null (no layout records); only one id is ever
+    // stored and normalization keeps it only when it names an existing,
+    // non-binned window-layout record.
+    activeWindowLayoutId: null,
     view: {
       iconSize: DEFAULT_ICON_SIZE,
       currentGroupId: ROOT_ID,
@@ -356,6 +361,18 @@ function normalizeWindowLayouts(raw) {
   return records;
 }
 
+/** 017: normalizes the persisted active-recording layout id independently of
+ * layout contents. It survives only when it names an existing, non-binned
+ * window-layout record that is not nested under a binned folder; any legacy
+ * absence, unknown, stale or binned id becomes null. */
+function normalizeActiveWindowLayoutId(raw, windowLayouts, groups) {
+  if (typeof raw !== 'string' || !raw) return null;
+  const match = windowLayouts.find((candidate) => candidate.id === raw);
+  if (!match || match.bin) return null;
+  if (isUnderBinnedGroup({ groups }, match)) return null;
+  return match.id;
+}
+
 function normalizeGraphPositions(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const cleaned = {};
@@ -437,18 +454,21 @@ function normalizePlacements(raw) {
 }
 
 export function normalizeState(raw) {
+  const groups = Array.isArray(raw?.groups)
+    ? raw.groups.map((candidate) => ({ ...candidate, icon: candidate.icon ?? null }))
+    : [];
+  const windowLayouts = normalizeWindowLayouts(raw?.windowLayouts);
   const state = {
     schemaVersion: 1,
-    groups: Array.isArray(raw?.groups)
-      ? raw.groups.map((candidate) => ({ ...candidate, icon: candidate.icon ?? null }))
-      : [],
+    groups,
     shortcuts: Array.isArray(raw?.shortcuts)
       ? raw.shortcuts.map((candidate) => {
           const { parentId: _parentId, order: _order, bin: _bin, ...rest } = candidate;
           return { ...rest, placements: normalizePlacements(candidate) };
         })
       : [],
-    windowLayouts: normalizeWindowLayouts(raw?.windowLayouts),
+    windowLayouts,
+    activeWindowLayoutId: normalizeActiveWindowLayoutId(raw?.activeWindowLayoutId, windowLayouts, groups),
     view: {
       iconSize: Math.min(
         MAX_ICON_SIZE,
@@ -730,6 +750,24 @@ export function reorderWindowLayoutMember(state, windowLayoutId, memberId, toInd
         ? { ...candidate, arrangement: { version: 2, members } }
         : candidate),
   };
+}
+
+/** 017: data-only active-recording layout selector. Sets the persisted active
+ * layout id to an existing, non-binned window layout, or clears it with null.
+ * An unknown or binned id is rejected: the current value is retained and no
+ * arrangement is touched (the layouts array reference is shared, so every
+ * arrangement stays byte-identical). The runtime never persists contents into
+ * this field; it records which layout owns the recording context. */
+export function setActiveWindowLayoutId(state, idOrNull) {
+  if (idOrNull === null) {
+    if (state.activeWindowLayoutId === null) return state;
+    return { ...state, activeWindowLayoutId: null };
+  }
+  if (typeof idOrNull !== 'string' || !idOrNull) return state;
+  const layout = windowLayout(state, idOrNull);
+  if (!layout || layout.bin || isUnderBinnedGroup(state, layout)) return state;
+  if (state.activeWindowLayoutId === idOrNull) return state;
+  return { ...state, activeWindowLayoutId: idOrNull };
 }
 
 export function createShortcut(state, shortcut) {
@@ -1106,7 +1144,19 @@ export function binSelection(state, ids, binnedAt = new Date().toISOString()) {
     ...placement,
     bin: { parentId: placement.parentId, order: placement.order ?? 0, binnedAt },
   }));
-  return { ...state, groups, windowLayouts, shortcuts };
+  // 017: binning the active layout (directly or via its folder) clears the
+  // persisted active-recording id immediately; restore never reactivates it.
+  const active = state.activeWindowLayoutId;
+  const activeBinned = typeof active === 'string' && active
+    && (windowLayoutRoots.has(active)
+      || (windowLayout(state, active) && isUnderBinnedGroup({ ...state, groups }, windowLayout(state, active))));
+  return {
+    ...state,
+    groups,
+    windowLayouts,
+    shortcuts,
+    activeWindowLayoutId: activeBinned ? null : state.activeWindowLayoutId,
+  };
 }
 
 export function restoreSelection(state, ids) {
@@ -1193,7 +1243,12 @@ export function permanentlyDelete(state, ids) {
       }),
     }))
     .filter((candidate) => candidate.placements.length > 0);
-  return { ...state, groups, windowLayouts, shortcuts };
+  // 017: deleting the active layout (directly or via its folder) clears the
+  // persisted active-recording id immediately; restore never reactivates it.
+  const active = state.activeWindowLayoutId;
+  const activeDeleted = typeof active === 'string' && active
+    && !windowLayouts.some((candidate) => candidate.id === active);
+  return { ...state, groups, windowLayouts, shortcuts, activeWindowLayoutId: activeDeleted ? null : state.activeWindowLayoutId };
 }
 
 export function renameItem(state, itemId, name) {

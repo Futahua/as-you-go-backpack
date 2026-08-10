@@ -43,6 +43,7 @@ import {
   removeWindowLayoutMember,
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
+  setActiveWindowLayoutId,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -77,6 +78,7 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { decomposeRegions, regionCentroid, regionPath } from './set-region-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
+import { createWindowLayoutRecordingWiring } from './app/window-layout-runtime.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
@@ -438,21 +440,19 @@ function windowLayoutPickerMarkup(layoutId, candidates) {
 // recording follows the last-touched layout context. Capabilities and icons
 // are ephemeral session state (never persisted); descriptors are the only
 // durable member identity and resolve fail-closed against visible windows.
+// 017I2: recording (switch, timer, observation, echo suppression) is owned
+// exclusively by the pure controller in ./app/window-layout-runtime.js; this
+// object keeps only the entry-side per-layout UI/interaction state.
 const windowLayoutRuntime = {
-  activeRecordingLayoutId: null,
-  capabilities: new Map(),   // memberId -> capability (ephemeral)
+  capabilities: new Map(),   // memberId -> capability (ephemeral, entry-side discrete actions)
   icons: new Map(),          // memberId -> data URL (ephemeral)
   pickerOpenFor: null,
   pickerCandidates: null,
-  recordingTimer: null,
-  observationPending: false,
-  suppression: null,
   saveTimer: null,
   selectedMembers: new Map(), // layoutId -> Set<memberId> (inner multiselect)
   pickUnsubscribe: null,
 };
 
-const WINDOW_LAYOUT_OBSERVE_CADENCE_MS = 500;
 const WINDOW_LAYOUT_SAVE_DEBOUNCE_MS = 300;
 
 function windowLayoutFromState(layoutId) {
@@ -534,11 +534,11 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
   windowLayoutRuntime.selectedMembers.delete(layoutId);
   syncWindowLayoutMemberSelection(layoutId);
   // 016 contextual occurrences: an icon click from a DIFFERENT layout (or
-  // with no active context) applies THIS layout's saved arrangement for the
+  // with no active context) applies THIS layout's saved arrangement for every
   // member and selects this layout's recording context. A click in the
   // already-current context toggles minimize/restore.
-  if (windowLayoutRuntime.activeRecordingLayoutId !== layoutId) {
-    await selectWindowLayoutContext(layoutId, memberId);
+  if (state.activeWindowLayoutId !== layoutId) {
+    await windowLayoutRecording.ensureRecording(layoutId);
     return;
   }
   const capability = await capabilityForMember(layoutId, memberId);
@@ -546,8 +546,13 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
   const observed = await host.observeWindowCapability(capability);
   if (observed.outcome !== 'success' || !observed.observation) {
     if (observed.outcome === 'missing') {
+      // Stale binding after a helper restart: drop it and re-sync the
+      // controller's capabilities so the observer re-resolves once.
       windowLayoutRuntime.capabilities.delete(memberId);
-      stopWindowLayoutRecording();
+      windowLayoutRuntimeController.invalidateCapabilities(layoutId);
+      if (state.activeWindowLayoutId === layoutId) {
+        await windowLayoutRuntimeController.reconcileActive();
+      }
     }
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(observed.outcome));
     return;
@@ -616,10 +621,14 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     const next = removeWindowLayoutMember(state, layoutId, existing.id);
     windowLayoutRuntime.capabilities.delete(existing.id);
     windowLayoutRuntime.icons.delete(existing.id);
-    stopWindowLayoutRecording();
     store.commit(next);
     closeWindowLayoutPicker();
     saveWorkspaceView();
+    // Removing a member of the active layout re-syncs the observer; removing
+    // from an inactive layout never starts recording there.
+    if (state.activeWindowLayoutId === layoutId) {
+      await windowLayoutRuntimeController.reconcileActive();
+    }
     return;
   }
   const bound = await host.bindWindowCandidate(candidateId);
@@ -646,37 +655,10 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
   if (icon) windowLayoutRuntime.icons.set(memberId, icon);
   store.commit(next);
   closeWindowLayoutPicker();
-  setActiveWindowLayoutRecording(layoutId);
   saveWorkspaceView();
-}
-
-/** 016 contextual application: applies THIS layout's saved arrangement for
- * the member (echo-suppressed per operation/member) and selects this layout
- * as the sole recording context. */
-async function selectWindowLayoutContext(layoutId, memberId) {
-  const member = windowLayoutMemberFromState(layoutId, memberId);
-  if (!member) return;
-  const capability = await capabilityForMember(layoutId, memberId);
-  if (!capability) return;
-  windowLayoutRuntime.suppression = { layoutId, memberId, bounds: member.bounds, state: member.state };
-  if (member.bounds) {
-    const applied = await host.applyWindowCapability(capability, member.bounds);
-    if (applied.outcome !== 'success') {
-      windowLayoutRuntime.suppression = null;
-      setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(applied.outcome));
-      return;
-    }
-  }
-  // A click from a DIFFERENT layout context always RESTORES that occurrence
-  // (per the creator's contextual model); only a click in the already-current
-  // context toggles minimize/restore, so the saved state is never used here.
-  const restored = await host.restoreWindowCapability(capability);
-  if (restored.outcome !== 'success') {
-    windowLayoutRuntime.suppression = null;
-    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(restored.outcome));
-    return;
-  }
-  setActiveWindowLayoutRecording(layoutId);
+  // Adding to a layout selects/persists that layout as the recording context
+  // and leaves one active observer.
+  await windowLayoutRecording.ensureRecording(layoutId);
 }
 
 /** 016 group actions (selected members when any are selected, otherwise all):
@@ -684,7 +666,6 @@ async function selectWindowLayoutContext(layoutId, memberId) {
  * targets, minimize only the unselected members OF THIS LAYOUT). One bounded
  * per-member loop with typed results; partial failures are visible. */
 async function runGroupMemberAction(layoutId, member, action, results, patches) {
-  const started = Date.now();
   const capability = await capabilityForMember(layoutId, member.id);
   if (!capability) return 'missing';
   const observed = await host.observeWindowCapability(capability);
@@ -697,12 +678,13 @@ async function runGroupMemberAction(layoutId, member, action, results, patches) 
     result = await host.minimizeWindowCapability(capability);
     nextState = 'minimized';
   } else {
-    windowLayoutRuntime.suppression = { layoutId, memberId: member.id, bounds: member.bounds, state: member.state };
+    // Group actions are explicit user intent: the controller's own echo
+    // suppression covers its switch applies, so no separate suppression is
+    // needed here - the observe loop records the post-action state as intent.
     if (member.bounds) result = await host.applyWindowCapability(capability, member.bounds);
     if (!result || result.outcome === 'success') {
       result = await host.restoreWindowCapability(capability);
     }
-    windowLayoutRuntime.suppression = null;
     nextState = 'normal';
   }
   results.push({ memberId: member.id, outcome: result.outcome });
@@ -765,7 +747,9 @@ async function windowLayoutGroupAction(layoutId, action) {
   const failed = results.filter((result) => result.outcome !== 'success').length;
   if (failed > 0) setWindowLayoutStatus(layoutId, `${failed} of ${results.length} members failed`);
   else setWindowLayoutStatus(layoutId, '');
-  setActiveWindowLayoutRecording(layoutId);
+  // Group actions select/persist this layout as the recording context and
+  // leave one active observer; an already-active layout only re-syncs members.
+  await windowLayoutRecording.ensureRecording(layoutId);
 }
 
 /** 016 direct onscreen pick: begin the Papers-owned pick session for THIS
@@ -817,9 +801,11 @@ async function beginWindowLayoutDirectPick(layoutId) {
     const next = removeWindowLayoutMember(state, layoutId, existing.id);
     windowLayoutRuntime.capabilities.delete(existing.id);
     windowLayoutRuntime.icons.delete(existing.id);
-    stopWindowLayoutRecording();
     store.commit(next);
     saveWorkspaceView();
+    if (state.activeWindowLayoutId === layoutId) {
+      await windowLayoutRuntimeController.reconcileActive();
+    }
     return;
   }
   const memberId = crypto.randomUUID();
@@ -836,8 +822,10 @@ async function beginWindowLayoutDirectPick(layoutId) {
   windowLayoutRuntime.capabilities.set(memberId, result.capability);
   if (result.candidate?.icon) windowLayoutRuntime.icons.set(memberId, result.candidate.icon);
   store.commit(next);
-  setActiveWindowLayoutRecording(layoutId);
   saveWorkspaceView();
+  // Direct-picked additions select/persist this layout as the recording
+  // context and leave one active observer.
+  await windowLayoutRecording.ensureRecording(layoutId);
 }
 
 function syncWindowLayoutMemberSelection(layoutId) {
@@ -849,65 +837,30 @@ function syncWindowLayoutMemberSelection(layoutId) {
   }
 }
 
-function setActiveWindowLayoutRecording(layoutId) {
-  stopWindowLayoutRecording();
-  windowLayoutRuntime.activeRecordingLayoutId = layoutId;
-  const layout = windowLayoutFromState(layoutId);
-  const member = layout?.arrangement?.members?.[0];
-  if (!member) return;
-  void (async () => {
-    const capability = await capabilityForMember(layoutId, member.id);
-    if (!capability) return;
-    if (windowLayoutRuntime.activeRecordingLayoutId !== layoutId) return;
-    windowLayoutRuntime.recordingTimer = setInterval(() => {
-      void observeWindowLayoutMember(layoutId, member.id, capability);
-    }, WINDOW_LAYOUT_OBSERVE_CADENCE_MS);
-  })();
-}
-
-async function observeWindowLayoutMember(layoutId, memberId, capability) {
-  if (windowLayoutRuntime.activeRecordingLayoutId !== layoutId) return;
-  const layout = windowLayoutFromState(layoutId);
-  if (!layout || layout.bin) {
-    // The layout was deleted or binned: stop observing; never keep a
-    // timer alive for an inactive/no-consumer layout.
-    stopWindowLayoutRecording();
-    return;
-  }
-  if (windowLayoutRuntime.observationPending) return;
-  windowLayoutRuntime.observationPending = true;
-  const result = await host.observeWindowCapability(capability);
-  windowLayoutRuntime.observationPending = false;
-  if (result.outcome !== 'success') {
-    if (result.outcome === 'missing') {
-      patchWindowLayoutMember(layoutId, memberId, 'missing');
-      windowLayoutRuntime.capabilities.delete(memberId);
-      stopWindowLayoutRecording();
-      setWindowLayoutStatus(layoutId, 'Window not visible');
-    }
-    return;
-  }
-  const observation = result.observation;
-  if (!observation) return;
-  const suppression = windowLayoutRuntime.suppression;
-  if (suppression && suppression.layoutId === layoutId && suppression.memberId === memberId) {
-    const sameBounds = JSON.stringify(suppression.bounds) === JSON.stringify(observation.bounds);
-    const sameState = (suppression.state === 'minimized' && observation.state === 'minimized')
-      || (suppression.state !== 'minimized' && observation.state !== 'minimized');
-    windowLayoutRuntime.suppression = null;
-    if (sameBounds && sameState) return;
-  }
-  const stateValue = observation.state === 'minimized' ? 'minimized' : 'normal';
-  // A minimized window's rectangle is its taskbar/minimized rect, never a
-  // valid arrangement: record the state but KEEP the saved restore bounds.
-  const next = updateWindowLayoutMember(state, layoutId, memberId, {
-    bounds: stateValue === 'minimized' ? undefined : observation.bounds,
-    state: stateValue,
-  });
-  store.replace(next);
-  patchWindowLayoutMember(layoutId, memberId, stateValue);
-  queueWindowLayoutSave();
-}
+/** 017I2: exactly ONE controller owns recording (switch, timer, observation,
+ * echo suppression). This wiring glues the pure controller to the real model
+ * and store: persisted active id, byte-stable inactive arrangements,
+ * minimized restore bounds preserved, debounced prompt saves and typed
+ * status. The old per-entry recording timer / global observationPending /
+ * single suppression path are retired. */
+const windowLayoutRecording = createWindowLayoutRecordingWiring({
+  getLayout: windowLayoutFromState,
+  host: {
+    resolveWindowDescriptor: (descriptor) => host.resolveWindowDescriptor(descriptor),
+    observeWindowCapability: (capability) => host.observeWindowCapability(capability),
+    applyWindowCapability: (capability, bounds) => host.applyWindowCapability(capability, bounds),
+    minimizeWindowCapability: (capability) => host.minimizeWindowCapability(capability),
+    restoreWindowCapability: (capability) => host.restoreWindowCapability(capability),
+  },
+  model: { setActiveWindowLayoutId, updateWindowLayoutMember },
+  getState: () => state,
+  replaceState: (next) => { state = store.replace(next); },
+  scheduleSave: queueWindowLayoutSave,
+  setStatus: setWindowLayoutStatus,
+  patchMember: patchWindowLayoutMember,
+  statusText: windowLayoutStatusForOutcome,
+});
+const windowLayoutRuntimeController = windowLayoutRecording.runtime;
 
 function queueWindowLayoutSave() {
   clearTimeout(windowLayoutRuntime.saveTimer);
@@ -916,13 +869,26 @@ function queueWindowLayoutSave() {
   }, WINDOW_LAYOUT_SAVE_DEBOUNCE_MS);
 }
 
-function stopWindowLayoutRecording() {
-  if (windowLayoutRuntime.recordingTimer) {
-    clearInterval(windowLayoutRuntime.recordingTimer);
-    windowLayoutRuntime.recordingTimer = null;
+/** Bootstrap: reconcile the persisted active id WITHOUT inventing one. A null
+ * id means no recording context until the creator touches a layout. */
+function bootstrapWindowLayoutRecording() {
+  if (state.activeWindowLayoutId) {
+    void windowLayoutRecording.ensureRecording(state.activeWindowLayoutId);
   }
-  windowLayoutRuntime.activeRecordingLayoutId = null;
 }
+
+/** Teardown: stop the recording timer and drop ephemeral capabilities without
+ * a late save (the persisted active id stays for the next open to reconcile).
+ * A pending debounced save is cancelled so no write races the unload. */
+function teardownWindowLayoutRecording() {
+  clearTimeout(windowLayoutRuntime.saveTimer);
+  windowLayoutRuntime.saveTimer = null;
+  windowLayoutRuntime.pickUnsubscribe?.();
+  windowLayoutRuntime.pickUnsubscribe = null;
+  void windowLayoutRuntimeController.stop({ clearActive: false });
+}
+
+window.addEventListener('pagehide', () => teardownWindowLayoutRecording());
 
 function handleWindowLayoutUnlink(layoutId, memberId) {
   const layout = windowLayoutFromState(layoutId);
@@ -930,10 +896,15 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
   const next = removeWindowLayoutMember(state, layoutId, memberId);
   windowLayoutRuntime.capabilities.delete(memberId);
   windowLayoutRuntime.icons.delete(memberId);
-  stopWindowLayoutRecording();
   store.commit(next);
   closeWindowLayoutPicker();
   saveWorkspaceView();
+  // Unlinking a member of the active layout re-syncs the observer; unlinking
+  // from an inactive layout never starts recording there. Unlinking the last
+  // member leaves the id retained with no timer (retry on the next add).
+  if (state.activeWindowLayoutId === layoutId) {
+    void windowLayoutRuntimeController.reconcileActive();
+  }
 }
 
 const graph = createGraphController();
@@ -3276,7 +3247,7 @@ const promptLibrary = createPromptLibraryDialog({
   },
 });
 
-bootstrapWorkspace({
+void bootstrapWorkspace({
   loadState: () => host.loadWorkspace(),
   setState: (next) => { state = store.install(next); },
   restoreWorkspaceView,
@@ -3291,4 +3262,4 @@ bootstrapWorkspace({
   drop,
   pointer,
   promptLibrary,
-});
+}).then(bootstrapWindowLayoutRecording);
