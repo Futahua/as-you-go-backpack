@@ -236,6 +236,7 @@ export function createHostBridge(window) {
     widgetPreviewHide: () => request('papers:project:widget-preview-hide'),
     widgetContextMenu: () => request('papers:project:widget-context-menu'),
     windowCandidatePicker: (candidates) => request('papers:project:window-candidate-picker', { candidates }),
+    windowCandidatePickerClose: () => request('papers:project:window-candidate-picker-close'),
     // 019G: real window thumbnail (Windows-taskbar-like hover preview). Consumes
     // ONLY the exact shared API: page request `papers:project:window-thumbnail`
     // with `{ capability, options: { maxWidth, maxHeight } }` (defaults 240x135;

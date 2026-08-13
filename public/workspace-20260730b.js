@@ -966,6 +966,10 @@ function patchWindowLayoutMember(layoutId, memberId, stateValue) {
 }
 
 async function openWindowLayoutPicker(layoutId) {
+  if (windowLayoutRuntime.pickerOpenFor === layoutId) {
+    closeWindowLayoutPicker();
+    return;
+  }
   // 019G: a picker covering the desktop must clear/discard the hover preview.
   windowLayoutMemberPreview.cancel();
   windowLayoutRuntime.pickerOpenFor = layoutId;
@@ -1035,6 +1039,7 @@ async function closeWindowLayoutMember(layoutId, memberId) {
 function closeWindowLayoutPicker() {
   const layoutId = windowLayoutRuntime.pickerOpenFor;
   windowLayoutRuntime.pickerOpenFor = null;
+  if (layoutId) void host.windowCandidatePickerClose().catch(() => undefined);
   windowLayoutRuntime.pickerCandidates = null;
   const pickerHost = layoutId
     ? document.querySelector(`[data-wl-picker="${CSS.escape(layoutId)}"]`)
@@ -5020,7 +5025,14 @@ function bootstrapWindowLayoutWidget() {
     }
   }
 
+  let widgetPickerOpen = false;
   async function openWidgetPicker() {
+    if (widgetPickerOpen) {
+      widgetPickerOpen = false;
+      await host.windowCandidatePickerClose().catch(() => undefined);
+      return;
+    }
+    widgetPickerOpen = true;
     // 019G: a picker covering the desktop must clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
     try {
@@ -5057,6 +5069,7 @@ function bootstrapWindowLayoutWidget() {
     } catch (error) {
       setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
     } finally {
+      widgetPickerOpen = false;
       closeWidgetPicker();
     }
   }

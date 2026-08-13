@@ -269,6 +269,15 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
     observation: null,
     error: null,
   });
+
+  const closePicker = host.windowCandidatePickerClose();
+  const sentClosePicker = mock.parent.messages[2].message;
+  assert.equal(sentClosePicker.type, 'papers:project:window-candidate-picker-close');
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentClosePicker.requestId, ok: true,
+    picker: { ok: true },
+  });
+  assert.deepEqual(await closePicker, { candidateId: null });
 });
 
 test('host bridge window observation/control methods carry the capability and unwrap outcomes', async () => {
