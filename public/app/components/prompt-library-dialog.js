@@ -339,10 +339,17 @@ export function createPromptLibraryDialog({
     if (!copySelectedButton) return;
     if (copyFlashTimer != null) {
       clearTimeout(copyFlashTimer);
-      copySelectedButton.classList.remove('prompt-copied-flash');
     }
+    // Removing and re-adding in the same paint does not restart a CSS
+    // animation. Force one style boundary so every copy visibly replays both
+    // the notification entrance and the button flash.
+    copySelectedButton.classList.remove('prompt-copied-flash');
+    status.classList.remove('prompt-status-copied');
+    void copySelectedButton.offsetWidth;
+    void status.offsetWidth;
     copySelectedButton.textContent = label;
     copySelectedButton.classList.add('prompt-copied-flash');
+    if (status.textContent !== '') status.classList.add('prompt-status-copied');
     copyFlashTimer = setTimeout(() => {
       copyFlashTimer = null;
       copySelectedButton.classList.remove('prompt-copied-flash');
