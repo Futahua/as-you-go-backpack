@@ -598,7 +598,7 @@ const windowLayoutRuntime = {
 };
 
 const WINDOW_LAYOUT_SAVE_DEBOUNCE_MS = 300;
-const WINDOW_LAYOUT_LIST_DWELL_MS = 100;
+const WINDOW_LAYOUT_LIST_DWELL_MS = 200;
 let windowLayoutListDwell = null;
 
 function cancelWindowLayoutListDwell() {
