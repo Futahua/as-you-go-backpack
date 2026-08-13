@@ -326,7 +326,7 @@ export function createPromptLibraryDialog({
   function copyToClipboard(text, confirmation = null) {
     void copyText(text).then(() => {
       statusMessage(confirmation ? `${confirmation}.` : 'Prompt copied.', { copied: true });
-      if (confirmation) flashCopied(confirmation);
+      flashCopied(confirmation);
     }).catch((caught) => {
       error.textContent = caught instanceof Error ? caught.message : String(caught);
     });
@@ -336,24 +336,25 @@ export function createPromptLibraryDialog({
    * copied, then restores the label. Overlapping copies reuse one timer so a
    * fast second click cannot strand the temporary label. */
   function flashCopied(label) {
-    if (!copySelectedButton) return;
     if (copyFlashTimer != null) {
       clearTimeout(copyFlashTimer);
     }
     // Removing and re-adding in the same paint does not restart a CSS
     // animation. Force one style boundary so every copy visibly replays both
     // the notification entrance and the button flash.
-    copySelectedButton.classList.remove('prompt-copied-flash');
+    copySelectedButton?.classList.remove('prompt-copied-flash');
     status.classList.remove('prompt-status-copied');
-    void copySelectedButton.offsetWidth;
+    if (copySelectedButton) void copySelectedButton.offsetWidth;
     void status.offsetWidth;
-    copySelectedButton.textContent = label;
-    copySelectedButton.classList.add('prompt-copied-flash');
+    if (copySelectedButton) {
+      copySelectedButton.textContent = label ?? COPY_SELECTED_LABEL;
+      if (label) copySelectedButton.classList.add('prompt-copied-flash');
+    }
     if (status.textContent !== '') status.classList.add('prompt-status-copied');
     copyFlashTimer = setTimeout(() => {
       copyFlashTimer = null;
-      copySelectedButton.classList.remove('prompt-copied-flash');
-      copySelectedButton.textContent = COPY_SELECTED_LABEL;
+      copySelectedButton?.classList.remove('prompt-copied-flash');
+      if (copySelectedButton) copySelectedButton.textContent = COPY_SELECTED_LABEL;
       // Clear only the copy confirmation. A newer, unrelated status message
       // must survive an older copy timer reaching its deadline.
       if (status.classList.contains('prompt-status-copied')) statusMessage('');

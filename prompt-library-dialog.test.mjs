@@ -875,7 +875,22 @@ test('double-clicking a prompt copies its current draft text only', () => {
   h.rowFor('prompt-root').dispatch('dblclick', { target: h.rowFor('prompt-root'), preventDefault, stopPropagation });
   return Promise.resolve().then(() => {
     assert.deepEqual(h.copied, ['unsaved draft body']);
+    assert.equal(h.nodes['prompt-status'].textContent, 'Prompt copied.');
+    assert.ok(h.nodes['prompt-status'].classList.contains('prompt-status-copied'));
   });
+});
+
+test('an individual prompt copy clears its notification after three seconds', async () => {
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  h.rowFor('prompt-root').dispatch('dblclick', {
+    target: h.rowFor('prompt-root'), preventDefault, stopPropagation,
+  });
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 2900));
+  assert.equal(h.nodes['prompt-status'].textContent, 'Prompt copied.', 'still visible before the deadline');
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(h.nodes['prompt-status'].textContent, '', 'cleared after three seconds');
 });
 
 test('double-clicking a folder expands it instead of copying', () => {
