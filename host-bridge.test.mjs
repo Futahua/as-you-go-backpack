@@ -339,3 +339,148 @@ test('host bridge surfaces window capability failures as rejected outcomes, neve
   });
   await assert.rejects(pending, /denied/);
 });
+test('018X1 detach pushes accept the canonical FLAT shape and the legacy detail wrapper', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const received = [];
+  const unsubscribe = host.onDetachMessage((type, detail) => received.push({ type, detail }));
+
+  // Canonical flat shape: { type, transferId, reason? } - the whole pushed
+  // object is the detail (event.data.detail ?? event.data).
+  mock.dispatchMessage({ type: 'papers:project:detach-stop-request', transferId: 't1', reason: 'crash' });
+  assert.deepEqual(received[0], {
+    type: 'papers:project:detach-stop-request',
+    detail: { type: 'papers:project:detach-stop-request', transferId: 't1', reason: 'crash' },
+  });
+
+  // Legacy wrapper is still accepted.
+  mock.dispatchMessage({ type: 'papers:project:detach-closed', detail: { transferId: 't2' } });
+  assert.deepEqual(received[1], { type: 'papers:project:detach-closed', detail: { transferId: 't2' } });
+
+  // Host result responses are never misrouted to detach listeners.
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: 'r', ok: true });
+  assert.equal(received.length, 2);
+  unsubscribe();
+});
+
+test('018X1 one-way detach ACKs resolve on the immediate OK host result, not the timeout', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const ack = host.detachStopAck('t1');
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:detach-stop-ack');
+  assert.equal(sent.transferId, 't1');
+  assert.ok(sent.requestId);
+  // The preload posts an immediate OK result for the fire-and-forget send.
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sent.requestId, ok: true });
+  assert.deepEqual(await ack, undefined);
+
+  const focus = host.detachFocus();
+  const sentFocus = mock.parent.messages[1].message;
+  assert.equal(sentFocus.type, 'papers:project:detach-focus');
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sentFocus.requestId, ok: true });
+  assert.deepEqual(await focus, undefined);
+});
+test('018V2 detachReady posts the exact two-sided-latch request and resolves on the immediate OK result', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const ready = host.detachReady();
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:detach-ready');
+  assert.ok(sent.requestId);
+  assert.equal('transferId' in sent, false, 'the page READY request carries no token/transfer');
+  assert.equal('detail' in sent, false, 'the page READY request is detail-free');
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sent.requestId, ok: true });
+  assert.deepEqual(await ready, undefined);
+});
+
+test('019C widgetOpen/Focus/Close post exact bounded layout-key requests', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  host.widgetOpen('layout-a');
+  host.widgetFocus('layout-a');
+  host.widgetClose('layout-a');
+  host.widgetCloseSelf();
+  host.widgetReady();
+  const sent = mock.parent.messages.map((entry) => entry.message);
+  assert.deepEqual(sent.map((message) => message.type), [
+    'papers:project:widget-open',
+    'papers:project:widget-focus',
+    'papers:project:widget-close',
+    'papers:project:widget-close',
+    'papers:project:widget-ready',
+  ]);
+  assert.equal(sent[0].layoutKey, 'layout-a');
+  assert.equal(sent[1].layoutKey, 'layout-a');
+  assert.equal(sent[2].layoutKey, 'layout-a');
+  assert.equal('layoutKey' in sent[3], false, 'the widget self-close is token-attached by the preload');
+  assert.equal('layoutKey' in sent[4], false, 'widget-ready is detail-free');
+  // Resolve every request so no 15s timeout timer outlives the test.
+  for (const entry of mock.parent.messages) {
+    mock.dispatchMessage({ type: 'papers:host:result', requestId: entry.message.requestId, ok: true });
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test('019C the widget host result resolves under its own ok/reused/error shape', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const opened = host.widgetOpen('layout-a');
+  const sent = mock.parent.messages[0].message;
+  // The preload wraps the session payload under the `widget` key so the
+  // protocol ok flag is never shadowed.
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sent.requestId, ok: true, widget: { ok: true, reused: true } });
+  assert.deepEqual(await opened, { ok: true, reused: true, error: null });
+
+  const failed = host.widgetFocus('layout-a');
+  const sentFailed = mock.parent.messages[1].message;
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sentFailed.requestId, ok: true, widget: { ok: false, error: 'compact widget failed to load' } });
+  assert.deepEqual(await failed, { ok: false, reused: false, error: 'compact widget failed to load' });
+});
+
+test('019G windowThumbnailCapability posts the exact shared page request', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const capability = { version: 1, bindingId: 'b:1' };
+  const promise = host.windowThumbnailCapability(capability, { maxWidth: 240, maxHeight: 135 });
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:window-thumbnail');
+  assert.ok(sent.requestId);
+  assert.deepEqual(sent.capability, capability);
+  assert.deepEqual(sent.options, { maxWidth: 240, maxHeight: 135 });
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sent.requestId, ok: true, outcome: 'success', imageUrl: 'data:image/png;base64,AAA', width: 240, height: 135 });
+  // 019GR: success resolves EXACTLY { outcome, imageUrl, width, height }.
+  assert.deepEqual(await promise, { outcome: 'success', imageUrl: 'data:image/png;base64,AAA', width: 240, height: 135 });
+});
+
+test('019G windowThumbnailCapability defaults to 240x135 and resolves payload-free fallbacks', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const capability = { version: 1, bindingId: 'b:2' };
+  const promise = host.windowThumbnailCapability(capability);
+  const sent = mock.parent.messages[0].message;
+  assert.deepEqual(sent.options, { maxWidth: 240, maxHeight: 135 }, 'defaults to the shared 240x135');
+  // 019GR: a payload-free typed fallback resolves EXACTLY { outcome } plus an
+  // optional bounded error - never generic capability fields like
+  // observation:null - and the test awaits the SAME request it dispatches.
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sent.requestId, ok: true, outcome: 'minimized' });
+  assert.deepEqual(await promise, { outcome: 'minimized' });
+});
+
+test('022 picker stage and commit post exact detail-free requests', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const stage = host.pickWindowStage();
+  const commit = host.pickWindowCommit();
+  const sent = mock.parent.messages.map((entry) => entry.message);
+  assert.deepEqual(sent.map((message) => message.type), [
+    'papers:project:window-pick-stage',
+    'papers:project:window-pick-commit',
+  ]);
+  assert.equal('detail' in sent[0], false);
+  assert.equal('detail' in sent[1], false);
+  for (const entry of mock.parent.messages) {
+    mock.dispatchMessage({ type: 'papers:host:result', requestId: entry.message.requestId, ok: true });
+  }
+  await Promise.all([stage, commit]);
+});

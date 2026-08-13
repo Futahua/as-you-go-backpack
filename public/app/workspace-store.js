@@ -42,11 +42,11 @@ export function createWorkspaceStore({
     ...initialSession,
   };
 
-  function save(nextState = getState()) {
+  function save(nextState = getState(), metadata) {
     const snapshot = JSON.stringify(nextState);
     const operation = saveQueue
       .catch(() => undefined)
-      .then(() => persist(snapshot));
+      .then(() => persist(snapshot, metadata));
     saveQueue = operation;
     return operation;
   }

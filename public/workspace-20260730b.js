@@ -43,6 +43,7 @@ import {
   removeWindowLayoutMember,
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
+  setWindowLayoutCardSize,
   setActiveWindowLayoutId,
 } from './workspace-model-20260730b.js';
 
@@ -78,7 +79,13 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { decomposeRegions, regionCentroid, regionPath } from './set-region-model.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
-import { createWindowLayoutRecordingWiring } from './app/window-layout-runtime.js';
+import { createWindowLayoutRecordingWiring, windowLayoutMemberKey } from './app/window-layout-runtime.js';
+import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
+import { runBoundedConcurrent } from './app/window-layout-actions.js';
+import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
+import { createWindowLayoutPickApplier, createWindowLayoutRetirementWriter } from './app/window-layout-workspace.js';
+import { windowLayoutControlButton, windowLayoutMemberMarkup } from './app/window-layout-control-icons.js';
+import { createWindowLayoutMemberPreview, windowLayoutPreviewHoverState } from './app/window-layout-preview.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
@@ -119,15 +126,46 @@ My request:
 const elements = getWorkspaceElements(document);
 const statusToast = createStatusToast({ element: elements.status });
 
+// 019C: the compact-widget surface is the SAME project entry loaded by the
+// Papers compact-widget host with `papers-surface=compact-widget` plus the
+// opaque layout key (papers-layout-key is what Papers writes; layout-key is
+// accepted for the assignment's literal URL). Only that named layout's card is
+// rendered; the graph/workspace and the old 018 wait-for-ACTIVATE/read-only
+// lifecycle never run here.
+function windowLayoutWidgetSurfaceParams(locationRef) {
+  const search = new URLSearchParams(locationRef.search);
+  if (search.get('papers-surface') !== 'compact-widget') return null;
+  const layoutId = search.get('papers-layout-key') ?? search.get('layout-key');
+  if (!layoutId || layoutId.length === 0 || layoutId.length > 512) return null;
+  return { layoutId };
+}
+const WIDGET_SURFACE = windowLayoutWidgetSurfaceParams(window.location);
+if (WIDGET_SURFACE) document.documentElement.dataset.widgetSurface = 'true';
+
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
+
+// 018X7: the store's internal commit save-rejection handler must not paint a
+// stale persistence error once a detach handoff is read-only. The sink checks
+// the gate (declared later; only invoked on commit-save settle, so no TDZ).
+const workspaceStoreStatus = createReadOnlyStatusSink({
+  isReadOnly: () => detachSaveGate.isReadOnly(),
+  show: (text, options) => statusToast.show(text, options),
+});
 
 const store = createWorkspaceStore({
   getState: () => state,
   setState: (next) => { state = next; },
   normalizeState,
-  persist: (snapshot) => host.saveWorkspace(snapshot),
-  setStatus,
+  persist: (snapshot, metadata) => {
+    // 018X1/018X8: every save funnels through the store's persist callback.
+    // Persistence is blocked while read-only UNLESS the metadata carries the
+    // gate's exact current flush permit (an older queued save has no token and
+    // resolves as suppressed; the handoff FLUSH saves the final snapshot once).
+    if (!detachSaveGate.permitsPersist(metadata)) return Promise.resolve();
+    return host.saveWorkspace(snapshot);
+  },
+  setStatus: workspaceStoreStatus,
   initialSession: { currentId: ROOT_ID },
   prepare: (next, session) => captureWorkspaceViewFrom(next, session),
   afterCommit: () => {
@@ -135,6 +173,32 @@ const store = createWorkspaceStore({
     render();
   },
 });
+// 018X1 read-only gate: every workspace mutation funnels through commit/
+// replace. While a layout controller is detached these are no-ops; the handoff
+// flush temporarily raises the override so the final capture+save still runs.
+const storeCommit = store.commit.bind(store);
+const storeReplace = store.replace.bind(store);
+const detachSaveGate = createDetachSaveGate({
+  getState: () => state,
+  replaceState: (next) => storeReplace(next),
+  commitState: (next, options) => storeCommit(next, options),
+  // 018X8: the flush permit token is carried through the REAL store save queue.
+  saveState: (current, metadata) => store.save(current, metadata),
+});
+store.commit = (next, options) => detachSaveGate.commit(next, options);
+store.replace = (next) => detachSaveGate.replace(next);
+// 018X2 item 7: the store's exported undo/redo call the LEXICAL internal
+// commit (not the monkeypatched wrapper), so they are gated explicitly while
+// read-only. All other exported mutators are session-only (non-durable) except
+// commit/replace (gated) and install (the load path, intentionally ungated).
+const storeUndo = store.undo.bind(store);
+const storeRedo = store.redo.bind(store);
+store.undo = () => (detachSaveGate.isReadOnly())
+  ? Promise.resolve(false)
+  : storeUndo();
+store.redo = () => (detachSaveGate.isReadOnly())
+  ? Promise.resolve(false)
+  : storeRedo();
 const session = store.getSession();
 
 let suppressBlankClick = false;
@@ -283,9 +347,23 @@ function restoreWorkspaceView() {
 }
 
 function saveWorkspaceView() {
+  if (detachSaveGate.isReadOnly()) return;
   state = store.replace(captureWorkspaceView());
-  void store.save(state).catch((error) =>
-    setStatus(error instanceof Error ? error.message : String(error)));
+  void store.save(state).catch((error) => {
+    // 018X6: a delayed persistence error must not paint status over the
+    // handoff if read-only began before this catch ran.
+    if (detachSaveGate.isReadOnly()) return;
+    setStatus(error instanceof Error ? error.message : String(error));
+  });
+}
+
+/** 018A1/018X1 handoff flush: capture the current view into state and await the
+ * REAL store save queue (the single write that completes before the stop/flush
+ * ACK). The read-only gate's override is raised BEFORE the capture so the final
+ * state is never discarded, and released in finally so no write can race the
+ * ACK and no new gesture save can slip through. */
+function flushWorkspaceSave() {
+  return detachSaveGate.flush(() => captureWorkspaceView());
 }
 
 function pathTo(groupId) {
@@ -339,7 +417,7 @@ function iconMarkup(candidate) {
     return '<span class="folder-art" aria-hidden="true"><span></span></span>';
   }
   if (candidate.kind === 'window-layout') {
-    return '<span class="window-layout-art" aria-hidden="true"><span></span><span></span></span>';
+    return '';
   }
   if (candidate.kind === 'group') {
     if (candidate.icon) {
@@ -362,52 +440,99 @@ function linkMarkup(candidate) {
     : '';
 }
 
+/** 024: a layout has no icon of its own (members carry the real icons), so its
+ * card is content-sized - the empty icon box that would otherwise sit above the
+ * name is omitted. Folders/shortcuts/groups keep their icon box. */
+function iconItemMarkup(candidate) {
+  if (candidate.kind === 'window-layout') return '';
+  return `<div class="item-icon">${iconMarkup(candidate)}</div>`;
+}
+
 function descriptionMarkup(candidate) {
   return candidate.kind === 'shortcut' && candidate.description
     ? `<small>${escapeHtml(candidate.description)}</small>`
     : '';
 }
 
-/** The compact live body inside a window-layout shell: one button per
- * persisted member (program icon, exact title, static state marker), group
- * controls, a picker host and a status line. Buttons never begin outer
- * graph dragging because the graph drag excludes <button> pointerdowns
- * by design (Assignment 015/016). No Activate control and no affirmative
- * Recording furniture (016 creator correction): adding a member captures
- * its bounds/state immediately and tracking is implicit. */
-function windowLayoutBodyMarkup(candidate) {
-  const members = (candidate.arrangement?.members ?? []).map((member) =>
-    windowLayoutMemberMarkup(candidate.id, member)).join('');
+/** 035: the attached workspace card becomes a greyed, noninteractive placeholder
+ * while its compact widget is open (`options.detached`), or during the retired
+ * full-detach handoff (`readonly`/`detached` presentation modes). The widget
+ * surface itself is never a placeholder. One predicate so the card class and
+ * the body markup cannot disagree. */
+function windowLayoutCardPlaceholder(options) {
+  if (options.widgetSurface === true) return false;
+  return options.detached === true
+    || windowLayoutDetachment.isReadOnly()
+    || windowLayoutDetachment.getState().mode === 'detached';
+}
+
+function windowLayoutCardMarkup(candidate, options = {}) {
+  const placeholder = windowLayoutCardPlaceholder(options);
+  return `<div class="window-layout-card${placeholder ? ' window-layout-card--placeholder' : ''}" data-wl-card="${escapeHtml(candidate.id)}"${placeholder ? ' data-wl-placeholder="true"' : ''}>
+    ${windowLayoutBodyMarkup(candidate, options)}
+  </div>`;
+}
+
+/** 019B compact card live body inside a window-layout shell: a fixed-height,
+ * one-row, taskbar-like icon strip (one compact icon button per persisted
+ * member - every member is visible; large counts compact instead of clipping),
+ * a single row of compact static inline-SVG controls, a picker host and a
+ * status line. Buttons never begin outer graph dragging because the graph drag
+ * excludes <button> pointerdowns by design (Assignment 015/016). No Activate
+ * control and no affirmative Recording furniture (016 creator correction):
+ * adding a member captures its bounds/state immediately and tracking is
+ * implicit. 035: the attached placeholder shows the same greyed members and the
+ * lock ONLY (reattach); the widget is the sole live card. */
+function windowLayoutBodyMarkup(candidate, options = {}) {
   const emptyHint = (candidate.arrangement?.members ?? []).length === 0
     ? '<div class="window-layout-empty" data-wl-empty="true">No windows yet</div>'
     : '';
   const status = windowLayoutStatusText(candidate.id);
+  // 018V7R3: one shared bounded presentation mode (readonly/detached/workspace)
+  // so the body markup and the node content signatures cannot disagree.
+  const presentationMode = windowLayoutPresentationMode({
+    isReadOnly: windowLayoutDetachment.isReadOnly(),
+    mode: windowLayoutDetachment.getState().mode,
+  });
+  const placeholder = windowLayoutCardPlaceholder(options);
+  if (placeholder) {
+    const members = (candidate.arrangement?.members ?? []).map((member) =>
+      windowLayoutMemberMarkup(candidate.id, member, windowLayoutMemberIcon(candidate.id, member.id), true)).join('');
+    // Inert greyed summary while the widget is the sole live card: disabled
+    // members and status, with the lock kept as the reattach toggle only.
+    return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" data-wl-placeholder-body="true" aria-label="Window group (detached)">
+    <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
+    <div class="window-layout-controls">${windowLayoutControlButton('reattach', 'Close this window-layout widget', 'data-wl-reattach', candidate.id)}</div>
+    <div class="window-layout-status" data-wl-status="${escapeHtml(candidate.id)}">${escapeHtml(status)}</div>
+  </div>`;
+  }
+  const members = (candidate.arrangement?.members ?? []).map((member) =>
+    windowLayoutMemberMarkup(candidate.id, member, windowLayoutMemberIcon(candidate.id, member.id))).join('');
+  // 019C: a compact-WIDGET surface shows REATTACH (close this layout's widget)
+  // instead of DETACH; the workspace card shows DETACH (open/focus the widget).
+  const widgetSurface = options.widgetSurface === true;
+  const detachControl = widgetSurface
+    ? windowLayoutControlButton('reattach', 'Close this window-layout widget', 'data-wl-reattach', candidate.id)
+    : windowLayoutControlButton('detach', 'Open this layout as a compact widget', 'data-wl-detach', candidate.id);
   return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" aria-label="Window group">
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
     <div class="window-layout-controls">
-      <button class="window-layout-control wl-pick" type="button" data-wl-pick="${escapeHtml(candidate.id)}" title="Pick an onscreen window directly">Pick onscreen</button>
-      <button class="window-layout-control wl-list" type="button" data-wl-list="${escapeHtml(candidate.id)}" title="Choose from the list of onscreen windows">List</button>
-      <button class="window-layout-control wl-min-all" type="button" data-wl-min-all="${escapeHtml(candidate.id)}" title="Minimize all members">Minimize all</button>
-      <button class="window-layout-control wl-restore-all" type="button" data-wl-restore-all="${escapeHtml(candidate.id)}" title="Restore/open all members">Restore all</button>
-      <button class="window-layout-control wl-isolate" type="button" data-wl-isolate="${escapeHtml(candidate.id)}" title="Restore the selected members and minimize the rest of this layout">Isolate</button>
+      ${windowLayoutControlButton('pick', 'Pick an onscreen window directly', 'data-wl-pick', candidate.id)}
+      ${windowLayoutControlButton('list', 'Choose from the list of onscreen windows', 'data-wl-list', candidate.id)}
+      ${windowLayoutControlButton('min-all', 'Minimize all members', 'data-wl-min-all', candidate.id)}
+      ${windowLayoutControlButton('restore-all', 'Restore/open all members', 'data-wl-restore-all', candidate.id)}
+      ${windowLayoutControlButton('isolate', 'Restore the selected members and minimize the rest of this layout', 'data-wl-isolate', candidate.id)}
+      ${detachControl}
     </div>
     <div class="window-layout-picker" data-wl-picker="${escapeHtml(candidate.id)}"></div>
     <div class="window-layout-status" data-wl-status="${escapeHtml(candidate.id)}">${escapeHtml(status)}</div>
   </div>`;
 }
 
-function windowLayoutMemberMarkup(layoutId, member) {
-  const icon = windowLayoutMemberIcon(layoutId, member.id);
-  const iconMarkup = icon
-    ? `<img class="window-layout-member-icon" src="${escapeHtml(icon)}" alt="" data-wl-member-icon="${escapeHtml(member.id)}">`
-    : `<span class="window-layout-member-icon placeholder" data-wl-member-icon="${escapeHtml(member.id)}" aria-hidden="true"></span>`;
-  const stateClass = member.state === 'minimized' ? 'minimized' : 'normal';
-  return `<button class="window-layout-member ${stateClass}" data-wl-member="${escapeHtml(member.id)}" data-wl-layout="${escapeHtml(layoutId)}" type="button" title="${escapeHtml(member.descriptor.title)} - ${stateClass}">
-    ${iconMarkup}
-    <span class="window-layout-member-label">${escapeHtml(member.descriptor.title)}</span>
-    <span class="window-layout-member-state ${stateClass}" aria-hidden="true"></span>
-  </button>`;
-}
+/** 019F: the six control glyphs and the taskbar-like member button live in
+ * ./app/window-layout-control-icons.js (static inline SVG, exact creator
+ * mapping, stable data-wl-glyph identifiers). The body wires them with the
+ * exact title/aria-label semantics and behavior data attributes. */
 
 /** Picker list markup (016): a vertical list of compact rows from the host
  * candidate list. Every row toggles: a row whose title matches an existing
@@ -443,17 +568,100 @@ function windowLayoutPickerMarkup(layoutId, candidates) {
 // 017I2: recording (switch, timer, observation, echo suppression) is owned
 // exclusively by the pure controller in ./app/window-layout-runtime.js; this
 // object keeps only the entry-side per-layout UI/interaction state.
+// 040: capabilities and icons are keyed by the composite
+// `layoutId\u0000memberId` identity (windowLayoutMemberKey) so two layouts
+// referencing the same real window never share ephemeral state; every cache,
+// DOM selector and removal path uses the composite key.
 const windowLayoutRuntime = {
-  capabilities: new Map(),   // memberId -> capability (ephemeral, entry-side discrete actions)
-  icons: new Map(),          // memberId -> data URL (ephemeral)
+  capabilities: new Map(),   // `${layoutId}\u0000${memberId}` -> capability (ephemeral, entry-side discrete actions)
+  icons: new Map(),          // `${layoutId}\u0000${memberId}` -> data URL (ephemeral)
   pickerOpenFor: null,
   pickerCandidates: null,
+  pickLayoutId: null,
   saveTimer: null,
   selectedMembers: new Map(), // layoutId -> Set<memberId> (inner multiselect)
+  selectionAnchor: new Map(), // layoutId -> memberId (Shift+click range anchor, 019B)
   pickUnsubscribe: null,
 };
 
 const WINDOW_LAYOUT_SAVE_DEBOUNCE_MS = 300;
+
+/** Balance wrapped member rows against the card's actual live width. If one
+ * more icon would create an 8+1 orphan, two near-even rows are chosen; a user
+ * resize recomputes the columns continuously instead of relying on a hardcoded
+ * member-count breakpoint. */
+function balanceWindowLayoutMemberRows(card) {
+  const members = card?.querySelector?.('[data-wl-members]');
+  if (!members) return;
+  const count = members.querySelectorAll('[data-wl-member]').length;
+  if (count === 0) {
+    members.style.removeProperty('--wl-balanced-member-width');
+    return;
+  }
+  const available = Math.max(28, card.clientWidth - 16);
+  const maxColumns = Math.max(1, Math.floor((available + 4) / 32));
+  const rows = Math.max(1, Math.ceil(count / maxColumns));
+  const columns = Math.ceil(count / rows);
+  members.style.setProperty('--wl-balanced-member-width', `${(columns * 28) + ((columns - 1) * 4)}px`);
+}
+
+const windowLayoutCardResizeTimers = new WeakMap();
+const windowLayoutCardResizeObserver = typeof ResizeObserver === 'function'
+  ? new ResizeObserver((entries) => {
+    for (const { target: card } of entries) {
+      balanceWindowLayoutMemberRows(card);
+      if (WIDGET_SURFACE || !card.isConnected || !card.style.width || card.matches('.window-layout-card--placeholder')) continue;
+      const layoutId = card.dataset.wlCard;
+      const width = Math.min(Math.round(card.getBoundingClientRect().width), WINDOW_LAYOUT_CARD_MAX_WIDTH);
+      const height = Math.ceil(card.scrollHeight);
+      const shell = card.closest('.window-layout-shell');
+      if (shell) shell.style.setProperty('--wl-card-width', `${width}px`);
+      const prior = windowLayoutCardResizeTimers.get(card);
+      if (prior) clearTimeout(prior);
+      windowLayoutCardResizeTimers.set(card, setTimeout(() => {
+        windowLayoutCardResizeTimers.delete(card);
+        const layout = windowLayoutFromState(layoutId);
+        if (!layout || !card.isConnected) return;
+        let next;
+        try { next = setWindowLayoutCardSize(state, layoutId, width, height); } catch { return; }
+        if (next === state) return;
+        store.replace(next);
+        void store.save(next).catch(() => undefined);
+      }, 180));
+    }
+  })
+  : null;
+
+function installWindowLayoutCardPresentation(root) {
+  for (const card of root?.querySelectorAll?.('.window-layout-card') ?? []) {
+    balanceWindowLayoutMemberRows(card);
+    windowLayoutCardResizeObserver?.observe(card);
+  }
+}
+
+function removeWindowLayoutCardPresentation(root) {
+  for (const card of root?.querySelectorAll?.('.window-layout-card') ?? []) {
+    windowLayoutCardResizeObserver?.unobserve(card);
+  }
+}
+
+/** Move a dragged member in visual row-major order. The old X-only comparator
+ * was wrong after wrapping and made later drags appear to time out or jump. */
+function moveWindowLayoutMemberButton(members, button, clientX, clientY) {
+  const candidates = [...members.querySelectorAll('[data-wl-member]')].filter((candidate) => candidate !== button);
+  let before = null;
+  for (const candidate of candidates) {
+    const rect = candidate.getBoundingClientRect();
+    if (clientY < rect.top + (rect.height / 2)
+      || (clientY <= rect.bottom && clientX < rect.left + (rect.width / 2))) {
+      before = candidate;
+      break;
+    }
+  }
+  if (button.nextElementSibling === before || (!before && button === members.lastElementChild)) return false;
+  members.insertBefore(button, before);
+  return true;
+}
 
 function windowLayoutFromState(layoutId) {
   return state.windowLayouts?.find((candidate) => candidate.id === layoutId) ?? null;
@@ -478,36 +686,131 @@ function setWindowLayoutStatus(layoutId, text) {
   if (status) status.textContent = text;
 }
 
-function windowLayoutMemberIcon(layoutId, memberId) {
-  const cached = windowLayoutRuntime.icons.get(memberId);
-  if (cached !== undefined) return cached;
+/** 040: ONE shared/batched layout-scoped icon refresh. Members whose icon is
+ * not yet cached are queued by their composite layout\u0000member key; a single
+ * bounded `windowCandidates()` request resolves every queued member's icon in
+ * one pass (never one enumeration per member). Committed pick icons are cached
+ * immediately at add time; everything else is filled here. A member with no
+ * icon yet renders a stable explicit placeholder cell (no blank geometry, no
+ * layout shift). The refresh is shared by the workspace and widget surfaces and
+ * re-broadcasts resolved icons to open widgets. */
+const windowLayoutPendingIcons = new Map(); // compositeKey -> { layoutId, memberId, member }
+let windowLayoutIconRefreshScheduled = false;
+
+function queueWindowLayoutIconRefresh(layoutId, memberId) {
   const member = windowLayoutMemberFromState(layoutId, memberId);
-  if (!member) return null;
-  // Lazy host-side re-enrichment after reload: match the persisted
-  // descriptor against the trusted candidate list (bounded, cached).
-  void host.windowCandidates().then((result) => {
-    if (result.outcome !== 'success') return;
-    const match = result.candidates.find((candidate) =>
-      candidate.title === member.descriptor.title && candidate.icon);
-    if (!match) return;
-    windowLayoutRuntime.icons.set(memberId, match.icon);
-    const img = document.querySelector(`[data-wl-member-icon="${CSS.escape(memberId)}"]`);
-    if (img) img.src = match.icon;
-  }).catch(() => undefined);
+  if (!member) return;
+  const key = windowLayoutMemberKey(layoutId, memberId);
+  if (windowLayoutRuntime.icons.has(key)) return;
+  windowLayoutPendingIcons.set(key, { layoutId, memberId, member });
+  if (windowLayoutIconRefreshScheduled) return;
+  windowLayoutIconRefreshScheduled = true;
+  setTimeout(() => {
+    windowLayoutIconRefreshScheduled = false;
+    void runWindowLayoutIconRefresh();
+  }, 0);
+}
+
+async function runWindowLayoutIconRefresh() {
+  if (windowLayoutPendingIcons.size === 0) return;
+  if (windowLayoutDetachment.isReadOnly()) return;
+  const pending = new Map(windowLayoutPendingIcons);
+  windowLayoutPendingIcons.clear();
+  const result = await host.windowCandidates();
+  // 018X4: a handoff begun during the host call must abort before any UI
+  // cache/src side effect.
+  if (windowLayoutDetachment.isReadOnly()) return;
+  if (result.outcome !== 'success') return;
+  const candidates = result.candidates ?? [];
+  const updatedLayouts = new Set();
+  for (const { layoutId, memberId, member } of pending.values()) {
+    const key = windowLayoutMemberKey(layoutId, memberId);
+    if (windowLayoutRuntime.icons.has(key)) continue;
+    const titleMatches = candidates.filter((candidate) =>
+      candidate.title === member.descriptor.title);
+    if (titleMatches.length !== 1) continue;
+    const match = titleMatches[0];
+    let icon = match.icon ?? null;
+    // 040I: hydrate the exact HWND/class icon via a separate post-list request.
+    // This keeps the latency-critical desktop enumeration small while allowing
+    // packaged/Electron apps (ChatGPT, OpenCode) to use their taskbar icon
+    // instead of the executable's generic fallback. Work is sequential and
+    // bounded to actual layout members, never every visible desktop window.
+    try {
+      const bound = await host.bindWindowCandidate(match.id);
+      if (windowLayoutDetachment.isReadOnly()) return;
+      if (bound.outcome === 'success' && bound.capability) {
+        windowLayoutRuntime.capabilities.set(key, bound.capability);
+        const nativeIcon = await host.windowThumbnailCapability(bound.capability, {
+          maxWidth: 48,
+          maxHeight: 48,
+        });
+        if (windowLayoutDetachment.isReadOnly()) return;
+        if (nativeIcon.outcome === 'success' && nativeIcon.imageUrl) {
+          icon = nativeIcon.imageUrl;
+        }
+      }
+    } catch {
+      // Keep the executable icon fallback when the native icon is unavailable.
+    }
+    if (!icon) continue;
+    windowLayoutRuntime.icons.set(key, icon);
+    updatedLayouts.add(layoutId);
+  }
+  if (updatedLayouts.size > 0) {
+    // Update scoped DOM (each layout's own member icon only) and re-broadcast
+    // the resolved icons to any open widget for those layouts.
+    for (const layoutId of updatedLayouts) {
+      const container = document.querySelector(`[data-wl-members="${CSS.escape(layoutId)}"]`);
+      if (container) {
+        for (const button of container.querySelectorAll('[data-wl-member]')) {
+          const memberId = button.dataset.wlMember;
+          const icon = windowLayoutRuntime.icons.get(windowLayoutMemberKey(layoutId, memberId));
+          if (!icon) continue;
+          const cell = button.querySelector('[data-wl-member-icon]');
+          if (cell && cell.classList.contains('placeholder')) {
+            const img = document.createElement('img');
+            img.className = 'window-layout-member-icon';
+            img.setAttribute('data-wl-member-icon', memberId);
+            img.alt = '';
+            img.src = icon;
+            cell.replaceWith(img);
+          } else if (cell && cell.tagName === 'IMG' && cell.getAttribute('src') !== icon) {
+            cell.setAttribute('src', icon);
+          }
+        }
+      }
+      windowLayoutWidgetChannelWorkspace.broadcast(layoutId);
+    }
+  }
+}
+
+function windowLayoutMemberIcon(layoutId, memberId) {
+  const cached = windowLayoutRuntime.icons.get(windowLayoutMemberKey(layoutId, memberId));
+  if (cached !== undefined) return cached;
+  queueWindowLayoutIconRefresh(layoutId, memberId);
   return null;
 }
 
 async function capabilityForMember(layoutId, memberId) {
+  // 018X5: reject immediately when read-only, BEFORE the cached-capability fast
+  // path, so a later group member cannot issue observe/mutation calls without
+  // awaiting a fresh resolve.
+  if (windowLayoutDetachment.isReadOnly()) return null;
   const member = windowLayoutMemberFromState(layoutId, memberId);
   if (!member) return null;
-  const cached = windowLayoutRuntime.capabilities.get(memberId);
+  const key = windowLayoutMemberKey(layoutId, memberId);
+  const cached = windowLayoutRuntime.capabilities.get(key);
   if (cached) return cached;
   const resolved = await host.resolveWindowDescriptor(member.descriptor);
+  // 018X4: a handoff begun during the resolve must abort IMMEDIATELY after the
+  // await, before either the failure status or the success cache side effect.
+  if (windowLayoutDetachment.isReadOnly()) return null;
   if (resolved.outcome !== 'success') {
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(resolved.outcome));
     return null;
   }
-  windowLayoutRuntime.capabilities.set(memberId, resolved.capability);
+  windowLayoutRuntime.capabilities.set(key, resolved.capability);
   return resolved.capability;
 }
 
@@ -519,7 +822,8 @@ function windowLayoutStatusForOutcome(outcome) {
   return 'Failed';
 }
 
-async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false) {
+async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false, shiftKey = false) {
+  if (windowLayoutDetachment.isReadOnly()) return;
   const member = windowLayoutMemberFromState(layoutId, memberId);
   if (!member) return;
   if (ctrlKey) {
@@ -528,10 +832,35 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
     if (selected.has(memberId)) selected.delete(memberId);
     else selected.add(memberId);
     windowLayoutRuntime.selectedMembers.set(layoutId, selected);
+    windowLayoutRuntime.selectionAnchor.set(layoutId, memberId);
+    syncWindowLayoutMemberSelection(layoutId);
+    return;
+  }
+  if (shiftKey) {
+    // 019B: Shift+click selects the first-to-last range between the anchor and
+    // the clicked member in persisted member order. With no anchor (or an
+    // anchor that left the layout), the clicked member alone becomes the range
+    // AND the new anchor.
+    const ordered = (windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
+      .map((existing) => existing.id);
+    const anchorId = windowLayoutRuntime.selectionAnchor.get(layoutId);
+    const anchorIndex = ordered.indexOf(anchorId);
+    const clickedIndex = ordered.indexOf(memberId);
+    const selected = new Set();
+    if (anchorIndex === -1 || clickedIndex === -1) {
+      selected.add(memberId);
+    } else {
+      const [start, end] = anchorIndex <= clickedIndex
+        ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
+      for (let index = start; index <= end; index += 1) selected.add(ordered[index]);
+    }
+    windowLayoutRuntime.selectedMembers.set(layoutId, selected);
+    windowLayoutRuntime.selectionAnchor.set(layoutId, memberId);
     syncWindowLayoutMemberSelection(layoutId);
     return;
   }
   windowLayoutRuntime.selectedMembers.delete(layoutId);
+  windowLayoutRuntime.selectionAnchor.delete(layoutId);
   syncWindowLayoutMemberSelection(layoutId);
   // 016 contextual occurrences: an icon click from a DIFFERENT layout (or
   // with no active context) applies THIS layout's saved arrangement for every
@@ -542,73 +871,120 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
     return;
   }
   const capability = await capabilityForMember(layoutId, memberId);
+  // 018X7: capabilityForMember yields even on the cached fast path; a handoff
+  // entered during that microtask must abort before observe.
+  if (windowLayoutDetachment.isReadOnly()) return;
   if (!capability) return;
   const observed = await host.observeWindowCapability(capability);
+  // 018X4: abort immediately after the observe await, before success OR failure
+  // handling.
+  if (windowLayoutDetachment.isReadOnly()) return;
   if (observed.outcome !== 'success' || !observed.observation) {
     if (observed.outcome === 'missing') {
       // Stale binding after a helper restart: drop it and re-sync the
       // controller's capabilities so the observer re-resolves once.
-      windowLayoutRuntime.capabilities.delete(memberId);
+      windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
       windowLayoutRuntimeController.invalidateCapabilities(layoutId);
       if (state.activeWindowLayoutId === layoutId) {
         await windowLayoutRuntimeController.reconcileActive();
+        // 018X5: abort immediately after the reconcile await before the status.
+        if (windowLayoutDetachment.isReadOnly()) return;
       }
     }
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(observed.outcome));
     return;
   }
+  // 018X2: a handoff begun during the observe must abort before any side effect.
+  if (windowLayoutDetachment.isReadOnly()) return;
   const liveState = observed.observation.state === 'minimized' ? 'minimized' : 'normal';
   const targetState = liveState === 'minimized' ? 'restore' : 'minimize';
   const result = targetState === 'restore'
     ? await host.restoreWindowCapability(capability)
     : await host.minimizeWindowCapability(capability);
+  // 018X4: abort immediately after the mutation await, before failure status.
+  if (windowLayoutDetachment.isReadOnly()) return;
   if (result.outcome !== 'success') {
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
     return;
   }
+  // 018X2: re-check after the minimize/restore await too.
+  if (windowLayoutDetachment.isReadOnly()) return;
   const nextState = targetState === 'restore' ? 'normal' : 'minimized';
   store.replace(updateWindowLayoutMember(state, layoutId, memberId, {
     state: nextState,
     bounds: observed.observation.bounds,
   }));
   patchWindowLayoutMember(layoutId, memberId, nextState);
+  noteWindowLayoutCommit(layoutId);
   queueWindowLayoutSave();
 }
 
 function patchWindowLayoutMember(layoutId, memberId, stateValue) {
-  const button = document.querySelector(`[data-wl-member="${CSS.escape(memberId)}"]`);
+  // 040: scope the DOM selector by layout+member so a state patch for one
+  // layout can never touch the same-window member of another layout.
+  const button = document.querySelector(
+    `[data-wl-layout="${CSS.escape(layoutId)}"] [data-wl-member="${CSS.escape(memberId)}"]`);
   if (!button) return;
   button.classList.remove('normal', 'minimized');
   button.classList.add(stateValue);
+  button.setAttribute('aria-pressed', stateValue === 'minimized' ? 'true' : 'false');
+  button.removeAttribute('title');
   const marker = button.querySelector('.window-layout-member-state');
   if (marker) {
     marker.className = `window-layout-member-state ${stateValue}`;
+    marker.setAttribute('data-wl-member-state', stateValue);
   }
 }
 
 async function openWindowLayoutPicker(layoutId) {
+  // 019G: a picker covering the desktop must clear/discard the hover preview.
+  windowLayoutMemberPreview.cancel();
   windowLayoutRuntime.pickerOpenFor = layoutId;
-  const pickerHost = document.querySelector(`[data-wl-picker="${CSS.escape(layoutId)}"]`);
-  if (!pickerHost) return;
-  pickerHost.innerHTML = '<div class="window-layout-picker-panel"><div class="window-layout-empty">Loading candidates…</div></div>';
   const result = await host.windowCandidates();
+  // 018X4: abort immediately after the await, before the failure or success UI.
+  if (windowLayoutDetachment.isReadOnly()) return;
   if (windowLayoutRuntime.pickerOpenFor !== layoutId) return; // closed meanwhile
   if (result.outcome !== 'success') {
-    pickerHost.innerHTML = `<div class="window-layout-picker-panel"><div class="window-layout-empty">${escapeHtml(windowLayoutStatusForOutcome(result.outcome))}</div></div>`;
+    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
+    closeWindowLayoutPicker();
     return;
   }
   windowLayoutRuntime.pickerCandidates = result.candidates;
-  pickerHost.innerHTML = windowLayoutPickerMarkup(layoutId, result.candidates);
+  const currentTitles = new Set((windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
+    .map((member) => member.descriptor.title));
+  const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
+    id: candidate.id,
+    title: candidate.title,
+    icon: candidate.icon ?? null,
+    current: currentTitles.has(candidate.title),
+  })));
+  if (windowLayoutRuntime.pickerOpenFor !== layoutId) return;
+  if (picked.candidateId) await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
+  closeWindowLayoutPicker();
 }
 
 function closeWindowLayoutPicker() {
+  const layoutId = windowLayoutRuntime.pickerOpenFor;
   windowLayoutRuntime.pickerOpenFor = null;
   windowLayoutRuntime.pickerCandidates = null;
-  const pickerHost = document.querySelector('[data-wl-picker]');
+  const pickerHost = layoutId
+    ? document.querySelector(`[data-wl-picker="${CSS.escape(layoutId)}"]`)
+    : null;
   if (pickerHost) pickerHost.innerHTML = '';
+  restoreHoveredWindowLayoutPreview(layoutId);
+}
+
+function restoreHoveredWindowLayoutPreview(layoutId) {
+  if (!layoutId) return;
+  queueMicrotask(() => {
+    const member = document.querySelector(`[data-wl-layout="${CSS.escape(layoutId)}"][data-wl-member]:hover`);
+    if (!member) return;
+    scheduleWindowLayoutPreviewDwell(member);
+  });
 }
 
 async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
+  if (windowLayoutDetachment.isReadOnly()) return;
   const layout = windowLayoutFromState(layoutId);
   if (!layout) return;
   const members = layout.arrangement?.members ?? [];
@@ -619,11 +995,12 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
   const existing = row ? members.find((member) => member.descriptor.title === row.title) : null;
   if (existing) {
     const next = removeWindowLayoutMember(state, layoutId, existing.id);
-    windowLayoutRuntime.capabilities.delete(existing.id);
-    windowLayoutRuntime.icons.delete(existing.id);
+    windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, existing.id));
+    windowLayoutRuntime.icons.delete(windowLayoutMemberKey(layoutId, existing.id));
     store.commit(next);
     closeWindowLayoutPicker();
     saveWorkspaceView();
+    noteWindowLayoutCommit(layoutId);
     // Removing a member of the active layout re-syncs the observer; removing
     // from an inactive layout never starts recording there.
     if (state.activeWindowLayoutId === layoutId) {
@@ -632,6 +1009,9 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     return;
   }
   const bound = await host.bindWindowCandidate(candidateId);
+  // 018X4: abort immediately after the await, before the failure status or the
+  // success continuation.
+  if (windowLayoutDetachment.isReadOnly()) return;
   if (bound.outcome !== 'success') {
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(bound.outcome));
     return;
@@ -640,6 +1020,8 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
   // 016: adding a window captures its current valid bounds/state immediately;
   // the creator never presses another button to make the member useful.
   const observed = await host.observeWindowCapability(bound.capability);
+  // 018X2: a handoff begun during the bind/observe must abort before the add.
+  if (windowLayoutDetachment.isReadOnly()) return;
   const member = {
     id: memberId,
     descriptor: bound.descriptor,
@@ -649,17 +1031,26 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
       ? 'minimized' : 'normal',
   };
   const next = addWindowLayoutMember(state, layoutId, member);
-  windowLayoutRuntime.capabilities.set(memberId, bound.capability);
+  windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(layoutId, memberId), bound.capability);
   const icon = (windowLayoutRuntime.pickerCandidates ?? [])
     .find((candidate) => candidate.id === candidateId)?.icon ?? null;
-  if (icon) windowLayoutRuntime.icons.set(memberId, icon);
+  if (icon) windowLayoutRuntime.icons.set(windowLayoutMemberKey(layoutId, memberId), icon);
   store.commit(next);
   closeWindowLayoutPicker();
   saveWorkspaceView();
+  noteWindowLayoutCommit(layoutId);
   // Adding to a layout selects/persists that layout as the recording context
   // and leaves one active observer.
   await windowLayoutRecording.ensureRecording(layoutId);
 }
+
+/** 019B: bounded concurrent group scheduling. At most
+ * WINDOW_LAYOUT_GROUP_CONCURRENCY members observe/mutate in flight, so a group
+ * action's latency scales with the slowest helper call instead of a fully
+ * serialized tail; results stay typed per member and a superseded result
+ * (read-only handoff begun mid-batch) aborts the whole batch. */
+const WINDOW_LAYOUT_GROUP_CONCURRENCY = 4;
+const WINDOW_LAYOUT_GROUP_ABORT = (result) => result === 'superseded';
 
 /** 016 group actions (selected members when any are selected, otherwise all):
  * minimize, restore/open (applies saved bounds), or isolate (restore the
@@ -667,82 +1058,122 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
  * per-member loop with typed results; partial failures are visible. */
 async function runGroupMemberAction(layoutId, member, action, results, patches) {
   const capability = await capabilityForMember(layoutId, member.id);
+  // 018X7: capabilityForMember yields even on the cached fast path; a handoff
+  // entered during that microtask must abort before any host call.
+  if (windowLayoutDetachment.isReadOnly()) return 'superseded';
   if (!capability) return 'missing';
-  const observed = await host.observeWindowCapability(capability);
-  if (observed.outcome !== 'success' || !observed.observation) {
-    return observed.outcome;
-  }
-  let result = null;
-  let nextState = observed.observation.state === 'minimized' ? 'minimized' : 'normal';
-  if (action === 'minimize') {
-    result = await host.minimizeWindowCapability(capability);
-    nextState = 'minimized';
-  } else {
-    // Group actions are explicit user intent: the controller's own echo
-    // suppression covers its switch applies, so no separate suppression is
-    // needed here - the observe loop records the post-action state as intent.
-    if (member.bounds) result = await host.applyWindowCapability(capability, member.bounds);
-    if (!result || result.outcome === 'success') {
-      result = await host.restoreWindowCapability(capability);
+  // 018X5: the runner owns the systematic barriers (observe/apply/restore/
+  // minimize each abort on read-only at the next executable boundary).
+  const outcome = await windowLayoutGroupActionRunner.runMember(capability, member, action);
+  if (outcome === 'superseded') return outcome;
+  if (outcome !== 'success') return outcome;
+  const nextState = action === 'minimize' ? 'minimized' : 'normal';
+  if (windowLayoutDetachment.isReadOnly()) return 'superseded';
+  results.push({ memberId: member.id, outcome });
+  patches.push({ memberId: member.id, state: nextState });
+  patchWindowLayoutMember(layoutId, member.id, nextState);
+  return outcome;
+}
+
+/** 019B: the stale-binding retry moves INSIDE the concurrent worker so a
+ * helper restart fails one member's first observe with missing, drops and
+ * re-resolves that member ONCE, and retries without deserializing the batch. */
+async function runGroupMemberActionWithRetry(layoutId, member, action, results, patches) {
+  let outcome = await runGroupMemberAction(layoutId, member, action, results, patches);
+  if (outcome === 'missing') {
+    windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, member.id));
+    const freshCapability = await capabilityForMember(layoutId, member.id);
+    // 018X5: abort immediately after the retry resolution await.
+    if (windowLayoutDetachment.isReadOnly()) return 'superseded';
+    if (freshCapability) {
+      outcome = await runGroupMemberAction(layoutId, member, action, results, patches);
+      if (outcome !== 'missing') return outcome;
     }
-    nextState = 'normal';
+    results.push({ memberId: member.id, outcome: 'missing' });
   }
+  return outcome;
+}
+
+/** 019B: isolate minimizes ONE unselected member (a bounded concurrent
+ * worker); the handoff barriers are identical to the per-member runner. */
+async function isolateMinimizeMember(layoutId, member, results, patches) {
+  const capability = await capabilityForMember(layoutId, member.id);
+  // 018X5: abort immediately after the isolate resolution await.
+  if (windowLayoutDetachment.isReadOnly()) return 'superseded';
+  if (!capability) {
+    results.push({ memberId: member.id, outcome: 'missing' });
+    return 'missing';
+  }
+  const result = await host.minimizeWindowCapability(capability);
+  // 018X5: abort immediately after the minimize await before the UI patch.
+  if (windowLayoutDetachment.isReadOnly()) return 'superseded';
   results.push({ memberId: member.id, outcome: result.outcome });
   if (result.outcome === 'success') {
-    patches.push({ memberId: member.id, state: nextState });
-    patchWindowLayoutMember(layoutId, member.id, nextState);
+    patches.push({ memberId: member.id, state: 'minimized' });
+    patchWindowLayoutMember(layoutId, member.id, 'minimized');
   }
   return result.outcome;
 }
 
-async function windowLayoutGroupAction(layoutId, action) {
+/** 019B: prewarms every target's capability concurrently (the host descriptor
+ * resolves fan out in one round trip instead of a serialized tail), then runs
+ * the per-member actions through a BOUNDED concurrent scheduler with typed
+ * results, a superseded abort and a final abort barrier before the single
+ * committed state. `explicitTargetIds` lets Shift+right-click toggle ONLY the
+ * clicked member when no inner range is selected (019B) without disturbing the
+ * selection UI. */
+async function windowLayoutGroupAction(layoutId, action, explicitTargetIds = null) {
+  if (windowLayoutDetachment.isReadOnly()) return;
   const layout = windowLayoutFromState(layoutId);
   if (!layout) return;
   const members = layout.arrangement?.members ?? [];
   if (members.length === 0) return;
-  const selected = windowLayoutRuntime.selectedMembers.get(layoutId);
+  const selected = explicitTargetIds
+    ? new Set(explicitTargetIds)
+    : windowLayoutRuntime.selectedMembers.get(layoutId);
   const targets = selected && selected.size > 0
     ? members.filter((member) => selected.has(member.id)) : members;
   const results = [];
   const patches = [];
-  for (const member of targets) {
-    const outcome = await runGroupMemberAction(layoutId, member, action, results, patches);
-    // A stale binding (helper restart) fails the first observe with missing:
-    // drop it, re-resolve ONCE, and retry the full action.
-    if (outcome === 'missing') {
-      windowLayoutRuntime.capabilities.delete(member.id);
-      const freshCapability = await capabilityForMember(layoutId, member.id);
-      if (freshCapability) {
-        const retried = await runGroupMemberAction(layoutId, member, action, results, patches);
-        if (retried !== 'missing') continue;
-      }
-      results.push({ memberId: member.id, outcome: 'missing' });
-    }
-  }
+  // 019B prewarm: resolve every target's capability before the batch so the
+  // bounded observes/mutates below are cache-hot. A handoff entered during the
+  // fan-out aborts before any host call.
+  await Promise.all(targets.map((member) => capabilityForMember(layoutId, member.id)));
+  if (windowLayoutDetachment.isReadOnly()) return;
+  await runBoundedConcurrent(
+    targets,
+    WINDOW_LAYOUT_GROUP_CONCURRENCY,
+    (member) => runGroupMemberActionWithRetry(layoutId, member, action, results, patches),
+    WINDOW_LAYOUT_GROUP_ABORT,
+  );
   if (action === 'isolate') {
     const unselected = selected && selected.size > 0
       ? members.filter((member) => !selected.has(member.id)) : [];
-    for (const member of unselected) {
-      const capability = await capabilityForMember(layoutId, member.id);
-      if (!capability) {
-        results.push({ memberId: member.id, outcome: 'missing' });
-        continue;
-      }
-      const result = await host.minimizeWindowCapability(capability);
-      results.push({ memberId: member.id, outcome: result.outcome });
-      if (result.outcome === 'success') {
-        patches.push({ memberId: member.id, state: 'minimized' });
-        patchWindowLayoutMember(layoutId, member.id, 'minimized');
-      }
+    if (unselected.length > 0) {
+      await Promise.all(unselected.map((member) => capabilityForMember(layoutId, member.id)));
+      if (windowLayoutDetachment.isReadOnly()) return;
+      await runBoundedConcurrent(
+        unselected,
+        WINDOW_LAYOUT_GROUP_CONCURRENCY,
+        (member) => isolateMinimizeMember(layoutId, member, results, patches),
+        WINDOW_LAYOUT_GROUP_ABORT,
+      );
     }
   }
+  // 018X5/019B: the FINAL abort barrier — a handoff begun during any in-flight
+  // member (returned 'superseded') or discovered by the runner aborts the
+  // ENTIRE action before the committed state, status and controller ensure.
+  if (windowLayoutDetachment.isReadOnly() || windowLayoutGroupActionRunner.aborted()) return;
   // Chain every member patch into ONE next state and commit once, so a later
   // patch can never clobber an earlier one with stale state.
   let nextState = state;
   for (const patch of patches) {
     nextState = updateWindowLayoutMember(nextState, layoutId, patch.memberId, { state: patch.state });
   }
-  if (patches.length > 0) store.replace(nextState);
+  if (patches.length > 0) {
+    store.replace(nextState);
+    noteWindowLayoutCommit(layoutId);
+  }
   queueWindowLayoutSave();
   const failed = results.filter((result) => result.outcome !== 'success').length;
   if (failed > 0) setWindowLayoutStatus(layoutId, `${failed} of ${results.length} members failed`);
@@ -752,12 +1183,59 @@ async function windowLayoutGroupAction(layoutId, action) {
   await windowLayoutRecording.ensureRecording(layoutId);
 }
 
+/** 019B/019C Shift+right-click: minimizes/restores the SELECTED RANGE (or just
+ * the clicked member when no inner range is selected) toward the OPPOSITE of
+ * the clicked member's live state — clicking a minimized member restores the
+ * range, otherwise it minimizes it. `explicitMemberIds` (the widget-sourced
+ * range, 019C) overrides the workspace-local inner selection without touching
+ * it. The direction is probed once (one observe) and the batch keeps per-member
+ * typed results through the bounded scheduler. Plain right-click on a member
+ * still falls through to the workspace menu. */
+async function windowLayoutToggleRange(layoutId, clickedMemberId, explicitMemberIds = null) {
+  if (windowLayoutDetachment.isReadOnly()) return;
+  const member = windowLayoutMemberFromState(layoutId, clickedMemberId);
+  if (!member) return;
+  const selected = explicitMemberIds !== null
+    ? new Set(explicitMemberIds)
+    : windowLayoutRuntime.selectedMembers.get(layoutId);
+  const hasRange = Boolean(selected && selected.size > 0);
+  const capability = await capabilityForMember(layoutId, clickedMemberId);
+  // 018X5: abort immediately after the probe resolution await.
+  if (windowLayoutDetachment.isReadOnly()) return;
+  if (!capability) {
+    setWindowLayoutStatus(layoutId, 'Window not visible');
+    return;
+  }
+  const observed = await host.observeWindowCapability(capability);
+  // 018X4: abort immediately after the observe await, before success/failure.
+  if (windowLayoutDetachment.isReadOnly()) return;
+  if (observed.outcome !== 'success' || !observed.observation) {
+    if (observed.outcome === 'missing') {
+      windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, clickedMemberId));
+      windowLayoutRuntimeController.invalidateCapabilities(layoutId);
+    }
+    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(observed.outcome));
+    return;
+  }
+  const liveState = observed.observation.state === 'minimized' ? 'minimized' : 'normal';
+  const action = liveState === 'minimized' ? 'restore' : 'minimize';
+  const range = explicitMemberIds !== null
+    ? explicitMemberIds
+    : (hasRange ? null : [clickedMemberId]);
+  await windowLayoutGroupAction(layoutId, action, range);
+}
+
 /** 016 direct onscreen pick: begin the Papers-owned pick session for THIS
  * layout and wait for its single typed result (Escape/right-click cancels). */
 async function beginWindowLayoutDirectPick(layoutId) {
+  console.info('[045-direct-pick] begin-enter', layoutId);
+  if (windowLayoutDetachment.isReadOnly()) return;
   const layout = windowLayoutFromState(layoutId);
   if (!layout) return;
+  // 019G: the pick overlay covers the desktop; clear/discard the hover preview.
+  windowLayoutMemberPreview.cancel();
   closeWindowLayoutPicker();
+  windowLayoutRuntime.pickLayoutId = layoutId;
   const members = (layout.arrangement?.members ?? []).map((member) => member.descriptor);
   let result = null;
   try {
@@ -766,11 +1244,19 @@ async function beginWindowLayoutDirectPick(layoutId) {
     // eligible window) is never missed. A failed begin removes the listener
     // again; the main-side session clears onResult on failure, so nothing
     // can deliver afterwards.
+    console.info('[045-direct-pick] begin-request', layoutId, members.length);
     const beginPromise = host.pickWindowBegin(members);
     const pickPromise = new Promise((resolve) => {
       windowLayoutRuntime.pickUnsubscribe = host.onPickResult(resolve);
     });
     const begin = await beginPromise;
+    console.info('[045-direct-pick] begin-result', layoutId, begin?.outcome, begin?.error ?? '');
+    // 018X4: abort immediately after the begin await, before the failure status.
+    if (windowLayoutDetachment.isReadOnly()) {
+      windowLayoutRuntime.pickUnsubscribe?.();
+      windowLayoutRuntime.pickUnsubscribe = null;
+      return;
+    }
     if (begin.outcome !== 'started') {
       windowLayoutRuntime.pickUnsubscribe?.();
       windowLayoutRuntime.pickUnsubscribe = null;
@@ -778,54 +1264,37 @@ async function beginWindowLayoutDirectPick(layoutId) {
       return;
     }
     result = await pickPromise;
-  } catch {
+    // 018X4: abort immediately after the result, before success OR failure
+    // handling (the non-picked status must never fire post-handoff).
+    if (windowLayoutDetachment.isReadOnly()) return;
+  } catch (error) {
+    console.error('[045-direct-pick] begin-error', String(error));
     windowLayoutRuntime.pickUnsubscribe?.();
     windowLayoutRuntime.pickUnsubscribe = null;
+    if (windowLayoutDetachment.isReadOnly()) return;
     setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
     return;
   } finally {
     windowLayoutRuntime.pickUnsubscribe?.();
     windowLayoutRuntime.pickUnsubscribe = null;
+    windowLayoutRuntime.pickLayoutId = null;
   }
-  if (result.outcome !== 'picked' || !result.capability || !result.descriptor) {
-    if (result.outcome === 'cancelled') setWindowLayoutStatus(layoutId, '');
-    else setWindowLayoutStatus(layoutId, result.error || 'Pick failed');
+  // 019C: Winter's pick session returns ONE typed committed set (Enter) or a
+  // zero-mutation cancel (Escape). Every remove is applied data-only and every
+  // successful add is bound, all persisted ONCE by the pick applier; the active
+  // layout identity is preserved and the one recording controller continues.
+  if (result.outcome === 'cancelled') {
+    setWindowLayoutStatus(layoutId, '');
     return;
   }
-  const current = windowLayoutFromState(layoutId);
-  if (!current) return;
-  const existing = (current.arrangement?.members ?? [])
-    .find((member) => member.descriptor.title === result.descriptor.title);
-  if (existing) {
-    // Toggled off: data-only unlink, never closes or moves the window.
-    const next = removeWindowLayoutMember(state, layoutId, existing.id);
-    windowLayoutRuntime.capabilities.delete(existing.id);
-    windowLayoutRuntime.icons.delete(existing.id);
-    store.commit(next);
-    saveWorkspaceView();
-    if (state.activeWindowLayoutId === layoutId) {
-      await windowLayoutRuntimeController.reconcileActive();
-    }
+  if (result.outcome !== 'committed') {
+    setWindowLayoutStatus(layoutId, result.error || 'Pick failed');
     return;
   }
-  const memberId = crypto.randomUUID();
-  const observed = await host.observeWindowCapability(result.capability);
-  const member = {
-    id: memberId,
-    descriptor: result.descriptor,
-    bounds: observed.outcome === 'success' && observed.observation?.bounds
-      ? observed.observation.bounds : null,
-    state: observed.outcome === 'success' && observed.observation?.state === 'minimized'
-      ? 'minimized' : 'normal',
-  };
-  const next = addWindowLayoutMember(state, layoutId, member);
-  windowLayoutRuntime.capabilities.set(memberId, result.capability);
-  if (result.candidate?.icon) windowLayoutRuntime.icons.set(memberId, result.candidate.icon);
-  store.commit(next);
-  saveWorkspaceView();
-  // Direct-picked additions select/persist this layout as the recording
-  // context and leave one active observer.
-  await windowLayoutRecording.ensureRecording(layoutId);
+  // 018X1R: after awaited pick/host work, re-check the read-only handoff so an
+  // in-flight pick result can never mutate post-handoff state.
+  if (windowLayoutDetachment.isReadOnly()) return;
+  await applyWindowLayoutPickSet(layoutId, result);
 }
 
 function syncWindowLayoutMemberSelection(layoutId) {
@@ -833,9 +1302,404 @@ function syncWindowLayoutMemberSelection(layoutId) {
   const container = document.querySelector(`[data-wl-members="${CSS.escape(layoutId)}"]`);
   if (!container) return;
   for (const button of container.querySelectorAll('[data-wl-member]')) {
-    button.classList.toggle('selected', Boolean(selected?.has(button.dataset.wlMember)));
+    const isSelected = Boolean(selected?.has(button.dataset.wlMember));
+    button.classList.toggle('selected', isSelected);
+    button.setAttribute('aria-selected', String(isSelected));
   }
 }
+
+/** 019B/019GR bounded tooltip/popover DOM seam for a member. ONE shared fixed
+ * popover (per document) is reused across every layout and card: it shows the
+ * member's NATIVE ICON (when available) + FULL name and carries the live
+ * preview slot (`data-wl-popover-preview`) for the real thumbnail. The
+ * icon/name fallback stays when no preview is supplied. Bounded: pointer-events
+ * none, positioned on hover and RE-POSITIONED when the preview image changes
+ * the popover size, hidden on leave/scroll/resize; it never makes a host call. */
+function createWindowLayoutMemberPopover() {
+  let element = null;
+  let lastAnchor = null;
+  let lastName = '';
+  let animationFrame = null;
+  function ensure() {
+    if (element) return element;
+    element = document.createElement('div');
+    element.className = 'window-layout-member-popover';
+    element.setAttribute('data-wl-popover', 'true');
+    element.hidden = true;
+    element.innerHTML =
+      '<div class="window-layout-member-popover-title">'
+      + '<img class="window-layout-member-popover-icon" data-wl-popover-icon alt="" hidden>'
+      + '<div class="window-layout-member-popover-name" data-wl-popover-name></div>'
+      + '</div>'
+      + '<div class="window-layout-member-popover-preview" data-wl-popover-preview></div>';
+    document.body.appendChild(element);
+    return element;
+  }
+  function position() {
+    const popover = element;
+    if (!popover || !lastAnchor) return;
+    const rect = popover.getBoundingClientRect();
+    const margin = 6;
+    const left = Math.max(margin, Math.min(
+      window.innerWidth - rect.width - margin,
+      lastAnchor.left + lastAnchor.width / 2 - rect.width / 2,
+    ));
+    let top = lastAnchor.top - rect.height - margin;
+    if (top < margin) top = lastAnchor.bottom + margin;
+    // 034: keep the WHOLE popover (including a real-window preview) inside the
+    // viewport - in the content-fit detached widget the window is small, so a
+    // top-placed preview must not overflow the bottom edge.
+    if (top + rect.height > window.innerHeight - margin) top = window.innerHeight - rect.height - margin;
+    if (top < margin) top = margin;
+    popover.style.left = `${Math.round(left)}px`;
+    popover.style.top = `${Math.round(top)}px`;
+  }
+  return {
+    show(name, anchorRect, iconSrc = null) {
+      lastName = name;
+      // Widget thumbnails live in their own naturally-sized native window.
+      // Retain only the anchor here; a local name popover is cramped by the
+      // compact widget viewport and duplicates the preview's title.
+      if (WIDGET_SURFACE) {
+        lastAnchor = anchorRect;
+        if (element) {
+          element.classList.remove('is-visible');
+          element.hidden = true;
+        }
+        return;
+      }
+      const popover = ensure();
+      const nameNode = popover.querySelector('[data-wl-popover-name]');
+      if (nameNode) nameNode.textContent = name;
+      const iconNode = popover.querySelector('[data-wl-popover-icon]');
+      if (iconNode) {
+        if (iconSrc) {
+          iconNode.src = iconSrc;
+          iconNode.hidden = false;
+        } else {
+          iconNode.removeAttribute('src');
+          iconNode.hidden = true;
+        }
+      }
+      const preview = popover.querySelector('[data-wl-popover-preview]');
+      if (preview) preview.replaceChildren();
+      popover.hidden = false;
+      popover.classList.remove('is-visible');
+      lastAnchor = anchorRect;
+      position();
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = null;
+        if (!popover.hidden) popover.classList.add('is-visible');
+      });
+    },
+    hide() {
+      if (animationFrame !== null) {
+        cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+      if (element) {
+        element.classList.remove('is-visible');
+        element.hidden = true;
+      }
+      if (WIDGET_SURFACE) void host.widgetPreviewHide().catch(() => undefined);
+    },
+    /** 019GR: the preview image changed the popover size - re-clamp placement
+     * against the SAME member anchor so it never jumps off-screen. */
+    reposition() {
+      if (!element || element.hidden || !lastAnchor) return;
+      position();
+    },
+    /** 019C seam: fill the live-preview slot (thumbnail markup). Passing null
+     * clears it back to the icon/name-only fallback. 034: once the preview
+     * image finishes decoding it changes the popover size, so placement is
+     * re-clamped then (and when already complete) to keep the WHOLE popover
+     * inside the host viewport - never clipped by host/card bounds. */
+    updatePreview(memberId, previewMarkup) {
+      const preview = ensure().querySelector('[data-wl-popover-preview]');
+      if (!preview) return;
+      if (WIDGET_SURFACE) {
+        preview.replaceChildren();
+        if (previewMarkup == null) {
+          void host.widgetPreviewHide().catch(() => undefined);
+          return;
+        }
+        const holder = document.createElement('div');
+        holder.innerHTML = previewMarkup;
+        const img = holder.querySelector('.window-layout-member-preview-image');
+        if (!img || !lastAnchor) return;
+        const width = Number(img.getAttribute('width'));
+        const height = Number(img.getAttribute('height'));
+        if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+        void host.widgetPreviewShow(img.src, lastName, width, height, {
+          x: Math.round(window.screenX + lastAnchor.left),
+          y: Math.round(window.screenY + lastAnchor.top),
+          width: Math.round(lastAnchor.width),
+          height: Math.round(lastAnchor.height),
+        }).catch(() => undefined);
+        return;
+      }
+      const popover = ensure();
+      if (previewMarkup == null) {
+        preview.replaceChildren();
+        popover.classList.remove('has-preview');
+        popover.style.removeProperty('width');
+      } else {
+        preview.innerHTML = previewMarkup;
+        const declaredWidth = Number(preview.querySelector('.window-layout-member-preview-image')?.getAttribute('width'));
+        if (Number.isFinite(declaredWidth) && declaredWidth > 0) {
+          popover.classList.add('has-preview');
+          popover.style.width = `${declaredWidth}px`;
+        }
+      }
+      const img = preview.querySelector('.window-layout-member-preview-image');
+      if (img) {
+        img.addEventListener('load', () => windowLayoutMemberPopover.reposition(), { once: true });
+        if (img.complete) windowLayoutMemberPopover.reposition();
+      }
+    },
+  };
+}
+const windowLayoutMemberPopover = createWindowLayoutMemberPopover();
+const WINDOW_LAYOUT_PREVIEW_DWELL_MS = 100;
+let windowLayoutPreviewDwellTimer = null;
+
+function cancelWindowLayoutPreviewDwell() {
+  if (windowLayoutPreviewDwellTimer !== null) {
+    clearTimeout(windowLayoutPreviewDwellTimer);
+    windowLayoutPreviewDwellTimer = null;
+  }
+}
+
+function scheduleWindowLayoutPreviewDwell(member) {
+  cancelWindowLayoutPreviewDwell();
+  const layoutId = member.dataset.wlLayout;
+  const memberId = member.dataset.wlMember;
+  const name = member.getAttribute('aria-label') ?? member.title ?? '';
+  const iconSrc = member.querySelector('.window-layout-member-icon')?.getAttribute('src') ?? null;
+  const anchor = member.getBoundingClientRect();
+  windowLayoutPreviewDwellTimer = setTimeout(() => {
+    windowLayoutPreviewDwellTimer = null;
+    if (!member.isConnected || !member.matches(':hover')) return;
+    if (name) windowLayoutMemberPopover.show(name, anchor, iconSrc);
+    windowLayoutMemberPreview.schedule(layoutId, memberId);
+  }, WINDOW_LAYOUT_PREVIEW_DWELL_MS);
+}
+
+// 019GR surface-aware preview capability resolution. The WORKSPACE resolves the
+// member's capability from durable state via the existing runtime logic. The
+// COMPACT-WIDGET surface owns only widgetState.snapshot (durable state lives in
+// the workspace window), so it turns the snapshot member descriptor into a
+// capability through the host and caches it in a MEMORY-ONLY map — a capability
+// is never placed in snapshot/channel/durable state. The cache is cleared on
+// missing/removal, snapshot replacement (renderWidgetCard) and pagehide.
+const windowLayoutWidgetPreviewCapabilities = new Map();
+let windowLayoutWidgetPreviewSnapshot = null;
+
+function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
+  if (!WIDGET_SURFACE) return capabilityForMember(layoutId, memberId);
+  // 040: composite layout\u0000member cache identity so the widget preview for
+  // one layout never reuses a capability cached under another layout's member.
+  const key = windowLayoutMemberKey(layoutId, memberId);
+  const member = (windowLayoutWidgetPreviewSnapshot?.members ?? [])
+    .find((candidate) => candidate.id === memberId);
+  if (!member || !member.descriptor || typeof member.descriptor !== 'object' || Array.isArray(member.descriptor)) {
+    windowLayoutWidgetPreviewCapabilities.delete(key);
+    return Promise.resolve(null);
+  }
+  const cached = windowLayoutWidgetPreviewCapabilities.get(key);
+  if (cached) return Promise.resolve(cached);
+  return Promise.resolve(host.resolveWindowDescriptor(member.descriptor)).then((resolved) => {
+    if (!resolved || resolved.outcome !== 'success' || !resolved.capability) {
+      windowLayoutWidgetPreviewCapabilities.delete(key);
+      return null;
+    }
+    windowLayoutWidgetPreviewCapabilities.set(key, resolved.capability);
+    return resolved.capability;
+  });
+}
+
+// 019G real window thumbnail preview (Windows-taskbar-like hover card). The
+// shared popover shows the member ICON + FULL title immediately; the thumbnail
+// capture is debounced 120 ms and requests the member's CURRENT capability at
+// 240x135. A strictly valid data-PNG success renders a bounded static <img> and
+// re-clamps popover placement; everything else stays an honest icon/name-only
+// fallback. The generation/latest-only guard drops stale replies, and cancel()
+// (pointer leave, scroll, resize, picker start, card removal, pagehide)
+// discards pending work + clears the preview. No state/store writes, no
+// animation/flashing.
+const windowLayoutMemberPreview = createWindowLayoutMemberPreview({
+  resolveCapability: resolveWindowLayoutPreviewCapability,
+  requestThumbnail: (capability, options) => host.windowThumbnailCapability(capability, options),
+  setPreviewImage: (imageUrl, width, height) => {
+    windowLayoutMemberPopover.updatePreview(null,
+      `<img class="window-layout-member-preview-image" src="${escapeHtml(imageUrl)}" alt="" width="${width}" height="${height}">`);
+    // 019GR: the image changed the popover size - re-clamp placement.
+    windowLayoutMemberPopover.reposition();
+  },
+  clearPreview: () => windowLayoutMemberPopover.updatePreview(null, null),
+});
+
+// Shift-hover mirrors taskbar Peek semantics using a reversible host session:
+// every other currently visible eligible window is temporarily minimized, and
+// only windows changed by this session are restored on release/leave.
+let windowLayoutShiftPeekHeld = false;
+let windowLayoutShiftPeekGeneration = 0;
+let windowLayoutShiftPeekKey = null;
+let windowLayoutShiftPeekEndTimer = null;
+let windowLayoutShiftPeekStartTimer = null;
+
+function endWindowLayoutShiftPeek() {
+  if (windowLayoutShiftPeekStartTimer !== null) {
+    clearTimeout(windowLayoutShiftPeekStartTimer);
+    windowLayoutShiftPeekStartTimer = null;
+  }
+  if (windowLayoutShiftPeekEndTimer !== null) {
+    clearTimeout(windowLayoutShiftPeekEndTimer);
+    windowLayoutShiftPeekEndTimer = null;
+  }
+  windowLayoutShiftPeekGeneration += 1;
+  windowLayoutShiftPeekKey = null;
+  void host.windowPeekEnd().catch(() => undefined);
+}
+
+function deferWindowLayoutShiftPeekEnd() {
+  if (windowLayoutShiftPeekEndTimer !== null) clearTimeout(windowLayoutShiftPeekEndTimer);
+  windowLayoutShiftPeekEndTimer = setTimeout(() => {
+    windowLayoutShiftPeekEndTimer = null;
+    windowLayoutShiftPeekHeld = false;
+    endWindowLayoutShiftPeek();
+  }, 120);
+}
+
+function keepWindowLayoutShiftPeekAlive() {
+  if (windowLayoutShiftPeekEndTimer === null) return;
+  clearTimeout(windowLayoutShiftPeekEndTimer);
+  windowLayoutShiftPeekEndTimer = null;
+}
+
+function beginWindowLayoutShiftPeek(member) {
+  const layoutId = member?.dataset?.wlLayout;
+  const memberId = member?.dataset?.wlMember;
+  if (!layoutId || !memberId) return;
+  const key = `${layoutId}\u0000${memberId}`;
+  if (windowLayoutShiftPeekKey === key) return;
+  const generation = ++windowLayoutShiftPeekGeneration;
+  windowLayoutShiftPeekKey = key;
+  if (windowLayoutShiftPeekStartTimer !== null) clearTimeout(windowLayoutShiftPeekStartTimer);
+  cancelWindowLayoutPreviewDwell();
+  windowLayoutMemberPopover.hide();
+  windowLayoutMemberPreview.cancel();
+  // Explorer's compositor path is private; our bounded foreign-window
+  // fallback must never queue one native transition for every icon crossed.
+  // Coalesce traversal within two display frames: an A->B->C sweep performs C
+  // only, while an intentional hover remains effectively immediate.
+  windowLayoutShiftPeekStartTimer = setTimeout(() => {
+    windowLayoutShiftPeekStartTimer = null;
+    void performWindowLayoutShiftPeek(member, layoutId, memberId, generation);
+  }, 32);
+}
+
+async function performWindowLayoutShiftPeek(member, layoutId, memberId, generation) {
+  const capability = await resolveWindowLayoutPreviewCapability(layoutId, memberId);
+  if (generation !== windowLayoutShiftPeekGeneration
+    || !windowLayoutShiftPeekHeld
+    || !member.isConnected
+    || !member.matches(':hover')
+    || !capability) return;
+  await host.windowPeekBeginCapability(capability).catch(() => undefined);
+  if (generation !== windowLayoutShiftPeekGeneration) void host.windowPeekEnd().catch(() => undefined);
+}
+
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Shift' || event.repeat) return;
+  windowLayoutShiftPeekHeld = true;
+  const member = document.querySelector('[data-wl-member]:hover');
+  if (member) void beginWindowLayoutShiftPeek(member);
+});
+window.addEventListener('keyup', (event) => {
+  if (event.key !== 'Shift') return;
+  windowLayoutShiftPeekHeld = false;
+  endWindowLayoutShiftPeek();
+});
+window.addEventListener('blur', () => {
+  windowLayoutShiftPeekHeld = false;
+  endWindowLayoutShiftPeek();
+});
+
+// 019B/019GR hover wiring via the pure exact-member transition predicate: a move
+// between descendants of the SAME member (icon/indicator) is ignored (no
+// reschedule/clear); entering a member shows icon+title and schedules; leaving
+// this EXACT member (to another member or the outside) hides + cancels before
+// the next member schedules. Scrolling (a card may have scrolled the strip) or
+// resizing hides the popover and cancels the pending preview. Read-only safe.
+elements.grid.addEventListener('mouseover', (event) => {
+  const member = event.target.closest('[data-wl-member]');
+  const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
+  if (member && member !== relatedMember && (event.shiftKey || windowLayoutShiftPeekHeld)) {
+    keepWindowLayoutShiftPeekAlive();
+    windowLayoutShiftPeekHeld = true;
+    void beginWindowLayoutShiftPeek(member);
+    return;
+  }
+  const state = windowLayoutPreviewHoverState(member, relatedMember);
+  if (state === 'outside') {
+    if (!event.target.closest('[data-wl-popover]')) {
+      cancelWindowLayoutPreviewDwell();
+      windowLayoutMemberPopover.hide();
+      windowLayoutMemberPreview.cancel();
+    }
+    return;
+  }
+  if (state === 'inside') return;
+  scheduleWindowLayoutPreviewDwell(member);
+});
+// The detached widget is deliberately non-focusable, so it cannot reliably
+// receive Shift keydown/keyup. Mouse/pointer events still carry the physical
+// modifier state. Track that state while the pointer moves so Shift Peek works
+// even when Shift was pressed before entering the widget.
+elements.grid.addEventListener('pointermove', (event) => {
+  const member = event.target.closest('[data-wl-member]');
+  if (event.shiftKey && member) {
+    keepWindowLayoutShiftPeekAlive();
+    windowLayoutShiftPeekHeld = true;
+    void beginWindowLayoutShiftPeek(member);
+    return;
+  }
+  if (!event.shiftKey && windowLayoutShiftPeekHeld) {
+    windowLayoutShiftPeekHeld = false;
+    endWindowLayoutShiftPeek();
+  }
+});
+elements.grid.addEventListener('mouseout', (event) => {
+  const member = event.target.closest('[data-wl-member]');
+  const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
+  // Crossing directly from one member to another is a Peek transition, not a
+  // release. Keep the session alive so the host can reveal only the new target
+  // and hide only the old one. End only when the pointer leaves the member row.
+  if (member && !relatedMember && windowLayoutShiftPeekKey) deferWindowLayoutShiftPeekEnd();
+  const state = windowLayoutPreviewHoverState(member, relatedMember);
+  if (state === 'enter') {
+    cancelWindowLayoutPreviewDwell();
+    windowLayoutMemberPopover.hide();
+    windowLayoutMemberPreview.cancel();
+  }
+});
+document.addEventListener('scroll', () => {
+  cancelWindowLayoutPreviewDwell();
+  windowLayoutMemberPopover.hide();
+  windowLayoutMemberPreview.cancel();
+}, true);
+window.addEventListener('resize', () => {
+  cancelWindowLayoutPreviewDwell();
+  windowLayoutMemberPopover.hide();
+  windowLayoutMemberPreview.cancel();
+});
+window.addEventListener('pagehide', () => {
+  endWindowLayoutShiftPeek();
+  cancelWindowLayoutPreviewDwell();
+  windowLayoutMemberPreview.cancel();
+});
 
 /** 017I2: exactly ONE controller owns recording (switch, timer, observation,
  * echo suppression). This wiring glues the pure controller to the real model
@@ -859,8 +1723,305 @@ const windowLayoutRecording = createWindowLayoutRecordingWiring({
   setStatus: setWindowLayoutStatus,
   patchMember: patchWindowLayoutMember,
   statusText: windowLayoutStatusForOutcome,
+  onRetireMember: (intent) => handleWindowLayoutRetireMember(intent),
 });
 const windowLayoutRuntimeController = windowLayoutRecording.runtime;
+
+// ---- 018A1 exclusive-controller handoff (As You Go half) ------------------
+// One controller/observer/save owner at any time. While detached the workspace
+// is read-only (persist gate + stopped controller + cancelled pick); the
+// detached surface loads durable state and starts the controller ONLY after
+// ACTIVATE. Detached READY is reported before any load/bootstrap.
+function cancelWindowLayoutPick() {
+  windowLayoutRuntime.pickUnsubscribe?.();
+  windowLayoutRuntime.pickUnsubscribe = null;
+  // 018X1R: return the host cancel promise so the handoff AWAITS the pick
+  // cancel before controller stop/flush/ACK (a late pick result must not
+  // overtake the handoff).
+  return host.pickWindowCancel().catch(() => undefined);
+}
+
+// 018A1/018X1 read-only capture guard: while a layout controller is detached
+// the workspace is an inert summary. A full-viewport transparent overlay
+// swallows every pointer gesture (navigation/selection included); a small fixed
+// toolbar ABOVE the overlay keeps only Focus/Reattach usable. Durable writes
+// are additionally blocked by the detach save gate (persist/commit/replace).
+// Z-indexes stay within the CSS 32-bit clamp: overlay 2147483646, toolbar
+// 2147483647 (toolbar one above the overlay, neither exceeding the max).
+let detachReadOnlyOverlay = null;
+let detachReadOnlyToolbar = null;
+// 018X1R/018X2: while read-only, capture-phase keyboard/beforeinput events are
+// swallowed so keyboard mutations (typing, Ctrl+Z, workspace hotkeys) cannot
+// reach the workspace. No arbitrary toolbar key is exempted; only Enter/Space
+// 018X3: read-only input guards (workspace hotkeys blocked; only the
+// Focus/Reattach toolbar is usable — pointer events targeted at it pass
+// through, Enter/Space on a focused button activate it exactly once).
+const detachReadOnlyInputGuards = createDetachReadOnlyInputGuards({
+  windowRef: window,
+  getToolbar: () => detachReadOnlyToolbar,
+});
+function buildDetachReadOnlyToolbar() {
+  const toolbar = document.createElement('div');
+  toolbar.setAttribute('data-detach-readonly', 'true');
+  Object.assign(toolbar.style, {
+    position: 'fixed',
+    top: '12px',
+    right: '12px',
+    zIndex: '2147483647',
+    display: 'flex',
+    gap: '6px',
+  });
+  const focus = document.createElement('button');
+  focus.type = 'button';
+  focus.textContent = 'Focus';
+  focus.className = 'window-layout-control wl-focus';
+  focus.addEventListener('click', () => void windowLayoutDetachment.focusDetached().catch(() => undefined));
+  const reattach = document.createElement('button');
+  reattach.type = 'button';
+  reattach.textContent = 'Reattach';
+  reattach.className = 'window-layout-control wl-reattach';
+  reattach.addEventListener('click', () => void windowLayoutDetachment.reattach().catch(() => undefined));
+  toolbar.append(focus, reattach);
+  return toolbar;
+}
+function setDetachReadOnly(flag) {
+  detachSaveGate.setReadOnly(flag);
+  if (flag) {
+    // 018X2 item 9: cancel any in-progress graph drag (rolls back node
+    // positions) and any active marquee (releases capture / hides the overlay
+    // WITHOUT the finish command), before the capture guards prevent a
+    // still-captured pointerup from finalizing after the handoff.
+    pointer?.cancelDrag?.();
+    marquee?.cancel?.();
+    // 018X4: cancel the separate 016 member drag (clears state/capture/visuals
+    // without finalizing a move) so it cannot revive after disarm/pointer reuse.
+    cancelWindowLayoutDrag();
+    if (!detachReadOnlyOverlay) {
+      detachReadOnlyOverlay = document.createElement('div');
+      detachReadOnlyOverlay.setAttribute('data-detach-readonly', 'true');
+      Object.assign(detachReadOnlyOverlay.style, {
+        position: 'fixed',
+        inset: '0',
+        zIndex: '2147483646',
+        cursor: 'default',
+        background: 'transparent',
+      });
+      document.body.appendChild(detachReadOnlyOverlay);
+    }
+    if (!detachReadOnlyToolbar) {
+      detachReadOnlyToolbar = buildDetachReadOnlyToolbar();
+      document.body.appendChild(detachReadOnlyToolbar);
+    }
+    detachReadOnlyInputGuards.arm();
+  } else {
+    if (detachReadOnlyOverlay) {
+      detachReadOnlyOverlay.remove();
+      detachReadOnlyOverlay = null;
+    }
+    if (detachReadOnlyToolbar) {
+      detachReadOnlyToolbar.remove();
+      detachReadOnlyToolbar = null;
+    }
+    detachReadOnlyInputGuards.disarm();
+  }
+}
+
+// 019G/021: the legacy 018 full-surface detach (windowLayoutDetachment) is
+// RETIRED from reachability. Detach now opens the compact layout-only widget
+// (widgetOpen) which never freezes the workspace, so these guards are inert:
+// the workspace is never read-only and the old `?detach=1` branch below can
+// never activate (mode is always 'workspace'). The compact-widget guards (the
+// widget never writes the store) are untouched.
+const windowLayoutDetachment = {
+  isReadOnly: () => false,
+  getState: () => ({ mode: 'workspace', readOnly: false, detachedActive: false, stopped: false, transferId: null, busy: false }),
+  isStopped: () => false,
+  stop: () => undefined,
+  reattach: () => Promise.resolve(),
+  focusDetached: () => Promise.resolve(),
+  reportReady: () => Promise.resolve(),
+  waitForActivate: () => Promise.resolve(null),
+};
+
+// 018X5: systematic await/read-only barrier for the group member actions.
+const windowLayoutGroupActionRunner = createWindowLayoutGroupActionRunner({
+  isReadOnly: () => windowLayoutDetachment.isReadOnly(),
+  host,
+});
+
+// ---- 019C compact widget surface (As You Go half) -------------------------
+// One native widget per layout, opened/focused by the workspace and closed by
+// the widget itself. The workspace is the SOLE durable writer and revision
+// source: the widget only sends bounded command intents over a same-origin
+// BroadcastChannel and never touches the store/save/recording persistence.
+// The workspace writer applies commands through the EXISTING functions/store.
+// 035: layouts whose compact widget is currently open. Their attached card is
+// a greyed placeholder (the widget is the sole live card); the set is driven by
+// the widget's widget-ready/dispose channel announcements.
+const detachedWidgets = new Set();
+// 040: module-level handle to the WIDGET surface's channel client so the shared
+// context-menu action (`Remove from this layout`) can route the removal intent
+// through the widget channel instead of writing the store from the widget. Set
+// when the widget bootstraps, cleared on pagehide.
+let windowLayoutWidgetClient = null;
+const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorkspace({
+  channel: new BroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL),
+  getLayout: windowLayoutFromState,
+  snapshot: (layout, memberIcon) => ({
+    ...windowLayoutWidgetSnapshot(layout, memberIcon),
+    // The compact surface does not load the whole workspace state. Carry only
+    // the bounded visual preferences needed to render the same native window
+    // transparency/theme as its host Backpack.
+    appearance: {
+      theme: getTheme(state.view?.preferences),
+      transparentBackground: getTransparentBackground(state.view?.preferences),
+      backdropOpacity: getBackdropOpacity(state.view?.preferences),
+    },
+  }),
+  // 019G/021: the workspace's icon cache feeds the bounded snapshot icon so the
+  // widget renders REAL member icons (bounded to the channel byte cap).
+  // 040: composite layout\u0000member cache identity.
+  memberIcon: (layoutId, memberId) => windowLayoutRuntime.icons.get(windowLayoutMemberKey(layoutId, memberId)) ?? null,
+  // 035: a widget announcing itself marks its attached card as a placeholder;
+  // a dispose restores it. Both re-render the graph node.
+  onWidgetOpen: (layoutId) => {
+    if (detachedWidgets.has(layoutId)) return;
+    detachedWidgets.add(layoutId);
+    render();
+  },
+  onWidgetDispose: (layoutId) => {
+    if (!detachedWidgets.delete(layoutId)) return;
+    render();
+  },
+  // 035: the live widget reports its window content size; the workspace persists
+  // it to the shared card geometry (replace + save, no history/selection churn)
+  // so reattach mirrors it.
+  onCardSize: (layoutId, width, height) => {
+    let next;
+    try {
+      next = setWindowLayoutCardSize(state, layoutId, width, height);
+    } catch {
+      return;
+    }
+    if (next === state) return;
+    store.replace(next);
+    void store.save(next).catch(() => undefined);
+  },
+  applyCommand: async (layoutId, command) => {
+    if (windowLayoutDetachment.isReadOnly()) return { ok: false, error: 'read-only' };
+    if (command.kind === 'member-toggle') {
+      await handleWindowLayoutMemberClick(layoutId, command.memberId);
+      return { ok: true };
+    }
+    if (command.kind === 'remove-member') {
+      // 040: the widget's `Remove from this layout` routes to the existing
+      // scoped data-only unlink writer (composite cache cleanup, one
+      // persistence, active-only reconcile). Never a cross-layout mutation.
+      handleWindowLayoutUnlink(layoutId, command.memberId);
+      return { ok: true };
+    }
+    if (command.kind === 'group-action') {
+      await windowLayoutGroupAction(layoutId, command.action,
+        command.memberIds.length > 0 ? command.memberIds : null);
+      return { ok: true };
+    }
+    if (command.kind === 'range-toggle') {
+      await windowLayoutToggleRange(layoutId, command.memberId,
+        command.memberIds.length > 0 ? command.memberIds : [command.memberId]);
+      return { ok: true };
+    }
+    if (command.kind === 'reorder') {
+      // 024: the widget drag-reorder intent - applied through the EXISTING
+      // model reorder, persisted once and broadcast back to open widgets.
+      const next = reorderWindowLayoutMember(state, layoutId, command.memberId, command.toIndex);
+      if (next !== state) {
+        // commit() already owns the one queued persistence write. The former
+        // saveWorkspaceView() issued a second identical host request per drop;
+        // repeated drags could backlog the bridge and surface a false timeout.
+        const persisted = await store.commit(next);
+        if (!persisted) return { ok: false, error: 'reorder persistence failed' };
+        noteWindowLayoutCommit(layoutId, { reason: 'reorder' });
+      }
+      return { ok: true };
+    }
+    if (command.kind === 'picker-commit') {
+      const applied = await applyWindowLayoutPickSet(layoutId, command.pick);
+      // 019DR: a read-only handoff that began during observation surfaces as a
+      // typed superseded failure (zero commit/save/recording mutation), so the
+      // widget never sees a false committed result.
+      return applied.outcome === 'superseded'
+        ? { ok: false, error: 'superseded' }
+        : { ok: true };
+    }
+    return { ok: false, error: 'unknown command' };
+  },
+});
+const windowLayoutPickApplier = createWindowLayoutPickApplier({
+  getState: () => state,
+  // 019I: store.commit() installs state synchronously via setState and RETURNS
+  // a Promise<boolean> for persistence. NEVER assign that Promise to `state`
+  // (JSON.stringify(Promise) == "{}" would corrupt the durable snapshot).
+  commitState: (next) => store.commit(next),
+  observeCapability: (capability) => host.observeWindowCapability(capability),
+  model: { addWindowLayoutMember, removeWindowLayoutMember },
+  capabilities: windowLayoutRuntime.capabilities,
+  icons: windowLayoutRuntime.icons,
+  isReadOnly: () => windowLayoutDetachment.isReadOnly(),
+});
+const windowLayoutRetirementWriter = createWindowLayoutRetirementWriter({
+  getState: () => state,
+  // 019I: same rule as the pick applier - invoke the real commit, never assign
+  // its persistence Promise to the global state.
+  commitState: (next) => store.commit(next),
+  model: { removeWindowLayoutMember },
+  capabilities: windowLayoutRuntime.capabilities,
+  icons: windowLayoutRuntime.icons,
+});
+
+/** 019C/019DR: applies Winter's ONE typed committed pick set (every remove
+ * data-only, every successful add) with a single durable commit; cancel is
+ * byte-zero and a read-only handoff begun mid-apply surfaces as typed
+ * `superseded` with zero commit/save/recording mutation. */
+async function applyWindowLayoutPickSet(layoutId, result) {
+  if (windowLayoutDetachment.isReadOnly()) return { outcome: 'failed', error: 'read-only' };
+  const applied = await windowLayoutPickApplier.apply(layoutId, result);
+  if (applied.outcome === 'committed') {
+    windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
+    if (applied.failures > 0) {
+      setWindowLayoutStatus(layoutId, `${applied.failures} member${applied.failures === 1 ? '' : 's'} could not be added`);
+    } else {
+      setWindowLayoutStatus(layoutId, '');
+    }
+    // Adding to a layout selects/persists it as the recording context and
+    // leaves one active observer; an already-active layout only re-syncs.
+    await windowLayoutRecording.ensureRecording(layoutId);
+  }
+  return applied;
+}
+
+/** 019C: Ning's onRetireMember intent -> ONE data-only removal/save and a
+ * status/selection refresh. An intent for a member/layout that no longer
+ * exists is ignored; counters are never persisted. */
+function handleWindowLayoutRetireMember(intent) {
+  const { layoutId, memberId } = intent ?? {};
+  if (!layoutId || !memberId) return;
+  if (windowLayoutDetachment.isReadOnly()) return;
+  const result = windowLayoutRetirementWriter.retire(layoutId, memberId);
+  if (result.outcome !== 'removed') return;
+  // 019G: a removed card must clear/discard any pending hover preview.
+  windowLayoutMemberPreview.cancel();
+  windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
+  setWindowLayoutStatus(layoutId, '');
+  const selected = windowLayoutRuntime.selectedMembers.get(layoutId);
+  if (selected?.delete(memberId)) syncWindowLayoutMemberSelection(layoutId);
+}
+
+/** 019C: after any OTHER durable window-layout commit the workspace broadcasts
+ * the fresh snapshot/revision so open widgets re-sync (the channel workspace
+ * also answers command intents itself). */
+function noteWindowLayoutCommit(layoutId, options) {
+  windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId, options);
+}
 
 function queueWindowLayoutSave() {
   clearTimeout(windowLayoutRuntime.saveTimer);
@@ -869,36 +2030,53 @@ function queueWindowLayoutSave() {
   }, WINDOW_LAYOUT_SAVE_DEBOUNCE_MS);
 }
 
-/** Bootstrap: reconcile the persisted active id WITHOUT inventing one. A null
- * id means no recording context until the creator touches a layout. */
+/** Bootstrap: reconcile the persisted active id WITHOUT inventing one. Returns
+ * the real controller switch promise so the detached/workspace RESUMED ACK
+ * follows actual owner start (018X1). A null id means no recording context
+ * until the creator touches a layout. */
 function bootstrapWindowLayoutRecording() {
   if (state.activeWindowLayoutId) {
-    void windowLayoutRecording.ensureRecording(state.activeWindowLayoutId);
+    return windowLayoutRecording.ensureRecording(state.activeWindowLayoutId);
   }
+  return Promise.resolve();
 }
 
 /** Teardown: stop the recording timer and drop ephemeral capabilities without
  * a late save (the persisted active id stays for the next open to reconcile).
- * A pending debounced save is cancelled so no write races the unload. */
+ * A pending debounced save is cancelled so no write races the unload. This is
+ * the CONTROLLER stop used by the detach handoff too, so it must NOT stop the
+ * detach lifecycle: the workspace still has to receive CLOSED/crash and
+ * resume. 018X2 item 8: the runtime stop Promise is RETURNED so the factory's
+ * `await stopController()` is a real await. The pagehide handler performs the
+ * full lifecycle stop. */
 function teardownWindowLayoutRecording() {
   clearTimeout(windowLayoutRuntime.saveTimer);
   windowLayoutRuntime.saveTimer = null;
   windowLayoutRuntime.pickUnsubscribe?.();
   windowLayoutRuntime.pickUnsubscribe = null;
-  void windowLayoutRuntimeController.stop({ clearActive: false });
+  return windowLayoutRuntimeController.stop({ clearActive: false });
 }
+
+// 018X1: pagehide performs only the detach LIFECYCLE stop (the controller stop
+// is owned by the handoff and by the controller's own seams; a second stop here
+// would be a duplicate that could race an in-flight transfer).
+window.addEventListener('pagehide', () => windowLayoutDetachment.stop());
 
 window.addEventListener('pagehide', () => teardownWindowLayoutRecording());
 
 function handleWindowLayoutUnlink(layoutId, memberId) {
+  if (windowLayoutDetachment.isReadOnly()) return;
   const layout = windowLayoutFromState(layoutId);
   if (!layout || !memberId) return;
+  // 019G: a removed card must clear/discard any pending hover preview.
+  windowLayoutMemberPreview.cancel();
   const next = removeWindowLayoutMember(state, layoutId, memberId);
-  windowLayoutRuntime.capabilities.delete(memberId);
-  windowLayoutRuntime.icons.delete(memberId);
+  windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
+  windowLayoutRuntime.icons.delete(windowLayoutMemberKey(layoutId, memberId));
   store.commit(next);
   closeWindowLayoutPicker();
   saveWorkspaceView();
+  noteWindowLayoutCommit(layoutId);
   // Unlinking a member of the active layout re-syncs the observer; unlinking
   // from an inactive layout never starts recording there. Unlinking the last
   // member leaves the id retained with no timer (retry on the next add).
@@ -1073,6 +2251,7 @@ function createGraphController() {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; pendingFrame = false; }
     nodes.forEach((node) => {
       if (node.exitTimer) { clearTimeout(node.exitTimer); node.exitTimer = null; }
+      removeWindowLayoutCardPresentation(node.shell);
     });
     if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
     nodes.clear();
@@ -1802,6 +2981,23 @@ function createGraphController() {
     }
   }
 
+  /** 035: the attached window-layout shell takes the layout's persisted shared
+   * card width (the detached widget's latest window content width) so attached
+   * and detached cards are 1:1. No persisted width -> the CSS default. */
+  function applyWindowLayoutShellWidth(shell, candidate) {
+    if (candidate.kind !== 'window-layout') return;
+    const raw = candidate.cardSize?.width;
+    // 037: the attached host footprint is the CARD's client width, capped at
+    // the shared compact presentation maximum - never a larger empty host
+    // footprint (a legacy over-max persisted value cannot stretch the node).
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
+      const width = Math.min(raw, WINDOW_LAYOUT_CARD_MAX_WIDTH);
+      shell.style.setProperty('--wl-card-width', `${Math.round(width)}px`);
+    } else {
+      shell.style.removeProperty('--wl-card-width');
+    }
+  }
+
   function refreshNodeContent(node) {
     if (!node.shell) return;
     const candidate = node.candidate;
@@ -1824,6 +3020,18 @@ function createGraphController() {
     iconItem.classList.toggle('ancestor-item', candidate.ancestor === true);
     iconItem.classList.toggle('trail-item', candidate.trail === true);
     node.shell.classList.toggle('bin-origin-ghost', isGhost);
+    // 035: the shared card width updates whenever it changes, even when the
+    // inner HTML is otherwise unchanged.
+    applyWindowLayoutShellWidth(node.shell, candidate);
+    // 018V7R3: the window-layout signature includes the bounded presentation
+    // mode so the cached inert read-only HTML is not reused for the writable
+    // view (the Detach control must appear after the unlock render). 035: the
+    // detached-widget placeholder state + persisted width also change the
+    // signature so the node re-renders when a widget opens/closes or resizes.
+    const windowLayoutMode = windowLayoutPresentationMode({
+      isReadOnly: windowLayoutDetachment.isReadOnly(),
+      mode: windowLayoutDetachment.getState().mode,
+    });
     const signature = JSON.stringify([
       candidate.kind,
       candidate.name,
@@ -1834,18 +3042,21 @@ function createGraphController() {
       isExpanded,
       session.binMode,
       state.view.iconSize,
-      candidate.kind === 'window-layout' ? ((candidate.arrangement?.version ?? 0) + '|' + (candidate.arrangement?.members ?? []).map((m) => m.id + ':' + m.state).join(',')) : 0,
+      candidate.kind === 'window-layout'
+        ? `${windowLayoutContentSignature(candidate, windowLayoutMode)}|d:${detachedWidgets.has(candidate.id)}|w:${candidate.cardSize?.width ?? 0}`
+        : 0,
     ]);
     if (node.contentSignature !== signature) {
+      removeWindowLayoutCardPresentation(iconItem);
       node.contentSignature = signature;
       iconItem.innerHTML =
         `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
         + `${linkMarkup(candidate)}`
-        + `<div class="item-icon">${iconMarkup(candidate)}</div>`
-        + `<strong>${escapeHtml(candidate.name)}</strong>`
-        + `${descriptionMarkup(candidate)}`
-        + `${candidate.kind === 'window-layout' ? windowLayoutBodyMarkup(candidate) : ''}`;
+        + (candidate.kind === 'window-layout'
+          ? windowLayoutCardMarkup(candidate, { detached: detachedWidgets.has(candidate.id) })
+          : `${iconItemMarkup(candidate)}<strong>${escapeHtml(candidate.name)}</strong>${descriptionMarkup(candidate)}`);
       hydrateNodeIcons(node.shell);
+      installWindowLayoutCardPresentation(iconItem);
     }
     node.width = node.shell.offsetWidth || (state.view.iconSize + 42);
     node.height = node.shell.offsetHeight || (state.view.iconSize + 64);
@@ -1880,15 +3091,25 @@ function createGraphController() {
     iconItem.innerHTML =
       `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
       + `${linkMarkup(candidate)}`
-      + `<div class="item-icon">${iconMarkup(candidate)}</div>`
-      + `<strong>${escapeHtml(candidate.name)}</strong>`
-      + `${descriptionMarkup(candidate)}`
-      + `${candidate.kind === 'window-layout' ? windowLayoutBodyMarkup(candidate) : ''}`;
+      + (candidate.kind === 'window-layout'
+        ? windowLayoutCardMarkup(candidate, { detached: detachedWidgets.has(candidate.id) })
+        : `${iconItemMarkup(candidate)}<strong>${escapeHtml(candidate.name)}</strong>${descriptionMarkup(candidate)}`);
 
     shell.append(iconItem);
     nodeLayer.append(shell);
     node.shell = shell;
+    installWindowLayoutCardPresentation(iconItem);
+    // 035: the shell takes the layout's persisted shared card width so the
+    // initial node width/height measure the real footprint.
+    applyWindowLayoutShellWidth(shell, candidate);
 
+    // 018V7R3: the initial signature includes the bounded presentation mode so
+    // the create and refresh signatures agree with the body markup. 035: the
+    // detached-widget placeholder state + persisted width are included too.
+    const windowLayoutMode = windowLayoutPresentationMode({
+      isReadOnly: windowLayoutDetachment.isReadOnly(),
+      mode: windowLayoutDetachment.getState().mode,
+    });
     node.contentSignature = JSON.stringify([
       candidate.kind,
       candidate.name,
@@ -1899,7 +3120,9 @@ function createGraphController() {
       isExpanded,
       session.binMode,
       state.view.iconSize,
-      candidate.kind === 'window-layout' ? ((candidate.arrangement?.version ?? 0) + '|' + (candidate.arrangement?.members ?? []).map((m) => m.id + ':' + m.state).join(',')) : 0,
+      candidate.kind === 'window-layout'
+        ? `${windowLayoutContentSignature(candidate, windowLayoutMode)}|d:${detachedWidgets.has(candidate.id)}|w:${candidate.cardSize?.width ?? 0}`
+        : 0,
     ]);
 
     node.width = shell.offsetWidth || (state.view.iconSize + 42);
@@ -2143,7 +3366,7 @@ function createGraphController() {
     simulation.alpha(Math.max(simulation.alpha(), level)).restart();
   }
 
-  function fitGraph(padding = 90, animate = true) {
+  function fitGraph(padding = 90) {
     if (!camera || !viewport || !viewportSelection || nodes.size === 0) return false;
     const w = viewport.clientWidth;
     const h = viewport.clientHeight;
@@ -2172,11 +3395,14 @@ function createGraphController() {
     const tx = w / 2 - cx * k;
     const ty = h / 2 - cy * k;
     const transform = zoomIdentity.translate(tx, ty).scale(k);
-    if (animate && !reducedMotion?.matches) {
-      viewportSelection.transition().duration(550).call(zoomBehavior.transform, transform);
-    } else {
-      zoomBehavior.transform(viewportSelection, transform);
-    }
+    // 043: the vendored d3-selection.js selection (what `select(viewport)`
+    // returns) has NO transition() method — the transition machinery is only
+    // bundled inside d3-zoom.js against its private selection copy, so the
+    // previous animated branch always threw `viewportSelection.transition is
+    // not a function` on normal first render. Apply the transform directly
+    // (the same zoomBehavior.transform the old non-animated branch used) so
+    // the initial fit works for every renderer.
+    zoomBehavior.transform(viewportSelection, transform);
     return true;
   }
 
@@ -2320,6 +3546,10 @@ function applyTheme(preferences) {
 function applyBackdropOpacity(preferences) {
   const opacity = getBackdropOpacity(preferences);
   document.documentElement.style.setProperty('--workspace-backdrop-opacity', String(opacity));
+  document.documentElement.style.setProperty(
+    '--workspace-backdrop-opacity-percent',
+    `${Math.round(opacity * 10000) / 100}%`,
+  );
   const slider = elements.backdropOpacitySlider;
   if (slider && document.activeElement !== slider) slider.value = String(opacity);
   if (elements.backdropOpacityValue) {
@@ -2329,6 +3559,7 @@ function applyBackdropOpacity(preferences) {
 
 function render() {
   applyTheme(state.view?.preferences);
+  if (WIDGET_SURFACE) return; // 019C: the widget renders only its own card
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
     // us (e.g. via the top-level Bin list or "Delete all") — fall back to
@@ -2486,8 +3717,10 @@ async function runMenuAction(action) {
     return editorDialog.showEditor(isWebLink(chosen) ? 'web' : 'shortcut', chosen);
   }
   if (action === 'rename' && onlyId) {
-    // A window-layout is edited through the same name+icon surface as a
-    // folder (updateGroup handles both), so the existing editor renames it.
+    if (windowLayout(onlyId)) {
+      setStatus('Window layout names and icons are fixed.');
+      return;
+    }
     return editorDialog.showEditor('group', group(onlyId) ?? windowLayout(onlyId));
   }
   if (action === 'copy') return commands.copySelection();
@@ -2498,36 +3731,90 @@ async function runMenuAction(action) {
   if (action === 'reset-graph-position') return commands.resetGraphPositions();
   if (action === 'rename-set') return beginSetRename();
   if (action === 'delete-sets') return commands.deleteSelectedSets();
+  if (action === 'remove-from-layout') {
+    // 040: member context action -> the existing scoped data-only unlink
+    // writer with the clicked composite layout/member key. Scoped cache
+    // cleanup, one persistence, active-only reconcile; never a cross-layout
+    // mutation. Read the target from the menu dataset (set at open time).
+    // On the WIDGET surface the intent routes through the widget channel to
+    // the workspace writer (the widget never writes the store itself).
+    const layoutId = elements.menu.dataset.wlLayout;
+    const memberId = elements.menu.dataset.wlMember;
+    delete elements.menu.dataset.wlLayout;
+    delete elements.menu.dataset.wlMember;
+    if (!layoutId || !memberId) return;
+    if (WIDGET_SURFACE && windowLayoutWidgetClient) {
+      windowLayoutWidgetClient.sendCommand({ kind: 'remove-member', memberId });
+      return;
+    }
+    handleWindowLayoutUnlink(layoutId, memberId);
+    return;
+  }
 }
 
 // 016 inner member drag: reorder within the layout, or unlink (data-only)
 // beyond a clear outside threshold. Never starts outer graph drag and never
-// moves/resizes/minimizes/closes the external window.
-let windowLayoutDrag = null; // { layoutId, memberId, startX, startY, moved, pointerId }
+// moves/resizes/minimizes/closes the external window. 018X4: the drag state
+// machine lives in the shared createWindowLayoutMemberDrag guard so the
+// read-only handoff can cancel it and a later pointerup / reused pointer ID
+// cannot finalize an unlink/reorder after reattach.
+const windowLayoutMemberDrag = createWindowLayoutMemberDrag();
 let windowLayoutDragJustMoved = false;
-const WINDOW_LAYOUT_DRAG_THRESHOLD_PX = 8;
 const WINDOW_LAYOUT_DROP_OUT_PX = 40;
 
+/** 018X6: restores the member row's live DOM order back to the canonical
+ * persisted arrangement order (a pointermove may already have reordered the
+ * buttons before a read-only cancellation). Same DOM nodes/listeners are
+ * preserved; nothing is committed/saved/finalized. */
+function restoreWindowLayoutMemberDomOrder(layoutId) {
+  const members = document.querySelector(`[data-wl-members="${CSS.escape(layoutId)}"]`);
+  const layout = windowLayoutFromState(layoutId);
+  if (!members || !layout) return;
+  const memberIds = (layout.arrangement?.members ?? []).map((member) => member.id);
+  const ordered = orderWindowLayoutMemberButtons(
+    [...members.querySelectorAll('[data-wl-member]')],
+    memberIds,
+  );
+  for (const button of ordered) {
+    if (button.parentNode === members) members.appendChild(button);
+  }
+}
+
+/** 018X4/018X6: cancels an in-progress 016 member drag WITHOUT finalizing a
+ * move: rolls back any visual DOM reorder to the canonical order, clears the
+ * drag state and the drag-out visual, so a later pointerup (e.g. after the
+ * read-only handoff disarms) or a reused pointer ID cannot trigger an unlink
+ * or reorder. Used by read-only entry and Escape (force-cancel). */
+function cancelWindowLayoutDrag() {
+  const layoutId = windowLayoutMemberDrag.get()?.layoutId;
+  windowLayoutMemberDrag.cancel();
+  if (layoutId) restoreWindowLayoutMemberDomOrder(layoutId);
+  const members = document.querySelector('[data-wl-members].wl-drag-out');
+  if (members) members.classList.remove('wl-drag-out');
+}
+
 elements.grid.addEventListener('pointerdown', (event) => {
+  if (WIDGET_SURFACE) return;
   const member = event.target.closest('[data-wl-member]');
-  if (!member || event.ctrlKey || event.button !== 0) return;
-  windowLayoutDrag = {
+  if (!member || !event.ctrlKey || event.button !== 0) return;
+  cancelWindowLayoutPreviewDwell();
+  windowLayoutMemberPopover.hide();
+  windowLayoutMemberPreview.cancel();
+  windowLayoutMemberDrag.start({
     layoutId: member.dataset.wlLayout,
     memberId: member.dataset.wlMember,
-    startX: event.clientX,
-    startY: event.clientY,
-    moved: false,
+    clientX: event.clientX,
+    clientY: event.clientY,
     pointerId: event.pointerId,
-  };
+  });
 });
 
 elements.grid.addEventListener('pointermove', (event) => {
-  const drag = windowLayoutDrag;
-  if (!drag || drag.pointerId !== event.pointerId) return;
-  if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < WINDOW_LAYOUT_DRAG_THRESHOLD_PX) return;
-  drag.moved = true;
-  const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
-  const button = document.querySelector(`[data-wl-member="${CSS.escape(drag.memberId)}"]`);
+  if (WIDGET_SURFACE) return;
+  const drag = windowLayoutMemberDrag.move(event.pointerId, event.clientX, event.clientY);
+  if (!drag) return;
+    const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
+    const button = document.querySelector(`[data-wl-layout="${CSS.escape(drag.layoutId)}"] [data-wl-member="${CSS.escape(drag.memberId)}"]`);
   if (!members || !button) return;
   const row = members.getBoundingClientRect();
   const outside = event.clientY < row.top - WINDOW_LAYOUT_DROP_OUT_PX
@@ -2536,66 +3823,60 @@ elements.grid.addEventListener('pointermove', (event) => {
     || event.clientX > row.right + WINDOW_LAYOUT_DROP_OUT_PX;
   members.classList.toggle('wl-drag-out', outside);
   if (outside) return;
-  const buttons = [...members.querySelectorAll('[data-wl-member]')];
-  let targetIndex = buttons.length - 1;
-  for (let index = 0; index < buttons.length; index += 1) {
-    const rect = buttons[index].getBoundingClientRect();
-    if (event.clientX < rect.left + rect.width / 2) { targetIndex = index; break; }
-  }
-  const currentIndex = buttons.indexOf(button);
-  if (currentIndex === -1 || targetIndex === currentIndex) return;
-  button.remove();
-  const children = [...members.children];
-  const at = Math.max(0, Math.min(targetIndex, children.length));
-  members.insertBefore(button, children[at] ?? null);
+  moveWindowLayoutMemberButton(members, button, event.clientX, event.clientY);
 });
 
 elements.grid.addEventListener('pointerup', (event) => {
-  const drag = windowLayoutDrag;
-  if (!drag || drag.pointerId !== event.pointerId) return;
-  windowLayoutDrag = null;
-  const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
-  if (!members) return;
-  const row = members.getBoundingClientRect();
-  const outside = event.clientY < row.top - WINDOW_LAYOUT_DROP_OUT_PX
-    || event.clientY > row.bottom + WINDOW_LAYOUT_DROP_OUT_PX
-    || event.clientX < row.left - WINDOW_LAYOUT_DROP_OUT_PX
-    || event.clientX > row.right + WINDOW_LAYOUT_DROP_OUT_PX;
-  members.classList.remove('wl-drag-out');
-  const layout = windowLayoutFromState(drag.layoutId);
-  if (!layout) return;
-  if (!drag.moved) return; // plain click: handled by the click delegation
-  windowLayoutDragJustMoved = true;
-  if (outside) {
-    // Escape-like cancel path: data-only unlink, never closes or moves it.
-    handleWindowLayoutUnlink(drag.layoutId, drag.memberId);
-    return;
-  }
-  const buttons = [...members.querySelectorAll('[data-wl-member]')];
-  const toIndex = buttons.findIndex((button) => button.dataset.wlMember === drag.memberId);
-  if (toIndex === -1) return;
-  const next = reorderWindowLayoutMember(state, drag.layoutId, drag.memberId, toIndex);
-  store.commit(next);
-  saveWorkspaceView();
+  if (WIDGET_SURFACE) return;
+  windowLayoutMemberDrag.finalize(event.pointerId, (drag) => {
+    const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
+    if (!members) return;
+    const row = members.getBoundingClientRect();
+    const outside = event.clientY < row.top - WINDOW_LAYOUT_DROP_OUT_PX
+      || event.clientY > row.bottom + WINDOW_LAYOUT_DROP_OUT_PX
+      || event.clientX < row.left - WINDOW_LAYOUT_DROP_OUT_PX
+      || event.clientX > row.right + WINDOW_LAYOUT_DROP_OUT_PX;
+    members.classList.remove('wl-drag-out');
+    const layout = windowLayoutFromState(drag.layoutId);
+    if (!layout) return;
+    if (!drag.moved) return; // plain click: handled by the click delegation
+    windowLayoutDragJustMoved = true;
+    if (outside) {
+      // Escape-like cancel path: data-only unlink, never closes or moves it.
+      handleWindowLayoutUnlink(drag.layoutId, drag.memberId);
+      return;
+    }
+    const buttons = [...members.querySelectorAll('[data-wl-member]')];
+    const toIndex = buttons.findIndex((button) => button.dataset.wlMember === drag.memberId);
+    if (toIndex === -1) return;
+    const next = reorderWindowLayoutMember(state, drag.layoutId, drag.memberId, toIndex);
+    // One commit = one persistence request; only broadcast after it settles.
+    void store.commit(next).then((persisted) => {
+      if (persisted) noteWindowLayoutCommit(drag.layoutId);
+    });
+  });
 });
 
 elements.grid.addEventListener('pointercancel', (event) => {
-  const drag = windowLayoutDrag;
-  if (!drag || drag.pointerId !== event.pointerId) return;
-  windowLayoutDrag = null;
-  const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
+  if (WIDGET_SURFACE) return;
+  // 018X6: ordinary pointercancel cancels ONLY when its pointerId matches the
+  // active drag (preserving prior multi-pointer behavior); read-only/Escape
+  // force-cancel via cancelWindowLayoutDrag().
+  const active = windowLayoutMemberDrag.get();
+  if (!active || !windowLayoutMemberDrag.cancelMatching(event.pointerId)) return;
+  restoreWindowLayoutMemberDomOrder(active.layoutId);
+  const members = document.querySelector('[data-wl-members].wl-drag-out');
   if (members) members.classList.remove('wl-drag-out');
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && windowLayoutDrag) {
-    windowLayoutDrag = null;
-    const members = document.querySelector('[data-wl-members].wl-drag-out');
-    if (members) members.classList.remove('wl-drag-out');
+  if (event.key === 'Escape' && windowLayoutMemberDrag.isActive()) {
+    cancelWindowLayoutDrag();
   }
 });
 
 elements.grid.addEventListener('click', (event) => {
+  if (WIDGET_SURFACE) return;
   event.stopPropagation();
   const expandButton = event.target.closest('[data-expand]');
   if (expandButton) {
@@ -2620,13 +3901,18 @@ elements.grid.addEventListener('click', (event) => {
   // and never fall through to selection, navigation or graph drag.
   const windowLayoutBody = event.target.closest('.window-layout-body');
   if (windowLayoutBody) {
+    // 035: while a layout's widget is open its attached card is a greyed
+    // placeholder — every interaction is inert EXCEPT the lock (reattach).
+    const bodyLayoutId = windowLayoutBody.dataset?.wlLayout;
+    const detachedLayout = typeof bodyLayoutId === 'string' && bodyLayoutId && detachedWidgets.has(bodyLayoutId);
+    if (detachedLayout && !event.target.closest('[data-wl-reattach]')) return;
     const memberButton = event.target.closest('[data-wl-member]');
     if (memberButton) {
       if (windowLayoutDragJustMoved) {
         windowLayoutDragJustMoved = false;
         return;
       }
-      void handleWindowLayoutMemberClick(memberButton.dataset.wlLayout, memberButton.dataset.wlMember, event.ctrlKey);
+      void handleWindowLayoutMemberClick(memberButton.dataset.wlLayout, memberButton.dataset.wlMember, event.ctrlKey, event.shiftKey);
       return;
     }
     const pickCandidate = event.target.closest('[data-wl-pick-candidate]');
@@ -2646,6 +3932,7 @@ elements.grid.addEventListener('click', (event) => {
     }
     const directPick = event.target.closest('[data-wl-pick]');
     if (directPick) {
+      console.info('[045-direct-pick] click-handler', directPick.dataset.wlPick);
       void beginWindowLayoutDirectPick(directPick.dataset.wlPick);
       return;
     }
@@ -2667,6 +3954,25 @@ elements.grid.addEventListener('click', (event) => {
     const isolate = event.target.closest('[data-wl-isolate]');
     if (isolate) {
       void windowLayoutGroupAction(isolate.dataset.wlIsolate, 'isolate');
+      return;
+    }
+    // 019C: Detach opens/focuses the layout's compact widget (repeated detach
+    // focuses/reuses); Reattach on the WORKSPACE closes that layout's widget.
+    // The WIDGET's own card routes its reattach to widgetCloseSelf() and stops
+    // propagation, so this handler only sees the workspace path.
+    const detach = event.target.closest('[data-wl-detach]');
+    if (detach) {
+      if (detach.dataset.wlDetach) void host.widgetOpen(detach.dataset.wlDetach).catch(() => undefined);
+      return;
+    }
+    const reattach = event.target.closest('[data-wl-reattach]');
+    if (reattach) {
+      if (reattach.dataset.wlReattach) {
+        // 035: reattaching restores the attached card immediately (no longer a
+        // placeholder) even while the close request is in flight.
+        if (detachedWidgets.delete(reattach.dataset.wlReattach)) render();
+        void host.widgetClose(reattach.dataset.wlReattach).catch(() => undefined);
+      }
       return;
     }
     return;
@@ -2763,6 +4069,7 @@ elements.grid.addEventListener('click', (event) => {
 
 
 elements.grid.addEventListener('contextmenu', (event) => {
+  if (WIDGET_SURFACE) return;
   event.preventDefault();
   event.stopPropagation();
   // Opening the context menu can implicitly cancel an in-progress pointer
@@ -2771,6 +4078,29 @@ elements.grid.addEventListener('contextmenu', (event) => {
   // will-pin/graph-drop-target visuals stuck on whatever tile the pointer
   // last touched. Cancel the drag defensively any time the menu opens.
   pointer.cancelDrag();
+  // 019B: Shift+right-click on a member minimizes/restores the selected range
+  // (direction from the clicked member's live state). 040: a PLAIN right-click
+  // on a member opens the member context menu (`Remove from this layout`); it
+  // must never trigger preview, reorder, selection, or removal from another
+  // layout, and the inert grey placeholder card refuses removal.
+  const wlMember = event.target.closest('[data-wl-member]');
+  if (wlMember) {
+    if (event.shiftKey) {
+      void windowLayoutToggleRange(wlMember.dataset.wlLayout, wlMember.dataset.wlMember);
+      return;
+    }
+    const layoutId = wlMember.dataset.wlLayout;
+    const memberId = wlMember.dataset.wlMember;
+    if (!layoutId || !memberId) return;
+    // 040: grey placeholder refusal — the placeholder card's members are
+    // disabled and never offer removal.
+    if (wlMember.disabled) return;
+    // 040: scope the removal target on the menu element (layoutId/memberId).
+    elements.menu.dataset.wlLayout = layoutId;
+    elements.menu.dataset.wlMember = memberId;
+    openMenu(event.clientX, event.clientY, 'member', layoutId);
+    return;
+  }
   const tile = event.target.closest('.icon-item');
   if (tile && tile.classList.contains('bin-origin-ghost')) return;
   // An ancestor tile has no context menu (nothing on it can be renamed,
@@ -2881,6 +4211,25 @@ document.addEventListener('click', (event) => {
 // Escape (or a click anywhere else) closes an open window-layout picker
 // without changing anything (Assignment 015).
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && windowLayoutRuntime.pickUnsubscribe) {
+    event.preventDefault();
+    event.stopPropagation();
+    void cancelWindowLayoutPick();
+    return;
+  }
+  if (windowLayoutRuntime.pickUnsubscribe && (event.key === ' ' || event.key === 'Enter')) {
+    event.preventDefault();
+    event.stopPropagation();
+    const activePickLayout = windowLayoutRuntime.pickLayoutId;
+    const request = event.key === ' '
+      ? host.pickWindowStage()
+      : host.pickWindowCommit();
+    void request.catch((error) => setWindowLayoutStatus(
+      activePickLayout ?? 'active',
+      error instanceof Error ? error.message : String(error),
+    ));
+    return;
+  }
   if (event.key === 'Escape' && windowLayoutRuntime.pickerOpenFor) {
     closeWindowLayoutPicker();
   }
@@ -2892,12 +4241,18 @@ document.addEventListener('click', (event) => {
 });
 
 elements.explorer.addEventListener('wheel', (event) => {
+  if (WIDGET_SURFACE) return;
   if (!event.ctrlKey) return;
   event.preventDefault();
   state = store.replace(setIconSize(state, state.view.iconSize + (event.deltaY < 0 ? 12 : -12)));
   render();
   clearTimeout(zoomTimer);
-  zoomTimer = setTimeout(() => persist().catch((error) => setStatus(String(error))), 250);
+  zoomTimer = setTimeout(() => persist().catch((error) => {
+    // 018X6: a delayed persistence error must not paint status over the
+    // handoff if read-only began before this catch ran.
+    if (detachSaveGate.isReadOnly()) return;
+    setStatus(String(error));
+  }), 250);
 }, { passive: false });
 
 elements.breadcrumbs.addEventListener('click', (event) => {
@@ -2955,6 +4310,10 @@ function confirmPickupCopy(message) {
 elements.backdropOpacitySlider.addEventListener('input', () => {
   const opacity = Number(elements.backdropOpacitySlider.value);
   document.documentElement.style.setProperty('--workspace-backdrop-opacity', String(opacity));
+  document.documentElement.style.setProperty(
+    '--workspace-backdrop-opacity-percent',
+    `${Math.round(opacity * 10000) / 100}%`,
+  );
   elements.backdropOpacityValue.textContent = `${Math.round(opacity * 100)}%`;
 });
 
@@ -3247,19 +4606,669 @@ const promptLibrary = createPromptLibraryDialog({
   },
 });
 
-void bootstrapWorkspace({
-  loadState: () => host.loadWorkspace(),
-  setState: (next) => { state = store.install(next); },
-  restoreWorkspaceView,
-  setStatus,
-  render,
-  toolbar,
-  confirmDialog,
-  menu,
-  editorDialog,
-  binControls,
-  keyboard,
-  drop,
-  pointer,
-  promptLibrary,
-}).then(bootstrapWindowLayoutRecording);
+// ---- 019C compact-widget surface bootstrap --------------------------------
+// `?papers-surface=compact-widget&papers-layout-key=<id>` renders ONLY the named
+// layout's card and routes every card interaction through the same-origin
+// widget channel to the WORKSPACE writer. No old 018 wait-for-ACTIVATE/read-only
+// lifecycle; widget-ready is reported after the channel message listener exists.
+// The widget never writes the store/save/recording persistence.
+function bootstrapWindowLayoutWidget() {
+  const { layoutId } = WIDGET_SURFACE;
+  const widgetOpacityStorageKey = `papers-window-layout-widget-opacity:${layoutId}`;
+  const storedWidgetOpacity = Number(localStorage.getItem(widgetOpacityStorageKey));
+  let widgetOpacity = Number.isFinite(storedWidgetOpacity)
+    ? Math.max(0, Math.min(1, storedWidgetOpacity))
+    : null;
+
+  function applyWidgetOpacity(fallback = 1) {
+    const opacity = widgetOpacity ?? fallback;
+    document.documentElement.style.setProperty('--workspace-backdrop-opacity', String(opacity));
+    document.documentElement.style.setProperty(
+      '--workspace-backdrop-opacity-percent',
+      `${Math.round(opacity * 10000) / 100}%`,
+    );
+  }
+  const channel = new BroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL);
+  const widgetState = {
+    selection: new Set(),
+    anchor: new Map(),
+    snapshot: { id: layoutId, name: layoutId, members: [] },
+    candidates: null,
+    pickUnsubscribe: null,
+    lastRevision: -1,
+    // 035: true once a real workspace snapshot has been received (the restore
+    // below must never run against the empty initial default snapshot).
+    snapshotReceived: false,
+  };
+  // 035: the widget restores its window size EXACTLY ONCE after the first real
+  // snapshot; every later resize is user-owned and only reported for persistence.
+  let windowRestoredOnce = false;
+  // 019G/021: bounded snapshot re-request for a transient unknown-layout.
+  let snapshotRetry = null;
+
+  function handleWidgetMessage(message) {
+    if (message.type === 'snapshot' || message.type === 'committed' || message.type === 'stale') {
+      if (typeof message.revision !== 'number' || message.revision === widgetState.lastRevision) return;
+      widgetState.lastRevision = message.revision;
+      if (message.snapshot && typeof message.snapshot === 'object' && message.snapshot.id === layoutId) {
+        widgetState.snapshot = message.snapshot;
+        if (message.snapshot.appearance && typeof message.snapshot.appearance === 'object') {
+          applyTheme(message.snapshot.appearance);
+          applyWidgetOpacity(Number(message.snapshot.appearance.backdropOpacity) || 0);
+        }
+        widgetState.snapshotReceived = true;
+        const memberIds = new Set((message.snapshot.members ?? []).map((member) => member.id));
+        for (const memberId of [...widgetState.selection]) {
+          if (!memberIds.has(memberId)) widgetState.selection.delete(memberId);
+        }
+         renderWidgetCard({ skipHostResize: message.reason === 'reorder' || message.commandKind === 'reorder' });
+      }
+      return;
+    }
+    if (message.type === 'error') {
+      if (message.code === 'unknown-layout') {
+        // 019G/021: the workspace may still be loading durable state. Bounded
+        // re-request so the first open is never stuck on the empty card.
+        if (!snapshotRetry) {
+          snapshotRetry = createBoundedRetry({
+            attempts: 3,
+            delayMs: 250,
+            request: () => client.requestSnapshot(),
+            shouldRetry: () => true,
+            onResult: () => { snapshotRetry = null; },
+          });
+          snapshotRetry.start();
+        }
+        return;
+      }
+      setWindowLayoutStatus(layoutId, message.message || message.code || 'Command failed');
+    }
+  }
+
+  function renderWidgetCard({ skipHostResize = false } = {}) {
+    // 019GR: replacing the card must cancel the hover preview, hide the popover
+    // and clear the ephemeral widget capability cache so a late reply cannot
+    // paint a removed/replaced card. The snapshot ref feeds the surface-aware
+    // preview resolver.
+    windowLayoutMemberPreview.cancel();
+    windowLayoutMemberPopover.hide();
+    windowLayoutWidgetPreviewCapabilities.clear();
+    windowLayoutWidgetPreviewSnapshot = widgetState.snapshot;
+    // 019G/021: seed the shared icon cache from the snapshot's bounded icons so
+    // the SAME member markup renders REAL member icons (prune stale ones).
+    // 040: composite layout\u0000member cache identity — prune only THIS
+    // layout's keys that are no longer in the snapshot.
+    const snapshot = widgetState.snapshot;
+    const snapshotKeys = new Set((snapshot.members ?? []).map((member) => windowLayoutMemberKey(layoutId, member.id)));
+    const layoutPrefix = `${layoutId}\u0000`;
+    for (const key of [...windowLayoutRuntime.icons.keys()]) {
+      if (key.startsWith(layoutPrefix) && !snapshotKeys.has(key)) windowLayoutRuntime.icons.delete(key);
+    }
+    for (const member of snapshot.members ?? []) {
+      if (typeof member.icon === 'string' && member.icon.length > 0) {
+        windowLayoutRuntime.icons.set(windowLayoutMemberKey(layoutId, member.id), member.icon);
+      }
+    }
+    // 033 C5: the detached widget renders the EXACT SAME card component as the
+    // attached grid node - one shared card, two homes.
+    removeWindowLayoutCardPresentation(elements.grid);
+    elements.grid.innerHTML = windowLayoutCardMarkup(
+      { id: snapshot.id, name: snapshot.name, arrangement: { members: snapshot.members } },
+      { widgetSurface: true },
+    );
+    installWindowLayoutCardPresentation(elements.grid);
+    const card = elements.grid.querySelector('.window-layout-body');
+    if (card) {
+      card.addEventListener('pointerdown', (event) => event.stopPropagation());
+      card.addEventListener('click', handleWidgetCardClick);
+      card.addEventListener('contextmenu', handleWidgetCardContextMenu);
+    }
+    syncWidgetSelection();
+    // 035: restore the window ONCE after the first real snapshot (persisted
+    // shared card geometry, or a content-fit when none exists yet). 039: after
+    // that, EVERY re-render (e.g. a member-count change) auto-corrects the
+    // native client height to the rendered card content height. The FIRST
+    // restore reports BOTH axes itself; its own native resize event drives the
+    // follow-up height correction, so the correction never measures the
+    // transient default width (which would clobber the restored width).
+    const wasRestored = windowRestoredOnce;
+    restoreWidgetWindowSize();
+    if (wasRestored && !skipHostResize) reportWidgetSize();
+  }
+
+  /** 035: the full card content size — the card root plus any member/control
+   * strip content that must not be clipped by the hidden scrollbars. The card
+   * fills its host width, so the measured width equals the window content
+   * width and only the height is a real content-fit input. */
+  function measureWidgetCardContent() {
+    const cardEl = elements.grid.querySelector('.window-layout-card');
+    if (!cardEl) return null;
+    const rect = cardEl.getBoundingClientRect();
+    let width = rect.width;
+    // `getBoundingClientRect()` is clipped to the current native viewport when
+    // a width resize creates extra wrapped rows. scrollHeight retains the full
+    // laid-out card, including content below the clipped bottom edge.
+    let height = Math.max(rect.height, cardEl.scrollHeight);
+    for (const strip of cardEl.querySelectorAll('[data-wl-members], .window-layout-controls')) {
+      if (strip.scrollWidth > width) width = strip.scrollWidth;
+    }
+    return { width: Math.ceil(width), height: Math.ceil(height) };
+  }
+
+  /** 035: restore the frameless widget window exactly once, after the first
+   * real workspace snapshot. With a persisted shared geometry the window opens
+   * at that size (the layout's last resize); without one it content-fits to
+   * the card's natural size. The host applies the report verbatim (no
+   * +tolerance), so the card's fill-width never creeps. */
+  function restoreWidgetWindowSize() {
+    if (windowRestoredOnce || !widgetState.snapshotReceived) return;
+    windowRestoredOnce = true;
+    const cardSize = widgetState.snapshot?.cardSize;
+    if (cardSize && typeof cardSize.width === 'number' && typeof cardSize.height === 'number'
+      && Number.isFinite(cardSize.width) && Number.isFinite(cardSize.height)
+      && cardSize.width >= 1 && cardSize.height >= 1) {
+      // 037: a persisted width is the actual card/client width; an over-max
+      // legacy value is capped so the window opens content-fitted immediately.
+      void host.widgetReportSize(
+        Math.round(Math.min(cardSize.width, WINDOW_LAYOUT_CARD_MAX_WIDTH)),
+        Math.round(cardSize.height),
+      ).catch(() => undefined);
+      return;
+    }
+    const memberCount = widgetState.snapshot?.members?.length ?? 0;
+    const preferredColumns = memberCount <= 8 ? Math.max(1, memberCount) : Math.ceil(memberCount / Math.ceil(memberCount / 8));
+    const naturalWidth = Math.min(WINDOW_LAYOUT_CARD_MAX_WIDTH, Math.max(158, (preferredColumns * 28) + ((preferredColumns - 1) * 4) + 16));
+    const content = measureWidgetCardContent();
+    if (content && content.height > 0) {
+      void host.widgetReportSize(naturalWidth, content.height).catch(() => undefined);
+    }
+  }
+
+  /** 039/041: report the ACTUAL shared card/client presentation geometry —
+   * WIDTH = the rendered card border-box width (content-fit, capped at the
+   * compact maximum; a few-member card never retains a wide empty minimum) and
+   * HEIGHT = the rendered card content height. When the card reflows (a user
+   * width resize or a member-count change) the native client is auto-corrected
+   * to the card border box, so the detached host equals the card in BOTH axes
+   * with no empty vertical canvas and no clipping. The width stays user-
+   * resizable (narrowing drives wrapping) and continuously measurement-driven;
+   * the report also persists the shared geometry so reattach matches. */
+  function reportWidgetSize() {
+    const width = window.innerWidth;
+    const content = measureWidgetCardContent();
+    const cardWidth = Math.min(width, WINDOW_LAYOUT_CARD_MAX_WIDTH);
+    const height = content && content.height > 0 ? content.height : window.innerHeight;
+    // 037: snap an over-max client width; 039: auto-correct the client height;
+    // 041: snap the client width to the content-fit card border box. One report.
+    if (width > WINDOW_LAYOUT_CARD_MAX_WIDTH
+      || Math.abs(height - window.innerHeight) > 1) {
+      void host.widgetReportSize(cardWidth, height).catch(() => undefined);
+    }
+    client.sendCardSize(cardWidth, height);
+  }
+
+  function syncWidgetSelection() {
+    for (const button of elements.grid.querySelectorAll('[data-wl-member]')) {
+      const selected = widgetState.selection.has(button.dataset.wlMember);
+      button.classList.toggle('selected', selected);
+      button.setAttribute('aria-selected', String(selected));
+    }
+  }
+
+  function toggleWidgetMemberSelection(memberId) {
+    if (widgetState.selection.has(memberId)) widgetState.selection.delete(memberId);
+    else widgetState.selection.add(memberId);
+    widgetState.anchor.set(layoutId, memberId);
+    syncWidgetSelection();
+  }
+
+  function handleWidgetCardClick(event) {
+    event.stopPropagation();
+    const member = event.target.closest('[data-wl-member]');
+    if (member) {
+      if (widgetDragJustMoved) {
+        widgetDragJustMoved = false;
+        return;
+      }
+      const memberId = member.dataset.wlMember;
+      if (event.ctrlKey) {
+        // 019C: widget-local ephemeral selection (Ctrl toggle / Shift range);
+        // only committed actions are routed to the workspace writer.
+        toggleWidgetMemberSelection(memberId);
+        return;
+      }
+      if (event.shiftKey) {
+        const ordered = (widgetState.snapshot.members ?? []).map((candidate) => candidate.id);
+        const anchorId = widgetState.anchor.get(layoutId);
+        const anchorIndex = ordered.indexOf(anchorId);
+        const clickedIndex = ordered.indexOf(memberId);
+        widgetState.selection = new Set();
+        if (anchorIndex === -1 || clickedIndex === -1) {
+          widgetState.selection.add(memberId);
+        } else {
+          const [start, end] = anchorIndex <= clickedIndex
+            ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
+          for (let index = start; index <= end; index += 1) widgetState.selection.add(ordered[index]);
+        }
+        widgetState.anchor.set(layoutId, memberId);
+        syncWidgetSelection();
+        return;
+      }
+      client.sendCommand({ kind: 'member-toggle', memberId });
+      return;
+    }
+    const pickCandidate = event.target.closest('[data-wl-pick-candidate]');
+    if (pickCandidate) {
+      void handleWidgetListCandidate(pickCandidate.dataset.wlPickCandidate);
+      return;
+    }
+    const pickerClose = event.target.closest('[data-wl-picker-close]');
+    if (pickerClose) {
+      closeWidgetPicker();
+      return;
+    }
+    const directPick = event.target.closest('[data-wl-pick]');
+    if (directPick) {
+      void beginWidgetDirectPick();
+      return;
+    }
+    const listButton = event.target.closest('[data-wl-list]');
+    if (listButton) {
+      void openWidgetPicker();
+      return;
+    }
+    const minAll = event.target.closest('[data-wl-min-all]');
+    if (minAll) {
+      client.sendCommand({ kind: 'group-action', action: 'minimize', memberIds: [...widgetState.selection] });
+      return;
+    }
+    const restoreAll = event.target.closest('[data-wl-restore-all]');
+    if (restoreAll) {
+      client.sendCommand({ kind: 'group-action', action: 'restore', memberIds: [...widgetState.selection] });
+      return;
+    }
+    const isolate = event.target.closest('[data-wl-isolate]');
+    if (isolate) {
+      client.sendCommand({ kind: 'group-action', action: 'isolate', memberIds: [...widgetState.selection] });
+      return;
+    }
+    const reattach = event.target.closest('[data-wl-reattach]');
+    if (reattach) {
+      // 035: report the widget is closing BEFORE the window is torn down so the
+      // workspace reliably restores the attached card (pagehide alone can race
+      // the channel close). Idempotent workspace-side.
+      client.dispose();
+      void host.widgetCloseSelf().catch(() => undefined);
+      return;
+    }
+
+    // Plain blank-card click exits the widget-local Ctrl/range selection. This
+    // is ephemeral presentation state only: no member is toggled, no command
+    // is sent to the workspace writer, and no layout data is changed.
+    if (widgetState.selection.size > 0) {
+      widgetState.selection.clear();
+      widgetState.anchor.delete(layoutId);
+      syncWidgetSelection();
+    }
+  }
+
+  async function handleWidgetCardContextMenu(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const member = event.target.closest('[data-wl-member]');
+    if (member && event.shiftKey) {
+      client.sendCommand({
+        kind: 'range-toggle',
+        memberId: member.dataset.wlMember,
+        memberIds: [...widgetState.selection],
+      });
+      return;
+    }
+    // A detached widget is frequently narrower than an ordinary menu. Ask its
+    // trusted native host for a real popup so the action can extend beyond the
+    // widget bounds and dismiss normally with Escape, blur or an outside click.
+    if (member) {
+      const memberId = member.dataset.wlMember;
+      if (!memberId || member.disabled) return;
+      windowLayoutMemberPreview.cancel();
+      try {
+        const result = await host.widgetContextMenu();
+        if (result?.action === 'remove') {
+          client.sendCommand({ kind: 'remove-member', memberId });
+        }
+      } catch (error) {
+        setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
+      }
+    }
+  }
+
+  async function openWidgetPicker() {
+    // 019G: a picker covering the desktop must clear/discard the hover preview.
+    windowLayoutMemberPreview.cancel();
+    try {
+      const result = await host.windowCandidates();
+      if (result.outcome !== 'success') {
+        setWindowLayoutStatus(layoutId, result.error || 'List unavailable');
+        return;
+      }
+      widgetState.candidates = result.candidates;
+      const currentTitles = new Set((widgetState.snapshot.members ?? []).map((member) => member.descriptor.title));
+      const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
+        id: candidate.id,
+        title: candidate.title,
+        icon: candidate.icon ?? null,
+        current: currentTitles.has(candidate.title),
+      })));
+      if (picked.candidateId) await handleWidgetListCandidate(picked.candidateId);
+    } catch (error) {
+      setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
+    } finally {
+      closeWidgetPicker();
+    }
+  }
+
+  function windowLayoutWidgetPickerMarkup(candidates) {
+    const currentTitles = new Set((widgetState.snapshot.members ?? []).map((member) => member.descriptor.title));
+    const rows = candidates.map((candidate) => {
+      const isCurrent = currentTitles.has(candidate.title);
+      return `<button class="window-layout-pick-candidate${isCurrent ? ' current-member' : ''}" data-wl-pick-candidate="${escapeHtml(candidate.id)}" type="button" title="${escapeHtml(candidate.title)}">
+        ${candidate.icon
+          ? `<img class="window-layout-pick-icon" src="${escapeHtml(candidate.icon)}" alt="">`
+          : '<span class="window-layout-pick-icon placeholder" aria-hidden="true"></span>'}
+        <span class="window-layout-pick-label">${escapeHtml(candidate.title)}</span>
+        <span class="window-layout-pick-state">${isCurrent ? 'remove' : escapeHtml(candidate.state ?? 'add')}</span>
+      </button>`;
+    }).join('');
+    return `<div class="window-layout-picker-panel">
+      <div class="window-layout-picker-head">Choose an onscreen window (click a member row to remove it)
+        <button class="window-layout-picker-close" data-wl-picker-close="true" type="button" title="Close picker">×</button>
+      </div>
+      <div class="window-layout-picker-list">${rows || '<div class="window-layout-empty">No eligible windows</div>'}</div>
+    </div>`;
+  }
+
+  function closeWidgetPicker() {
+    widgetState.candidates = null;
+    const pickerHost = elements.grid.querySelector(`[data-wl-picker="${CSS.escape(layoutId)}"]`);
+    if (pickerHost) pickerHost.innerHTML = '';
+    restoreHoveredWindowLayoutPreview(layoutId);
+  }
+
+  async function handleWidgetListCandidate(candidateId) {
+    const row = (widgetState.candidates ?? []).find((candidate) => candidate.id === candidateId);
+    if (!row) return;
+    const bound = await host.bindWindowCandidate(candidateId);
+    if (bound.outcome !== 'success') {
+      setWindowLayoutStatus(layoutId, bound.error || 'Pick failed');
+      return;
+    }
+    const isMember = (widgetState.snapshot.members ?? [])
+      .some((member) => member.descriptor.title === bound.descriptor.title);
+    if (isMember) {
+      client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] } });
+    } else {
+      client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [{ descriptor: bound.descriptor, capability: bound.capability, candidate: row }], removes: [] } });
+    }
+    closeWidgetPicker();
+  }
+
+  async function beginWidgetDirectPick() {
+    // 019G: the pick overlay covers the desktop; clear/discard the hover preview.
+    windowLayoutMemberPreview.cancel();
+    closeWidgetPicker();
+    const members = (widgetState.snapshot.members ?? []).map((member) => member.descriptor);
+    try {
+      // Subscribe to the result push BEFORE awaiting begin, so an immediate
+      // pick never misses its result (016R pattern).
+      const beginPromise = host.pickWindowBegin(members);
+      const pickPromise = new Promise((resolve) => {
+        widgetState.pickUnsubscribe = host.onPickResult(resolve);
+      });
+      const begin = await beginPromise;
+      if (begin.outcome !== 'started') {
+        widgetState.pickUnsubscribe?.();
+        widgetState.pickUnsubscribe = null;
+        setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
+        return;
+      }
+      const result = await pickPromise;
+      if (result.outcome === 'failed') {
+        setWindowLayoutStatus(layoutId, result.error || 'Pick failed');
+        return;
+      }
+      // Winter's one typed committed set goes to the WORKSPACE writer; the
+      // widget never applies it locally.
+      client.sendCommand({ kind: 'picker-commit', pick: result });
+    } catch {
+      widgetState.pickUnsubscribe?.();
+      widgetState.pickUnsubscribe = null;
+      setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
+    } finally {
+      widgetState.pickUnsubscribe?.();
+      widgetState.pickUnsubscribe = null;
+    }
+  }
+
+  window.addEventListener('keydown', (event) => {
+    if (!widgetState.pickUnsubscribe) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      void host.pickWindowCancel();
+    } else if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      void (event.key === ' ' ? host.pickWindowStage() : host.pickWindowCommit());
+    }
+  });
+
+  window.addEventListener('pagehide', () => {
+    widgetState.pickUnsubscribe?.();
+    widgetState.pickUnsubscribe = null;
+    snapshotRetry?.cancel();
+    snapshotRetry = null;
+    if (cardSizeTimer !== null) {
+      clearTimeout(cardSizeTimer);
+      cardSizeTimer = null;
+    }
+    // 019GR: pagehide discards pending preview work and clears the ephemeral
+    // widget capability cache.
+    windowLayoutMemberPreview.cancel();
+    windowLayoutWidgetPreviewCapabilities.clear();
+    // 035: report the widget is closing so the workspace restores its attached
+    // card (no longer a greyed placeholder).
+    client.dispose();
+    client.close();
+    windowLayoutWidgetClient = null;
+  });
+
+  // 035/037/039: the live widget reports its shared card geometry whenever the
+  // creator resizes it (debounced) so the workspace persists it. The width is
+  // capped at the compact presentation maximum (over-max snaps), and the
+  // HEIGHT is the rendered card content height, so the native client
+  // auto-corrects to fit the card in both axes after every reflow.
+  let cardSizeTimer = null;
+  window.addEventListener('resize', () => {
+    // Trailing-edge correction: while the creator is dragging an edge Windows
+    // owns the native size and can overwrite an early correction. Re-arm on
+    // every event, then fit the wrapped height once that resize burst settles.
+    if (cardSizeTimer !== null) clearTimeout(cardSizeTimer);
+    cardSizeTimer = setTimeout(() => {
+      cardSizeTimer = null;
+      reportWidgetSize();
+    }, 80);
+  });
+
+  // 019C: the widget channel client installs its message listener in the
+  // factory, so widget-ready is reported ONLY after the listener exists. The
+  // preload latches the hidden token and forwards READY to the session; no
+  // ACTIVATE/load gate.
+  const client = createWindowLayoutWidgetChannelClient({
+    channel,
+    layoutId,
+    onMessage: handleWidgetMessage,
+  });
+  windowLayoutWidgetClient = client;
+  // 040: the widget card's member context menu (`Remove from this layout`) is
+  // the SHARED context menu component; it must be mounted in the widget surface
+  // too (the workspace bootstrap does this, but the widget never runs it).
+  menu.mount();
+  // 024: member-icon reordering in the DETACHED/compact-widget card. The widget
+  // never writes the store: a drag reorders the live DOM and sends a bounded
+  // `reorder` intent through the channel; the workspace applies + broadcasts
+  // the fresh snapshot. Capture-phase listeners run before the card's own
+  // stopPropagation handlers.
+  const widgetMemberDrag = createWindowLayoutMemberDrag();
+  let widgetDragJustMoved = false;
+  window.addEventListener('wheel', (event) => {
+    // A detached widget has no scrollable document. Chromium does not always
+    // preserve Ctrl in wheel events for a non-focusable native window, so the
+    // wheel itself is the stable input contract here (Ctrl+wheel still works).
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const hostOpacity = Number(widgetState.snapshot.appearance?.backdropOpacity) || 0;
+    const current = widgetOpacity ?? hostOpacity;
+    widgetOpacity = Math.max(0, Math.min(1, Math.round((current + (event.deltaY < 0 ? 0.05 : -0.05)) * 100) / 100));
+    localStorage.setItem(widgetOpacityStorageKey, String(widgetOpacity));
+    applyWidgetOpacity(hostOpacity);
+  }, { capture: true, passive: false });
+  function suppressNextWidgetMemberClick() {
+    widgetDragJustMoved = true;
+    setTimeout(() => { widgetDragJustMoved = false; }, 0);
+  }
+  elements.grid.addEventListener('pointerdown', (event) => {
+    const member = event.target.closest('[data-wl-member]');
+    if (!member || !event.ctrlKey || event.button !== 0) return;
+    event.preventDefault();
+    cancelWindowLayoutPreviewDwell();
+    windowLayoutMemberPopover.hide();
+    windowLayoutMemberPreview.cancel();
+    // A lost pointerup from a previous OS/native transition must not poison the
+    // next Ctrl-drag. Each press owns a fresh captured pointer session.
+    widgetMemberDrag.cancel();
+    widgetMemberDrag.start({
+      layoutId: member.dataset.wlLayout,
+      memberId: member.dataset.wlMember,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pointerId: event.pointerId,
+    });
+    member.classList.add('wl-member-dragging');
+    // Capture on the stable grid, not the button whose DOM position changes
+    // during live reorder. Moving a captured button can release capture after
+    // the first insertion and incorrectly limit a drag to one slot.
+    try { elements.grid.setPointerCapture(event.pointerId); } catch { /* unsupported */ }
+  }, true);
+  elements.grid.addEventListener('pointermove', (event) => {
+    const drag = widgetMemberDrag.move(event.pointerId, event.clientX, event.clientY);
+    if (!drag) return;
+    event.preventDefault();
+    const members = elements.grid.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
+    const button = elements.grid.querySelector(`[data-wl-layout="${CSS.escape(drag.layoutId)}"] [data-wl-member="${CSS.escape(drag.memberId)}"]`);
+    if (!members || !button) return;
+    const row = members.getBoundingClientRect();
+    const outside = event.clientY < row.top - WINDOW_LAYOUT_DROP_OUT_PX
+      || event.clientY > row.bottom + WINDOW_LAYOUT_DROP_OUT_PX
+      || event.clientX < row.left - WINDOW_LAYOUT_DROP_OUT_PX
+      || event.clientX > row.right + WINDOW_LAYOUT_DROP_OUT_PX;
+    members.classList.toggle('wl-drag-out', outside);
+    if (outside) return;
+    moveWindowLayoutMemberButton(members, button, event.clientX, event.clientY);
+  }, true);
+  elements.grid.addEventListener('pointerup', (event) => {
+    widgetMemberDrag.finalize(event.pointerId, (drag) => {
+      const members = elements.grid.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
+      if (!members) return;
+      const dragged = members.querySelector(`[data-wl-member="${CSS.escape(drag.memberId)}"]`);
+      dragged?.classList.remove('wl-member-dragging');
+      members.classList.remove('wl-drag-out');
+      if (!drag.moved) {
+        // Pointer capture retargets the eventual click to the grid. Complete
+        // Ctrl-click selection here when the gesture never became a drag.
+        toggleWidgetMemberSelection(drag.memberId);
+        suppressNextWidgetMemberClick();
+        return;
+      }
+      suppressNextWidgetMemberClick();
+      const buttons = [...members.querySelectorAll('[data-wl-member]')];
+      const toIndex = buttons.findIndex((button) => button.dataset.wlMember === drag.memberId);
+      if (toIndex === -1) return;
+      client.sendCommand({ kind: 'reorder', memberId: drag.memberId, toIndex });
+    });
+    const captured = elements.grid.querySelector(`[data-wl-member].wl-member-dragging`);
+    captured?.classList.remove('wl-member-dragging');
+    try { elements.grid.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+  }, true);
+  elements.grid.addEventListener('pointercancel', (event) => {
+    const active = widgetMemberDrag.get();
+    if (!active || !widgetMemberDrag.cancelMatching(event.pointerId)) return;
+    const members = elements.grid.querySelector(`[data-wl-members="${CSS.escape(active.layoutId)}"]`);
+    if (members) members.classList.remove('wl-drag-out');
+    const captured = elements.grid.querySelector(`[data-wl-member="${CSS.escape(active.memberId)}"]`);
+    captured?.classList.remove('wl-member-dragging');
+    try { elements.grid.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+  }, true);
+  elements.grid.addEventListener('lostpointercapture', (event) => {
+    const active = widgetMemberDrag.get();
+    if (!active || active.pointerId !== event.pointerId) return;
+    widgetMemberDrag.cancelMatching(event.pointerId);
+    const members = elements.grid.querySelector(`[data-wl-members="${CSS.escape(active.layoutId)}"]`);
+    if (members) members.classList.remove('wl-drag-out');
+    members?.querySelector(`[data-wl-member="${CSS.escape(active.memberId)}"]`)?.classList.remove('wl-member-dragging');
+  }, true);
+  return host.widgetReady().then(() => {
+    client.ready();
+    client.requestSnapshot();
+  });
+}
+
+// 018A1/018X1/018X2/018V2: the detached surface (?detach=1) registers lifecycle
+// listeners at factory creation, then (018V2 two-sided latch) reports page
+// READY EXACTLY ONCE — only after its detach-message listener is installed and
+// BEFORE it waits for ACTIVATE/load/bootstrap. The durable-state load is gated
+// on ACTIVATE (after the workspace stop+flush ACK). On pagehide the activate
+// waiter resolves the explicit CANCELLED sentinel: the loadState rejects
+// (bootstrap must not load) and the controller bootstrap is skipped while
+// stopped, so neither durable state nor the controller starts.
+// 019C: the compact-widget surface never runs the workspace graph/workspace
+// bootstrap, the old 018 wait-for-ACTIVATE lifecycle or the recording
+// controller (the workspace window owns all of those).
+if (WIDGET_SURFACE) {
+  void bootstrapWindowLayoutWidget();
+} else {
+  const DETACHED_SURFACE = windowLayoutDetachment.getState().mode === 'detached';
+  if (DETACHED_SURFACE) {
+    void windowLayoutDetachment.reportReady();
+  }
+  void bootstrapWorkspace({
+    loadState: DETACHED_SURFACE
+      ? () => windowLayoutDetachment.waitForActivate().then((transferId) => {
+        if (transferId === DETACH_ACTIVATE_CANCELLED) {
+          throw new Error('detach activate cancelled');
+        }
+        return host.loadWorkspace();
+      })
+      : () => host.loadWorkspace(),
+    setState: (next) => { state = store.install(next); },
+    restoreWorkspaceView,
+    setStatus,
+    render,
+    toolbar,
+    confirmDialog,
+    menu,
+    editorDialog,
+    binControls,
+    keyboard,
+    drop,
+    pointer,
+    promptLibrary,
+  }).then(() => {
+    if (!windowLayoutDetachment.isStopped()) bootstrapWindowLayoutRecording();
+    // 019G/021: after durable state loads, broadcast a real snapshot for every
+    // layout so an already-open widget is never stuck on `unknown-layout` /
+    // the empty default card (cold-open readiness race).
+    for (const layout of state.windowLayouts ?? []) {
+      windowLayoutWidgetChannelWorkspace.broadcast(layout.id);
+    }
+  });
+}

@@ -13,6 +13,19 @@ const stringIds = (value) => Array.isArray(value)
   ? [...new Set(value.filter((candidate) => typeof candidate === 'string'))]
   : [];
 
+/** 035: the persisted shared card geometry of a window-layout record - the
+ * detached widget's latest window content size, mirrored by the attached card
+ * and reused as the next detach bounds. Bounded positive integers only; values
+ * below 1 are rejected (consistent with the channel/IPC report bounds). */
+export function normalizeWindowLayoutCardSize(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const width = raw.width;
+  const height = raw.height;
+  if (!hasNumber(width) || !hasNumber(height)) return null;
+  if (width < 1 || height < 1) return null;
+  return { width: Math.round(Math.min(2000, width)), height: Math.round(Math.min(2000, height)) };
+}
+
 export function emptyState() {
   return {
     schemaVersion: 1,
@@ -356,6 +369,10 @@ function normalizeWindowLayouts(raw) {
         }
         : {}),
       arrangement: normalizeWindowLayoutArrangement(candidate.arrangement),
+      // 035: the shared attached/detached card geometry survives reloads (the
+      // detached widget's latest window content size); malformed or missing
+      // values stay null so an old record renders at the default width.
+      ...(normalizeWindowLayoutCardSize(candidate.cardSize) ? { cardSize: normalizeWindowLayoutCardSize(candidate.cardSize) } : {}),
     });
   }
   return records;
@@ -731,6 +748,28 @@ export function updateWindowLayoutMember(state, windowLayoutId, memberId, patch)
   };
 }
 
+/** 035: data-only shared-geometry writer. Stores the detached widget's latest
+ * window content size on the layout's cardSize so the attached card mirrors it
+ * on reattach and the next detach reuses it as its open bounds. Bounded to the
+ * same [1, 2000] range as the channel/IPC report; returns the same state when
+ * nothing changed. */
+export function setWindowLayoutCardSize(state, windowLayoutId, width, height) {
+  const layout = windowLayout(state, windowLayoutId);
+  if (!layout) throw new Error('Window layout not found.');
+  const cardSize = normalizeWindowLayoutCardSize({ width, height });
+  if (!cardSize) throw new Error('Window layout card size is invalid.');
+  if (layout.cardSize && layout.cardSize.width === cardSize.width && layout.cardSize.height === cardSize.height) {
+    return state;
+  }
+  return {
+    ...state,
+    windowLayouts: state.windowLayouts.map((candidate) =>
+      candidate.id === windowLayoutId
+        ? { ...candidate, cardSize }
+        : candidate),
+  };
+}
+
 /** Reorders one member to a new index within the layout's persisted member
  * order (016 inner reorder drag). Data-only; never touches the window. */
 export function reorderWindowLayoutMember(state, windowLayoutId, memberId, toIndex) {
@@ -916,12 +955,12 @@ export function updateGroup(state, groupId, changes) {
       icon: changes.icon ?? null,
     };
   });
-  // A window-layout record is edited through the same name+icon surface the
-  // group editor provides, so the existing editor renames it unchanged.
+  // 024: layout name/icon customization is REMOVED. The persisted name/icon
+  // fields stay for compatibility, but the group editor can no longer rename
+  // or re-icon a window-layout record (the card is identified by content).
   const windowLayouts = (state.windowLayouts ?? []).map((candidate) => {
     if (candidate.id !== groupId) return candidate;
-    found = true;
-    return { ...candidate, name, icon: changes.icon ?? null };
+    throw new Error('Window layout name and icon are not customizable.');
   });
   if (!found) throw new Error('Group was not found.');
   return { ...state, groups, windowLayouts };

@@ -73,6 +73,17 @@ test('openMenu in bin mode shows restore and permanent delete', () => {
   assert.match(menuNode.innerHTML, /Delete permanently/);
 });
 
+test('040 member kind shows only Remove from this layout and records the parent layout', () => {
+  const { menu, menuNode } = createHarness();
+  menu.openMenu(100, 100, 'member', 'L1');
+  assert.equal(menuNode.hidden, false);
+  assert.equal(menuNode.dataset.parent, 'L1');
+  assert.match(menuNode.innerHTML, /data-action="remove-from-layout"/);
+  assert.match(menuNode.innerHTML, /Remove from this layout/);
+  assert.doesNotMatch(menuNode.innerHTML, /data-action="copy"/);
+  assert.doesNotMatch(menuNode.innerHTML, /data-action="bin"/);
+});
+
 test('openMenu with a single selection shows edit/rename and Open', () => {
   const selected = [
     { id: 's1', name: 'App', target: 'C:\\app.exe' },

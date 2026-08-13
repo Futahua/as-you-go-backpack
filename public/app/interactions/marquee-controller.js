@@ -90,5 +90,19 @@ export function createMarqueeController({
     return moved;
   }
 
-  return { isActive, start, move, finish };
+  /** 018X2 item 9: cancels an active marquee WITHOUT finalizing selection.
+   * Releases pointer capture, hides the overlay and resets the gesture state,
+   * so a later captured pointerup cannot call the finish command after a
+   * handoff begins. Normal gestures are unaffected (start/move/finish
+   * unchanged). */
+  function cancel() {
+    if (!drag) return;
+    if (elements.grid.hasPointerCapture(drag.pointerId)) {
+      elements.grid.releasePointerCapture(drag.pointerId);
+    }
+    drag = null;
+    elements.marquee.hidden = true;
+  }
+
+  return { isActive, start, move, finish, cancel };
 }

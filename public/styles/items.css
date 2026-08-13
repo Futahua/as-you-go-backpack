@@ -158,44 +158,149 @@
   word-break: break-word;
 }
 
-/* Window-layout items (Assignments 008, 015). The shell widens so the
-   compact live body fits; the simulation keeps measuring the rendered
-   shell, so collision uses the real footprint. Restrained static styles
-   from existing tokens; interior buttons never start outer graph drag
-   and the live observer patches only member interiors. */
+/* Window-layout items (Assignments 008, 015). The shell width is the layout's
+   persisted shared host width (default 320px when a fresh layout has none), so
+   the attached host footprint and collision use the real geometry. The compact
+   card inside takes the measured available width of its host (the attached
+   shell OR the user-resizable detached window) up to ONE shared compact
+   presentation bound; wider hosts never stretch the card into a long strip.
+   Restrained static styles from existing tokens; interior buttons never start
+   outer graph drag and the live observer patches only member interiors. */
 .graph-node-shell.window-layout-shell {
-  width: clamp(148px, calc(var(--icon-size) + 84px), calc(var(--icon-size) + 100px));
+  width: var(--wl-card-width, fit-content);
 }
-.window-layout-art {
-  position: relative;
+/* 033/034/035/036 + 041: the ONE shared card component (attached grid node and
+   detached compact-widget) has the same surface, dimensions and content.
+   041: the card is content-fit (fit-content) - a one/few-member card never
+   retains a wide empty minimum; it is exactly as wide as its content up to the
+   host width and capped at one measurement-driven compact presentation bound
+   (--wl-card-max-width, ~280px). Member/control rows WRAP continuously with the
+   actual available width below it. This is a WIDTH bound shared by attached and
+   detached; it is NOT a member/icon/column-count breakpoint. No title. */
+.window-layout-card {
   display: block;
-  width: 82%;
-  height: 62%;
-  border: 2px solid var(--text-secondary);
-  border-radius: 6px;
+  width: 100%;
+  max-width: min(100%, var(--wl-card-max-width, 280px));
+  margin-inline: auto;
+  min-width: 0;
+  box-sizing: border-box;
   background: var(--surface-soft);
+  border: 1px solid var(--border-soft, var(--text-faint));
+  border-radius: 8px;
+  padding: 6px 8px;
+  text-align: center;
 }
-.window-layout-art::before {
-  position: absolute;
-  top: -16%;
-  left: 12%;
-  width: 46%;
-  height: 24%;
-  border: 2px solid var(--text-secondary);
-  border-bottom: 0;
-  border-radius: 5px 5px 0 0;
-  background: var(--surface-raised);
-  content: "";
+/* The attached card lives inside the graph node; the node shell/icon-item stay
+   as a thin selection/drag wrapper. 036: the wrapper carries NO padding AND NO
+   border for window layouts so the attached card's outer (border-box) width
+   equals the shell/persisted host width exactly — the same value the detached
+   card reports — proving 1:1 without a border/content-box delta. */
+.window-layout-shell .icon-item {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+}
+/* 036: the window-layout card keeps a visible selection cue without altering
+   its measured width (inset ring, no layout change) now that the wrapper has
+   no border of its own. */
+.icon-item.selected .window-layout-card {
+  box-shadow: inset 0 0 0 1.5px var(--folder-color, currentColor);
+}
+/* 035: the attached card while its widget is the sole live card - greyed,
+   disabled members and controls; only the reattach lock stays live. */
+.window-layout-card--placeholder {
+  background: var(--surface-muted, var(--surface-soft));
+  filter: grayscale(1);
+}
+.window-layout-card--placeholder .window-layout-member,
+.window-layout-card--placeholder .window-layout-control {
+  opacity: 0.55;
+  filter: grayscale(1);
+}
+.window-layout-card--placeholder .window-layout-control.wl-reattach {
+  opacity: 1;
+  filter: none;
 }
 .window-layout-body {
   display: grid;
   width: 100%;
-  gap: 5px;
-  margin-top: 8px;
-  padding: 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--surface-soft);
+  max-width: 100%;
+  gap: 4px;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+/* 035: on the compact-widget surface the card host fills the window edge to
+   edge (no explorer/workspace responsive inset or padding) so the shared card
+   IS the widget and its width equals the window content width exactly. The
+   workspace page never matches these (its cards sit inside graph nodes). */
+.workspace:has(.icon-grid > .window-layout-card) {
+  width: 100%;
+  max-width: none;
+  padding: 0;
+}
+.icon-grid:has(> .window-layout-card) {
+  width: 100%;
+  padding: 0;
+  min-height: 0;
+}
+/* 038: the compact-widget surface is the shared card ONLY. Every workspace host
+   control - the navigation/toolbar (copy/duplicate, Bin/trash, breadcrumbs,
+   backdrop slider, restore/delete-all), the global status line, the selection
+   footer, the context menu, the editors and confirm dialogs, and the backdrop
+   panel - is absent in widget mode. The card host (.explorer > .icon-grid) is
+   untouched. This matches ONLY the widget (a card directly inside the grid);
+   the workspace's attached cards live inside graph nodes. */
+body:has(.icon-grid > .window-layout-card) .navigation,
+body:has(.icon-grid > .window-layout-card) .status,
+body:has(.icon-grid > .window-layout-card) .selection-status,
+body:has(.icon-grid > .window-layout-card) .editor-layer,
+body:has(.icon-grid > .window-layout-card) .confirm-layer,
+body:has(.icon-grid > .window-layout-card) .workspace-backdrop,
+body:has(.icon-grid > .window-layout-card) .toolbar-float {
+  display: none !important;
+}
+.window-layout-shell .window-layout-card {
+  resize: horizontal;
+  overflow: hidden;
+}
+.icon-grid > .window-layout-card {
+  width: min(100%, var(--wl-card-max-width, 280px));
+  max-width: var(--wl-card-max-width, 280px);
+  margin: 0;
+  background: color-mix(in srgb,
+    var(--surface-soft) var(--workspace-backdrop-opacity-percent, 100%),
+    transparent);
+  /* Frameless pet window: empty card surface moves the native window. */
+  -webkit-app-region: drag;
+}
+/* The native BrowserWindow is transparent. Widget mode must not add a second
+   opaque page/workspace sheet beneath the opacity-controlled Backpack card. */
+:root[data-widget-surface="true"],
+:root[data-widget-surface="true"] body,
+:root[data-widget-surface="true"] .workspace,
+:root[data-widget-surface="true"] .explorer,
+:root[data-widget-surface="true"] .icon-grid {
+  background: transparent !important;
+}
+/* Interactive descendants must never be swallowed by the native drag region;
+   Ctrl+drag member reorder, hover previews, menus and controls remain normal. */
+.icon-grid > .window-layout-card .window-layout-member,
+.icon-grid > .window-layout-card .window-layout-member *,
+.icon-grid > .window-layout-card .window-layout-control,
+.icon-grid > .window-layout-card .window-layout-control *,
+.icon-grid > .window-layout-card .window-layout-picker-panel,
+.icon-grid > .window-layout-card button,
+.icon-grid > .window-layout-card input,
+.icon-grid > .window-layout-card [role="button"] {
+  -webkit-app-region: no-drag;
+}
+.window-layout-member.wl-member-dragging {
+  z-index: 2;
+  cursor: grabbing;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--folder-color, var(--accent)) 58%, transparent);
 }
 .window-layout-members {
   display: flex;
@@ -203,52 +308,97 @@
   justify-content: center;
   align-items: center;
   gap: 4px;
-  min-height: 26px;
+  overflow-x: visible;
+  overflow-y: visible;
+  scrollbar-width: none;
+  width: var(--wl-balanced-member-width, 100%);
+  max-width: 100%;
+  margin-inline: auto;
 }
+.window-layout-members::-webkit-scrollbar { height: 0; }
 .window-layout-member {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: 1px solid var(--border-strong);
+  justify-content: center;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
   border-radius: 6px;
-  background: var(--surface-raised);
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 9px;
-  line-height: 1;
-  padding: 3px 5px;
+  padding: 2px;
   cursor: pointer;
-  max-width: 150px;
+  transition: background 110ms ease, box-shadow 110ms ease, filter 110ms ease;
 }
 .window-layout-member-icon {
   width: 14px;
   height: 14px;
   object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.window-layout-member:focus-visible {
+  outline: 2px solid var(--folder-color, currentColor);
+  outline-offset: -2px;
 }
 .window-layout-member-icon.placeholder {
   display: inline-block;
+  width: 14px;
+  height: 14px;
+  position: relative;
+  border: 1px solid var(--text-faint);
   background: var(--surface-muted);
   border-radius: 3px;
 }
-.window-layout-member-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.window-layout-member-icon.placeholder::after {
+  position: absolute;
+  inset: 3px 2px;
+  border: 1px solid currentColor;
+  border-top-width: 2px;
+  border-radius: 1px;
+  content: "";
+  opacity: 0.65;
 }
+/* 019F taskbar-like member button: a small BOTTOM running indicator (a Windows
+   taskbar-style line) shown ONLY for open/normal members - a minimized or
+   missing member shows NO bar at all (024). The accent surface/indicator is
+   used ONLY for this product's explicit Ctrl/Shift selection (aria-selected). */
 .window-layout-member-state {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--success, #4caf50);
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text-muted);
+  pointer-events: none;
   flex: none;
 }
-.window-layout-member-state.minimized {
-  background: var(--text-muted);
-}
+.window-layout-member-state.minimized,
 .window-layout-member-state.missing {
-  background: var(--danger, #e57373);
+  display: none;
 }
-.window-layout-member.minimized { background: var(--surface-muted); }
+.window-layout-member.minimized { background: transparent; }
 .window-layout-member.missing { opacity: 0.55; }
+/* 019F: subtle STATIC rounded hover/selected backgrounds (no animation); the
+   accent ring + indicator apply only to the explicit selection. */
+.window-layout-member:hover {
+  background: var(--surface-soft);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--folder-color, var(--accent)) 42%, transparent);
+  filter: brightness(1.08);
+}
+.window-layout-member.selected {
+  background: var(--surface-soft);
+  box-shadow: inset 0 0 0 1.5px var(--folder-color, currentColor);
+}
+.window-layout-member.selected .window-layout-member-state {
+  background: var(--folder-color, currentColor);
+  opacity: 1;
+}
 .window-layout-empty {
   color: var(--text-muted);
   font-size: 9px;
@@ -258,17 +408,44 @@
 .window-layout-controls {
   display: flex;
   justify-content: center;
-  gap: 4px;
+  gap: 3px;
+  flex-wrap: wrap;
+  overflow-x: visible;
+  overflow-y: visible;
+  scrollbar-width: none;
 }
+.window-layout-controls::-webkit-scrollbar { height: 0; }
 .window-layout-control {
-  border: 1px solid var(--border-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 20px;
+  border: 1px solid transparent;
   border-radius: 5px;
-  background: var(--surface-raised);
+  background: transparent;
   color: var(--text-muted);
-  font-size: 9px;
-  line-height: 1;
-  padding: 3px 6px;
+  padding: 0;
   cursor: pointer;
+  transition: background 110ms ease, box-shadow 110ms ease, color 110ms ease;
+}
+.window-layout-control:not(:disabled):hover {
+  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+  color: var(--text-secondary);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--folder-color, var(--accent)) 38%, transparent);
+}
+.window-layout-control svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  stroke: currentColor;
+  fill-rule: evenodd;
+}
+.window-layout-control:focus-visible {
+  outline: 2px solid var(--folder-color, currentColor);
+  outline-offset: -1px;
 }
 .window-layout-control:disabled {
   opacity: 0.5;
@@ -372,18 +549,97 @@
 .window-layout-pick-candidate {
   max-width: 100%;
 }
-.window-layout-member.selected {
-  outline: 2px solid var(--folder-color, currentColor);
-  outline-offset: -2px;
-}
 .window-layout-members.wl-drag-out {
   box-shadow: inset 0 0 0 2px var(--text-danger, crimson);
 }
 .window-layout-controls {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
   justify-content: center;
+  gap: 3px;
+  flex-wrap: wrap;
+  overflow-x: visible;
+  overflow-y: visible;
+  scrollbar-width: none;
+}
+.window-layout-controls::-webkit-scrollbar { height: 0; }
+/* 019B bounded tooltip/popover seam: full member name + an empty live-preview
+ * slot that 019C's thumbnail host fills. Name-only fallback: with no preview
+ * the popover collapses to just the name. pointer-events none keeps it purely
+ * informational and below the read-only toolbar (z-index 2147483647). */
+.window-layout-member-popover {
+  position: fixed;
+  z-index: 2147483640;
+  min-width: 120px;
+  max-width: 260px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.25;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.25);
+  pointer-events: none;
+  opacity: 1;
+  transform: none;
+}
+.window-layout-member-popover.is-visible {
+  opacity: 1;
+  transform: none;
+}
+.window-layout-member-popover-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.window-layout-member-popover-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  flex: none;
+}
+.window-layout-member-popover-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.window-layout-member-popover-preview:not(:empty) {
+  margin-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 4px;
+}
+/* 019G/034: bounded static real-window thumbnail in the shared hover card. The
+   image never animates/flashes and is capped by the shared 320x180 contract,
+   but it must ALSO fit the host viewport - in the content-fit detached widget
+   the preview shrinks to the window (width AND height) instead of being
+   clipped/consumed by the host/card bounds. */
+.window-layout-member-preview-image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(240px, calc(100vw - 12px));
+  max-height: calc(100vh - 44px);
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-muted);
+  animation: window-layout-preview-slide-up 180ms cubic-bezier(.2, .8, .2, 1) both;
+}
+.window-layout-member-popover.has-preview {
+  box-sizing: content-box;
+  min-width: 0;
+}
+.window-layout-member-popover.has-preview .window-layout-member-popover-title {
+  width: 100%;
+}
+@keyframes window-layout-preview-slide-up {
+  from { transform: translateY(10px); }
+  to { transform: translateY(0); }
+}
+.window-layout-member-popover {
+  max-width: calc(100vw - 12px);
+  max-height: calc(100vh - 12px);
+  overflow: hidden;
 }
 
 .icon-grid[data-view="graph"] {

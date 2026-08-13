@@ -8,8 +8,16 @@
 
 export const WINDOW_LAYOUT_RUNTIME_CADENCE_MS = 500;
 
-function memberKey(layoutId, memberId) {
+/** 040: the shared composite ephemeral identity the pure runtime uses for its
+ * capability cache. Every entry/widget capability/icon cache, DOM selector and
+ * update/removal path keys by the SAME layout\u0000member composite so two
+ * layouts referencing the same real window stay independent. */
+export function windowLayoutMemberKey(layoutId, memberId) {
   return `${layoutId}\u0000${memberId}`;
+}
+
+function memberKey(layoutId, memberId) {
+  return windowLayoutMemberKey(layoutId, memberId);
 }
 
 function sameBounds(left, right) {
@@ -36,6 +44,7 @@ export function createWindowLayoutRuntime({
   persistActiveLayout,
   persistObservation = () => undefined,
   onMemberResult = () => undefined,
+  onRetireMember = () => undefined,
   setIntervalFn = globalThis.setInterval,
   clearIntervalFn = globalThis.clearInterval,
   cadenceMs = WINDOW_LAYOUT_RUNTIME_CADENCE_MS,
@@ -58,6 +67,16 @@ export function createWindowLayoutRuntime({
   let switchTail = Promise.resolve();
   const capabilities = new Map();
   const suppressions = new Map();
+  // 019B: per-member consecutive-genuine-missing tracker (in-memory only, never
+  // persisted, keyed by layout/member, reset on ownership change). A member is
+  // retired after exactly two consecutive `missing` observations; any success
+  // clears its streak; timeout/helper-unavailable/denied neither count as
+  // missing nor remove. `retired` guarantees one typed removal intent per
+  // member per ownership and stops further helper round-trips for it.
+  const missingCounts = new Map();
+  const retired = new Set();
+  // 018X3: in-flight observation promises are tracked so stop() can drain them.
+  const observationsInFlight = new Set();
 
   function isCurrent(layoutId, expectedGeneration) {
     return activeLayoutId === layoutId && generation === expectedGeneration;
@@ -76,6 +95,8 @@ export function createWindowLayoutRuntime({
     stopTimer();
     capabilities.clear();
     suppressions.clear();
+    missingCounts.clear();
+    retired.clear();
   }
 
   function report(layoutId, memberId, result) {
@@ -128,7 +149,11 @@ export function createWindowLayoutRuntime({
   function startTimer(layoutId, expectedGeneration, memberIds) {
     activeMembers = [...memberIds];
     if (activeMembers.length === 0 || !isCurrent(layoutId, expectedGeneration)) return;
-    timer = setIntervalFn(() => { void observeActiveMembers(layoutId, expectedGeneration); }, cadenceMs);
+    timer = setIntervalFn(() => {
+      const pending = observeActiveMembers(layoutId, expectedGeneration);
+      observationsInFlight.add(pending);
+      pending.finally(() => observationsInFlight.delete(pending)).catch(() => undefined);
+    }, cadenceMs);
   }
 
   async function runSwitch(layoutId, expectedGeneration) {
@@ -141,6 +166,8 @@ export function createWindowLayoutRuntime({
     }
     stopTimer();
     suppressions.clear();
+    missingCounts.clear();
+    retired.clear();
     await persistActiveLayout(layoutId);
     if (generation !== expectedGeneration) return { outcome: 'superseded', layoutId, results: [] };
     activeLayoutId = layoutId;
@@ -180,31 +207,86 @@ export function createWindowLayoutRuntime({
 
   async function observeMember(layoutId, memberId, expectedGeneration) {
     if (!isCurrent(layoutId, expectedGeneration)) return { outcome: 'superseded' };
-    const capability = capabilities.get(memberKey(layoutId, memberId));
-    if (!capability) return { outcome: 'missing-capability' };
-    const observed = await host.observeWindowCapability(capability);
-    if (!isCurrent(layoutId, expectedGeneration)) return { outcome: 'superseded' };
-    if (observed.outcome !== 'success' || !observed.observation) {
-      return report(layoutId, memberId, observed);
-    }
-    const observation = observed.observation;
     const key = memberKey(layoutId, memberId);
-    const suppression = suppressions.get(key);
-    if (suppression && suppression.generation === expectedGeneration) {
-      suppressions.delete(key);
-      if ((suppression.bounds === null || sameBounds(suppression.bounds, observation.bounds))
-        && sameState(suppression.state, observation.state)) {
-        return { layoutId, memberId, outcome: 'echo-suppressed' };
+    if (retired.has(key)) return { layoutId, memberId, outcome: 'retired' };
+    const capability = capabilities.get(key);
+    if (capability) {
+      const observed = await host.observeWindowCapability(capability);
+      if (!isCurrent(layoutId, expectedGeneration)) return { outcome: 'superseded' };
+      if (observed.outcome === 'success' && observed.observation) {
+        // A genuine success clears the member's missing streak.
+        missingCounts.delete(key);
+        const observation = observed.observation;
+        const suppression = suppressions.get(key);
+        if (suppression && suppression.generation === expectedGeneration) {
+          suppressions.delete(key);
+          if ((suppression.bounds === null || sameBounds(suppression.bounds, observation.bounds))
+            && sameState(suppression.state, observation.state)) {
+            return { layoutId, memberId, outcome: 'echo-suppressed' };
+          }
+        }
+        const patch = {
+          state: observation.state === 'minimized' ? 'minimized' : 'normal',
+          // A minimized rectangle is not a restore rectangle. The injected model
+          // callback therefore receives no bounds and must preserve the old one.
+          ...(observation.state === 'minimized' ? {} : { bounds: observation.bounds ?? null }),
+        };
+        persistObservation(layoutId, memberId, patch);
+        return { layoutId, memberId, outcome: 'recorded', patch };
       }
+      if (observed.outcome !== 'missing') {
+        // timeout/helper-unavailable/denied/malformed/ambiguous never remove
+        // and never count as missing (the streak is preserved, not reset).
+        return report(layoutId, memberId, observed);
+      }
+      // 'missing': the SESSION capability is stale (e.g. after a helper restart)
+      // or the window really vanished. Invalidate it so a fresh resolution can
+      // prove which; do NOT count this miss yet.
+      capabilities.delete(key);
     }
-    const patch = {
-      state: observation.state === 'minimized' ? 'minimized' : 'normal',
-      // A minimized rectangle is not a restore rectangle. The injected model
-      // callback therefore receives no bounds and must preserve the old one.
-      ...(observation.state === 'minimized' ? {} : { bounds: observation.bounds ?? null }),
-    };
-    persistObservation(layoutId, memberId, patch);
-    return { layoutId, memberId, outcome: 'recorded', patch };
+    // 019HR: no usable capability (invalidated stale or absent) - re-resolve the
+    // member's persisted descriptor BEFORE any miss can count. A freshly
+    // re-resolved LIVE window recovers with its new capability (streak cleared,
+    // never retires); only a fresh descriptor resolution that CONFIRMS the
+    // window is missing may increment the genuine-missing streak (exactly two
+    // confirmed misses retire once). A helper-unavailable/timeout/denied/
+    // malformed re-resolution never increments and never removes (the streak is
+    // preserved, not reset).
+    const member = layoutMembers(getLayout(layoutId)).find((candidate) => candidate.id === memberId);
+    let reResolved = null;
+    if (member?.descriptor) {
+      try {
+        reResolved = await host.resolveWindowDescriptor(member.descriptor);
+      } catch {
+        reResolved = null;
+      }
+      if (!isCurrent(layoutId, expectedGeneration)) return { outcome: 'superseded' };
+    }
+    if (reResolved && reResolved.outcome === 'success' && reResolved.capability) {
+      // Recovered: the window is live; replace the capability and clear the
+      // streak safely. The next cadence observes the fresh capability.
+      capabilities.set(key, reResolved.capability);
+      missingCounts.delete(key);
+      return { layoutId, memberId, outcome: 'recovered' };
+    }
+    if (!reResolved || reResolved.outcome !== 'missing') {
+      // Cannot confirm a genuine miss (transient/rejected resolution or no
+      // descriptor): preserve the streak, never remove, never count.
+      return report(layoutId, memberId, reResolved ?? { outcome: 'missing-capability' });
+    }
+    // 019B: exactly two CONSECUTIVE confirmed genuine missing results -> one
+    // typed removal intent. The member stays in the observed set but is skipped
+    // (no further helper round-trip) until the store removes it.
+    const count = (missingCounts.get(key) ?? 0) + 1;
+    missingCounts.set(key, count);
+    if (count >= 2) {
+      missingCounts.delete(key);
+      retired.add(key);
+      const intent = { layoutId, memberId, outcome: 'retire', consecutiveMissing: count };
+      onRetireMember?.(intent);
+      return intent;
+    }
+    return report(layoutId, memberId, { outcome: 'missing' });
   }
 
   async function observeActiveMembers(layoutId = activeLayoutId, expectedGeneration = generation) {
@@ -260,7 +342,16 @@ export function createWindowLayoutRuntime({
           capabilities.set(key, capability);
         }
       }
-      if (capability) successful.push(member.id);
+      if (capability) {
+        // 019B/019HR2: a successfully re-resolved (reappeared) member is
+        // observed again; its retired flag AND its prior missing streak are
+        // cleared so a future genuine-missing streak starts fresh and can never
+        // inherit an old count (miss1 -> proven-live reconcile -> miss1 must
+        // NOT read as count2).
+        retired.delete(key);
+        missingCounts.delete(key);
+        successful.push(member.id);
+      }
     }
     if (!isCurrent(layoutId, expectedGeneration)) return { outcome: 'superseded', layoutId, results: [] };
     startTimer(layoutId, expectedGeneration, successful);
@@ -277,10 +368,18 @@ export function createWindowLayoutRuntime({
     }
   }
 
+  /** 018X3: stop is a REAL drain barrier, not only generation invalidation.
+   * It awaits the captured switch chain and every in-flight observation so any
+   * host apply/minimize/restore/observe already issued by the workspace settles
+   * before the caller (the detach handoff) flushes and ACKs. */
   async function stop({ clearActive = true } = {}) {
+    const drainTail = switchTail;
+    const drainObservations = [...observationsInFlight];
     ++generation;
     clearRuntimeState();
     activeLayoutId = null;
+    await drainTail.catch(() => undefined);
+    await Promise.all(drainObservations.map((promise) => promise.catch(() => undefined)));
     if (clearActive) await persistActiveLayout(null);
   }
 
@@ -326,6 +425,7 @@ export function createWindowLayoutRecordingWiring({
   setStatus,
   patchMember,
   statusText,
+  onRetireMember,
   setIntervalFn,
   clearIntervalFn,
   cadenceMs,
@@ -355,6 +455,7 @@ export function createWindowLayoutRecordingWiring({
         setStatus?.(result.layoutId, statusText?.(result.outcome) ?? 'Failed');
       }
     },
+    onRetireMember,
     setIntervalFn,
     clearIntervalFn,
     cadenceMs,

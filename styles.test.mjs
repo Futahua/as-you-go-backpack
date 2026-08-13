@@ -166,3 +166,48 @@ test('trail tiles fade through the existing Trail opacity variable, without anim
   assert.doesNotMatch(itemsCss, /\.icon-item\.ancestor-item\s*\{[^}]*opacity/,
     'opacity moved off the ancestor-only class onto trail-item');
 });
+
+test('019F: member state is a bottom running indicator, not a top-right dot', () => {
+  const stateRule = itemsCss.match(/\.window-layout-member-state\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(stateRule, /\bbottom:\s*0\b/, 'the running indicator sits at the bottom');
+  assert.match(stateRule, /\bheight:\s*2px\b/, 'the indicator is a short line, not a dot');
+  assert.doesNotMatch(stateRule, /\bright:\s*1px\b/, 'no top-right corner dot');
+  assert.doesNotMatch(stateRule, /border-radius:\s*50%/, 'no round dot');
+  assert.match(stateRule, /left:\s*50%/, 'the line is centered under the icon');
+});
+
+test('019F: member icons are centered and never filtered/recolored', () => {
+  const memberRule = itemsCss.match(/\.window-layout-member\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(memberRule, /justify-content:\s*center/, 'the icon is centered horizontally');
+  assert.match(memberRule, /align-items:\s*center/, 'the icon is centered vertically');
+  const iconRule = itemsCss.match(/\.window-layout-member-icon\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.doesNotMatch(iconRule, /filter|mix-blend-mode|-webkit-filter/, 'native artwork must never be filtered/recolored');
+  assert.match(iconRule, /object-fit:\s*contain/, 'artwork is contained, not stretched');
+});
+
+test('019F: member hover/selection use a subtle rounded background and accent only for selection', () => {
+  const hoverRule = itemsCss.match(/\.window-layout-member:hover\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(hoverRule, /background:\s*var\(--surface-soft\)/, 'static rounded hover background');
+  assert.doesNotMatch(hoverRule, /transition|animation/, 'no animated hover');
+  const selectedRule = itemsCss.match(/\.window-layout-member\.selected\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(selectedRule, /background:\s*var\(--surface-soft\)/, 'subtle selected background');
+  assert.match(selectedRule, /var\(--folder-color/, 'accent ring only for explicit selection');
+  const indicatorAccent = itemsCss.match(/\.window-layout-member\.selected \.window-layout-member-state\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(indicatorAccent, /background:\s*var\(--folder-color/, 'accent indicator only for explicit selection');
+  assert.doesNotMatch(indicatorAccent, /var\(--success/, 'no green foreground-active claim');
+});
+
+test('019F/033/034/035/036 C4: member strip wraps with the available width up to ONE compact width bound - every member visible, no count cap, no clipping, no long strip', () => {
+  const stripRule = itemsCss.match(/\.window-layout-members\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(stripRule, /flex-wrap:\s*wrap/, 'bounded wrapping, every member visible');
+  assert.match(stripRule, /overflow-x:\s*visible/, 'no clipping');
+  assert.match(stripRule, /overflow-y:\s*visible/, 'rows reflow without clipping');
+  assert.doesNotMatch(stripRule, /gap:\s*\d+px\s+\d+px/, 'uniform gap, no window grouping');
+  // 036: the card fills its host width up to the ONE compact width bound
+  // (measurement-driven WIDTH bound shared by attached + detached; never a
+  // count-based breakpoint and never an unbounded strip).
+  assert.match(itemsCss, /\.window-layout-card\s*\{[^}]*width:\s*100%/);
+  assert.match(itemsCss, /\.window-layout-card\s*\{[^}]*max-width:\s*min\(100%, var\(--wl-card-max-width/);
+  assert.match(stripRule, /width:\s*var\(--wl-balanced-member-width/, 'live width chooses balanced rows');
+  assert.doesNotMatch(itemsCss, /\.window-layout-member:nth-child/);
+});

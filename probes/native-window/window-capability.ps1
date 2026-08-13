@@ -36,6 +36,7 @@ using System.Text;
 namespace AYG
 {
     public struct Rect { public int Left, Top, Right, Bottom; }
+    public struct POINT { public int X, Y; }
 
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -53,6 +54,17 @@ namespace AYG
         [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr w, IntPtr l);
         [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
 
+        [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
+        [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT pt);
+        [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, IntPtr dwExtraInfo);
+        [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+        [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+        public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+        public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+        public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+        public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+        public const byte VK_ESCAPE = 0x1B;
+        public const uint KEYEVENTF_KEYUP = 0x0002;
         public const int SW_MINIMIZE = 6;
         public const int SW_RESTORE = 9;
         public const int WM_CLOSE = 0x0010;

@@ -115,3 +115,24 @@ test('marquee selection excludes ancestor tiles', () => {
   const update = h.commandCalls.find(([name]) => name === 'update');
   assert.deepEqual(update[1], ['a'], 'the ancestor tile is filtered out of the marquee');
 });
+test('018X2 cancel releases capture and hides the overlay WITHOUT the finish command', () => {
+  const h = createHarness();
+  h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, preserveSelection: false });
+  h.controller.move({ pointerId: 1, clientX: 55, clientY: 55 });
+  h.controller.cancel();
+  assert.equal(h.effects.released, 1, 'capture is released');
+  assert.equal(h.elements.marquee.hidden, true, 'overlay is hidden');
+  assert.ok(h.commandCalls.every(([name]) => name !== 'finish'), 'no finish command runs on cancel');
+  assert.equal(h.controller.isActive(1), false, 'gesture is reset');
+  // A later finish for the cancelled pointer is a no-op (cannot finalize after a handoff).
+  const moved = h.controller.finish(1);
+  assert.equal(moved, null);
+  assert.ok(h.commandCalls.every(([name]) => name !== 'finish'), 'later pointerup cannot finish a cancelled marquee');
+});
+
+test('018X2 cancel with no active marquee is a harmless no-op', () => {
+  const h = createHarness();
+  h.controller.cancel();
+  assert.equal(h.effects.released, 0);
+  assert.deepEqual(h.commandCalls, []);
+});

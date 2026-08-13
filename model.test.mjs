@@ -39,6 +39,7 @@ import {
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
   setActiveWindowLayoutId,
+  setWindowLayoutCardSize,
   itemsIn,
   binnedItems,
   setItemSets,
@@ -1428,6 +1429,41 @@ test('deleting a folder cleans up the window layouts inside it', () => {
   assert.equal(deleted.windowLayouts.length, 0, 'the nested layout died with its folder');
 });
 
+// 035: the shared attached/detached card geometry is one persisted value on the
+// window-layout record; it survives reload and mirrors the widget resize.
+test('035 setWindowLayoutCardSize persists the shared card geometry, bounded', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'W', parentId: ROOT_ID });
+  const wl = state.windowLayouts[0];
+  assert.equal(wl.cardSize, undefined, 'a fresh layout has no shared geometry yet');
+  state = setWindowLayoutCardSize(state, wl.id, 260, 140);
+  assert.deepEqual(state.windowLayouts[0].cardSize, { width: 260, height: 140 });
+  const unchanged = setWindowLayoutCardSize(state, wl.id, 260, 140);
+  assert.equal(unchanged, state, 'unchanged geometry is a no-op (same state reference)');
+  assert.throws(() => setWindowLayoutCardSize(state, wl.id, 0, 140), /card size is invalid/);
+  assert.throws(() => setWindowLayoutCardSize(state, wl.id, 'x', 140), /card size is invalid/);
+  assert.throws(() => setWindowLayoutCardSize(state, 'nope', 260, 140), /not found/);
+  // The detached widget's reported window content size is bounded to [1, 2000].
+  state = setWindowLayoutCardSize(state, wl.id, 5000, 10);
+  assert.deepEqual(state.windowLayouts[0].cardSize, { width: 2000, height: 10 });
+});
+
+test('035 normalizeState preserves a valid cardSize and drops a malformed one', () => {
+  const raw = {
+    ...emptyState(),
+    windowLayouts: [
+      { id: 'good', name: 'Good', parentId: 'root', cardSize: { width: 300.9, height: 82 } },
+      { id: 'bad', name: 'Bad', parentId: 'root', cardSize: { width: 0, height: -4 } },
+    ],
+  };
+  const normalized = normalizeState(raw);
+  const good = normalized.windowLayouts.find((w) => w.id === 'good');
+  assert.deepEqual(good.cardSize, { width: 301, height: 82 }, 'valid geometry is rounded and preserved');
+  assert.equal(normalized.windowLayouts.find((w) => w.id === 'bad').cardSize, undefined, 'malformed geometry dropped');
+  const reloaded = normalizeState(JSON.parse(JSON.stringify(normalized)));
+  assert.deepEqual(reloaded.windowLayouts, normalized.windowLayouts, 'save/reload round trip keeps cardSize');
+});
+
 // Assignment 015: one-member model/UI slice - ordered membership with a
 // stable persisted descriptor and per-layout arrangement.
 // =============================================================================
@@ -1763,4 +1799,17 @@ test('017I1: binning or deleting the active layout clears it; restore never reac
   const binnedAgain = binSelection(restored, [l1], '2026-07-30T00:00:00.000Z');
   const deleted = permanentlyDelete(binnedAgain, [l1]);
   assert.equal(deleted.activeWindowLayoutId, null, 'deleting the active layout clears the id');
+});
+
+test('024 window-layout name/icon customization is removed (updateGroup rejects, group rename still works)', () => {
+  let state = createWindowLayout(emptyState(), { name: 'Layout', parentId: ROOT_ID });
+  const layout = state.windowLayouts[0];
+  const before = JSON.stringify(state.windowLayouts);
+  assert.throws(() => updateGroup(state, layout.id, { name: 'Renamed', icon: 'x' }),
+    /not customizable/, 'renaming a window-layout throws');
+  assert.equal(JSON.stringify(state.windowLayouts), before, 'the layout record is byte-unchanged after the rejected rename');
+  state = createGroup(state, 'Folder');
+  const folderId = state.groups.find((g) => g.name === 'Folder').id;
+  state = updateGroup(state, folderId, { name: 'Renamed Folder', icon: 'x' });
+  assert.equal(state.groups.find((g) => g.id === folderId).name, 'Renamed Folder', 'ordinary group rename still works');
 });

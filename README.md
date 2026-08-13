@@ -59,3 +59,12 @@ it and lists the interaction behavior, store and compatibility rules that must b
 
 Run `npm test` here after a change. The test is self-contained and does not launch any
 prepared action or modify Papers data.
+
+## Native SlopTop bridge source
+
+The exact AutoHotkey v2 engine used by this Backpack's native window picker is backed up at
+`native/sloptop_engine.ahk`. The creator's live copy remains
+`D:\333\SlopTop\sloptop_engine.ahk`; the repository copy is source backup, not an automatic
+installer or launcher. When intentionally synchronizing the two, compare their SHA-256 hashes
+before restarting the elevated live process. The script expects its existing cursor assets
+relative to its live SlopTop directory.

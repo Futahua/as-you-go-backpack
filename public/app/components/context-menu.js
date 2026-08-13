@@ -31,7 +31,15 @@ export function createContextMenu({
     const binMode = getBinMode();
     const selected = getSelectedItems();
     const selectedSets = getSelectedSets();
-    if (kind === 'blank') {
+    if (kind === 'member') {
+      // 040: member-icon context menu — `Remove from this layout` routes through
+      // the scoped data-only writer with the clicked layout/member identity.
+      // The target (layoutId/memberId) is carried on the menu element dataset.
+      content = [
+        menuButton('remove-from-layout', 'Remove from this layout', true),
+      ].join('');
+      elements.menu.dataset.parent = parentId;
+    } else if (kind === 'blank') {
       content = [
         menuButton('new-folder', 'New folder'),
         menuButton('new-shortcut', 'Add shortcut'),
