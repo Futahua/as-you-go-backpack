@@ -681,23 +681,9 @@ function windowLayoutStatusText(layoutId) {
   return '';
 }
 
-const windowLayoutTransientStatusTimers = new Map();
 function setWindowLayoutStatus(layoutId, text) {
-  const previous = windowLayoutTransientStatusTimers.get(layoutId);
-  if (previous) {
-    clearTimeout(previous);
-    windowLayoutTransientStatusTimers.delete(layoutId);
-  }
   const status = document.querySelector(`[data-wl-status="${CSS.escape(layoutId)}"]`);
   if (status) status.textContent = text;
-  if (WIDGET_SURFACE && text) {
-    const timer = setTimeout(() => {
-      windowLayoutTransientStatusTimers.delete(layoutId);
-      const current = document.querySelector(`[data-wl-status="${CSS.escape(layoutId)}"]`);
-      if (current?.textContent === text) current.textContent = '';
-    }, 2400);
-    windowLayoutTransientStatusTimers.set(layoutId, timer);
-  }
 }
 
 /** 040: ONE shared/batched layout-scoped icon refresh. Members whose icon is
@@ -804,21 +790,6 @@ function windowLayoutMemberIcon(layoutId, memberId) {
   if (cached !== undefined) return cached;
   queueWindowLayoutIconRefresh(layoutId, memberId);
   return null;
-}
-
-function setWindowLayoutTransientStatus(layoutId, text, durationMs = 2400) {
-  if (WIDGET_SURFACE) {
-    setWindowLayoutStatus(layoutId, text);
-    return;
-  }
-  const previous = windowLayoutTransientStatusTimers.get(layoutId);
-  if (previous) clearTimeout(previous);
-  setWindowLayoutStatus(layoutId, text);
-  const timer = setTimeout(() => {
-    windowLayoutTransientStatusTimers.delete(layoutId);
-    setWindowLayoutStatus(layoutId, '');
-  }, durationMs);
-  windowLayoutTransientStatusTimers.set(layoutId, timer);
 }
 
 async function capabilityForMember(layoutId, memberId) {
@@ -988,49 +959,10 @@ async function openWindowLayoutPicker(layoutId) {
       current: currentTitles.has(candidate.title),
     })));
     if (windowLayoutRuntime.pickerOpenFor !== layoutId) return;
-    if (picked.action === 'terminate' && picked.candidateId) {
-      await terminateWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
-      continue;
-    }
-    if (picked.action !== 'select' || !picked.candidateId) break;
+    if (!picked.candidateId) break;
     await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
   }
   closeWindowLayoutPicker();
-}
-
-async function terminateWindowLayoutCandidate(layoutId, candidateId, candidates) {
-  const row = candidates.find((candidate) => candidate.id === candidateId);
-  if (!row) return false;
-  const bound = await host.bindWindowCandidate(candidateId);
-  if (bound.outcome !== 'success') {
-    setWindowLayoutTransientStatus(layoutId, bound.error || 'Window is no longer available');
-    return false;
-  }
-  const result = await host.terminateWindowCapability(bound.capability);
-  if (result.outcome !== 'success') {
-    setWindowLayoutTransientStatus(layoutId, result.error || 'Process could not be ended');
-    return false;
-  }
-  setWindowLayoutTransientStatus(layoutId, 'Process ended', 1200);
-  return true;
-}
-
-async function terminateWindowLayoutMemberProcess(layoutId, memberId) {
-  const capability = WIDGET_SURFACE
-    ? await resolveWindowLayoutPreviewCapability(layoutId, memberId)
-    : await capabilityForMember(layoutId, memberId);
-  if (!capability) {
-    setWindowLayoutTransientStatus(layoutId, 'Window is no longer available');
-    return;
-  }
-  const result = await host.terminateWindowCapability(capability);
-  if (result.outcome !== 'success') {
-    setWindowLayoutTransientStatus(layoutId, result.error || 'Process could not be ended');
-    return;
-  }
-  windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
-  windowLayoutWidgetPreviewCapabilities.delete(windowLayoutMemberKey(layoutId, memberId));
-  setWindowLayoutTransientStatus(layoutId, 'Process ended', 1200);
 }
 
 function closeWindowLayoutPicker() {
@@ -1767,17 +1699,6 @@ window.addEventListener('pagehide', () => {
   endWindowLayoutShiftPeek();
   cancelWindowLayoutPreviewDwell();
   windowLayoutMemberPreview.cancel();
-});
-elements.grid.addEventListener('auxclick', (event) => {
-  if (event.button !== 1 || !event.ctrlKey) return;
-  const member = event.target.closest('[data-wl-member]');
-  if (!member || member.disabled) return;
-  event.preventDefault();
-  event.stopPropagation();
-  cancelWindowLayoutPreviewDwell();
-  windowLayoutMemberPopover.hide();
-  windowLayoutMemberPreview.cancel();
-  void terminateWindowLayoutMemberProcess(member.dataset.wlLayout, member.dataset.wlMember);
 });
 
 /** 017I2: exactly ONE controller owns recording (switch, timer, observation,
@@ -5040,11 +4961,7 @@ function bootstrapWindowLayoutWidget() {
           icon: candidate.icon ?? null,
           current: selectedTitles.has(candidate.title),
         })));
-        if (picked.action === 'terminate' && picked.candidateId) {
-          await terminateWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
-          continue;
-        }
-        if (picked.action !== 'select' || !picked.candidateId) break;
+        if (!picked.candidateId) break;
         const pickedRow = result.candidates.find((candidate) => candidate.id === picked.candidateId);
         const changed = await handleWidgetListCandidate(
           picked.candidateId,
