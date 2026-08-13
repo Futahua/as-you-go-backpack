@@ -940,26 +940,28 @@ async function openWindowLayoutPicker(layoutId) {
   // 019G: a picker covering the desktop must clear/discard the hover preview.
   windowLayoutMemberPreview.cancel();
   windowLayoutRuntime.pickerOpenFor = layoutId;
-  const result = await host.windowCandidates();
-  // 018X4: abort immediately after the await, before the failure or success UI.
-  if (windowLayoutDetachment.isReadOnly()) return;
-  if (windowLayoutRuntime.pickerOpenFor !== layoutId) return; // closed meanwhile
-  if (result.outcome !== 'success') {
-    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
-    closeWindowLayoutPicker();
-    return;
+  while (windowLayoutRuntime.pickerOpenFor === layoutId) {
+    const result = await host.windowCandidates();
+    // 018X4: abort immediately after the await, before the failure or success UI.
+    if (windowLayoutDetachment.isReadOnly()) return;
+    if (windowLayoutRuntime.pickerOpenFor !== layoutId) return; // closed meanwhile
+    if (result.outcome !== 'success') {
+      setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
+      break;
+    }
+    windowLayoutRuntime.pickerCandidates = result.candidates;
+    const currentTitles = new Set((windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
+      .map((member) => member.descriptor.title));
+    const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
+      id: candidate.id,
+      title: candidate.title,
+      icon: candidate.icon ?? null,
+      current: currentTitles.has(candidate.title),
+    })));
+    if (windowLayoutRuntime.pickerOpenFor !== layoutId) return;
+    if (!picked.candidateId) break;
+    await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
   }
-  windowLayoutRuntime.pickerCandidates = result.candidates;
-  const currentTitles = new Set((windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
-    .map((member) => member.descriptor.title));
-  const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
-    id: candidate.id,
-    title: candidate.title,
-    icon: candidate.icon ?? null,
-    current: currentTitles.has(candidate.title),
-  })));
-  if (windowLayoutRuntime.pickerOpenFor !== layoutId) return;
-  if (picked.candidateId) await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
   closeWindowLayoutPicker();
 }
 
@@ -998,7 +1000,6 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, existing.id));
     windowLayoutRuntime.icons.delete(windowLayoutMemberKey(layoutId, existing.id));
     store.commit(next);
-    closeWindowLayoutPicker();
     saveWorkspaceView();
     noteWindowLayoutCommit(layoutId);
     // Removing a member of the active layout re-syncs the observer; removing
@@ -1036,7 +1037,6 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     .find((candidate) => candidate.id === candidateId)?.icon ?? null;
   if (icon) windowLayoutRuntime.icons.set(windowLayoutMemberKey(layoutId, memberId), icon);
   store.commit(next);
-  closeWindowLayoutPicker();
   saveWorkspaceView();
   noteWindowLayoutCommit(layoutId);
   // Adding to a layout selects/persists that layout as the recording context
@@ -4946,20 +4946,32 @@ function bootstrapWindowLayoutWidget() {
     // 019G: a picker covering the desktop must clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
     try {
-      const result = await host.windowCandidates();
-      if (result.outcome !== 'success') {
-        setWindowLayoutStatus(layoutId, result.error || 'List unavailable');
-        return;
+      const selectedTitles = new Set((widgetState.snapshot.members ?? [])
+        .map((member) => member.descriptor.title));
+      while (true) {
+        const result = await host.windowCandidates();
+        if (result.outcome !== 'success') {
+          setWindowLayoutStatus(layoutId, result.error || 'List unavailable');
+          break;
+        }
+        widgetState.candidates = result.candidates;
+        const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
+          id: candidate.id,
+          title: candidate.title,
+          icon: candidate.icon ?? null,
+          current: selectedTitles.has(candidate.title),
+        })));
+        if (!picked.candidateId) break;
+        const pickedRow = result.candidates.find((candidate) => candidate.id === picked.candidateId);
+        const changed = await handleWidgetListCandidate(
+          picked.candidateId,
+          pickedRow ? selectedTitles.has(pickedRow.title) : null,
+        );
+        if (changed && pickedRow) {
+          if (selectedTitles.has(pickedRow.title)) selectedTitles.delete(pickedRow.title);
+          else selectedTitles.add(pickedRow.title);
+        }
       }
-      widgetState.candidates = result.candidates;
-      const currentTitles = new Set((widgetState.snapshot.members ?? []).map((member) => member.descriptor.title));
-      const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
-        id: candidate.id,
-        title: candidate.title,
-        icon: candidate.icon ?? null,
-        current: currentTitles.has(candidate.title),
-      })));
-      if (picked.candidateId) await handleWidgetListCandidate(picked.candidateId);
     } catch (error) {
       setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
     } finally {
@@ -4994,22 +5006,24 @@ function bootstrapWindowLayoutWidget() {
     restoreHoveredWindowLayoutPreview(layoutId);
   }
 
-  async function handleWidgetListCandidate(candidateId) {
+  async function handleWidgetListCandidate(candidateId, selectedOverride = null) {
     const row = (widgetState.candidates ?? []).find((candidate) => candidate.id === candidateId);
-    if (!row) return;
+    if (!row) return false;
     const bound = await host.bindWindowCandidate(candidateId);
     if (bound.outcome !== 'success') {
       setWindowLayoutStatus(layoutId, bound.error || 'Pick failed');
-      return;
+      return false;
     }
-    const isMember = (widgetState.snapshot.members ?? [])
-      .some((member) => member.descriptor.title === bound.descriptor.title);
+    const isMember = typeof selectedOverride === 'boolean'
+      ? selectedOverride
+      : (widgetState.snapshot.members ?? [])
+        .some((member) => member.descriptor.title === bound.descriptor.title);
     if (isMember) {
       client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] } });
     } else {
       client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [{ descriptor: bound.descriptor, capability: bound.capability, candidate: row }], removes: [] } });
     }
-    closeWidgetPicker();
+    return true;
   }
 
   async function beginWidgetDirectPick() {
