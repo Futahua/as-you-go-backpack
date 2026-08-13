@@ -74,6 +74,8 @@ test('024/035: the detached/widget card supports member-icon reorder via the cha
   assert.match(workspaceSource, /elements\.grid\.addEventListener\('click', \(event\) => \{\s*if \(WIDGET_SURFACE\) return;/);
   assert.match(workspaceSource, /if \(!WIDGET_SURFACE && listButton && listButton !== relatedListButton\)/);
   assert.match(workspaceSource, /scheduleWindowLayoutListDwell\(listButton, openWidgetPicker\)/);
+  assert.match(workspaceSource,
+    /!event\.target\.closest\('button, input, \[data-wl-member\]'\)\) clearWidgetSelection\(\)/);
 });
 
 test('024: the compact card keeps the accepted absence of per-button outlines and native scrollbars', () => {

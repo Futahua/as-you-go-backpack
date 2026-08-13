@@ -5119,7 +5119,7 @@ function bootstrapWindowLayoutWidget() {
   // but a blank press must always clear the ephemeral Ctrl/range selection.
   window.addEventListener('pointerdown', (event) => {
     if (event.button === 0 && !event.ctrlKey && !event.shiftKey
-      && !event.target.closest('[data-wl-member]')) clearWidgetSelection();
+      && !event.target.closest('button, input, [data-wl-member]')) clearWidgetSelection();
   }, { capture: true });
   window.addEventListener('blur', clearWidgetSelection);
   windowLayoutWidgetSelectionChannel?.addEventListener('message', (event) => {
