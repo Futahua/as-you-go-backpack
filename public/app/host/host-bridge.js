@@ -174,6 +174,8 @@ export function createHostBridge(window) {
       request('papers:project:window-minimize-capability', { capability }),
     restoreWindowCapability: (capability) =>
       request('papers:project:window-restore-capability', { capability }),
+    terminateWindowCapability: (capability) =>
+      request('papers:project:window-terminate-capability', { capability }),
     applyWindowCapability: (capability, bounds) =>
       request('papers:project:window-apply-capability', { capability, bounds }),
     resolveWindowDescriptor: (descriptor) =>

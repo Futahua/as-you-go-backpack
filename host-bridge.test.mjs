@@ -306,8 +306,18 @@ test('host bridge window observation/control methods carry the capability and un
   });
   assert.deepEqual(await restored, { outcome: 'missing', observation: null, error: 'gone' });
 
+  const terminated = host.terminateWindowCapability(capability);
+  const sentTerminate = mock.parent.messages[3].message;
+  assert.equal(sentTerminate.type, 'papers:project:window-terminate-capability');
+  assert.deepEqual(sentTerminate.capability, capability);
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentTerminate.requestId, ok: true,
+    outcome: 'success',
+  });
+  assert.equal((await terminated).outcome, 'success');
+
   const applied = host.applyWindowCapability(capability, { x: 5, y: 6, width: 400, height: 300 });
-  const sentApply = mock.parent.messages[3].message;
+  const sentApply = mock.parent.messages[4].message;
   assert.equal(sentApply.type, 'papers:project:window-apply-capability');
   assert.deepEqual(sentApply.bounds, { x: 5, y: 6, width: 400, height: 300 });
   mock.dispatchMessage({
@@ -317,7 +327,7 @@ test('host bridge window observation/control methods carry the capability and un
   assert.equal((await applied).outcome, 'success');
 
   const resolved = host.resolveWindowDescriptor({ version: 1, title: 'Window A', processId: 1001 });
-  const sentResolve = mock.parent.messages[4].message;
+  const sentResolve = mock.parent.messages[5].message;
   assert.equal(sentResolve.type, 'papers:project:window-resolve-descriptor');
   assert.deepEqual(sentResolve.descriptor, { version: 1, title: 'Window A', processId: 1001 });
   mock.dispatchMessage({
