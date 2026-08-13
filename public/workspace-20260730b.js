@@ -2544,7 +2544,7 @@ function createGraphController() {
     nodes.forEach((node) => {
       if (node.exiting || !node.shell) return;
       node.shell.style.transform =
-        `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
+        `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%) scale(${node.visualScale ?? 1})`;
     });
     drawSetRings();
     syncEdgeOpacity();
@@ -3061,6 +3061,10 @@ function createGraphController() {
       // Trail opacity slider. Expanded trail descendants are trail items,
       // not ancestors.
       trail: vi.trail === true,
+      // Pure render metadata: breadcrumb ancestors and anything expanded from
+      // one inherit that path node's depth scale. Ordinary workspace bodies
+      // remain exactly 1.
+      trailScale: Number.isFinite(vi.trailScale) ? vi.trailScale : 1,
     };
   }
 
@@ -3102,6 +3106,7 @@ function createGraphController() {
         node.candidate = buildCandidate(vi);
         node.parentIds = parentIds;
         node.depth = vi.depth;
+        node.visualScale = node.candidate?.trailScale ?? 1;
         refreshNodeContent(node);
         continue;
       }
@@ -3128,6 +3133,7 @@ function createGraphController() {
         id: vi.id,
         candidate,
         depth: vi.depth,
+        visualScale: candidate.trailScale ?? 1,
         x: saved ? saved.x : seed.x,
         y: saved ? saved.y : seed.y,
         fx: saved ? saved.x : null,
@@ -3304,8 +3310,9 @@ function createGraphController() {
       hydrateNodeIcons(node.shell);
       installWindowLayoutCardPresentation(iconItem);
     }
-    node.width = node.shell.offsetWidth || (state.view.iconSize + 42);
-    node.height = node.shell.offsetHeight || (state.view.iconSize + 64);
+    const visualScale = node.visualScale ?? 1;
+    node.width = (node.shell.offsetWidth || (state.view.iconSize + 42)) * visualScale;
+    node.height = (node.shell.offsetHeight || (state.view.iconSize + 64)) * visualScale;
   }
 
   function createNodeShell(node) {
@@ -3321,7 +3328,7 @@ function createGraphController() {
     const shell = document.createElement('div');
     shell.className = `graph-node-shell${isGhost ? ' bin-origin-ghost' : ''}${candidate.kind === 'window-layout' ? ' window-layout-shell' : ''}`;
     shell.dataset.graphNodeId = candidate.id;
-    shell.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%)`;
+    shell.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%) scale(${node.visualScale ?? 1})`;
 
     const iconItem = document.createElement('div');
     iconItem.className = `icon-item${isSelected ? ' selected' : ''}${isGhost ? ' bin-origin-ghost' : ''}${candidate.ancestor ? ' ancestor-item' : ''}${candidate.trail ? ' trail-item' : ''}`;
@@ -3371,8 +3378,9 @@ function createGraphController() {
         : 0,
     ]);
 
-    node.width = shell.offsetWidth || (state.view.iconSize + 42);
-    node.height = shell.offsetHeight || (state.view.iconSize + 64);
+    const visualScale = node.visualScale ?? 1;
+    node.width = (shell.offsetWidth || (state.view.iconSize + 42)) * visualScale;
+    node.height = (shell.offsetHeight || (state.view.iconSize + 64)) * visualScale;
 
     if (reducedMotion?.matches) {
       shell.style.opacity = '1';
@@ -3402,7 +3410,7 @@ function createGraphController() {
     const targetY = parent ? parent.y : node.y;
     if (node.shell) {
       node.shell.classList.add('exiting');
-      node.shell.style.transform = `translate3d(${targetX}px, ${targetY}px, 0) translate(-50%, -50%)`;
+      node.shell.style.transform = `translate3d(${targetX}px, ${targetY}px, 0) translate(-50%, -50%) scale(${node.visualScale ?? 1})`;
       node.shell.style.opacity = '0';
       node.shell.style.scale = '0.5';
     }

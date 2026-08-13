@@ -9,6 +9,21 @@ function identityOf(candidate) {
   return candidate.kind === 'shortcut' ? candidate.shortcutId : candidate.id;
 }
 
+/** Breadcrumb bodies encode their position in the path through size. The
+ * root is 30%, the exact path midpoint is 60%, and the immediate parent is
+ * 100%. Longer paths distribute smoothly through those anchors. A one-node
+ * path is both root and immediate parent, so proximity wins and it stays at
+ * the normal 100% size. */
+export function breadcrumbNodeScale(index, count) {
+  if (!Number.isInteger(index) || !Number.isInteger(count) || count <= 0) return 1;
+  if (count === 1) return 1;
+  const t = Math.max(0, Math.min(1, index / (count - 1)));
+  const scale = t <= 0.5
+    ? 0.3 + (0.6 * t)
+    : 0.6 + (0.8 * (t - 0.5));
+  return Math.round(scale * 1000) / 1000;
+}
+
 /** Walks the Bin from binCurrentId ('bin' for the top-level list, or a
  * binned folder's id after drilling into it — see the renderer's
  * dedicated Bin breadcrumb/navigation). Every item at that level is a
@@ -20,6 +35,7 @@ function identityOf(candidate) {
  * binned separately are two independent tiles. */
 function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = [], trailExpanded = new Set()) {
   const result = [];
+  const ancestorIds = new Set(ancestors.map((entry) => entry.id));
 
   const byIdentity = new Map();
   ancestors.forEach((entry, index) => {
@@ -33,10 +49,11 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
       parents: chainParentId ? [chainParentId] : [],
       ancestor: true,
       trail: true,
+      trailScale: breadcrumbNodeScale(index, ancestors.length),
     });
   });
 
-  function walkBinChildren(groupId, depth, trailBranch) {
+  function walkBinChildren(groupId, depth, trailBranch, trailScale = 1) {
     const children = groupId === 'bin' ? binnedItems(state) : itemsInBinnedGroup(state, groupId);
     children.forEach((child, siblingIndex) => {
       // The folder we are drilled into is part of an expanded ancestor's
@@ -50,10 +67,15 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
         siblingIndex,
         siblingCount: children.length,
         trail: trailBranch,
+        trailScale: trailBranch ? trailScale : 1,
       });
       if (child.kind === 'group'
         && (trailBranch ? trailExpanded.has(child.id) : expanded.has(child.id))) {
-        walkBinChildren(child.id, depth + 1, trailBranch);
+        // A deeper breadcrumb owns its own expanded branch and scale. Do not
+        // walk into it from an earlier (smaller) ancestor first.
+        if (!(trailBranch && ancestorIds.has(child.id))) {
+          walkBinChildren(child.id, depth + 1, trailBranch, trailScale);
+        }
       }
     });
   }
@@ -69,6 +91,7 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
       siblingIndex,
       siblingCount: roots.length,
       trail: false,
+      trailScale: 1,
       // The folder this item was actually inside when it was sent to the
       // Bin (not its Bin-graph parent, which is always 'bin' at this
       // depth) — lets the renderer draw a "where did this come from" edge.
@@ -84,7 +107,7 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
         : null,
     });
     if (candidate.kind === 'group' && expanded.has(candidate.id)) {
-      walkBinChildren(candidate.id, 1, false);
+      walkBinChildren(candidate.id, 1, false, 1);
     }
   });
 
@@ -97,7 +120,9 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
     parentIds: parents,
   })));
   ancestors.forEach((entry, index) => {
-    if (trailExpanded.has(entry.id)) walkBinChildren(entry.id, index + 1, true);
+    if (trailExpanded.has(entry.id)) {
+      walkBinChildren(entry.id, index + 1, true, breadcrumbNodeScale(index, ancestors.length));
+    }
   });
 
   return result;
@@ -174,6 +199,7 @@ export function inheritedSetMemberIdsVisible(set, visibleIds, ancestorsOfNode) {
 function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded = new Set()) {
   const byIdentity = new Map();
   const visitedFolders = new Set();
+  const ancestorIds = new Set(ancestors.map((entry) => entry.id));
 
   ancestors.forEach((entry, index) => {
     const chainParentId = index === 0 ? null : ancestors[index - 1].id;
@@ -186,10 +212,11 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
       parents: chainParentId ? [chainParentId] : [],
       ancestor: true,
       trail: true,
+      trailScale: breadcrumbNodeScale(index, ancestors.length),
     });
   });
 
-  function walk(folderId, depth, trailBranch) {
+  function walk(folderId, depth, trailBranch, trailScale = 1) {
     if (visitedFolders.has(folderId)) return;
     visitedFolders.add(folderId);
     const children = itemsIn(state, folderId);
@@ -210,6 +237,7 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
           siblingCount: children.length,
           parents: [],
           trail: trailBranch,
+          trailScale: trailBranch ? trailScale : 1,
         };
         byIdentity.set(identity, entry);
       } else if (!trailBranch) {
@@ -217,19 +245,31 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
         // ordinary current-folder path and a trail path is one ordinary
         // body, so the merged entry is never flipped to trail.
         entry.trail = false;
+        entry.trailScale = 1;
+      } else if (entry.trail) {
+        // A shared trail-only body can be reached from more than one expanded
+        // breadcrumb. Let the nearer (larger) branch win at a glance.
+        entry.trailScale = Math.max(entry.trailScale ?? 0.3, trailScale);
       }
       entry.parents.push(folderId);
       const isOpen = child.kind === 'group'
         && (trailBranch ? trailExpanded.has(child.id) : expanded.has(child.id));
-      if (isOpen) walk(child.id, depth + 1, trailBranch);
+      // Each expanded breadcrumb is walked separately below with its own
+      // depth-derived scale. Crossing into it here would let an earlier
+      // ancestor claim the folder in visitedFolders at the wrong size.
+      if (isOpen && !(trailBranch && ancestorIds.has(child.id))) {
+        walk(child.id, depth + 1, trailBranch, trailScale);
+      }
     });
   }
-  walk(parentId, 0, false);
+  walk(parentId, 0, false, 1);
   // An expanded ancestor reveals its children in place, exactly like any
   // expanded folder in the current view — but those children are trail
   // items, and so are everything reached by expanding them further.
   ancestors.forEach((entry, index) => {
-    if (trailExpanded.has(entry.id)) walk(entry.id, index + 1, true);
+    if (trailExpanded.has(entry.id)) {
+      walk(entry.id, index + 1, true, breadcrumbNodeScale(index, ancestors.length));
+    }
   });
 
   return [...byIdentity.values()].map(({ parents, ...entry }) => ({

@@ -54,6 +54,7 @@ import {
   allUniquePositions,
   setEligibleItems,
   directSetMemberIdsVisible,
+  breadcrumbNodeScale,
 } from './public/graph-model-20260730b.js';
 
 import { belongsToSet } from './public/sets-model.js';
@@ -1051,6 +1052,36 @@ test('the ancestor chain is prepended as ordinary group entries marked ancestor'
   assert.ok(items.slice(2).every((i) => i.ancestor !== true), 'view items are not ancestors');
   assert.deepEqual(items.slice(0, 2).map((i) => i.depth), [0, 1]);
   assert.equal(items[1].parentId, ROOT_ID, 'the second ancestor is parented to the first');
+});
+
+test('breadcrumb depth scales root 30%, midpoint 60%, and immediate parent 100%', () => {
+  assert.equal(breadcrumbNodeScale(0, 3), 0.3);
+  assert.equal(breadcrumbNodeScale(1, 3), 0.6);
+  assert.equal(breadcrumbNodeScale(2, 3), 1);
+  assert.equal(breadcrumbNodeScale(0, 1), 1, 'a lone immediate parent stays full size');
+  assert.deepEqual(
+    [0, 1, 2, 3, 4].map((index) => breadcrumbNodeScale(index, 5)),
+    [0.3, 0.45, 0.6, 0.8, 1],
+    'longer paths distribute smoothly through the three requested anchors',
+  );
+});
+
+test('breadcrumb ancestors and everything expanded from each inherit that ancestor size', () => {
+  const { state, chain } = buildChain(3);
+  const rootChild = state.groups.find((group) => group.name === 'Folder 1 child 1').id;
+  const middleChild = state.groups.find((group) => group.name === 'Folder 2 child 1').id;
+  const items = visibleGraphItems(state, chain[2], new Set(), false, 'bin',
+    pathShape(state, chain).slice(0, -1), new Set([ROOT_ID, chain[0], chain[1]]));
+  const scaleOf = (id) => items.find((item) => item.id === id)?.trailScale;
+  assert.equal(scaleOf(ROOT_ID), 0.3);
+  assert.equal(scaleOf(chain[0]), 0.6);
+  assert.equal(scaleOf(chain[1]), 1);
+  assert.equal(scaleOf(rootChild), 0.6,
+    'Folder 1 expanded children inherit Folder 1 rather than the root');
+  assert.equal(scaleOf(middleChild), 1,
+    'the immediate parent expanded children inherit full size');
+  assert.ok(items.filter((item) => item.trail !== true).every((item) => item.trailScale === 1),
+    'ordinary current-folder items stay at their existing size');
 });
 
 test('the current folder never renders: dropped from the chain and never spawned', () => {
