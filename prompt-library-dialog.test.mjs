@@ -2082,8 +2082,12 @@ test('the confirmation restores the button label', async () => {
   copySelected(h);
   await Promise.resolve();
   assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copied 1 prompt');
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.ok(h.nodes['prompt-status'].classList.contains('prompt-status-copied'));
+  await new Promise((resolve) => setTimeout(resolve, 2900));
+  assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copied 1 prompt', 'confirmation stays for three seconds');
+  await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copy selected', 'label restored');
+  assert.equal(h.nodes['prompt-status'].textContent, '', 'copy notification cleared');
   assert.ok(
     !h.nodes['prompt-copy-selected'].classList.contains('prompt-copied-flash'),
     'flash class removed',
@@ -2099,7 +2103,7 @@ test('a second copy restarts the confirmation instead of stranding the label', a
   // Second copy lands most of the way through the first confirmation. If the
   // first timer is not cancelled it fires mid-second-confirmation and clears
   // the label early.
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  await new Promise((resolve) => setTimeout(resolve, 2700));
   clickRow(h, 'folder-dev');
   copySelected(h);
   await Promise.resolve();
@@ -2109,8 +2113,9 @@ test('a second copy restarts the confirmation instead of stranding the label', a
     h.nodes['prompt-copy-selected'].textContent, 'Copied 2 prompts',
     'the first timer must not cut the second confirmation short',
   );
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  await new Promise((resolve) => setTimeout(resolve, 2700));
   assert.equal(h.nodes['prompt-copy-selected'].textContent, 'Copy selected', 'restored once');
+  assert.equal(h.nodes['prompt-status'].textContent, '', 'second notification owns the restarted deadline');
 });
 
 test('closing during a confirmation restores the label immediately', async () => {

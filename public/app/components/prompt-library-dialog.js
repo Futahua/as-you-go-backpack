@@ -64,7 +64,7 @@ import {
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const COPY_SELECTED_LABEL = 'Copy selected';
-const COPY_FLASH_MS = 1400;
+const COPY_FLASH_MS = 3000;
 
 /** Small local SVG icon set for the prompt tree. */
 const ICONS = {
@@ -347,6 +347,9 @@ export function createPromptLibraryDialog({
       copyFlashTimer = null;
       copySelectedButton.classList.remove('prompt-copied-flash');
       copySelectedButton.textContent = COPY_SELECTED_LABEL;
+      // Clear only the copy confirmation. A newer, unrelated status message
+      // must survive an older copy timer reaching its deadline.
+      if (status.classList.contains('prompt-status-copied')) statusMessage('');
     }, COPY_FLASH_MS);
   }
 
