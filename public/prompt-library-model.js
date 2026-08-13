@@ -8,9 +8,22 @@
  */
 
 const makeId = (kind) => `${kind}-${crypto.randomUUID()}`;
+const MIN_PROMPT_EDITOR_HEIGHT = 150;
+const MAX_PROMPT_EDITOR_HEIGHT = 1200;
 
 function createId(kind = 'prompt') {
   return makeId(kind);
+}
+
+function promptEditorHeightFields(raw) {
+  const value = raw?.editorHeight;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return {};
+  return {
+    editorHeight: Math.min(
+      MAX_PROMPT_EDITOR_HEIGHT,
+      Math.max(MIN_PROMPT_EDITOR_HEIGHT, Math.round(value)),
+    ),
+  };
 }
 
 /** Creates a prompt node. New prompts default to unchecked and empty so an
@@ -22,6 +35,7 @@ export function createPromptNode(overrides = {}) {
     title: typeof overrides.title === 'string' ? overrides.title : 'New prompt',
     text: typeof overrides.text === 'string' ? overrides.text : '',
     includeInBatch: overrides.includeInBatch === true,
+    ...promptEditorHeightFields(overrides),
   };
 }
 
@@ -99,6 +113,7 @@ function normalizeNode(raw, seen) {
       title: typeof raw.title === 'string' ? raw.title : 'New prompt',
       text: typeof raw.text === 'string' ? raw.text : '',
       includeInBatch: raw.includeInBatch === true,
+      ...promptEditorHeightFields(raw),
     };
   }
   return null;
@@ -341,6 +356,7 @@ export function clonePromptNodesForPaste(nodes) {
         title: node.title,
         text: node.text,
         includeInBatch: node.includeInBatch === true,
+        ...promptEditorHeightFields(node),
       });
   return (Array.isArray(nodes) ? nodes : []).map(clone);
 }

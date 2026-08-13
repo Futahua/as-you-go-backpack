@@ -134,6 +134,7 @@ export function createPromptLibraryDialog({
   let copyFlashTimer = null;
   let activePage = 'prompts';
   let capturingActionId = null;
+  let promptResizeGesture = null;
 
   const icon = (name) => createSvg(document, ICONS[name]);
 
@@ -951,6 +952,7 @@ export function createPromptLibraryDialog({
       textarea.className = 'prompt-card-text';
       textarea.setAttribute('aria-label', 'Prompt text');
       textarea.value = node.text;
+      if (Number.isFinite(node.editorHeight)) textarea.style.height = `${node.editorHeight}px`;
       details.append(textarea);
       fragment.append(row, details);
       return fragment;
@@ -1107,6 +1109,33 @@ export function createPromptLibraryDialog({
     } else if (event.target.classList.contains('prompt-card-text')) {
       applyEditInput(id, (nodes) => updatePromptNode(nodes, id, (node) => ({ ...node, text: event.target.value })));
     }
+  }
+
+  /** Native textarea resizing does not emit input/change. Capture only a
+   * pointer that begins in the bottom-right resize corner, then persist the
+   * final height after release. Ordinary clicks in the editor never create a
+   * size preference. */
+  function onPromptResizeStart(event) {
+    const textarea = event.target.closest?.('.prompt-card-text');
+    if (!textarea) return;
+    const rect = textarea.getBoundingClientRect();
+    const inResizeCorner = event.clientX >= rect.right - 18 && event.clientY >= rect.bottom - 18;
+    if (!inResizeCorner) return;
+    const id = ownerNodeId(textarea);
+    if (!id) return;
+    promptResizeGesture = { id, textarea, startHeight: Math.round(rect.height) };
+  }
+
+  function onPromptResizeEnd() {
+    const gesture = promptResizeGesture;
+    promptResizeGesture = null;
+    if (!gesture?.textarea?.isConnected && !gesture?.textarea?.parentNode) return;
+    const height = Math.round(gesture.textarea.getBoundingClientRect().height);
+    if (!Number.isFinite(height) || height === gesture.startHeight) return;
+    commitTreeMutation(
+      updatePromptNode(history.present, gesture.id, (node) => ({ ...node, editorHeight: height })),
+      'resize',
+    );
   }
 
   /** Anchor for Shift+click checkbox ranges, and the modifier state captured
@@ -1597,6 +1626,8 @@ export function createPromptLibraryDialog({
     copySelectedButton.addEventListener('click', copySelectedPromptText, { signal });
     cancelButton.addEventListener('click', onCancel, { signal });
     cardList.addEventListener('input', onTreeInput, { signal });
+    cardList.addEventListener('pointerdown', onPromptResizeStart, { signal });
+    document.addEventListener('pointerup', onPromptResizeEnd, { signal });
     // click runs before change and is the only place shiftKey is visible.
     cardList.addEventListener('click', onCheckboxClick, { signal });
     cardList.addEventListener('change', onCheckboxChange, { signal });

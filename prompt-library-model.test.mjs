@@ -74,6 +74,17 @@ test('duplicate ids keep the first occurrence', () => {
   assert.equal(library[0].title, 'A');
 });
 
+test('prompt editor height round-trips within safe bounds', () => {
+  const library = normalizePromptLibrary([
+    { ...prompt('a', 'A', 'one', true), editorHeight: 318.6 },
+    { ...prompt('b', 'B', 'two', false), editorHeight: 99999 },
+    { ...prompt('c', 'C', 'three', false), editorHeight: 'invalid' },
+  ]);
+  assert.equal(library[0].editorHeight, 319);
+  assert.equal(library[1].editorHeight, 1200);
+  assert.equal('editorHeight' in library[2], false);
+});
+
 test('batch text is depth-first and ignores folder titles', () => {
   const library = [
     {

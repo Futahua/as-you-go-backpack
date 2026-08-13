@@ -900,6 +900,29 @@ test('only one prompt editor opens at a time with no duplicate title field', () 
   assert.equal(h.rowFor('prompt-a').querySelector('.prompt-card-title'), null, 'first editor closed');
 });
 
+test('resized prompt editor height persists and restores on reopen', async () => {
+  const saves = [];
+  const view = treeFixture().view;
+  view.promptLibrary[1].editorHeight = 240;
+  const h = createHarness({ initialView: view, persist: async (snapshot) => saves.push(JSON.parse(snapshot)) });
+  open(h);
+  openPrompt(h, 'prompt-root');
+  const textarea = h.textareaFor('prompt-root');
+  assert.equal(textarea.style.height, '240px');
+  let height = 240;
+  textarea.getBoundingClientRect = () => ({ top: 0, left: 0, width: 400, height, right: 400, bottom: height });
+  textarea.dispatch('pointerdown', { target: textarea, clientX: 398, clientY: 238 });
+  height = 330;
+  h.document.dispatch('pointerup', { target: textarea, clientX: 398, clientY: 328 });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(h.getState().view.promptLibrary[1].editorHeight, 330);
+  assert.equal(saves.at(-1).view.promptLibrary[1].editorHeight, 330);
+  h.dialog.close();
+  open(h);
+  openPrompt(h, 'prompt-root');
+  assert.equal(h.textareaFor('prompt-root').style.height, '330px');
+});
+
 test('title and text survive collapse and re-render', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
