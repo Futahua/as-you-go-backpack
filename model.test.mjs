@@ -1109,6 +1109,71 @@ test('visible breadcrumb bodies consume the saved root and middle scale anchors'
   assert.deepEqual(items.slice(0, 3).map((item) => item.trailScale), [0.45, 0.75, 1]);
 });
 
+test('ordinary expansion decreases monotonically along only the expanded branch', () => {
+  let state = emptyState();
+  state = createGroup(state, 'Outer', ROOT_ID);
+  const outer = state.groups.at(-1).id;
+  state = createGroup(state, 'Unrelated', ROOT_ID);
+  const unrelated = state.groups.at(-1).id;
+  state = createGroup(state, 'Inner', outer);
+  const inner = state.groups.at(-1).id;
+  state = createGroup(state, 'Inner sibling', outer);
+  const innerSibling = state.groups.at(-1).id;
+  state = createGroup(state, 'Deep', inner);
+  const deep = state.groups.at(-1).id;
+  state = createShortcut(state, { name: 'Revealed file', target: 'C:\\file.txt', parentId: inner });
+  const revealedFile = state.shortcuts.at(-1).id;
+  const scales = { rootScale: 0.4, middleScale: 0.7 };
+  const expanded = visibleGraphItems(
+    state,
+    ROOT_ID,
+    new Set([outer, inner, deep]),
+    false,
+    'bin',
+    [],
+    new Set(),
+    scales,
+  );
+  const scaleOf = (items, id) => items.find((item) => item.id === id)?.trailScale;
+  assert.equal(scaleOf(expanded, outer), 1, 'the first folder remains the biggest');
+  assert.equal(scaleOf(expanded, inner), 0.7,
+    'the second expanded folder takes the middle slider value');
+  assert.equal(scaleOf(expanded, deep), 0.4,
+    'the newly revealed end of a three-folder chain takes the root slider value');
+  assert.equal(scaleOf(expanded, unrelated), 1,
+    'an unrelated root folder is not resized');
+  assert.equal(scaleOf(expanded, innerSibling), 0.7,
+    'folder children revealed at the same branch depth use the same monotonic size');
+  assert.equal(scaleOf(expanded, revealedFile), 0.4,
+    'non-folder icons inherit the same size as folders at their branch depth');
+});
+
+test('a long expanded branch never becomes small and then big again', () => {
+  let state = emptyState();
+  const ids = [];
+  let parentId = ROOT_ID;
+  for (let index = 0; index < 8; index += 1) {
+    state = createGroup(state, `Folder ${index + 1}`, parentId);
+    parentId = state.groups.at(-1).id;
+    ids.push(parentId);
+  }
+  const items = visibleGraphItems(
+    state,
+    ROOT_ID,
+    new Set(ids.slice(0, -1)),
+    false,
+    'bin',
+    [],
+    new Set(),
+    { rootScale: 0.4, middleScale: 0.7 },
+  );
+  const values = ids.map((id) => items.find((item) => item.id === id)?.trailScale);
+  assert.equal(values[0], 1);
+  assert.equal(values.at(-1), 0.4);
+  assert.ok(values.every((value, index) => index === 0 || value <= values[index - 1]),
+    `expected a monotonically decreasing branch, got ${values.join(', ')}`);
+});
+
 test('the current folder never renders: dropped from the chain and never spawned', () => {
   const { state, chain } = buildChain(2);
   const ancestors = pathShape(state, chain).slice(0, -1);

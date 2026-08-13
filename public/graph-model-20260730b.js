@@ -26,6 +26,33 @@ export function breadcrumbNodeScale(index, count, { rootScale = 0.3, middleScale
   return Math.round(scale * 1000) / 1000;
 }
 
+/** An ordinary expanded branch reads from its large root toward its small
+ * revealed end. Two visible generations use 100% -> middle; longer branches
+ * interpolate monotonically through middle toward root. Every icon revealed
+ * at a generation shares that generation's scale, regardless of item kind. */
+function expandedBranchScale(depth, count, scales) {
+  if (count <= 1 || depth <= 0) return 1;
+  if (count === 2) return breadcrumbNodeScale(1, 3, scales);
+  return breadcrumbNodeScale(Math.max(0, count - 1 - depth), count, scales);
+}
+
+function createVisibleBranchCountResolver(childrenOf, expanded) {
+  const visiting = new Set();
+  function count(folderId) {
+    if (visiting.has(folderId)) return 1;
+    visiting.add(folderId);
+    const visibleFolderChildren = expanded.has(folderId)
+      ? childrenOf(folderId).filter((child) => child.kind === 'group')
+      : [];
+    const value = visibleFolderChildren.length === 0
+      ? 1
+      : 1 + Math.max(...visibleFolderChildren.map((child) => count(child.id)));
+    visiting.delete(folderId);
+    return value;
+  }
+  return count;
+}
+
 /** Walks the Bin from binCurrentId ('bin' for the top-level list, or a
  * binned folder's id after drilling into it — see the renderer's
  * dedicated Bin breadcrumb/navigation). Every item at that level is a
@@ -38,6 +65,10 @@ export function breadcrumbNodeScale(index, count, { rootScale = 0.3, middleScale
 function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = [], trailExpanded = new Set(), breadcrumbScales = undefined) {
   const result = [];
   const ancestorIds = new Set(ancestors.map((entry) => entry.id));
+  const visibleBranchCount = createVisibleBranchCountResolver(
+    (folderId) => itemsInBinnedGroup(state, folderId),
+    expanded,
+  );
 
   const byIdentity = new Map();
   ancestors.forEach((entry, index) => {
@@ -55,12 +86,17 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
     });
   });
 
-  function walkBinChildren(groupId, depth, trailBranch, trailScale = 1) {
+  function walkBinChildren(groupId, depth, trailBranch, trailScale = 1, branchCount = 1) {
     const children = groupId === 'bin' ? binnedItems(state) : itemsInBinnedGroup(state, groupId);
     children.forEach((child, siblingIndex) => {
       // The folder we are drilled into is part of an expanded ancestor's
       // child list; the current folder never renders.
       if (child.id === binCurrentId) return;
+      const isOpen = child.kind === 'group'
+        && (trailBranch ? trailExpanded.has(child.id) : expanded.has(child.id));
+      const childBranchCount = !trailBranch && depth === 0 && isOpen
+        ? visibleBranchCount(child.id)
+        : branchCount;
       result.push({
         id: child.id,
         parentId: groupId === 'bin' ? 'bin' : groupId,
@@ -69,14 +105,15 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
         siblingIndex,
         siblingCount: children.length,
         trail: trailBranch,
-        trailScale: trailBranch ? trailScale : 1,
+        trailScale: trailBranch
+          ? trailScale
+          : expandedBranchScale(depth, childBranchCount, breadcrumbScales),
       });
-      if (child.kind === 'group'
-        && (trailBranch ? trailExpanded.has(child.id) : expanded.has(child.id))) {
+      if (isOpen) {
         // A deeper breadcrumb owns its own expanded branch and scale. Do not
         // walk into it from an earlier (smaller) ancestor first.
         if (!(trailBranch && ancestorIds.has(child.id))) {
-          walkBinChildren(child.id, depth + 1, trailBranch, trailScale);
+          walkBinChildren(child.id, depth + 1, trailBranch, trailScale, childBranchCount);
         }
       }
     });
@@ -85,6 +122,8 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
   const roots = binCurrentId === 'bin' ? binnedItems(state) : itemsInBinnedGroup(state, binCurrentId);
   roots.forEach((candidate, siblingIndex) => {
     if (candidate.id === binCurrentId) return;
+    const isOpen = candidate.kind === 'group' && expanded.has(candidate.id);
+    const branchCount = isOpen ? visibleBranchCount(candidate.id) : 1;
     result.push({
       id: candidate.id,
       parentId: 'bin',
@@ -109,7 +148,7 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
         : null,
     });
     if (candidate.kind === 'group' && expanded.has(candidate.id)) {
-      walkBinChildren(candidate.id, 1, false, 1);
+      walkBinChildren(candidate.id, 1, false, 1, branchCount);
     }
   });
 
@@ -203,6 +242,10 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
   const byIdentity = new Map();
   const visitedFolders = new Set();
   const ancestorIds = new Set(ancestors.map((entry) => entry.id));
+  const visibleBranchCount = createVisibleBranchCountResolver(
+    (folderId) => itemsIn(state, folderId),
+    expanded,
+  );
 
   ancestors.forEach((entry, index) => {
     const chainParentId = index === 0 ? null : ancestors[index - 1].id;
@@ -219,7 +262,7 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
     });
   });
 
-  function walk(folderId, depth, trailBranch, trailScale = 1) {
+  function walk(folderId, depth, trailBranch, trailScale = 1, branchCount = 1) {
     if (visitedFolders.has(folderId)) return;
     visitedFolders.add(folderId);
     const children = itemsIn(state, folderId);
@@ -230,6 +273,12 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
       // is inert for the normal walk.
       if (child.id === parentId) return;
       const identity = identityOf(child);
+      const isOpen = child.kind === 'group'
+        && (trailBranch ? trailExpanded.has(child.id) : expanded.has(child.id));
+      const childBranchCount = !trailBranch && depth === 0 && isOpen
+        ? visibleBranchCount(child.id)
+        : branchCount;
+      const ordinaryScale = expandedBranchScale(depth, childBranchCount, breadcrumbScales);
       let entry = byIdentity.get(identity);
       if (!entry) {
         entry = {
@@ -240,7 +289,7 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
           siblingCount: children.length,
           parents: [],
           trail: trailBranch,
-          trailScale: trailBranch ? trailScale : 1,
+          trailScale: trailBranch ? trailScale : ordinaryScale,
         };
         byIdentity.set(identity, entry);
       } else if (!trailBranch) {
@@ -248,20 +297,18 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
         // ordinary current-folder path and a trail path is one ordinary
         // body, so the merged entry is never flipped to trail.
         entry.trail = false;
-        entry.trailScale = 1;
+        entry.trailScale = ordinaryScale;
       } else if (entry.trail) {
         // A shared trail-only body can be reached from more than one expanded
         // breadcrumb. Let the nearer (larger) branch win at a glance.
         entry.trailScale = Math.max(entry.trailScale ?? 0.3, trailScale);
       }
       entry.parents.push(folderId);
-      const isOpen = child.kind === 'group'
-        && (trailBranch ? trailExpanded.has(child.id) : expanded.has(child.id));
       // Each expanded breadcrumb is walked separately below with its own
       // depth-derived scale. Crossing into it here would let an earlier
       // ancestor claim the folder in visitedFolders at the wrong size.
       if (isOpen && !(trailBranch && ancestorIds.has(child.id))) {
-        walk(child.id, depth + 1, trailBranch, trailScale);
+        walk(child.id, depth + 1, trailBranch, trailScale, childBranchCount);
       }
     });
   }
