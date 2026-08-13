@@ -1773,7 +1773,10 @@ window.addEventListener('blur', () => {
 elements.grid.addEventListener('mouseover', (event) => {
   const listButton = event.target.closest('[data-wl-list]');
   const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
-  if (listButton && listButton !== relatedListButton) {
+  // The compact widget installs its own membership-aware opener on the card.
+  // Do not let this workspace delegate replace that dwell after the event
+  // bubbles to the grid; widget-local state is authoritative there.
+  if (!WIDGET_SURFACE && listButton && listButton !== relatedListButton) {
     scheduleWindowLayoutListDwell(
       listButton,
       () => openWindowLayoutPicker(listButton.dataset.wlList),

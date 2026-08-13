@@ -72,6 +72,8 @@ test('024/035: the detached/widget card supports member-icon reorder via the cha
   // durable state would otherwise crash the detached card).
   assert.match(workspaceSource, /elements\.grid\.addEventListener\('pointerdown', \(event\) => \{\s*if \(WIDGET_SURFACE\) return;/);
   assert.match(workspaceSource, /elements\.grid\.addEventListener\('click', \(event\) => \{\s*if \(WIDGET_SURFACE\) return;/);
+  assert.match(workspaceSource, /if \(!WIDGET_SURFACE && listButton && listButton !== relatedListButton\)/);
+  assert.match(workspaceSource, /scheduleWindowLayoutListDwell\(listButton, openWidgetPicker\)/);
 });
 
 test('024: the compact card keeps the accepted absence of per-button outlines and native scrollbars', () => {
