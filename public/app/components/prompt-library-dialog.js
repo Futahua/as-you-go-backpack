@@ -120,7 +120,8 @@ export function createPromptLibraryDialog({
   let history = createPromptLibraryHistory([]);
   let draftLibrary = history.present;
   let expandedFolderIds = new Set();
-  let expandedPromptId = null;
+  // Prompt editors are independent: opening one must not collapse any others.
+  let expandedPromptIds = new Set();
   let editingFolderId = null;
   let confirmingDeleteIds = null;
   let treeClipboard = null;
@@ -224,19 +225,20 @@ export function createPromptLibraryDialog({
     },
     onTogglePromptEditor(id) {
       commitActiveEditTransaction();
-      expandedPromptId = expandedPromptId === id ? null : id;
+      if (expandedPromptIds.has(id)) expandedPromptIds.delete(id);
+      else expandedPromptIds.add(id);
       render();
-      if (expandedPromptId) focusInRow(expandedPromptId, '.prompt-card-title');
+      if (expandedPromptIds.has(id)) focusInRow(id, '.prompt-card-title');
     },
     onOpenPrompt(id) {
       commitActiveEditTransaction();
-      expandedPromptId = id;
+      expandedPromptIds.add(id);
       render();
       focusInRow(id, '.prompt-card-title');
     },
     onCollapsePromptEditor(id) {
       commitActiveEditTransaction();
-      if (expandedPromptId === id) expandedPromptId = null;
+      expandedPromptIds.delete(id);
       render();
     },
     onCopyPrompt(id) {
@@ -314,7 +316,7 @@ export function createPromptLibraryDialog({
     keyboardTarget: layer,
     getTree: () => draftLibrary,
     getExpandedFolders: () => expandedFolderIds,
-    getPromptEditorId: () => expandedPromptId,
+    isPromptEditorOpen: (id) => expandedPromptIds.has(id),
     getRenamingFolderId: () => editingFolderId,
     getHotkeyPreferences: () => store.getSnapshot()?.view?.preferences?.hotkeys ?? {},
     isKeyboardActive: () => activePage === 'prompts',
@@ -738,8 +740,9 @@ export function createPromptLibraryDialog({
     contextMenu.close();
     confirmingDeleteIds = null;
     controller.cancelDrag();
-    if (expandedPromptId && !findPromptNode(draftLibrary, expandedPromptId)) {
-      expandedPromptId = null;
+    for (const id of [...expandedPromptIds]) {
+      const node = findPromptNode(draftLibrary, id);
+      if (!node || node.type !== 'prompt') expandedPromptIds.delete(id);
     }
     if (editingFolderId && !findPromptNode(draftLibrary, editingFolderId)) {
       editingFolderId = null;
@@ -858,9 +861,9 @@ export function createPromptLibraryDialog({
       render();
       return;
     }
-    if (expandedPromptId) {
+    if (expandedPromptIds.size > 0) {
       commitActiveEditTransaction();
-      expandedPromptId = null;
+      expandedPromptIds.clear();
       render();
       return;
     }
@@ -914,7 +917,7 @@ export function createPromptLibraryDialog({
   }
 
   function createPromptElement(node, parentId, depth, nextId, inherited = 'neutral') {
-    const expanded = node.id === expandedPromptId;
+    const expanded = expandedPromptIds.has(node.id);
     const fragment = document.createDocumentFragment();
     const row = document.createElement('div');
     row.className = 'prompt-tree-row prompt-prompt-row';
@@ -1268,7 +1271,7 @@ export function createPromptLibraryDialog({
       history.present,
     );
     for (const id of ids) expandedFolderIds.delete(id);
-    if (expandedPromptId && ids.includes(expandedPromptId)) expandedPromptId = null;
+    for (const id of ids) expandedPromptIds.delete(id);
     commitTreeMutation(next, 'delete');
   }
 
@@ -1308,7 +1311,7 @@ export function createPromptLibraryDialog({
           ...folder,
           children: [...folder.children, added],
         }));
-    expandedPromptId = added.id;
+    expandedPromptIds.add(added.id);
     if (parentId) expandedFolderIds.add(parentId);
     commitTreeMutation(next, 'add prompt', { selectIds: [added.id] });
     focusInRow(added.id, '.prompt-card-title');
@@ -1522,7 +1525,7 @@ export function createPromptLibraryDialog({
     for (const node of draftLibrary) {
       if (node.type === 'folder') expandedFolderIds.add(node.id);
     }
-    expandedPromptId = null;
+    expandedPromptIds = new Set();
     editingFolderId = null;
     confirmingDeleteIds = null;
     treeClipboard = null;

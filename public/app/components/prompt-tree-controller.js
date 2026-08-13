@@ -36,7 +36,7 @@ export function createPromptTreeController({
   keyboardTarget = viewport,
   getTree,
   getExpandedFolders,
-  getPromptEditorId,
+  isPromptEditorOpen,
   getRenamingFolderId,
   getHotkeyPreferences = () => ({}),
   isKeyboardActive = () => true,
@@ -231,7 +231,7 @@ export function createPromptTreeController({
         } else {
           moveFocusToVisibleParent(id);
         }
-      } else if (getPromptEditorId() === id) {
+      } else if (isPromptEditorOpen(id)) {
         intents.onCollapsePromptEditor(id);
       } else {
         moveFocusToVisibleParent(id);

@@ -888,7 +888,7 @@ test('double-clicking a folder expands it instead of copying', () => {
   assert.equal(h.rowFor('prompt-b'), undefined, 'double-click toggles back');
 });
 
-test('only one prompt editor opens at a time with no duplicate title field', () => {
+test('multiple prompt editors remain open without duplicate title fields', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
   openPrompt(h, 'prompt-a');
@@ -897,7 +897,9 @@ test('only one prompt editor opens at a time with no duplicate title field', () 
   assert.ok(rootRow.querySelector('.prompt-card-title'), 'editor opens');
   assert.equal(rootRow.querySelectorAll('.prompt-card-title').length, 1, 'no duplicate title field');
   assert.equal(rootRow.querySelector('.prompt-prompt-title'), null, 'collapsed title replaced inline');
-  assert.equal(h.rowFor('prompt-a').querySelector('.prompt-card-title'), null, 'first editor closed');
+  const firstRow = h.rowFor('prompt-a');
+  assert.ok(firstRow.querySelector('.prompt-card-title'), 'first editor remains open');
+  assert.equal(firstRow.querySelectorAll('.prompt-card-title').length, 1, 'first editor has one title field');
 });
 
 test('resized prompt editor height persists and restores on reopen', async () => {
