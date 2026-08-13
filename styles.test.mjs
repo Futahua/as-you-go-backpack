@@ -166,9 +166,11 @@ test('prompt settings is a full page with peer navigation and create actions', (
   assert.match(actionRule, /border:\s*0/, 'create actions do not form a second card or toolbar');
 });
 
-test('expanded prompt bodies do not expose a native resize grip', () => {
+test('expanded prompt bodies stay resizable without a visible native grip', () => {
   const textRule = dialogCss.match(/\.prompt-card-text\s*\{[^}]*\}/)?.[0] ?? '';
-  assert.match(textRule, /resize:\s*none/);
+  assert.match(textRule, /resize:\s*vertical/);
+  const resizerRule = dialogCss.match(/\.prompt-card-text::\-webkit-resizer\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(resizerRule, /background:\s*transparent/);
 });
 
 test('prompt page content is borderless and uses surface-coloured scrollbars', () => {

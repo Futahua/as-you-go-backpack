@@ -514,8 +514,9 @@
   color: var(--text);
   font: inherit;
   line-height: 1.45;
-  resize: none;
+  resize: vertical;
 }
+.prompt-card-text::-webkit-resizer { background: transparent; }
 .prompt-card-text:focus {
   outline: none;
   background: var(--prompt-text-focus);
