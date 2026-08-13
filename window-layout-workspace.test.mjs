@@ -344,6 +344,30 @@ test('019I both production writer adapters invoke store.commit without assigning
   assert.doesNotMatch(retirementAdapter, corruptingAdapter, 'retirement production adapter never stores the commit Promise in state');
 });
 
+test('direct picker self-recovers orphaned Papers sessions before attached and widget starts', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const attachedStart = source.indexOf('async function beginWindowLayoutDirectPick(layoutId)');
+  const widgetStart = source.indexOf('async function beginWidgetDirectPick()');
+  assert.ok(attachedStart >= 0 && widgetStart > attachedStart, 'both direct-pick entry points exist');
+  const attached = source.slice(attachedStart, widgetStart);
+  const widget = source.slice(widgetStart, source.indexOf("window.addEventListener('keydown'", widgetStart));
+  for (const [surface, block] of [['attached', attached], ['widget', widget]]) {
+    const cancel = block.indexOf('await host.pickWindowCancel()');
+    const begin = block.indexOf('host.pickWindowBegin(members)');
+    assert.ok(cancel >= 0 && begin > cancel, `${surface} cancels an orphan before beginning`);
+    assert.match(block, /begin\.error \|\| 'Direct pick is unavailable'/,
+      `${surface} exposes the real begin failure instead of masking it`);
+  }
+  assert.match(attached, /windowLayoutRuntime\.pickUnsubscribe === pickUnsubscribe/,
+    'an older attached attempt cannot unsubscribe a newer attempt');
+  assert.match(widget, /widgetState\.pickUnsubscribe === pickUnsubscribe/,
+    'an older widget attempt cannot unsubscribe a newer attempt');
+  assert.match(source, /function uniqueWindowLayoutMemberDescriptors\(members\)/,
+    'duplicate saved members are collapsed before they can brick native preparation');
+  assert.equal((source.match(/uniqueWindowLayoutMemberDescriptors\(/g) ?? []).length, 3,
+    'both attached and widget surfaces use the shared descriptor deduplication');
+});
+
 test('040 two layouts referencing the SAME window stay cache- and state-isolated', async () => {
   // Layout A and layout B both contain a member for the SAME real window
   // (same descriptor title/fingerprint). The pick applier adds a new window to

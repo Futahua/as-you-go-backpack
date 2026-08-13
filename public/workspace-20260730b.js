@@ -1357,6 +1357,15 @@ async function windowLayoutToggleRange(layoutId, clickedMemberId, explicitMember
 
 /** 016 direct onscreen pick: begin the Papers-owned pick session for THIS
  * layout and wait for its single typed result (Escape/right-click cancels). */
+function uniqueWindowLayoutMemberDescriptors(members) {
+  const unique = new Map();
+  for (const descriptor of members) {
+    const key = `${descriptor.executableFingerprint ?? ''}|${descriptor.title ?? ''}`;
+    if (!unique.has(key)) unique.set(key, descriptor);
+  }
+  return [...unique.values()];
+}
+
 async function beginWindowLayoutDirectPick(layoutId) {
   console.info('[045-direct-pick] begin-enter', layoutId);
   if (windowLayoutDetachment.isReadOnly()) return;
@@ -1366,9 +1375,20 @@ async function beginWindowLayoutDirectPick(layoutId) {
   windowLayoutMemberPreview.cancel();
   closeWindowLayoutPicker();
   windowLayoutRuntime.pickLayoutId = layoutId;
-  const members = (layout.arrangement?.members ?? []).map((member) => member.descriptor);
+  const pickAttempt = Symbol('window-layout-direct-pick');
+  windowLayoutRuntime.pickAttempt = pickAttempt;
+  const members = uniqueWindowLayoutMemberDescriptors(
+    (layout.arrangement?.members ?? []).map((member) => member.descriptor),
+  );
   let result = null;
+  let pickUnsubscribe = null;
   try {
+    // A renderer reload or an abandoned picker can leave the Papers-owned
+    // session alive after this page has lost its result listener. Always
+    // cancel that one-shot session first so clicking Direct Pick is itself
+    // the recovery action. Cancelling an idle session is intentionally a
+    // no-op.
+    await host.pickWindowCancel();
     // 016R: subscribe to the result push BEFORE awaiting begin, so a pick
     // that completes while begin() is still resolving (immediate click on an
     // eligible window) is never missed. A failed begin removes the listener
@@ -1377,20 +1397,25 @@ async function beginWindowLayoutDirectPick(layoutId) {
     console.info('[045-direct-pick] begin-request', layoutId, members.length);
     const beginPromise = host.pickWindowBegin(members);
     const pickPromise = new Promise((resolve) => {
-      windowLayoutRuntime.pickUnsubscribe = host.onPickResult(resolve);
+      pickUnsubscribe = host.onPickResult(resolve);
+      windowLayoutRuntime.pickUnsubscribe = pickUnsubscribe;
     });
     const begin = await beginPromise;
     console.info('[045-direct-pick] begin-result', layoutId, begin?.outcome, begin?.error ?? '');
     // 018X4: abort immediately after the begin await, before the failure status.
     if (windowLayoutDetachment.isReadOnly()) {
-      windowLayoutRuntime.pickUnsubscribe?.();
-      windowLayoutRuntime.pickUnsubscribe = null;
+      pickUnsubscribe?.();
+      if (windowLayoutRuntime.pickUnsubscribe === pickUnsubscribe) {
+        windowLayoutRuntime.pickUnsubscribe = null;
+      }
       return;
     }
     if (begin.outcome !== 'started') {
-      windowLayoutRuntime.pickUnsubscribe?.();
-      windowLayoutRuntime.pickUnsubscribe = null;
-      setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
+      pickUnsubscribe?.();
+      if (windowLayoutRuntime.pickUnsubscribe === pickUnsubscribe) {
+        windowLayoutRuntime.pickUnsubscribe = null;
+      }
+      setWindowLayoutStatus(layoutId, begin.error || 'Direct pick is unavailable');
       return;
     }
     result = await pickPromise;
@@ -1399,15 +1424,22 @@ async function beginWindowLayoutDirectPick(layoutId) {
     if (windowLayoutDetachment.isReadOnly()) return;
   } catch (error) {
     console.error('[045-direct-pick] begin-error', String(error));
-    windowLayoutRuntime.pickUnsubscribe?.();
-    windowLayoutRuntime.pickUnsubscribe = null;
+    pickUnsubscribe?.();
+    if (windowLayoutRuntime.pickUnsubscribe === pickUnsubscribe) {
+      windowLayoutRuntime.pickUnsubscribe = null;
+    }
     if (windowLayoutDetachment.isReadOnly()) return;
     setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
     return;
   } finally {
-    windowLayoutRuntime.pickUnsubscribe?.();
-    windowLayoutRuntime.pickUnsubscribe = null;
-    windowLayoutRuntime.pickLayoutId = null;
+    pickUnsubscribe?.();
+    if (windowLayoutRuntime.pickUnsubscribe === pickUnsubscribe) {
+      windowLayoutRuntime.pickUnsubscribe = null;
+    }
+    if (windowLayoutRuntime.pickAttempt === pickAttempt) {
+      windowLayoutRuntime.pickAttempt = null;
+      windowLayoutRuntime.pickLayoutId = null;
+    }
   }
   // 019C: Winter's pick session returns ONE typed committed set (Enter) or a
   // zero-mutation cancel (Escape). Every remove is applied data-only and every
@@ -5353,19 +5385,28 @@ function bootstrapWindowLayoutWidget() {
     // 019G: the pick overlay covers the desktop; clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
     closeWidgetPicker();
-    const members = (widgetState.snapshot.members ?? []).map((member) => member.descriptor);
+    const members = uniqueWindowLayoutMemberDescriptors(
+      (widgetState.snapshot.members ?? []).map((member) => member.descriptor),
+    );
+    let pickUnsubscribe = null;
     try {
+      // Recover an orphaned main-process picker before starting this widget's
+      // fresh one-shot session. This also makes a second click a clean restart.
+      await host.pickWindowCancel();
       // Subscribe to the result push BEFORE awaiting begin, so an immediate
       // pick never misses its result (016R pattern).
       const beginPromise = host.pickWindowBegin(members);
       const pickPromise = new Promise((resolve) => {
-        widgetState.pickUnsubscribe = host.onPickResult(resolve);
+        pickUnsubscribe = host.onPickResult(resolve);
+        widgetState.pickUnsubscribe = pickUnsubscribe;
       });
       const begin = await beginPromise;
       if (begin.outcome !== 'started') {
-        widgetState.pickUnsubscribe?.();
-        widgetState.pickUnsubscribe = null;
-        setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
+        pickUnsubscribe?.();
+        if (widgetState.pickUnsubscribe === pickUnsubscribe) {
+          widgetState.pickUnsubscribe = null;
+        }
+        setWindowLayoutStatus(layoutId, begin.error || 'Direct pick is unavailable');
         return;
       }
       const result = await pickPromise;
@@ -5377,12 +5418,16 @@ function bootstrapWindowLayoutWidget() {
       // widget never applies it locally.
       client.sendCommand({ kind: 'picker-commit', pick: result });
     } catch {
-      widgetState.pickUnsubscribe?.();
-      widgetState.pickUnsubscribe = null;
+      pickUnsubscribe?.();
+      if (widgetState.pickUnsubscribe === pickUnsubscribe) {
+        widgetState.pickUnsubscribe = null;
+      }
       setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
     } finally {
-      widgetState.pickUnsubscribe?.();
-      widgetState.pickUnsubscribe = null;
+      pickUnsubscribe?.();
+      if (widgetState.pickUnsubscribe === pickUnsubscribe) {
+        widgetState.pickUnsubscribe = null;
+      }
     }
   }
 
