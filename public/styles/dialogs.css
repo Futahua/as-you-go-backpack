@@ -89,12 +89,29 @@
 .editor-error { min-height: 17px; margin: 10px 0 0; color: var(--danger); font-size: 12px; }
 .confirm-card p { margin: 0 0 18px; color: var(--text-confirm); line-height: 1.55; }
 .confirm-card label { display: block; margin: 11px 0; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
-.confirm-card.prompt-library {
+.prompt-settings-page {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-raised);
+  color: var(--text);
+}
+.prompt-library {
   display: flex;
   flex-direction: column;
-  width: min(760px, calc(100vw - 32px));
-  max-height: 82vh;
-  padding: 22px 22px 18px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: clamp(18px, 3vw, 36px);
 }
 .prompt-library-header {
   display: flex;
@@ -136,9 +153,9 @@
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin: 0 0 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 0 0 12px;
+  margin: 0 0 0 auto;
+  border: 0;
+  padding: 0;
 }
 .prompt-library-add-actions .paper-button {
   display: inline-flex;
@@ -150,7 +167,6 @@
   color: var(--accent-strong);
   font-size: 12px;
 }
-.prompt-library-add-actions svg { width: 15px; height: 15px; }
 .prompt-library-status {
   min-height: 17px;
   margin: 0 0 8px;
@@ -189,9 +205,9 @@
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin: 4px 0 10px;
-  padding: 9px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  padding: 9px 0 18px;
+  border: 0;
+  border-radius: 0;
   color: var(--text-muted);
   font-size: 12px;
 }
@@ -211,6 +227,9 @@
 .settings-checkbox-label input { accent-color: var(--accent); }
 @media (max-width: 560px) {
   .settings-preferences { grid-template-columns: 1fr; }
+  .prompt-library { padding: 16px; }
+  .prompt-library-header { align-items: flex-start; }
+  .prompt-library-add-actions { width: 100%; margin-left: 0; }
 }
 /* A copy confirmation is the one status the user is actively waiting for, so
  * it reads as a notification rather than the usual quiet line. */
@@ -276,12 +295,44 @@
   overflow-y: auto;
   margin: 0 -6px;
   padding: 0 6px;
-  border-top: 1px solid var(--border);
+  border: 0;
 }
 .prompt-tree-viewport:focus { outline: none; }
 .prompt-tree-viewport.prompt-root-target:focus {
-  outline: 1px solid var(--focus);
-  outline-offset: -1px;
+  outline: none;
+}
+
+/* These are page-sized work areas, not inset browser panels. Keep their
+ * scrollbars quiet and surface-coloured while retaining a comfortably sized
+ * hit target. */
+.prompt-settings-page,
+.prompt-tree-viewport,
+.hotkey-list {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-faint) 24%, var(--surface-raised)) var(--surface-raised);
+}
+.prompt-settings-page::-webkit-scrollbar,
+.prompt-tree-viewport::-webkit-scrollbar,
+.hotkey-list::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.prompt-settings-page::-webkit-scrollbar-track,
+.prompt-tree-viewport::-webkit-scrollbar-track,
+.hotkey-list::-webkit-scrollbar-track {
+  background: var(--surface-raised);
+}
+.prompt-settings-page::-webkit-scrollbar-thumb,
+.prompt-tree-viewport::-webkit-scrollbar-thumb,
+.hotkey-list::-webkit-scrollbar-thumb {
+  border: 3px solid var(--surface-raised);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-faint) 24%, var(--surface-raised));
+}
+.prompt-settings-page::-webkit-scrollbar-thumb:hover,
+.prompt-tree-viewport::-webkit-scrollbar-thumb:hover,
+.hotkey-list::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-muted) 38%, var(--surface-raised));
 }
 .prompt-tree-list { display: block; }
 /* Blank remainder of the viewport: absorbs clicks below the final row so the
@@ -536,7 +587,7 @@
   text-decoration: line-through;
   text-decoration-color: var(--danger-soft);
 }
-.prompt-tree-viewport.prompt-root-target { box-shadow: inset 0 0 0 1px var(--focus); }
+.prompt-tree-viewport.prompt-root-target { box-shadow: none; }
 .prompt-tree-viewport.prompt-drop-root { box-shadow: inset 0 -2px 0 0 var(--accent); }
 .prompt-dragging { opacity: 0.5; }
 .prompt-drop-before { box-shadow: inset 0 2px 0 0 var(--accent); }

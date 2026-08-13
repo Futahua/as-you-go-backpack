@@ -138,20 +138,41 @@ test('transparent background opt-in overrides page surface without changing dark
 });
 
 test('floating surfaces use theme variables, including the breadcrumb handle', () => {
-  const breadcrumbRule = toolbarCss.match(/\.breadcrumbs\s*\{[^}]*\}/)?.[0] ?? '';
+  const breadcrumbRule = [...toolbarCss.matchAll(/\.breadcrumbs(?:-retired)?\s*\{[^}]*\}/g)]
+    .map((match) => match[0])
+    .find((rule) => /background:\s*var\(--paper\)/.test(rule)) ?? '';
   assert.match(breadcrumbRule, /background:\s*var\(--paper\)/);
   for (const source of [toolbarCss, dialogCss]) {
     assert.doesNotMatch(source, /background:\s*#[0-9a-f]{3,8}\b/i, 'floating surfaces must not hide literal light backgrounds');
   }
 });
 
-test('prompt modal separates navigation tabs from create actions', () => {
+test('prompt settings is a full page with peer navigation and create actions', () => {
+  const pageRule = dialogCss.match(/\.prompt-settings-page\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(pageRule, /position:\s*fixed/);
+  assert.match(pageRule, /inset:\s*0/);
+  assert.match(pageRule, /background:\s*var\(--surface-raised\)/);
+  const libraryRule = dialogCss.match(/\.prompt-library\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(libraryRule, /width:\s*100%/);
+  assert.match(libraryRule, /height:\s*100%/);
+  assert.match(libraryRule, /border:\s*0/);
+  assert.match(libraryRule, /box-shadow:\s*none/);
   const headerRule = dialogCss.match(/\.prompt-library-header\s*\{[^}]*\}/)?.[0] ?? '';
   assert.ok(/border-bottom:\s*1px solid/.test(headerRule), 'tabs get a dedicated header boundary');
   const tabsRule = dialogCss.match(/\.prompt-library-tabs\s*\{[^}]*\}/)?.[0] ?? '';
   assert.ok(/background:\s*var\(--surface-muted\)/.test(tabsRule), 'tabs have a navigation treatment');
   const actionRule = dialogCss.match(/\.prompt-library-add-actions\s*\{[^}]*\}/)?.[0] ?? '';
-  assert.ok(/border-bottom:\s*1px solid/.test(actionRule), 'create actions get their own separation');
+  assert.match(actionRule, /margin:\s*0 0 0 auto/, 'create actions share the header row');
+  assert.match(actionRule, /border:\s*0/, 'create actions do not form a second card or toolbar');
+});
+
+test('prompt page content is borderless and uses surface-coloured scrollbars', () => {
+  const preferencesRule = dialogCss.match(/\.settings-preferences\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(preferencesRule, /border:\s*0/);
+  const viewportRule = dialogCss.match(/\.prompt-tree-viewport\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(viewportRule, /border:\s*0/);
+  assert.match(dialogCss, /scrollbar-color:[^;]*var\(--surface-raised\)/);
+  assert.match(dialogCss, /::-webkit-scrollbar-thumb\s*\{[^}]*background:\s*color-mix/s);
 });
 
 test('trail tiles fade through the existing Trail opacity variable, without animation', () => {

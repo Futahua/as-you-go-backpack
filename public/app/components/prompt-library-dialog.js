@@ -142,6 +142,7 @@ export function createPromptLibraryDialog({
   const hotkeysPage = document.querySelector('#prompt-page-hotkeys');
   const promptsTab = document.querySelector('#prompt-tab-prompts');
   const hotkeysTab = document.querySelector('#prompt-tab-hotkeys');
+  const addActions = document.querySelector('.prompt-library-add-actions');
   const hotkeyList = document.querySelector('#hotkey-list');
   const hotkeyStatus = document.querySelector('#hotkey-status');
   const resetAllHotkeysButton = document.querySelector('#hotkey-reset-all');
@@ -400,6 +401,7 @@ export function createPromptLibraryDialog({
     capturingActionId = null;
     if (promptsPage) promptsPage.hidden = activePage !== 'prompts';
     if (hotkeysPage) hotkeysPage.hidden = activePage !== 'hotkeys';
+    if (addActions) addActions.hidden = activePage !== 'prompts';
     promptsTab?.setAttribute('aria-selected', String(activePage === 'prompts'));
     hotkeysTab?.setAttribute('aria-selected', String(activePage === 'hotkeys'));
     renderHotkeys();
