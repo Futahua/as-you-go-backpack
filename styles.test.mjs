@@ -208,6 +208,7 @@ test('019F/033/034/035/036 C4: member strip wraps with the available width up to
   // count-based breakpoint and never an unbounded strip).
   assert.match(itemsCss, /\.window-layout-card\s*\{[^}]*width:\s*100%/);
   assert.match(itemsCss, /\.window-layout-card\s*\{[^}]*max-width:\s*min\(100%, var\(--wl-card-max-width/);
+  assert.match(itemsCss, /\.icon-grid > \.window-layout-card \.window-layout-body,[\s\S]*?-webkit-app-region:\s*no-drag/);
   assert.match(stripRule, /width:\s*var\(--wl-balanced-member-width/, 'live width chooses balanced rows');
   assert.doesNotMatch(itemsCss, /\.window-layout-member:nth-child/);
 });

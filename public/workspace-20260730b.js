@@ -41,6 +41,7 @@ import {
   createWindowLayout,
   addWindowLayoutMember,
   removeWindowLayoutMember,
+  removeClosedWindowFromAllLayouts,
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
   setWindowLayoutCardSize,
@@ -141,6 +142,17 @@ function windowLayoutWidgetSurfaceParams(locationRef) {
 }
 const WIDGET_SURFACE = windowLayoutWidgetSurfaceParams(window.location);
 if (WIDGET_SURFACE) document.documentElement.dataset.widgetSurface = 'true';
+const windowLayoutWidgetSelectionChannel = typeof BroadcastChannel === 'function'
+  ? new BroadcastChannel('ayg-window-layout-widget-selection')
+  : null;
+if (!WIDGET_SURFACE) {
+  // A click back in the Backpack explicitly exits every detached widget's
+  // ephemeral Ctrl/Shift selection, even when its always-on-top native window
+  // was shown inactive and therefore has no reliable browser blur transition.
+  window.addEventListener('pointerdown', () => {
+    windowLayoutWidgetSelectionChannel?.postMessage({ type: 'clear-selection' });
+  }, { capture: true });
+}
 
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
@@ -576,6 +588,7 @@ const windowLayoutRuntime = {
   capabilities: new Map(),   // `${layoutId}\u0000${memberId}` -> capability (ephemeral, entry-side discrete actions)
   icons: new Map(),          // `${layoutId}\u0000${memberId}` -> data URL (ephemeral)
   pickerOpenFor: null,
+  pickerGeneration: 0,
   pickerCandidates: null,
   pickLayoutId: null,
   saveTimer: null,
@@ -585,6 +598,29 @@ const windowLayoutRuntime = {
 };
 
 const WINDOW_LAYOUT_SAVE_DEBOUNCE_MS = 300;
+const WINDOW_LAYOUT_LIST_DWELL_MS = 100;
+let windowLayoutListDwell = null;
+
+function cancelWindowLayoutListDwell() {
+  if (windowLayoutListDwell) clearTimeout(windowLayoutListDwell);
+  windowLayoutListDwell = null;
+}
+
+function scheduleWindowLayoutListDwell(button, open) {
+  cancelWindowLayoutListDwell();
+  const layoutId = button.dataset.wlList;
+  windowLayoutListDwell = setTimeout(() => {
+    windowLayoutListDwell = null;
+    // The card can re-render during the dwell and replace the button node.
+    // Follow the stable layout identity so a legitimate hover survives that
+    // replacement, while mouseout still cancels an accidental crossing.
+    const liveButton = layoutId
+      ? document.querySelector(`[data-wl-list="${CSS.escape(layoutId)}"]:hover`)
+      : null;
+    if (!liveButton) return;
+    void open();
+  }, WINDOW_LAYOUT_LIST_DWELL_MS);
+}
 
 /** Balance wrapped member rows against the card's actual live width. If one
  * more icon would create an 8+1 orphan, two near-even rows are chosen; a user
@@ -967,39 +1003,55 @@ function patchWindowLayoutMember(layoutId, memberId, stateValue) {
 
 async function openWindowLayoutPicker(layoutId) {
   if (windowLayoutRuntime.pickerOpenFor === layoutId) {
+    // A native chooser can disappear independently (focus loss, renderer
+    // restart, or a failed IPC response). Re-entering the list control is an
+    // explicit recovery request; clear the stale session instead of leaving
+    // this layout permanently unable to open its picker.
     closeWindowLayoutPicker();
-    return;
   }
   // 019G: a picker covering the desktop must clear/discard the hover preview.
   windowLayoutMemberPreview.cancel();
+  const generation = ++windowLayoutRuntime.pickerGeneration;
   windowLayoutRuntime.pickerOpenFor = layoutId;
-  while (windowLayoutRuntime.pickerOpenFor === layoutId) {
-    const result = await host.windowCandidates();
-    // 018X4: abort immediately after the await, before the failure or success UI.
-    if (windowLayoutDetachment.isReadOnly()) return;
-    if (windowLayoutRuntime.pickerOpenFor !== layoutId) return; // closed meanwhile
-    if (result.outcome !== 'success') {
-      setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
-      break;
+  try {
+    while (windowLayoutRuntime.pickerOpenFor === layoutId
+      && windowLayoutRuntime.pickerGeneration === generation) {
+      const result = await host.windowCandidates();
+      // 018X4: abort immediately after the await, before the failure or success UI.
+      if (windowLayoutDetachment.isReadOnly()) return;
+      if (windowLayoutRuntime.pickerOpenFor !== layoutId
+        || windowLayoutRuntime.pickerGeneration !== generation) return; // closed meanwhile
+      if (result.outcome !== 'success') {
+        setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
+        break;
+      }
+      windowLayoutRuntime.pickerCandidates = result.candidates;
+      const currentTitles = new Set((windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
+        .map((member) => member.descriptor.title));
+      const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
+        id: candidate.id,
+        title: candidate.title,
+        icon: candidate.icon ?? null,
+        current: currentTitles.has(candidate.title),
+      })));
+      if (windowLayoutRuntime.pickerOpenFor !== layoutId
+        || windowLayoutRuntime.pickerGeneration !== generation) return;
+      if (picked.action === 'close' && picked.candidateId) {
+        await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
+        continue;
+      }
+      if (picked.action !== 'select' || !picked.candidateId) break;
+      await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
     }
-    windowLayoutRuntime.pickerCandidates = result.candidates;
-    const currentTitles = new Set((windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
-      .map((member) => member.descriptor.title));
-    const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
-      id: candidate.id,
-      title: candidate.title,
-      icon: candidate.icon ?? null,
-      current: currentTitles.has(candidate.title),
-    })));
-    if (windowLayoutRuntime.pickerOpenFor !== layoutId) return;
-    if (picked.action === 'close' && picked.candidateId) {
-      await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
-      continue;
-    }
-    if (picked.action !== 'select' || !picked.candidateId) break;
-    await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
+  } catch (error) {
+    setWindowLayoutTransientStatus(
+      layoutId,
+      error instanceof Error ? error.message : 'List unavailable',
+    );
+  } finally {
+    if (windowLayoutRuntime.pickerOpenFor === layoutId
+      && windowLayoutRuntime.pickerGeneration === generation) closeWindowLayoutPicker();
   }
-  closeWindowLayoutPicker();
 }
 
 async function closeWindowLayoutCandidate(layoutId, candidateId, candidates) {
@@ -1014,11 +1066,15 @@ async function closeWindowLayoutCandidate(layoutId, candidateId, candidates) {
     setWindowLayoutTransientStatus(layoutId, result.error || 'Window could not be closed');
     return false;
   }
+  await retireClosedWindowEverywhere(bound.descriptor);
   setWindowLayoutTransientStatus(layoutId, 'Window closed', 1200);
   return true;
 }
 
 async function closeWindowLayoutMember(layoutId, memberId) {
+  const descriptor = WIDGET_SURFACE
+    ? (windowLayoutWidgetPreviewSnapshot?.members ?? []).find((member) => member.id === memberId)?.descriptor
+    : windowLayoutMemberFromState(layoutId, memberId)?.descriptor;
   const capability = WIDGET_SURFACE
     ? await resolveWindowLayoutPreviewCapability(layoutId, memberId)
     : await capabilityForMember(layoutId, memberId);
@@ -1033,12 +1089,14 @@ async function closeWindowLayoutMember(layoutId, memberId) {
   }
   windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
   windowLayoutWidgetPreviewCapabilities.delete(windowLayoutMemberKey(layoutId, memberId));
+  if (descriptor) await retireClosedWindowEverywhere(descriptor);
   setWindowLayoutTransientStatus(layoutId, 'Window closed', 1200);
 }
 
 function closeWindowLayoutPicker() {
   const layoutId = windowLayoutRuntime.pickerOpenFor;
   windowLayoutRuntime.pickerOpenFor = null;
+  windowLayoutRuntime.pickerGeneration += 1;
   if (layoutId) void host.windowCandidatePickerClose().catch(() => undefined);
   windowLayoutRuntime.pickerCandidates = null;
   const pickerHost = layoutId
@@ -1380,6 +1438,13 @@ function syncWindowLayoutMemberSelection(layoutId) {
   }
 }
 
+function clearWindowLayoutMemberSelection(layoutId) {
+  if (!layoutId || !(windowLayoutRuntime.selectedMembers.get(layoutId)?.size > 0)) return;
+  windowLayoutRuntime.selectedMembers.delete(layoutId);
+  windowLayoutRuntime.selectionAnchor.delete(layoutId);
+  syncWindowLayoutMemberSelection(layoutId);
+}
+
 /** 019B/019GR bounded tooltip/popover DOM seam for a member. ONE shared fixed
  * popover (per document) is reused across every layout and card: it shows the
  * member's NATIVE ICON (when available) + FULL name and carries the live
@@ -1706,6 +1771,15 @@ window.addEventListener('blur', () => {
 // the next member schedules. Scrolling (a card may have scrolled the strip) or
 // resizing hides the popover and cancels the pending preview. Read-only safe.
 elements.grid.addEventListener('mouseover', (event) => {
+  const listButton = event.target.closest('[data-wl-list]');
+  const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
+  if (listButton && listButton !== relatedListButton) {
+    scheduleWindowLayoutListDwell(
+      listButton,
+      () => openWindowLayoutPicker(listButton.dataset.wlList),
+    );
+    return;
+  }
   const member = event.target.closest('[data-wl-member]');
   const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
   if (member && member !== relatedMember && (event.shiftKey || windowLayoutShiftPeekHeld)) {
@@ -1744,6 +1818,9 @@ elements.grid.addEventListener('pointermove', (event) => {
   }
 });
 elements.grid.addEventListener('mouseout', (event) => {
+  const listButton = event.target.closest('[data-wl-list]');
+  const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
+  if (listButton && listButton !== relatedListButton) cancelWindowLayoutListDwell();
   const member = event.target.closest('[data-wl-member]');
   const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
   // Crossing directly from one member to another is a Peek transition, not a
@@ -1947,6 +2024,53 @@ const detachedWidgets = new Set();
 // through the widget channel instead of writing the store from the widget. Set
 // when the widget bootstraps, cleared on pagehide.
 let windowLayoutWidgetClient = null;
+
+async function retireClosedWindowEverywhere(descriptor) {
+  if (WIDGET_SURFACE) {
+    return Boolean(windowLayoutWidgetClient?.sendCommand({
+      kind: 'retire-closed-window',
+      descriptor,
+    }));
+  }
+  if (windowLayoutDetachment.isReadOnly()) return false;
+  const removedByLayout = new Map();
+  for (const layout of state.windowLayouts ?? []) {
+    const removed = (layout.arrangement?.members ?? []).filter((member) =>
+      member.descriptor.title === descriptor.title
+      && member.descriptor.executableFingerprint.toLowerCase()
+        === descriptor.executableFingerprint.toLowerCase());
+    if (removed.length > 0) removedByLayout.set(layout.id, removed);
+  }
+  if (removedByLayout.size === 0) return false;
+  const next = removeClosedWindowFromAllLayouts(state, descriptor);
+  const persisted = await store.commit(next);
+  for (const [changedLayoutId, removed] of removedByLayout) {
+    const removedIds = new Set(removed.map((member) => member.id));
+    for (const memberId of removedIds) {
+      const key = windowLayoutMemberKey(changedLayoutId, memberId);
+      windowLayoutRuntime.capabilities.delete(key);
+      windowLayoutRuntime.icons.delete(key);
+      windowLayoutWidgetPreviewCapabilities.delete(key);
+    }
+    const selected = windowLayoutRuntime.selectedMembers.get(changedLayoutId);
+    if (selected) {
+      for (const memberId of removedIds) selected.delete(memberId);
+      if (selected.size === 0) windowLayoutRuntime.selectedMembers.delete(changedLayoutId);
+      syncWindowLayoutMemberSelection(changedLayoutId);
+    }
+    if (removedIds.has(windowLayoutRuntime.selectionAnchor.get(changedLayoutId))) {
+      windowLayoutRuntime.selectionAnchor.delete(changedLayoutId);
+    }
+    setWindowLayoutStatus(changedLayoutId, '');
+    noteWindowLayoutCommit(changedLayoutId, { reason: 'closed-window-retired' });
+  }
+  windowLayoutMemberPreview.cancel();
+  if ([...removedByLayout.keys()].includes(state.activeWindowLayoutId)) {
+    await windowLayoutRuntimeController.reconcileActive();
+  }
+  return persisted;
+}
+
 const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorkspace({
   channel: new BroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL),
   getLayout: windowLayoutFromState,
@@ -2001,6 +2125,10 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       // scoped data-only unlink writer (composite cache cleanup, one
       // persistence, active-only reconcile). Never a cross-layout mutation.
       handleWindowLayoutUnlink(layoutId, command.memberId);
+      return { ok: true };
+    }
+    if (command.kind === 'retire-closed-window') {
+      await retireClosedWindowEverywhere(command.descriptor);
       return { ok: true };
     }
     if (command.kind === 'group-action') {
@@ -3878,6 +4006,15 @@ function cancelWindowLayoutDrag() {
 
 elements.grid.addEventListener('pointerdown', (event) => {
   if (WIDGET_SURFACE) return;
+  const body = event.target.closest('.window-layout-body');
+  if (body && event.button === 0 && !event.ctrlKey && !event.shiftKey
+    && !event.target.closest('button, input, [data-wl-member]')) {
+    // Attached cards need their own inner-selection clear. The outer graph
+    // blank handler never sees this press because card events intentionally
+    // stop before workspace selection/navigation. Clear on pointerdown so a
+    // graph drag or pointer capture cannot swallow the later click.
+    clearWindowLayoutMemberSelection(body.dataset.wlLayout);
+  }
   const member = event.target.closest('[data-wl-member]');
   if (!member || !event.ctrlKey || event.button !== 0) return;
   cancelWindowLayoutPreviewDwell();
@@ -4807,9 +4944,22 @@ function bootstrapWindowLayoutWidget() {
         if (event.button === 0 && !event.ctrlKey && !event.shiftKey
           && !event.target.closest('button, input, [data-wl-member]')) {
           clearWidgetSelection();
+          beginBlankWidgetDrag(event, card);
         }
       });
       card.addEventListener('click', handleWidgetCardClick);
+      card.addEventListener('mouseover', (event) => {
+        const listButton = event.target.closest('[data-wl-list]');
+        const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
+        if (listButton && listButton !== relatedListButton) {
+          scheduleWindowLayoutListDwell(listButton, openWidgetPicker);
+        }
+      });
+      card.addEventListener('mouseout', (event) => {
+        const listButton = event.target.closest('[data-wl-list]');
+        const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
+        if (listButton && listButton !== relatedListButton) cancelWindowLayoutListDwell();
+      });
       card.addEventListener('contextmenu', handleWidgetCardContextMenu);
     }
     syncWidgetSelection();
@@ -4918,6 +5068,61 @@ function bootstrapWindowLayoutWidget() {
     syncWidgetSelection();
   }
 
+  let blankWidgetDrag = null;
+  function signalBlankWidgetDrag(phase, event) {
+    window.postMessage({
+      type: 'papers:project:widget-drag',
+      phase,
+      x: event.screenX,
+      y: event.screenY,
+    }, window.location.origin);
+  }
+
+  function beginBlankWidgetDrag(event, card) {
+    blankWidgetDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+    };
+    card.setPointerCapture?.(event.pointerId);
+    signalBlankWidgetDrag('begin', event);
+  }
+
+  window.addEventListener('pointermove', (event) => {
+    if (!blankWidgetDrag || blankWidgetDrag.pointerId !== event.pointerId) return;
+    if (!blankWidgetDrag.dragging) {
+      const distance = Math.hypot(event.clientX - blankWidgetDrag.startX, event.clientY - blankWidgetDrag.startY);
+      if (distance < 4) return;
+      blankWidgetDrag.dragging = true;
+    }
+    event.preventDefault();
+    signalBlankWidgetDrag('move', event);
+  }, { capture: true });
+
+  const endBlankWidgetDrag = (event) => {
+    if (!blankWidgetDrag || blankWidgetDrag.pointerId !== event.pointerId) return;
+    signalBlankWidgetDrag('end', event);
+    blankWidgetDrag = null;
+  };
+  window.addEventListener('pointerup', endBlankWidgetDrag, { capture: true });
+  window.addEventListener('pointercancel', endBlankWidgetDrag, { capture: true });
+
+  // Leaving the detached widget for Papers/Backpack cancels only its ephemeral
+  // Ctrl/Shift member selection. The widget and persisted layout stay open and
+  // unchanged.
+  // Capture the plain press at the window boundary as well as the card click:
+  // native frameless dragging/pointer capture may suppress the later click,
+  // but a blank press must always clear the ephemeral Ctrl/range selection.
+  window.addEventListener('pointerdown', (event) => {
+    if (event.button === 0 && !event.ctrlKey && !event.shiftKey
+      && !event.target.closest('[data-wl-member]')) clearWidgetSelection();
+  }, { capture: true });
+  window.addEventListener('blur', clearWidgetSelection);
+  windowLayoutWidgetSelectionChannel?.addEventListener('message', (event) => {
+    if (event.data?.type === 'clear-selection') clearWidgetSelection();
+  });
+
   function handleWidgetCardClick(event) {
     event.stopPropagation();
     const member = event.target.closest('[data-wl-member]');
@@ -4970,7 +5175,6 @@ function bootstrapWindowLayoutWidget() {
     }
     const listButton = event.target.closest('[data-wl-list]');
     if (listButton) {
-      void openWidgetPicker();
       return;
     }
     const minAll = event.target.closest('[data-wl-min-all]');
@@ -5051,8 +5255,6 @@ function bootstrapWindowLayoutWidget() {
   let widgetPickerOpen = false;
   async function openWidgetPicker() {
     if (widgetPickerOpen) {
-      widgetPickerOpen = false;
-      await host.windowCandidatePickerClose().catch(() => undefined);
       return;
     }
     widgetPickerOpen = true;

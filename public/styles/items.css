@@ -276,6 +276,15 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
   /* Frameless pet window: empty card surface moves the native window. */
   -webkit-app-region: drag;
 }
+/* Keep only the thin outer card frame as the native drag handle. Chromium does
+   not dispatch pointer/click events inside an app-region drag surface, so the
+   card interior must be no-drag for a blank click to clear member selection.
+   The outer padding/border remains draggable, preserving pet-window movement. */
+.icon-grid > .window-layout-card .window-layout-body,
+.icon-grid > .window-layout-card .window-layout-members,
+.icon-grid > .window-layout-card .window-layout-controls {
+  -webkit-app-region: no-drag;
+}
 /* The native BrowserWindow is transparent. Widget mode must not add a second
    opaque page/workspace sheet beneath the opacity-controlled Backpack card. */
 :root[data-widget-surface="true"],

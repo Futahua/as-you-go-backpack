@@ -31,7 +31,7 @@ export const PAPERS_PICK_MEMBER_LIMIT = 32;
 // its own generous-but-bounded ceiling.
 export const WINDOW_LAYOUT_WIDGET_MAX_ICON_BYTES = 262144;
 
-const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member']);
+const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window']);
 const GROUP_ACTIONS = new Set(['minimize', 'restore', 'isolate']);
 
 function isPlainObject(value) {
@@ -109,6 +109,11 @@ export function windowLayoutWidgetParseCommand(raw) {
     // channel's layoutId. Bounded memberId only.
     if (!exactKeys(raw, ['kind', 'memberId']) || !boundedString(raw.memberId, 'memberId')) return null;
     return { kind: 'remove-member', memberId: raw.memberId };
+  }
+  if (raw.kind === 'retire-closed-window') {
+    if (!exactKeys(raw, ['kind', 'descriptor'])) return null;
+    const descriptor = parseDescriptorLike(raw.descriptor);
+    return descriptor ? { kind: 'retire-closed-window', descriptor } : null;
   }
   if (raw.kind === 'group-action') {
     if (!exactKeys(raw, ['kind', 'action', 'memberIds'])) return null;

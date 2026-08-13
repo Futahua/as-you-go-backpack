@@ -36,6 +36,7 @@ import {
   createWindowLayout,
   addWindowLayoutMember,
   removeWindowLayoutMember,
+  removeClosedWindowFromAllLayouts,
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
   setActiveWindowLayoutId,
@@ -1737,6 +1738,25 @@ test('017I1: activeWindowLayoutId defaults null and normalizes legacy/unknown/bi
     schemaVersion: 1, groups: [], shortcuts: [],
     windowLayouts: state.windowLayouts, activeWindowLayoutId: 5,
   }).activeWindowLayoutId, null, 'non-string active id normalizes to null');
+});
+
+test('removeClosedWindowFromAllLayouts retires one closed native window from every referencing layout', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'One' });
+  state = createWindowLayout(state, { name: 'Two' });
+  const [one, two] = state.windowLayouts.map((layout) => layout.id);
+  const descriptor = { version: 1, title: 'Shared', executableFingerprint: 'a'.repeat(64) };
+  state = addWindowLayoutMember(state, one, memberFixture({ id: 'one-shared', descriptor }));
+  state = addWindowLayoutMember(state, two, memberFixture({ id: 'two-shared', descriptor }));
+  state = addWindowLayoutMember(state, two, memberFixture({
+    id: 'two-other',
+    descriptor: { version: 1, title: 'Other', executableFingerprint: 'b'.repeat(64) },
+  }));
+  const next = removeClosedWindowFromAllLayouts(state, descriptor);
+  assert.deepEqual(next.windowLayouts[0].arrangement.members, []);
+  assert.deepEqual(next.windowLayouts[1].arrangement.members.map((member) => member.id), ['two-other']);
+  assert.equal(removeClosedWindowFromAllLayouts(next, descriptor), next, 'an already-retired descriptor is byte-zero');
+  assert.throws(() => removeClosedWindowFromAllLayouts(state, { title: 'Shared', executableFingerprint: 'bad' }), /invalid/);
 });
 
 test('017I1: activeWindowLayoutId round-trips through normalizeState', () => {

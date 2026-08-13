@@ -721,6 +721,33 @@ export function removeWindowLayoutMember(state, windowLayoutId, memberId) {
   };
 }
 
+/** Removes every membership that identifies the same closed native window.
+ * A window may intentionally occur in several independent layouts, but once
+ * its process/window is actually closed none of those records remains live.
+ * One immutable state transition prevents inactive layouts retaining ghosts. */
+export function removeClosedWindowFromAllLayouts(state, descriptor) {
+  const title = descriptor?.title;
+  const fingerprint = descriptor?.executableFingerprint;
+  if (typeof title !== 'string' || title.length === 0
+    || typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(fingerprint)) {
+    throw new Error('Closed window descriptor is invalid.');
+  }
+  const normalizedFingerprint = fingerprint.toLowerCase();
+  let changed = false;
+  const windowLayouts = (state.windowLayouts ?? []).map((layout) => {
+    const members = layout.arrangement.members.filter((member) => {
+      const same = member.descriptor.title === title
+        && member.descriptor.executableFingerprint.toLowerCase() === normalizedFingerprint;
+      if (same) changed = true;
+      return !same;
+    });
+    return members.length === layout.arrangement.members.length
+      ? layout
+      : { ...layout, arrangement: { version: 2, members } };
+  });
+  return changed ? { ...state, windowLayouts } : state;
+}
+
 /** Patches one member's saved arrangement (bounds/state) for a layout.
  * Data-only; used by the bounded live observer. */
 export function updateWindowLayoutMember(state, windowLayoutId, memberId, patch) {
