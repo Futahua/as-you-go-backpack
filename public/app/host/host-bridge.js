@@ -139,7 +139,11 @@ export function createHostBridge(window) {
       return;
     }
     if ('picker' in event.data) {
-      task.resolve({ candidateId: event.data.picker?.candidateId ?? null });
+      const action = event.data.picker?.action;
+      task.resolve({
+        action: action === 'select' || action === 'close' ? action : 'cancel',
+        candidateId: event.data.picker?.candidateId ?? null,
+      });
       return;
     }
     task.resolve(

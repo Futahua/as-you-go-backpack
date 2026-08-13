@@ -270,14 +270,23 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
     error: null,
   });
 
+  const picker = host.windowCandidatePicker([{ id: 'c1', title: 'Window A', icon: null, current: false }]);
+  const sentPicker = mock.parent.messages[2].message;
+  assert.equal(sentPicker.type, 'papers:project:window-candidate-picker');
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentPicker.requestId, ok: true,
+    picker: { action: 'select', candidateId: 'c1' },
+  });
+  assert.deepEqual(await picker, { action: 'select', candidateId: 'c1' });
+
   const closePicker = host.windowCandidatePickerClose();
-  const sentClosePicker = mock.parent.messages[2].message;
+  const sentClosePicker = mock.parent.messages[3].message;
   assert.equal(sentClosePicker.type, 'papers:project:window-candidate-picker-close');
   mock.dispatchMessage({
     type: 'papers:host:result', requestId: sentClosePicker.requestId, ok: true,
     picker: { ok: true },
   });
-  assert.deepEqual(await closePicker, { candidateId: null });
+  assert.deepEqual(await closePicker, { action: 'cancel', candidateId: null });
 });
 
 test('host bridge window observation/control methods carry the capability and unwrap outcomes', async () => {

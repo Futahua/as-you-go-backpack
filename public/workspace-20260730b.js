@@ -4802,7 +4802,13 @@ function bootstrapWindowLayoutWidget() {
     installWindowLayoutCardPresentation(elements.grid);
     const card = elements.grid.querySelector('.window-layout-body');
     if (card) {
-      card.addEventListener('pointerdown', (event) => event.stopPropagation());
+      card.addEventListener('pointerdown', (event) => {
+        event.stopPropagation();
+        if (event.button === 0 && !event.ctrlKey && !event.shiftKey
+          && !event.target.closest('button, input, [data-wl-member]')) {
+          clearWidgetSelection();
+        }
+      });
       card.addEventListener('click', handleWidgetCardClick);
       card.addEventListener('contextmenu', handleWidgetCardContextMenu);
     }
@@ -4905,6 +4911,13 @@ function bootstrapWindowLayoutWidget() {
     syncWidgetSelection();
   }
 
+  function clearWidgetSelection() {
+    if (widgetState.selection.size === 0) return;
+    widgetState.selection.clear();
+    widgetState.anchor.delete(layoutId);
+    syncWidgetSelection();
+  }
+
   function handleWidgetCardClick(event) {
     event.stopPropagation();
     const member = event.target.closest('[data-wl-member]');
@@ -4989,9 +5002,7 @@ function bootstrapWindowLayoutWidget() {
     // is ephemeral presentation state only: no member is toggled, no command
     // is sent to the workspace writer, and no layout data is changed.
     if (widgetState.selection.size > 0) {
-      widgetState.selection.clear();
-      widgetState.anchor.delete(layoutId);
-      syncWidgetSelection();
+      clearWidgetSelection();
     }
   }
 
@@ -5017,7 +5028,19 @@ function bootstrapWindowLayoutWidget() {
       try {
         const result = await host.widgetContextMenu();
         if (result?.action === 'remove') {
-          client.sendCommand({ kind: 'remove-member', memberId });
+          const selectedIds = widgetState.selection.size > 0
+            ? [...widgetState.selection]
+            : [memberId];
+          const selectedSet = new Set(selectedIds);
+          const removes = (widgetState.snapshot.members ?? [])
+            .filter((candidate) => selectedSet.has(candidate.id))
+            .map((candidate) => ({ descriptor: candidate.descriptor }));
+          if (removes.length === 0) return;
+          client.sendCommand({
+            kind: 'picker-commit',
+            pick: { outcome: 'committed', adds: [], removes },
+          });
+          clearWidgetSelection();
         }
       } catch (error) {
         setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
