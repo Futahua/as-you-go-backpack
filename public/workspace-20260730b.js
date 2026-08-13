@@ -92,7 +92,7 @@ import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
 import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
-import { getBackdropOpacity, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTrailOpacity, getTransparentBackground, setBackdropOpacity } from './app/hotkeys-model.js';
+import { getBackdropOpacity, getBreadcrumbMiddleScale, getBreadcrumbRootScale, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTrailOpacity, getTransparentBackground, setBackdropOpacity } from './app/hotkeys-model.js';
 import { resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
@@ -3695,6 +3695,10 @@ function createGraphController() {
         ? pathToBin(session.binCurrentId === 'bin' ? null : session.binCurrentId).slice(0, -1)
         : pathTo(session.currentId).slice(0, -1),
       trailExpanded,
+      {
+        rootScale: getBreadcrumbRootScale(state.view?.preferences),
+        middleScale: getBreadcrumbMiddleScale(state.view?.preferences),
+      },
     );
     if (visible.length === 0) {
       nodes.forEach((_, id) => removeNode(id));

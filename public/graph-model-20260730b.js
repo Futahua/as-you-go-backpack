@@ -14,13 +14,15 @@ function identityOf(candidate) {
  * 100%. Longer paths distribute smoothly through those anchors. A one-node
  * path is both root and immediate parent, so proximity wins and it stays at
  * the normal 100% size. */
-export function breadcrumbNodeScale(index, count) {
+export function breadcrumbNodeScale(index, count, { rootScale = 0.3, middleScale = 0.6 } = {}) {
   if (!Number.isInteger(index) || !Number.isInteger(count) || count <= 0) return 1;
   if (count === 1) return 1;
+  const root = Math.max(0.3, Math.min(1, Number(rootScale) || 0.3));
+  const middle = Math.max(root, Math.min(1, Number(middleScale) || 0.6));
   const t = Math.max(0, Math.min(1, index / (count - 1)));
   const scale = t <= 0.5
-    ? 0.3 + (0.6 * t)
-    : 0.6 + (0.8 * (t - 0.5));
+    ? root + (2 * (middle - root) * t)
+    : middle + (2 * (1 - middle) * (t - 0.5));
   return Math.round(scale * 1000) / 1000;
 }
 
@@ -33,7 +35,7 @@ export function breadcrumbNodeScale(index, count) {
  * restorable/deletable tile. Unlike the normal graph there's no
  * shared-identity dedup: two placements of the same linked shortcut
  * binned separately are two independent tiles. */
-function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = [], trailExpanded = new Set()) {
+function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = [], trailExpanded = new Set(), breadcrumbScales = undefined) {
   const result = [];
   const ancestorIds = new Set(ancestors.map((entry) => entry.id));
 
@@ -49,7 +51,7 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
       parents: chainParentId ? [chainParentId] : [],
       ancestor: true,
       trail: true,
-      trailScale: breadcrumbNodeScale(index, ancestors.length),
+      trailScale: breadcrumbNodeScale(index, ancestors.length, breadcrumbScales),
     });
   });
 
@@ -121,7 +123,7 @@ function collectVisibleBin(state, expanded, binCurrentId = 'bin', ancestors = []
   })));
   ancestors.forEach((entry, index) => {
     if (trailExpanded.has(entry.id)) {
-      walkBinChildren(entry.id, index + 1, true, breadcrumbNodeScale(index, ancestors.length));
+      walkBinChildren(entry.id, index + 1, true, breadcrumbNodeScale(index, ancestors.length, breadcrumbScales));
     }
   });
 
@@ -136,9 +138,10 @@ export function visibleGraphItems(
   binCurrentId = 'bin',
   ancestors = [],
   trailExpanded = new Set(),
+  breadcrumbScales = undefined,
 ) {
-  if (binMode) return collectVisibleBin(state, expandedSet, binCurrentId, ancestors, trailExpanded);
-  return collectVisible(state, parentId, expandedSet, ancestors, trailExpanded);
+  if (binMode) return collectVisibleBin(state, expandedSet, binCurrentId, ancestors, trailExpanded, breadcrumbScales);
+  return collectVisible(state, parentId, expandedSet, ancestors, trailExpanded, breadcrumbScales);
 }
 
 /** Set outlines are owned by direct members visible at the current level.
@@ -196,7 +199,7 @@ export function inheritedSetMemberIdsVisible(set, visibleIds, ancestorsOfNode) {
  * consults only `trailExpanded`, recursively. The two sets never seed or
  * mutate each other, and a view with no saved trail choice passes an empty
  * trail set — every trail folder starts collapsed. */
-function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded = new Set()) {
+function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded = new Set(), breadcrumbScales = undefined) {
   const byIdentity = new Map();
   const visitedFolders = new Set();
   const ancestorIds = new Set(ancestors.map((entry) => entry.id));
@@ -212,7 +215,7 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
       parents: chainParentId ? [chainParentId] : [],
       ancestor: true,
       trail: true,
-      trailScale: breadcrumbNodeScale(index, ancestors.length),
+      trailScale: breadcrumbNodeScale(index, ancestors.length, breadcrumbScales),
     });
   });
 
@@ -268,7 +271,7 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
   // items, and so are everything reached by expanding them further.
   ancestors.forEach((entry, index) => {
     if (trailExpanded.has(entry.id)) {
-      walk(entry.id, index + 1, true, breadcrumbNodeScale(index, ancestors.length));
+      walk(entry.id, index + 1, true, breadcrumbNodeScale(index, ancestors.length, breadcrumbScales));
     }
   });
 

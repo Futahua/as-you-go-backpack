@@ -1064,6 +1064,16 @@ test('breadcrumb depth scales root 30%, midpoint 60%, and immediate parent 100%'
     [0.3, 0.45, 0.6, 0.8, 1],
     'longer paths distribute smoothly through the three requested anchors',
   );
+  assert.deepEqual(
+    [0, 1, 2, 3, 4].map((index) => breadcrumbNodeScale(index, 5, {
+      rootScale: 0.4,
+      middleScale: 0.7,
+    })),
+    [0.4, 0.55, 0.7, 0.85, 1],
+    'creator-selected anchors drive both interpolation halves',
+  );
+  assert.equal(breadcrumbNodeScale(0, 3, { rootScale: 0.1, middleScale: 0.2 }), 0.3,
+    '30% remains the hard minimum');
 });
 
 test('breadcrumb ancestors and everything expanded from each inherit that ancestor size', () => {
@@ -1082,6 +1092,21 @@ test('breadcrumb ancestors and everything expanded from each inherit that ancest
     'the immediate parent expanded children inherit full size');
   assert.ok(items.filter((item) => item.trail !== true).every((item) => item.trailScale === 1),
     'ordinary current-folder items stay at their existing size');
+});
+
+test('visible breadcrumb bodies consume the saved root and middle scale anchors', () => {
+  const { state, chain } = buildChain(3);
+  const items = visibleGraphItems(
+    state,
+    chain[2],
+    new Set(),
+    false,
+    'bin',
+    pathShape(state, chain).slice(0, -1),
+    new Set(),
+    { rootScale: 0.45, middleScale: 0.75 },
+  );
+  assert.deepEqual(items.slice(0, 3).map((item) => item.trailScale), [0.45, 0.75, 1]);
 });
 
 test('the current folder never renders: dropped from the chain and never spawned', () => {

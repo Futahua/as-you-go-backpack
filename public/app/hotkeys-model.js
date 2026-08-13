@@ -14,6 +14,8 @@ export const DEFAULT_BACKDROP_OPACITY = 1;
  * other item; lower values let the trail recede behind real content without
  * removing it. */
 export const DEFAULT_TRAIL_OPACITY = 1;
+export const DEFAULT_BREADCRUMB_ROOT_SCALE = 0.3;
+export const DEFAULT_BREADCRUMB_MIDDLE_SCALE = 0.6;
 
 const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift', 'Meta'];
 const MODIFIER_ALIASES = new Map([
@@ -471,6 +473,50 @@ export const normalizeTrailOpacity = (value) => normalizeOpacity('trailOpacity',
 export const getTrailOpacity = (rawPreferences) => getOpacity(rawPreferences, 'trailOpacity');
 export const setTrailOpacity = (rawPreferences, value) => setOpacity(rawPreferences, 'trailOpacity', value);
 
+function validBreadcrumbScale(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0.3 && value <= 1;
+}
+
+function breadcrumbScales(rawPreferences) {
+  const rawRoot = rawPreferences?.breadcrumbRootScale;
+  const rawMiddle = rawPreferences?.breadcrumbMiddleScale;
+  const middle = validBreadcrumbScale(rawMiddle) ? rawMiddle : DEFAULT_BREADCRUMB_MIDDLE_SCALE;
+  const root = Math.min(
+    validBreadcrumbScale(rawRoot) ? rawRoot : DEFAULT_BREADCRUMB_ROOT_SCALE,
+    middle,
+  );
+  return { root, middle };
+}
+
+export function getBreadcrumbRootScale(rawPreferences) {
+  return breadcrumbScales(rawPreferences).root;
+}
+
+export function getBreadcrumbMiddleScale(rawPreferences) {
+  return breadcrumbScales(rawPreferences).middle;
+}
+
+function storeBreadcrumbScales(rawPreferences, root, middle) {
+  const next = isRecord(rawPreferences) ? cloneValue(rawPreferences) : {};
+  delete next.breadcrumbRootScale;
+  delete next.breadcrumbMiddleScale;
+  if (root !== DEFAULT_BREADCRUMB_ROOT_SCALE) next.breadcrumbRootScale = root;
+  if (middle !== DEFAULT_BREADCRUMB_MIDDLE_SCALE) next.breadcrumbMiddleScale = middle;
+  return next;
+}
+
+export function setBreadcrumbRootScale(rawPreferences, value) {
+  const current = breadcrumbScales(rawPreferences);
+  const requested = validBreadcrumbScale(value) ? value : DEFAULT_BREADCRUMB_ROOT_SCALE;
+  return storeBreadcrumbScales(rawPreferences, Math.min(requested, current.middle), current.middle);
+}
+
+export function setBreadcrumbMiddleScale(rawPreferences, value) {
+  const current = breadcrumbScales(rawPreferences);
+  const requested = validBreadcrumbScale(value) ? value : DEFAULT_BREADCRUMB_MIDDLE_SCALE;
+  return storeBreadcrumbScales(rawPreferences, current.root, Math.max(requested, current.root));
+}
+
 /** Normalizes the complete project-owned view/preferences object while leaving
  * unrelated future preference records untouched. */
 export function normalizeViewPreferences(rawPreferences, catalog = HOTKEY_CATALOG) {
@@ -491,6 +537,11 @@ export function normalizeViewPreferences(rawPreferences, catalog = HOTKEY_CATALO
     if (opacity === fallback) delete next[key];
     else next[key] = opacity;
   }
+  const scales = breadcrumbScales(next);
+  delete next.breadcrumbRootScale;
+  delete next.breadcrumbMiddleScale;
+  if (scales.root !== DEFAULT_BREADCRUMB_ROOT_SCALE) next.breadcrumbRootScale = scales.root;
+  if (scales.middle !== DEFAULT_BREADCRUMB_MIDDLE_SCALE) next.breadcrumbMiddleScale = scales.middle;
   return next;
 }
 

@@ -253,6 +253,10 @@ function buildPromptLayerTree(nodes) {
     nodes['outline-opacity-value'],
     nodes['region-opacity-slider'],
     nodes['region-opacity-value'],
+    nodes['breadcrumb-root-scale-slider'],
+    nodes['breadcrumb-root-scale-value'],
+    nodes['breadcrumb-middle-scale-slider'],
+    nodes['breadcrumb-middle-scale-value'],
     nodes['theme-select'],
     nodes['transparent-background-toggle'],
     nodes['hotkey-list'],
@@ -301,6 +305,7 @@ function createHarness({ initialView = null, copyFails = false, persist = async 
     'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
     'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
     'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'transparent-background-toggle', 'hotkey-reset-all',
+    'breadcrumb-root-scale-slider', 'breadcrumb-root-scale-value', 'breadcrumb-middle-scale-slider', 'breadcrumb-middle-scale-value',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);
@@ -880,6 +885,34 @@ test('double-clicking a prompt copies its current draft text only', () => {
   });
 });
 
+test('Settings dual breadcrumb slider persists both ordered handles and applies immediately', async () => {
+  const saves = [];
+  const applied = [];
+  const h = createHarness({
+    persist: async (snapshot) => saves.push(JSON.parse(snapshot)),
+    initialView: { preferences: { future: { keep: true } } },
+    onViewPreferencesChanged: (next) => applied.push(next.view.preferences),
+  });
+  open(h);
+  h.dialog.setActivePage('hotkeys');
+  assert.equal(h.nodes['breadcrumb-root-scale-slider'].value, '0.3');
+  assert.equal(h.nodes['breadcrumb-middle-scale-slider'].value, '0.6');
+  h.nodes['breadcrumb-root-scale-slider'].value = '0.45';
+  h.nodes['breadcrumb-root-scale-slider'].dispatch('input', { target: h.nodes['breadcrumb-root-scale-slider'] });
+  h.nodes['breadcrumb-middle-scale-slider'].value = '0.8';
+  h.nodes['breadcrumb-middle-scale-slider'].dispatch('input', { target: h.nodes['breadcrumb-middle-scale-slider'] });
+  assert.equal(h.getState().view.preferences.breadcrumbRootScale, 0.45);
+  assert.equal(h.getState().view.preferences.breadcrumbMiddleScale, 0.8);
+  assert.equal(h.nodes['breadcrumb-root-scale-value'].textContent, '45%');
+  assert.equal(h.nodes['breadcrumb-middle-scale-value'].textContent, '80%');
+  assert.equal(h.nodes['breadcrumb-root-scale-slider'].max, '0.8');
+  assert.equal(h.nodes['breadcrumb-middle-scale-slider'].min, '0.45');
+  assert.deepEqual(h.getState().view.preferences.future, { keep: true });
+  assert.equal(applied.length, 2);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(saves.at(-1).view.preferences.breadcrumbMiddleScale, 0.8);
+});
+
 test('an individual prompt copy clears its notification after three seconds', async () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);
@@ -1235,6 +1268,7 @@ test('a failed auto-save is surfaced and leaves the dialog open', async () => {
     'prompt-page-prompts', 'prompt-page-hotkeys', 'prompt-tab-prompts', 'prompt-tab-hotkeys',
     'hotkey-list', 'hotkey-status', 'edge-opacity-slider', 'edge-opacity-value',
     'outline-opacity-slider', 'outline-opacity-value', 'region-opacity-slider', 'region-opacity-value', 'theme-select', 'transparent-background-toggle', 'hotkey-reset-all',
+    'breadcrumb-root-scale-slider', 'breadcrumb-root-scale-value', 'breadcrumb-middle-scale-slider', 'breadcrumb-middle-scale-value',
   ];
   const nodes = Object.fromEntries(topIds.map((id) => [id, makeNode(id)]));
   buildPromptLayerTree(nodes);

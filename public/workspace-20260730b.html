@@ -154,6 +154,14 @@
                 <label id="trail-opacity-label" for="trail-opacity-slider">Trail opacity <output id="trail-opacity-value" for="trail-opacity-slider">100%</output></label>
                 <input id="trail-opacity-slider" type="range" min="0" max="1" step="0.05" value="1" />
               </div>
+              <div class="settings-opacity-control settings-breadcrumb-scale-control">
+                <label>Breadcrumb size <span class="breadcrumb-scale-values">Root <output id="breadcrumb-root-scale-value" for="breadcrumb-root-scale-slider">30%</output> · Middle <output id="breadcrumb-middle-scale-value" for="breadcrumb-middle-scale-slider">60%</output> · Parent 100%</span></label>
+                <div class="dual-range" aria-label="Breadcrumb hierarchy sizes">
+                  <span class="dual-range-track" aria-hidden="true"></span>
+                  <input id="breadcrumb-root-scale-slider" class="dual-range-root" aria-label="Root breadcrumb size" type="range" min="0.3" max="1" step="0.05" value="0.3" />
+                  <input id="breadcrumb-middle-scale-slider" class="dual-range-middle" aria-label="Middle breadcrumb size" type="range" min="0.3" max="1" step="0.05" value="0.6" />
+                </div>
+              </div>
               <div class="settings-opacity-control settings-theme-control">
                 <label for="theme-select">Theme</label>
                 <select id="theme-select" aria-label="Theme">

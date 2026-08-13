@@ -215,6 +215,38 @@
 .settings-preferences label { display: flex; justify-content: space-between; gap: 12px; }
 .settings-preferences output { color: var(--accent-strong); font-weight: 700; }
 .settings-preferences input[type="range"] { width: 100%; accent-color: var(--accent); }
+.settings-breadcrumb-scale-control { grid-column: span 2; }
+.breadcrumb-scale-values { color: var(--text-muted); font-weight: 400; }
+.dual-range { position: relative; height: 20px; }
+.dual-range-track {
+  position: absolute;
+  inset: 8px 0 auto;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+.dual-range input[type="range"] {
+  position: absolute;
+  inset: 0;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+  appearance: none;
+}
+.dual-range input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--surface-raised);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-strong);
+  pointer-events: auto;
+  appearance: none;
+}
+.dual-range .dual-range-middle::-webkit-slider-thumb { background: var(--accent-strong); }
 .settings-preferences select {
   width: 100%;
   border: 1px solid var(--border-strong);
@@ -227,6 +259,7 @@
 .settings-checkbox-label input { accent-color: var(--accent); }
 @media (max-width: 560px) {
   .settings-preferences { grid-template-columns: 1fr; }
+  .settings-breadcrumb-scale-control { grid-column: auto; }
   .prompt-library { padding: 16px; }
   .prompt-library-header { align-items: flex-start; }
   .prompt-library-add-actions { width: 100%; margin-left: 0; }

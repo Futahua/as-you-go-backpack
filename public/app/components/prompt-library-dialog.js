@@ -46,6 +46,8 @@ import {
   clearHotkeyOverride,
   effectiveBindings,
   getEdgeOpacity,
+  getBreadcrumbMiddleScale,
+  getBreadcrumbRootScale,
   getOutlineOpacity,
   getRegionOpacity,
   getTheme,
@@ -54,6 +56,8 @@ import {
   resetAllHotkeyOverrides,
   resetHotkeyOverride,
   setEdgeOpacity,
+  setBreadcrumbMiddleScale,
+  setBreadcrumbRootScale,
   setOutlineOpacity,
   setRegionOpacity,
   setTheme,
@@ -154,6 +158,10 @@ export function createPromptLibraryDialog({
   const outlineOpacityValue = document.querySelector('#outline-opacity-value');
   const trailOpacitySlider = document.querySelector('#trail-opacity-slider');
   const trailOpacityValue = document.querySelector('#trail-opacity-value');
+  const breadcrumbRootScaleSlider = document.querySelector('#breadcrumb-root-scale-slider');
+  const breadcrumbRootScaleValue = document.querySelector('#breadcrumb-root-scale-value');
+  const breadcrumbMiddleScaleSlider = document.querySelector('#breadcrumb-middle-scale-slider');
+  const breadcrumbMiddleScaleValue = document.querySelector('#breadcrumb-middle-scale-value');
   const regionOpacitySlider = document.querySelector('#region-opacity-slider');
   const regionOpacityValue = document.querySelector('#region-opacity-value');
   const themeSelect = document.querySelector('#theme-select');
@@ -436,6 +444,18 @@ export function createPromptLibraryDialog({
       control.slider.value = String(opacity);
       if (control.output) control.output.textContent = `${Math.round(opacity * 100)}%`;
     }
+    const root = getBreadcrumbRootScale(preferences);
+    const middle = getBreadcrumbMiddleScale(preferences);
+    if (breadcrumbRootScaleSlider) {
+      breadcrumbRootScaleSlider.value = String(root);
+      breadcrumbRootScaleSlider.max = String(middle);
+    }
+    if (breadcrumbMiddleScaleSlider) {
+      breadcrumbMiddleScaleSlider.value = String(middle);
+      breadcrumbMiddleScaleSlider.min = String(root);
+    }
+    if (breadcrumbRootScaleValue) breadcrumbRootScaleValue.textContent = `${Math.round(root * 100)}%`;
+    if (breadcrumbMiddleScaleValue) breadcrumbMiddleScaleValue.textContent = `${Math.round(middle * 100)}%`;
   }
 
   function renderThemeControl() {
@@ -606,6 +626,22 @@ export function createPromptLibraryDialog({
   }
 
   function onOpacityInput(event) {
+    if (event.target === breadcrumbRootScaleSlider) {
+      persistViewPreferences(
+        setBreadcrumbRootScale(currentViewPreferences(), Number(breadcrumbRootScaleSlider.value)),
+        'Root breadcrumb size updated.',
+      );
+      renderOpacityControls();
+      return;
+    }
+    if (event.target === breadcrumbMiddleScaleSlider) {
+      persistViewPreferences(
+        setBreadcrumbMiddleScale(currentViewPreferences(), Number(breadcrumbMiddleScaleSlider.value)),
+        'Middle breadcrumb size updated.',
+      );
+      renderOpacityControls();
+      return;
+    }
     const control = opacityControls.find(({ slider }) => slider === event.target);
     if (!control) return;
     persistViewPreferences(

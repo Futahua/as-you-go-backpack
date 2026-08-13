@@ -3,6 +3,8 @@ import test from 'node:test';
 import { emptyState, normalizeState } from './public/workspace-model-20260730b.js';
 import {
   DEFAULT_BACKDROP_OPACITY,
+  DEFAULT_BREADCRUMB_MIDDLE_SCALE,
+  DEFAULT_BREADCRUMB_ROOT_SCALE,
   DEFAULT_EDGE_OPACITY,
   DEFAULT_OUTLINE_OPACITY,
   DEFAULT_REGION_OPACITY,
@@ -17,6 +19,8 @@ import {
   createHotkeyCatalog,
   effectiveBindings,
   getBackdropOpacity,
+  getBreadcrumbMiddleScale,
+  getBreadcrumbRootScale,
   getEdgeOpacity,
   getOutlineOpacity,
   getRegionOpacity,
@@ -33,6 +37,8 @@ import {
   resetHotkeyOverride,
   setHotkeyOverride,
   setBackdropOpacity,
+  setBreadcrumbMiddleScale,
+  setBreadcrumbRootScale,
   setEdgeOpacity,
   setOutlineOpacity,
   setRegionOpacity,
@@ -273,6 +279,26 @@ test('backdrop opacity normalizes, persists, and drops its opaque default', () =
   assert.deepEqual(setBackdropOpacity({ backdropOpacity: 0.4 }, 1), {});
   // Fully transparent is a real choice and must survive a round trip.
   assert.deepEqual(normalizeViewPreferences({ backdropOpacity: 0 }), { backdropOpacity: 0 });
+});
+
+test('breadcrumb hierarchy scales persist with a 30% floor and ordered handles', () => {
+  assert.equal(DEFAULT_BREADCRUMB_ROOT_SCALE, 0.3);
+  assert.equal(DEFAULT_BREADCRUMB_MIDDLE_SCALE, 0.6);
+  assert.equal(getBreadcrumbRootScale({}), 0.3);
+  assert.equal(getBreadcrumbMiddleScale({}), 0.6);
+  const customRoot = setBreadcrumbRootScale({ future: true }, 0.45);
+  assert.deepEqual(customRoot, { future: true, breadcrumbRootScale: 0.45 });
+  const customBoth = setBreadcrumbMiddleScale(customRoot, 0.75);
+  assert.equal(getBreadcrumbRootScale(customBoth), 0.45);
+  assert.equal(getBreadcrumbMiddleScale(customBoth), 0.75);
+  assert.equal(getBreadcrumbRootScale(setBreadcrumbRootScale(customBoth, 0.1)), 0.3,
+    'invalid values below the 30% floor return to the root default');
+  assert.equal(getBreadcrumbRootScale(setBreadcrumbRootScale(customBoth, 0.9)), 0.75,
+    'the root handle cannot cross the middle handle');
+  assert.equal(getBreadcrumbMiddleScale(setBreadcrumbMiddleScale(customBoth, 0.35)), 0.45,
+    'the middle handle cannot cross the root handle');
+  assert.deepEqual(normalizeViewPreferences({ breadcrumbRootScale: 0.1, breadcrumbMiddleScale: 2 }), {},
+    'invalid persisted scales repair to defaults');
 });
 
 test('view preference normalization preserves unknown records and repairs edge opacity', () => {
