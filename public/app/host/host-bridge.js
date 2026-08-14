@@ -141,7 +141,9 @@ export function createHostBridge(window) {
     if ('picker' in event.data) {
       const action = event.data.picker?.action;
       task.resolve({
-        action: action === 'select' || action === 'close' ? action : 'cancel',
+        action: action === 'select' || action === 'close' || action === 'direct-pick'
+          ? action
+          : 'cancel',
         candidateId: event.data.picker?.candidateId ?? null,
       });
       return;

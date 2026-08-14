@@ -1,4 +1,4 @@
-// 019F (RoketPuncha AYG lane): static tests for the exact six-icon control
+// 019F (RoketPuncha AYG lane): static tests for the compact control
 // mapping and the taskbar-like member button markup. Pure string assertions on
 // the shared builders - no DOM, no host, no globals.
 import assert from 'node:assert/strict';
@@ -11,13 +11,14 @@ import {
   windowLayoutControlButton,
   windowLayoutMemberMarkup,
 } from './public/app/window-layout-control-icons.js';
+import { createWindowLayoutIsolateMode } from './public/app/window-layout-isolate-mode.js';
 
-test('the six control actions map to six unique requested glyph shapes', () => {
-  assert.deepEqual(WINDOW_LAYOUT_CONTROL_ORDER, ['pick', 'list', 'min-all', 'restore-all', 'isolate', 'detach']);
+test('the three persistent control actions map to unique requested glyph shapes', () => {
+  assert.deepEqual(WINDOW_LAYOUT_CONTROL_ORDER, ['list', 'min-all', 'restore-all']);
   assert.equal(WINDOW_LAYOUT_CONTROL_ORDER.length, new Set(WINDOW_LAYOUT_CONTROL_ORDER).size);
   const shapes = WINDOW_LAYOUT_CONTROL_ORDER.map((name) => WINDOW_LAYOUT_CONTROL_GLYPHS[name]);
   assert.ok(shapes.every((glyph) => glyph && typeof glyph.path === 'string' && glyph.path.length > 0), 'every control has a glyph');
-  assert.equal(new Set(shapes.map((glyph) => glyph.path)).size, 6, 'all six shapes are unique');
+  assert.equal(new Set(shapes.map((glyph) => glyph.path)).size, 3, 'all three shapes are unique');
 });
 
 test('each control maps to the exact requested shape', () => {
@@ -30,9 +31,7 @@ test('each control maps to the exact requested shape', () => {
   assert.match(WINDOW_LAYOUT_CONTROL_GLYPHS['min-all'].path, /^<path d="M4 12h16"/);
   // 4 outlined square = Restore all
   assert.match(WINDOW_LAYOUT_CONTROL_GLYPHS['restore-all'].path, /<rect x="5" y="5" width="14" height="14"/);
-  // 5 outlined circle = Isolate
-  assert.match(WINDOW_LAYOUT_CONTROL_GLYPHS.isolate.path, /<circle cx="12" cy="12" r="7"/);
-  // 6 unlocked padlock = Detach
+  // 5 unlocked padlock = Detach
   assert.match(WINDOW_LAYOUT_CONTROL_GLYPHS.detach.path, /<rect x="6" y="10\.5" width="12" height="10"/);
 });
 
@@ -76,14 +75,18 @@ test('control buttons keep exact title/aria-label semantics and data attributes'
   assert.ok(button.includes('type="button"'), 'button type preserved');
 });
 
-test('the six control buttons render in the exact left-to-right order with distinct identifiers', () => {
+test('the list opener uses the cursor glyph while retaining list behavior', () => {
+  const button = windowLayoutControlButton('list', 'Choose windows', 'data-wl-list', 'L1', { glyph: 'pick' });
+  assert.match(button, /class="window-layout-control wl-list"/);
+  assert.match(button, /data-wl-list="L1"/);
+  assert.match(button, /data-wl-glyph="pick"/);
+});
+
+test('the three persistent control buttons render in the exact left-to-right order with distinct identifiers', () => {
   const labels = {
-    pick: 'Pick an onscreen window directly',
     list: 'Choose from the list of onscreen windows',
     'min-all': 'Minimize all members',
     'restore-all': 'Restore/open all members',
-    isolate: 'Restore the selected members and minimize the rest of this layout',
-    detach: 'Open this layout as a compact widget',
   };
   const html = WINDOW_LAYOUT_CONTROL_ORDER.map((name) => windowLayoutControlButton(name, labels[name], `data-wl-${name}`, 'L1')).join('');
   const order = WINDOW_LAYOUT_CONTROL_ORDER;
@@ -99,6 +102,25 @@ test('the six control buttons render in the exact left-to-right order with disti
       );
     }
   }
+});
+
+test('isolate mode semantics replace on plain member click and add on Ctrl+right-click intent', () => {
+  const mode = createWindowLayoutIsolateMode();
+  assert.equal(mode.isActive('L1'), false);
+  assert.equal(mode.click('L1', 'm1'), null, 'ordinary clicks pass through while mode is off');
+  assert.equal(mode.toggle('L1'), true);
+  assert.deepEqual(mode.click('L1', 'm1'), ['m1']);
+  assert.deepEqual(mode.click('L1', 'm2', true), ['m1', 'm2']);
+  assert.deepEqual(mode.click('L1', 'm3'), ['m3'], 'next plain click replaces the isolated set');
+  assert.equal(mode.toggle('L1'), false);
+  assert.equal(mode.click('L1', 'm1'), null);
+});
+
+test('minimize button exposes blue-mode state without a separate isolate control', () => {
+  const active = windowLayoutControlButton('min-all', 'Minimize; right-click for isolate mode', 'data-wl-min-all', 'L1', { toggle: true, active: true });
+  assert.match(active, /isolate-mode-active/);
+  assert.match(active, /aria-pressed="true"/);
+  assert.equal(WINDOW_LAYOUT_CONTROL_GLYPHS.isolate, undefined);
 });
 
 test('member markup: bottom indicator, accessible name, centered icon, no duplicate tooltip', () => {

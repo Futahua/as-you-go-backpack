@@ -279,8 +279,16 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
   });
   assert.deepEqual(await picker, { action: 'select', candidateId: 'c1' });
 
+  const directPicker = host.windowCandidatePicker([{ id: 'c1', title: 'Window A', icon: null, current: false }]);
+  const sentDirectPicker = mock.parent.messages[3].message;
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentDirectPicker.requestId, ok: true,
+    picker: { action: 'direct-pick', candidateId: null },
+  });
+  assert.deepEqual(await directPicker, { action: 'direct-pick', candidateId: null });
+
   const closePicker = host.windowCandidatePickerClose();
-  const sentClosePicker = mock.parent.messages[3].message;
+  const sentClosePicker = mock.parent.messages[4].message;
   assert.equal(sentClosePicker.type, 'papers:project:window-candidate-picker-close');
   mock.dispatchMessage({
     type: 'papers:host:result', requestId: sentClosePicker.requestId, ok: true,

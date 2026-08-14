@@ -68,9 +68,11 @@ test('038: the compact-widget surface hides ALL workspace host furniture; the sh
   assert.doesNotMatch(itemsCss, /\.window-layout-controls\s*\{[^}]*display:\s*none/);
   assert.doesNotMatch(itemsCss, /\.window-layout-member\s*\{[^}]*display:\s*none/);
   assert.doesNotMatch(itemsCss, /\.window-layout-card\s*\{[^}]*display:\s*none/);
-  // The shared card still renders the six legitimate controls + members.
-  assert.match(workspaceSource, /windowLayoutControlButton\('pick', 'Pick an onscreen window directly', 'data-wl-pick', candidate\.id\)/);
-  assert.match(workspaceSource, /windowLayoutControlButton\('isolate', 'Restore the selected members and minimize the rest of this layout', 'data-wl-isolate', candidate\.id\)/);
+  // The shared card renders one list/direct-pick control rather than a separate picker button.
+  assert.doesNotMatch(workspaceSource, /windowLayoutControlButton\('pick'/);
+  assert.match(workspaceSource, /data-wl-list/);
+  assert.doesNotMatch(workspaceSource, /data-wl-isolate/);
+  assert.match(workspaceSource, /right-click to toggle isolate mode/);
 });
 
 test('039/041: the detached native client auto-fits the card in BOTH axes (width = card border box, height = rendered card content)', () => {
@@ -129,10 +131,11 @@ test('035: the attached card becomes a greyed placeholder while its widget is op
   assert.match(workspaceSource, /function windowLayoutCardPlaceholder\(options\) \{/);
   assert.match(workspaceSource, /function windowLayoutCardPlaceholder[\s\S]*?if \(options\.widgetSurface === true\) return false;/);
   assert.match(workspaceSource, /window-layout-card--placeholder/);
-  // The placeholder body renders DISABLED members and ONLY the reattach lock.
+  // The placeholder body renders DISABLED members and one reattach lock.
   assert.match(workspaceSource, /windowLayoutMemberMarkup\(candidate\.id, member, windowLayoutMemberIcon\(candidate\.id, member\.id\), true\)/);
-  assert.match(workspaceSource, /windowLayoutControlButton\('reattach', 'Close this window-layout widget', 'data-wl-reattach', candidate\.id\)/);
-  // The workspace click handler is inert on a detached layout except the lock.
+  assert.match(workspaceSource, /windowLayoutControlButton\('reattach', 'Reattach this window-layout widget', 'data-wl-reattach', candidate\.id\)/);
+  assert.doesNotMatch(workspaceSource, /data-wl-detach/);
+  // Ordinary workspace clicks stay inert while detached except the lock.
   assert.match(workspaceSource, /detachedLayout && !event\.target\.closest\('\[data-wl-reattach\]'\)\) return;/);
 });
 

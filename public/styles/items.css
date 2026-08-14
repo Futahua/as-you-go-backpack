@@ -444,6 +444,12 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
   color: var(--text-secondary);
   box-shadow: 0 0 7px color-mix(in srgb, var(--folder-color, var(--accent)) 38%, transparent);
 }
+.window-layout-control.isolate-mode-active {
+  color: #8bc8ff;
+  background: color-mix(in srgb, #258cff 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #68b6ff 76%, transparent),
+    0 0 10px color-mix(in srgb, #258cff 68%, transparent);
+}
 .window-layout-control svg {
   display: block;
   width: 12px;

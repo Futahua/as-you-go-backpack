@@ -74,6 +74,7 @@ import {
   outlineCentroid,
 } from './set-ring-model.js';
 import { forceSetGravity, forceSetExclusion, forceSetSeparation } from './set-gravity-model.js';
+import { assignBranchRigidity, branchCenterGravityStrength, branchLinkDistance, branchLinkStrength, forceBranchUncross } from './branch-uncross-force.js';
 import { glyphPath, layoutTitleGlyphs } from './set-glyph-model.js';
 import { createSetEffectsController } from './set-effects-model.js';
 import { createDragTrailController } from './drag-trail-model.js';
@@ -86,6 +87,7 @@ import { runBoundedConcurrent } from './app/window-layout-actions.js';
 import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
 import { createWindowLayoutPickApplier, createWindowLayoutRetirementWriter } from './app/window-layout-workspace.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup } from './app/window-layout-control-icons.js';
+import { createWindowLayoutIsolateMode } from './app/window-layout-isolate-mode.js';
 import { createWindowLayoutMemberPreview, windowLayoutPreviewHoverState } from './app/window-layout-preview.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
 import { getWorkspaceElements } from './app/dom.js';
@@ -510,38 +512,30 @@ function windowLayoutBodyMarkup(candidate, options = {}) {
   if (placeholder) {
     const members = (candidate.arrangement?.members ?? []).map((member) =>
       windowLayoutMemberMarkup(candidate.id, member, windowLayoutMemberIcon(candidate.id, member.id), true)).join('');
-    // Inert greyed summary while the widget is the sole live card: disabled
-    // members and status, with the lock kept as the reattach toggle only.
+    // Inert greyed workspace summary while the widget is the sole live card:
+    // disabled members and status, with one plain-click reattach lock.
     return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" data-wl-placeholder-body="true" aria-label="Window group (detached)">
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
-    <div class="window-layout-controls">${windowLayoutControlButton('reattach', 'Close this window-layout widget', 'data-wl-reattach', candidate.id)}</div>
+    <div class="window-layout-controls">${windowLayoutControlButton('reattach', 'Reattach this window-layout widget', 'data-wl-reattach', candidate.id)}</div>
     <div class="window-layout-status" data-wl-status="${escapeHtml(candidate.id)}">${escapeHtml(status)}</div>
   </div>`;
   }
   const members = (candidate.arrangement?.members ?? []).map((member) =>
     windowLayoutMemberMarkup(candidate.id, member, windowLayoutMemberIcon(candidate.id, member.id))).join('');
-  // 019C: a compact-WIDGET surface shows REATTACH (close this layout's widget)
-  // instead of DETACH; the workspace card shows DETACH (open/focus the widget).
   const widgetSurface = options.widgetSurface === true;
-  const detachControl = widgetSurface
-    ? windowLayoutControlButton('reattach', 'Close this window-layout widget', 'data-wl-reattach', candidate.id)
-    : windowLayoutControlButton('detach', 'Open this layout as a compact widget', 'data-wl-detach', candidate.id);
   return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" aria-label="Window group">
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
     <div class="window-layout-controls">
-      ${windowLayoutControlButton('pick', 'Pick an onscreen window directly', 'data-wl-pick', candidate.id)}
-      ${windowLayoutControlButton('list', 'Choose from the list of onscreen windows', 'data-wl-list', candidate.id)}
-      ${windowLayoutControlButton('min-all', 'Minimize all members', 'data-wl-min-all', candidate.id)}
-      ${windowLayoutControlButton('restore-all', 'Restore/open all members', 'data-wl-restore-all', candidate.id)}
-      ${windowLayoutControlButton('isolate', 'Restore the selected members and minimize the rest of this layout', 'data-wl-isolate', candidate.id)}
-      ${detachControl}
+      ${windowLayoutControlButton('list', 'Choose from the list of onscreen windows', 'data-wl-list', candidate.id, { glyph: 'pick' })}
+      ${windowLayoutControlButton('min-all', widgetSurface ? 'Minimize all members; middle-click to reattach widget' : 'Minimize all members; right-click to toggle isolate mode', 'data-wl-min-all', candidate.id, { toggle: true, active: windowLayoutRuntime.isolateMode.isActive(candidate.id) })}
+      ${windowLayoutControlButton('restore-all', widgetSurface ? 'Restore/open all members' : 'Restore/open all members; middle-click to undock widget', 'data-wl-restore-all', candidate.id)}
     </div>
     <div class="window-layout-picker" data-wl-picker="${escapeHtml(candidate.id)}"></div>
     <div class="window-layout-status" data-wl-status="${escapeHtml(candidate.id)}">${escapeHtml(status)}</div>
   </div>`;
 }
 
-/** 019F: the six control glyphs and the taskbar-like member button live in
+/** 019F: the four persistent controls and taskbar-like member button live in
  * ./app/window-layout-control-icons.js (static inline SVG, exact creator
  * mapping, stable data-wl-glyph identifiers). The body wires them with the
  * exact title/aria-label semantics and behavior data attributes. */
@@ -594,6 +588,7 @@ const windowLayoutRuntime = {
   saveTimer: null,
   selectedMembers: new Map(), // layoutId -> Set<memberId> (inner multiselect)
   selectionAnchor: new Map(), // layoutId -> memberId (Shift+click range anchor, 019B)
+  isolateMode: createWindowLayoutIsolateMode(), // ephemeral; right-click minimize toggles it
   pickUnsubscribe: null,
 };
 
@@ -608,16 +603,13 @@ function cancelWindowLayoutListDwell() {
 
 function scheduleWindowLayoutListDwell(button, open) {
   cancelWindowLayoutListDwell();
-  const layoutId = button.dataset.wlList;
   windowLayoutListDwell = setTimeout(() => {
     windowLayoutListDwell = null;
-    // The card can re-render during the dwell and replace the button node.
-    // Follow the stable layout identity so a legitimate hover survives that
-    // replacement, while mouseout still cancels an accidental crossing.
-    const liveButton = layoutId
-      ? document.querySelector(`[data-wl-list="${CSS.escape(layoutId)}"]:hover`)
-      : null;
-    if (!liveButton) return;
+    // Mouseout is the authoritative cancellation seam. Chromium's `:hover`
+    // query is unreliable in transparent frameless widget surfaces and can
+    // report false while the pointer is visibly stationary over this button.
+    // A rerender may replace the node during the dwell, but the stable opener
+    // already carries the layout identity and remains safe to invoke once.
     void open();
   }, WINDOW_LAYOUT_LIST_DWELL_MS);
 }
@@ -891,6 +883,13 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
   if (windowLayoutDetachment.isReadOnly()) return;
   const member = windowLayoutMemberFromState(layoutId, memberId);
   if (!member) return;
+  const isolationTargets = !ctrlKey && !shiftKey
+    ? windowLayoutRuntime.isolateMode.click(layoutId, memberId, false)
+    : null;
+  if (isolationTargets !== null) {
+    await windowLayoutGroupAction(layoutId, 'isolate', isolationTargets);
+    return;
+  }
   if (ctrlKey) {
     // 016 inner multiselection: separate from workspace selection.
     const selected = new Set(windowLayoutRuntime.selectedMembers.get(layoutId) ?? []);
@@ -1040,6 +1039,10 @@ async function openWindowLayoutPicker(layoutId) {
         await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
         continue;
       }
+      if (picked.action === 'direct-pick') {
+        await beginWindowLayoutDirectPick(layoutId);
+        break;
+      }
       if (picked.action !== 'select' || !picked.candidateId) break;
       await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
     }
@@ -1097,13 +1100,16 @@ function closeWindowLayoutPicker() {
   const layoutId = windowLayoutRuntime.pickerOpenFor;
   windowLayoutRuntime.pickerOpenFor = null;
   windowLayoutRuntime.pickerGeneration += 1;
-  if (layoutId) void host.windowCandidatePickerClose().catch(() => undefined);
+  const closeRequest = layoutId
+    ? host.windowCandidatePickerClose().catch(() => undefined)
+    : Promise.resolve();
   windowLayoutRuntime.pickerCandidates = null;
   const pickerHost = layoutId
     ? document.querySelector(`[data-wl-picker="${CSS.escape(layoutId)}"]`)
     : null;
   if (pickerHost) pickerHost.innerHTML = '';
   restoreHoveredWindowLayoutPreview(layoutId);
+  return closeRequest;
 }
 
 function restoreHoveredWindowLayoutPreview(layoutId) {
@@ -1373,7 +1379,10 @@ async function beginWindowLayoutDirectPick(layoutId) {
   if (!layout) return;
   // 019G: the pick overlay covers the desktop; clear/discard the hover preview.
   windowLayoutMemberPreview.cancel();
-  closeWindowLayoutPicker();
+  // The chooser is a native always-on-top window. Do not race its asynchronous
+  // destruction against the Papers-owned direct picker: until it is gone it
+  // can retain foreground/ownership and make the picker appear to do nothing.
+  await closeWindowLayoutPicker();
   windowLayoutRuntime.pickLayoutId = layoutId;
   const pickAttempt = Symbol('window-layout-direct-pick');
   windowLayoutRuntime.pickAttempt = pickAttempt;
@@ -1475,6 +1484,15 @@ function clearWindowLayoutMemberSelection(layoutId) {
   windowLayoutRuntime.selectedMembers.delete(layoutId);
   windowLayoutRuntime.selectionAnchor.delete(layoutId);
   syncWindowLayoutMemberSelection(layoutId);
+}
+
+function toggleWindowLayoutIsolateMode(layoutId) {
+  if (!layoutId || windowLayoutDetachment.isReadOnly()) return;
+  const active = windowLayoutRuntime.isolateMode.toggle(layoutId);
+  for (const button of document.querySelectorAll(`[data-wl-min-all="${CSS.escape(layoutId)}"]`)) {
+    button.classList.toggle('isolate-mode-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  }
 }
 
 /** 019B/019GR bounded tooltip/popover DOM seam for a member. ONE shared fixed
@@ -1870,7 +1888,24 @@ elements.grid.addEventListener('mouseout', (event) => {
   }
 });
 elements.grid.addEventListener('auxclick', (event) => {
-  if (event.button !== 1 || !event.ctrlKey) return;
+  if (event.button !== 1) return;
+  const restoreAll = event.target.closest('[data-wl-restore-all]');
+  if (restoreAll && !detachedWidgets.has(restoreAll.dataset.wlRestoreAll)) {
+    event.preventDefault();
+    event.stopPropagation();
+    void host.widgetOpen(restoreAll.dataset.wlRestoreAll).catch(() => undefined);
+    return;
+  }
+  const minimizeAll = event.target.closest('[data-wl-min-all]');
+  if (minimizeAll && detachedWidgets.has(minimizeAll.dataset.wlMinAll)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const layoutId = minimizeAll.dataset.wlMinAll;
+    if (detachedWidgets.delete(layoutId)) render();
+    void host.widgetClose(layoutId).catch(() => undefined);
+    return;
+  }
+  if (!event.ctrlKey) return;
   const member = event.target.closest('[data-wl-member]');
   if (!member || member.disabled) return;
   event.preventDefault();
@@ -3496,8 +3531,12 @@ function createGraphController() {
     const w = viewport?.clientWidth || 800;
     const h = viewport?.clientHeight || 600;
     simulation = forceSimulation()
-      .force('cx', forceX(w / 2).strength(0.05))
-      .force('cy', forceY(h / 2).strength(0.05))
+      .force('cx', forceX(w / 2).strength((node) => (
+        node.ring ? 0.05 : branchCenterGravityStrength(node)
+      )))
+      .force('cy', forceY(h / 2).strength((node) => (
+        node.ring ? 0.05 : branchCenterGravityStrength(node)
+      )))
       // Ring nodes do not repel. Hundreds of them each pushing on everything
       // would both swamp the layout the icons make between themselves and pay
       // the charge cost for nodes whose position is already decided by their
@@ -3511,8 +3550,12 @@ function createGraphController() {
       // and slack so the layout can breathe.
       .force('link', forceLink()
         .id((n) => n.id)
-        .distance((link) => (link.source.ring ? RING_LINK_DISTANCE : 145))
-        .strength((link) => (link.source.ring ? 0.9 : 0.14)))
+        .distance((link) => (link.source.ring ? RING_LINK_DISTANCE : branchLinkDistance(link)))
+        .strength((link) => (link.source.ring ? 0.9 : branchLinkStrength(link))))
+      // A maximal non-branching path may not fold through itself. Its closest
+      // monotone projection is approached with a capped velocity; sibling
+      // paths and ordinary item bodies remain completely uninvolved.
+      .force('branchUncross', forceBranchUncross())
       // Holds each ring around its own members rather than letting it drift.
       //
       // The alpha floor inside it is gated on a drag being in progress. It
@@ -3589,12 +3632,12 @@ function createGraphController() {
     // cannot get in, and the outline dents and stretches because the same
     // forces act on it as on everything else. Nothing about containment is
     // enforced separately.
-    for (const ring of setRings.values()) nodeArray.push(...ring.nodes);
-    simulation.nodes(nodeArray);
-
     const edgeArray = [];
+    const hierarchyEdgeArray = [];
     edges.forEach((edge) => {
-      edgeArray.push({ source: edge.sourceId, target: edge.targetId });
+      const link = { source: edge.sourceId, target: edge.targetId };
+      edgeArray.push(link);
+      hierarchyEdgeArray.push(link);
     });
     originEdges.forEach((edge) => {
       edgeArray.push({ source: edge.sourceId, target: edge.targetId });
@@ -3603,7 +3646,15 @@ function createGraphController() {
     // opening up under load.
     for (const ring of setRings.values()) edgeArray.push(...ring.links);
 
+    // ForceX/ForceY cache their per-node strengths when simulation.nodes() is
+    // called. Compute branch rigidity first so the cached gravity coefficient
+    // already reflects the current expansion depth on this very tick.
+    assignBranchRigidity(nodeArray, hierarchyEdgeArray);
+    for (const ring of setRings.values()) nodeArray.push(...ring.nodes);
+    simulation.nodes(nodeArray);
+
     simulation.force('link').links(edgeArray);
+    simulation.force('branchUncross').links(hierarchyEdgeArray);
     // Ring nodes are small, so they pack tightly along the boundary instead of
     // being held a whole icon apart by the padding icons need.
     simulation.force('collide').radius((n) => (n.ring
@@ -4169,7 +4220,8 @@ elements.grid.addEventListener('click', (event) => {
   const windowLayoutBody = event.target.closest('.window-layout-body');
   if (windowLayoutBody) {
     // 035: while a layout's widget is open its attached card is a greyed
-    // placeholder — every interaction is inert EXCEPT the lock (reattach).
+    // placeholder — every ordinary interaction is inert except its explicit
+    // plain-click reattach lock.
     const bodyLayoutId = windowLayoutBody.dataset?.wlLayout;
     const detachedLayout = typeof bodyLayoutId === 'string' && bodyLayoutId && detachedWidgets.has(bodyLayoutId);
     if (detachedLayout && !event.target.closest('[data-wl-reattach]')) return;
@@ -4197,12 +4249,6 @@ elements.grid.addEventListener('click', (event) => {
       closeWindowLayoutPicker();
       return;
     }
-    const directPick = event.target.closest('[data-wl-pick]');
-    if (directPick) {
-      console.info('[045-direct-pick] click-handler', directPick.dataset.wlPick);
-      void beginWindowLayoutDirectPick(directPick.dataset.wlPick);
-      return;
-    }
     const listButton = event.target.closest('[data-wl-list]');
     if (listButton) {
       void openWindowLayoutPicker(listButton.dataset.wlList);
@@ -4218,28 +4264,11 @@ elements.grid.addEventListener('click', (event) => {
       void windowLayoutGroupAction(restoreAll.dataset.wlRestoreAll, 'restore');
       return;
     }
-    const isolate = event.target.closest('[data-wl-isolate]');
-    if (isolate) {
-      void windowLayoutGroupAction(isolate.dataset.wlIsolate, 'isolate');
-      return;
-    }
-    // 019C: Detach opens/focuses the layout's compact widget (repeated detach
-    // focuses/reuses); Reattach on the WORKSPACE closes that layout's widget.
-    // The WIDGET's own card routes its reattach to widgetCloseSelf() and stops
-    // propagation, so this handler only sees the workspace path.
-    const detach = event.target.closest('[data-wl-detach]');
-    if (detach) {
-      if (detach.dataset.wlDetach) void host.widgetOpen(detach.dataset.wlDetach).catch(() => undefined);
-      return;
-    }
     const reattach = event.target.closest('[data-wl-reattach]');
     if (reattach) {
-      if (reattach.dataset.wlReattach) {
-        // 035: reattaching restores the attached card immediately (no longer a
-        // placeholder) even while the close request is in flight.
-        if (detachedWidgets.delete(reattach.dataset.wlReattach)) render();
-        void host.widgetClose(reattach.dataset.wlReattach).catch(() => undefined);
-      }
+      const layoutId = reattach.dataset.wlReattach;
+      if (detachedWidgets.delete(layoutId)) render();
+      void host.widgetClose(layoutId).catch(() => undefined);
       return;
     }
     return;
@@ -4345,6 +4374,11 @@ elements.grid.addEventListener('contextmenu', (event) => {
   // will-pin/graph-drop-target visuals stuck on whatever tile the pointer
   // last touched. Cancel the drag defensively any time the menu opens.
   pointer.cancelDrag();
+  const isolateToggle = event.target.closest('[data-wl-min-all]');
+  if (isolateToggle) {
+    toggleWindowLayoutIsolateMode(isolateToggle.dataset.wlMinAll);
+    return;
+  }
   // 019B: Shift+right-click on a member minimizes/restores the selected range
   // (direction from the clicked member's live state). 040: a PLAIN right-click
   // on a member opens the member context menu (`Remove from this layout`); it
@@ -4352,6 +4386,11 @@ elements.grid.addEventListener('contextmenu', (event) => {
   // layout, and the inert grey placeholder card refuses removal.
   const wlMember = event.target.closest('[data-wl-member]');
   if (wlMember) {
+    if (event.ctrlKey && !event.shiftKey && windowLayoutRuntime.isolateMode.isActive(wlMember.dataset.wlLayout)) {
+      const targets = windowLayoutRuntime.isolateMode.click(wlMember.dataset.wlLayout, wlMember.dataset.wlMember, true);
+      if (targets !== null) void windowLayoutGroupAction(wlMember.dataset.wlLayout, 'isolate', targets);
+      return;
+    }
     if (event.shiftKey) {
       void windowLayoutToggleRange(wlMember.dataset.wlLayout, wlMember.dataset.wlMember);
       return;
@@ -4995,6 +5034,7 @@ function bootstrapWindowLayoutWidget() {
         }
       });
       card.addEventListener('click', handleWidgetCardClick);
+      card.addEventListener('auxclick', handleWidgetCardAuxClick);
       card.addEventListener('mouseover', (event) => {
         const listButton = event.target.closest('[data-wl-list]');
         const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
@@ -5179,6 +5219,13 @@ function bootstrapWindowLayoutWidget() {
         return;
       }
       const memberId = member.dataset.wlMember;
+      const isolationTargets = !event.ctrlKey && !event.shiftKey
+        ? windowLayoutRuntime.isolateMode.click(layoutId, memberId, false)
+        : null;
+      if (isolationTargets !== null) {
+        client.sendCommand({ kind: 'group-action', action: 'isolate', memberIds: isolationTargets });
+        return;
+      }
       if (event.ctrlKey) {
         // 019C: widget-local ephemeral selection (Ctrl toggle / Shift range);
         // only committed actions are routed to the workspace writer.
@@ -5215,11 +5262,6 @@ function bootstrapWindowLayoutWidget() {
       closeWidgetPicker();
       return;
     }
-    const directPick = event.target.closest('[data-wl-pick]');
-    if (directPick) {
-      void beginWidgetDirectPick();
-      return;
-    }
     const listButton = event.target.closest('[data-wl-list]');
     if (listButton) {
       return;
@@ -5234,21 +5276,6 @@ function bootstrapWindowLayoutWidget() {
       client.sendCommand({ kind: 'group-action', action: 'restore', memberIds: [...widgetState.selection] });
       return;
     }
-    const isolate = event.target.closest('[data-wl-isolate]');
-    if (isolate) {
-      client.sendCommand({ kind: 'group-action', action: 'isolate', memberIds: [...widgetState.selection] });
-      return;
-    }
-    const reattach = event.target.closest('[data-wl-reattach]');
-    if (reattach) {
-      // 035: report the widget is closing BEFORE the window is torn down so the
-      // workspace reliably restores the attached card (pagehide alone can race
-      // the channel close). Idempotent workspace-side.
-      client.dispose();
-      void host.widgetCloseSelf().catch(() => undefined);
-      return;
-    }
-
     // Plain blank-card click exits the widget-local Ctrl/range selection. This
     // is ephemeral presentation state only: no member is toggled, no command
     // is sent to the workspace writer, and no layout data is changed.
@@ -5257,10 +5284,30 @@ function bootstrapWindowLayoutWidget() {
     }
   }
 
+  function handleWidgetCardAuxClick(event) {
+    if (event.button !== 1) return;
+    const minimizeAll = event.target.closest('[data-wl-min-all]');
+    if (!minimizeAll) return;
+    event.preventDefault();
+    event.stopPropagation();
+    client.dispose();
+    void host.widgetCloseSelf().catch(() => undefined);
+  }
+
   async function handleWidgetCardContextMenu(event) {
     event.preventDefault();
     event.stopPropagation();
+    const isolateToggle = event.target.closest('[data-wl-min-all]');
+    if (isolateToggle) {
+      toggleWindowLayoutIsolateMode(isolateToggle.dataset.wlMinAll);
+      return;
+    }
     const member = event.target.closest('[data-wl-member]');
+    if (member && event.ctrlKey && !event.shiftKey && windowLayoutRuntime.isolateMode.isActive(layoutId)) {
+      const targets = windowLayoutRuntime.isolateMode.click(layoutId, member.dataset.wlMember, true);
+      if (targets !== null) client.sendCommand({ kind: 'group-action', action: 'isolate', memberIds: targets });
+      return;
+    }
     if (member && event.shiftKey) {
       client.sendCommand({
         kind: 'range-toggle',
@@ -5327,6 +5374,10 @@ function bootstrapWindowLayoutWidget() {
           await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
           continue;
         }
+        if (picked.action === 'direct-pick') {
+          await beginWidgetDirectPick();
+          break;
+        }
         if (picked.action !== 'select' || !picked.candidateId) break;
         const pickedRow = result.candidates.find((candidate) => candidate.id === picked.candidateId);
         const changed = await handleWidgetListCandidate(
@@ -5371,6 +5422,7 @@ function bootstrapWindowLayoutWidget() {
     const pickerHost = elements.grid.querySelector(`[data-wl-picker="${CSS.escape(layoutId)}"]`);
     if (pickerHost) pickerHost.innerHTML = '';
     restoreHoveredWindowLayoutPreview(layoutId);
+    return host.windowCandidatePickerClose().catch(() => undefined);
   }
 
   async function handleWidgetListCandidate(candidateId, selectedOverride = null) {
@@ -5396,7 +5448,10 @@ function bootstrapWindowLayoutWidget() {
   async function beginWidgetDirectPick() {
     // 019G: the pick overlay covers the desktop; clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
-    closeWidgetPicker();
+    // As on the attached surface, the native chooser must be fully destroyed
+    // before starting the direct picker or it can steal picker ownership.
+    await closeWidgetPicker();
+    windowLayoutRuntime.pickLayoutId = layoutId;
     const members = uniqueWindowLayoutMemberDescriptors(
       (widgetState.snapshot.members ?? []).map((member) => member.descriptor),
     );
@@ -5439,6 +5494,9 @@ function bootstrapWindowLayoutWidget() {
       pickUnsubscribe?.();
       if (widgetState.pickUnsubscribe === pickUnsubscribe) {
         widgetState.pickUnsubscribe = null;
+      }
+      if (windowLayoutRuntime.pickLayoutId === layoutId) {
+        windowLayoutRuntime.pickLayoutId = null;
       }
     }
   }
