@@ -43,8 +43,14 @@ npm test
 No build step, no framework — plain ES modules served as static files inside
 the Papers host.
 
-**Papers is at** `C:\Users\admin\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Papers.exe.lnk`.
+**Papers is at** `D:\Letters\MatTroiSeConMoc\PAPERS 3\Papers-3\release\win-unpacked\Papers.exe`.
 It reads these files from disk, so edits are live.
+
+The Start Menu shortcut `Papers.exe.lnk` is **stale**: it still points at
+`release-eyetest-019r1`, built 11 Aug 2026. Two dozen `release-*` directories
+sit side by side, so check the build date before trusting one. Launching the
+wrong build looks exactly like a fix that did not work — this session lost a
+first attempt to it.
 
 **Use Ctrl+Shift+R, not Ctrl+R.** Papers serves the backpack through a custom
 scheme with no cache headers, and Chromium holds the ES modules. A plain reload
