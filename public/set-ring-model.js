@@ -796,7 +796,24 @@ export function easeOutline(previous, target, { rate = 0.25 } = {}) {
       y: previous[i].y + ((target[i].y - previous[i].y) * rate),
     });
   }
-  return eased;
+  // Interpolating two convex outlines point by point does NOT give a convex
+  // outline. Perimeter resampling numbers points by distance travelled rather
+  // than by edge direction, so the same index on two differently shaped hulls
+  // need not be the same corner, and the shape midway between them can turn
+  // back on itself. Two convex 48-point hulls have been measured easing into an
+  // outline with four reflex turns.
+  //
+  // That matters well beyond how it looks: region decomposition and set
+  // separation both take this outline to be convex, and both quietly misbehave
+  // when it is not. Hulling here, at the one place the outline is produced,
+  // rather than defensively inside each consumer, keeps a single definition of
+  // what shape.outline is.
+  //
+  // Resampled back to the incoming count for the reason floorOutline gives:
+  // the next frame of easing needs point-for-point correspondence.
+  const hulled = ringHull(eased);
+  if (hulled.length < 3) return eased;
+  return resampleHull(hulled, target.length) ?? eased;
 }
 
 /** The area a closed outline encloses, by the shoelace formula. */

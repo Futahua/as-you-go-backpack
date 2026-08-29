@@ -24,7 +24,8 @@ const EPSILON = 1e-7;
  *   output vertices      r = 0.9312
  *   set count            r = 0.7338   <- the weakest predictor by a wide margin
  *
- * Only one dimension is enforced: several unrelated ceilings would be several
+ * Only one dimension is enforced (all of these are deterministic work
+ * estimates, not measurements of what the loops actually visit): several unrelated ceilings would be several
  * things to get wrong, and the rest of the ledger stays measured and available
  * for recalibration. Clips and vertices are statistically indistinguishable
  * here and both separate cleanly, but vertices also carries the size of what is

@@ -28,6 +28,9 @@ import {
   rayExitDistance,
   outlineCentroid,
 } from './public/set-ring-model.js';
+// Convexity is what the region engine and set separation assume of an outline,
+// so the check belongs to the same normalization they use.
+import { normalizePolygon } from './public/set-region-model.js';
 // The real forces, so containment is measured against the configuration the
 // app actually runs rather than an idealised one.
 import {
@@ -1330,4 +1333,86 @@ test('a balanced set does not shift under the anchor flag', () => {
   assert.ok(Math.abs(anchored.y - settled.y) < 1e-9, 'in either axis');
   assert.ok(anchored.a >= settled.a && anchored.a - settled.a < 20, 'the long axis keeps its size plus the render margin');
   assert.ok(anchored.b >= settled.b && anchored.b - settled.b < 20, 'the short axis keeps its size plus the render margin');
+});
+
+/** Counts corners that turn the wrong way on a CCW outline. Zero means convex. */
+function reflexTurns(outline) {
+  const points = normalizePolygon(outline);
+  let count = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    const c = points[(i + 2) % points.length];
+    if ((((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x))) < -1e-9) count += 1;
+  }
+  return count;
+}
+
+const lerpPointwise = (previous, target, rate) => previous.map((point, index) => ({
+  x: point.x + ((target[index].x - point.x) * rate),
+  y: point.y + ((target[index].y - point.y) * rate),
+}));
+
+// A known counterexample, not a random search. Perimeter resampling numbers
+// points by distance travelled, so index i on one hull and index i on another
+// need not be the same corner; the pointwise midpoint between them can turn back
+// on itself even though both endpoints are convex. Region decomposition and set
+// separation both take shape.outline to be convex, so this has to hold at the
+// source rather than being patched up in each consumer.
+const EASE_COUNTEREXAMPLE = {
+  previous: [{ x: -17.62, y: -34.92 }, { x: 3.59, y: -13.43 }, { x: 15.09, y: -42.76 }],
+  target: [{ x: -46.25, y: -6.64 }, { x: -44.20, y: 0.74 }, { x: -43.01, y: -40.93 }],
+};
+
+test('the counterexample really is one: raw pointwise easing goes non-convex', () => {
+  const previous = resampleHull(ringHull(EASE_COUNTEREXAMPLE.previous), 48);
+  const target = resampleHull(ringHull(EASE_COUNTEREXAMPLE.target), 48);
+  assert.equal(reflexTurns(previous), 0, 'the starting hull is convex');
+  assert.equal(reflexTurns(target), 0, 'the target hull is convex');
+  // If this ever stops being true the guard below is no longer being tested.
+  assert.ok(
+    reflexTurns(lerpPointwise(previous, target, 0.25)) > 0,
+    'expected unguarded interpolation to break convexity',
+  );
+});
+
+test('eased production outlines stay convex', () => {
+  const previous = resampleHull(ringHull(EASE_COUNTEREXAMPLE.previous), 48);
+  const target = resampleHull(ringHull(EASE_COUNTEREXAMPLE.target), 48);
+  for (const rate of [0.1, 0.25, 0.5, 0.75, 0.9]) {
+    const eased = easeOutline(previous, target, { rate });
+    assert.equal(reflexTurns(eased), 0, 'rate ' + rate + ' produced a non-convex outline');
+    assert.equal(eased.length, 48, 'rate ' + rate + ' lost point correspondence');
+  }
+});
+
+test('easing stays convex across a swept corpus of hull pairs', () => {
+  let state = 20260829;
+  const random = () => {
+    state = ((state * 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+  const blob = () => resampleHull(ringHull(Array.from({ length: 3 + Math.floor(random() * 6) }, () => ({
+    x: (random() - 0.5) * 200,
+    y: (random() - 0.5) * 200,
+  }))), 48);
+  for (let trial = 0; trial < 120; trial += 1) {
+    const previous = blob();
+    const target = blob();
+    if (!previous || !target || previous.length !== 48 || target.length !== 48) continue;
+    const eased = easeOutline(previous, target, { rate: 0.25 });
+    assert.equal(reflexTurns(eased), 0, 'trial ' + trial + ' produced a non-convex outline');
+    assert.equal(eased.length, 48, 'trial ' + trial + ' lost point correspondence');
+  }
+});
+
+test('the convexity guard does not stop easing from arriving', () => {
+  const previous = resampleHull(ringHull(EASE_COUNTEREXAMPLE.previous), 48);
+  const target = resampleHull(ringHull(EASE_COUNTEREXAMPLE.target), 48);
+  let current = previous;
+  for (let frame = 0; frame < 200; frame += 1) current = easeOutline(current, target);
+  // Hulling each frame must not leave the outline permanently short of, or
+  // drifting past, the shape the physics is asking for.
+  const settled = Math.abs(outlineArea(current) - outlineArea(target)) / outlineArea(target);
+  assert.ok(settled < 0.02, 'easing settled ' + (settled * 100).toFixed(2) + '% away from the target');
 });

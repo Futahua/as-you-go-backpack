@@ -32,9 +32,15 @@ export const UNLIMITED_BUDGET = Object.freeze({
 
 /** The work ledger every geometric primitive charges against.
  *
- * `vertices` is vertices *processed* — subject size times the number of clip
- * passes over it — which is the real cost of clipping, as distinct from
- * `outputVertices`, the cost the SVG path and centroid pay downstream.
+ * `vertices` is a deterministic *estimate* of vertex work, not a measurement:
+ * it charges subject size times clipper size times an assumed pass count. The
+ * real loops visit fewer vertices than that — subtractConvex's subject shrinks
+ * as each edge takes its slice, and a disjoint fast path may return early — so
+ * the charge deliberately over-approximates. That is fine, and arguably better,
+ * for a calibrated budget: it depends only on the inputs, never on how the
+ * primitives happen to be implemented, and it correlates with elapsed time at
+ * r = 0.998. It is distinct from `outputVertices`, which is an exact count of
+ * what the SVG path and centroid downstream will have to walk.
  * `peakFragments` tracks live polygons rather than cumulative ones because two
  * arrangements can do similar total work while only one of them holds thousands
  * of polygons at once and provokes a collection. */
