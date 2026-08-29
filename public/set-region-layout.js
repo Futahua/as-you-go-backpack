@@ -9,15 +9,29 @@ const EPSILON = 1e-7;
 
 /** How many sets may sit in one *overlapping* component before its exact Venn
  * decomposition is abandoned for the layered fallback. This is not a limit on
- * how many sets a workspace may hold — disjoint sets never share a component,
- * so a hundred separated sets are a hundred components of one.
+ * how many sets a workspace may hold: disjoint sets never share a component, so
+ * a hundred separated sets are a hundred components of one. What it means is
+ * that the region renderer no longer imposes a global total-set limit — set
+ * separation and hue solving have their own scaling characteristics, which are
+ * not established at arbitrary counts.
  *
- * Exact decomposition still enumerates 2**n masks inside a component, measured
- * on 48-vertex outlines at 9ms for four, 24ms for six and 68ms for eight. Six
- * is the largest that fits a frame with room to spare. Checkpoint 3 replaces
- * this count with a measured work budget; until then it must stay at or below
+ * Exact decomposition still enumerates 2**n masks inside a component. Warm
+ * medians on 48-vertex production outlines, worst of 25 runs in brackets:
+ *
+ *   4 sets    4.4ms  [ 5.9ms]
+ *   5 sets    7.9ms  [10.6ms]
+ *   6 sets   13.0ms  [18.6ms]
+ *
+ * A 60Hz frame is 16.7ms in total and decomposition shares it with physics, hue
+ * solving, effects and the DOM write. Four leaves room for those; five spends up
+ * to two thirds of the frame on regions alone; six can miss the frame outright.
+ * Four is the largest demonstrated safe value, so four is what this holds.
+ *
+ * Checkpoint 3 replaces this count with a budget measured in deterministic work
+ * units, which is what lets a sparse seven-set component stay exact and a
+ * pathological four-set one degrade. Until then this must stay at or below
  * decomposeRegions' own internal guard of 10. */
-export const DEFAULT_MAX_COMPONENT_SETS = 6;
+export const DEFAULT_MAX_COMPONENT_SETS = 4;
 
 function boundsOf(outline) {
   let minX = Infinity;
