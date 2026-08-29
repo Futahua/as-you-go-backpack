@@ -4,9 +4,11 @@ import {
   createRegionLayout,
   connectedComponents,
   overlapPairs,
-  DEFAULT_MAX_COMPONENT_SETS,
+  DEFAULT_WORK_BUDGET,
 } from './public/set-region-layout.js';
-import { decomposeRegions } from './public/set-region-model.js';
+import { decomposeArrangement } from './public/set-region-arrangement.js';
+// Retained as a reference oracle only. Production no longer routes through it.
+import { decomposeRegions, regionArea } from './public/set-region-model.js';
 
 const square = (x, y, size = 10) => [
   { x, y }, { x: x + size, y }, { x: x + size, y: y + size }, { x, y: y + size },
@@ -17,15 +19,15 @@ const circle = (cx, cy, radius, count = 48) => Array.from({ length: count }, (_,
   return { x: cx + (radius * Math.cos(angle)), y: cy + (radius * Math.sin(angle)) };
 });
 
-/** Wraps the real decomposition so a test can assert what was handed to it —
- * the point of the component split is that the expensive path is not reached. */
+/** Wraps the real arrangement so a test can assert what was handed to it — the
+ * point of the component split is that the expensive path is not reached. */
 function spyLayout(options = {}) {
   const calls = [];
   const layout = createRegionLayout({
     ...options,
-    decompose: (sets) => {
+    arrange: (sets, arrangeOptions) => {
       calls.push(sets.map(({ id }) => id));
-      return decomposeRegions(sets);
+      return decomposeArrangement(sets, arrangeOptions);
     },
   });
   return { layout, calls };
@@ -154,34 +156,73 @@ test('an eleventh disjoint set does not make the existing regions disappear', ()
   assert.ok(regions.every((region) => region.polygons.length === 1));
 });
 
-test('an oversized dense component falls back to one body per set instead of vanishing', () => {
-  const count = DEFAULT_MAX_COMPONENT_SETS + 1;
-  const { layout, calls } = spyLayout();
-  const sets = Array.from({ length: count }, (_, index) => ({
-    id: `S${index}`,
-    outline: square(index, 0, 20),
-  }));
-  const regions = layout.update(sets);
-  // Never enumerated, never empty.
-  assert.deepEqual(calls, []);
-  assert.equal(regions.length, count);
-  assert.deepEqual(regions.map(({ id }) => id), sets.map(({ id }) => id));
+/** The mutation test the budget design turns on: the SAME fixture must be exact
+ * under a generous budget and fall back under a starved one. If a fixture is
+ * exact either way, the budget is not what decided it. */
+const overlappingPair = [
+  { id: 'A', outline: square(0, 0, 20) },
+  { id: 'B', outline: square(10, 0, 20) },
+];
+
+test('a starved budget makes even a two-set overlap fall back cleanly', () => {
+  const layout = createRegionLayout({ budget: { vertices: 1 } });
+  const regions = layout.update(overlappingPair);
+  // One body per set, never empty, never a partial arrangement.
+  assert.deepEqual(regions.map(({ id }) => id), ['A', 'B']);
   assert.ok(regions.every((region) => region.setIds.length === 1));
   assert.ok(regions.every((region) => region.polygons.length === 1));
 });
 
-test('a component within the limit is still decomposed exactly', () => {
-  const { layout, calls } = spyLayout();
-  const sets = Array.from({ length: DEFAULT_MAX_COMPONENT_SETS }, (_, index) => ({
-    id: `S${index}`,
-    outline: square(index, 0, 20),
-  }));
-  const regions = layout.update(sets);
-  assert.equal(calls.length, 1);
-  assert.ok(regions.some((region) => region.setIds.length > 1));
+test('the same fixture is exact under a generous budget', () => {
+  const layout = createRegionLayout({ budget: { vertices: Infinity } });
+  const regions = layout.update(overlappingPair);
+  assert.deepEqual(regions.map(({ id }) => id), ['A', 'A|B', 'B']);
 });
 
-test('exact region ids and geometry stay byte-compatible with direct decomposition', () => {
+test('the default budget keeps an ordinary overlapping component exact', () => {
+  const { layout, calls } = spyLayout();
+  const regions = layout.update(['A', 'B', 'C', 'D'].map((id, index) => ({
+    id,
+    outline: circle(index * 60, (index % 2) * 40, 100),
+  })));
+  assert.equal(calls.length, 1);
+  assert.ok(regions.some((region) => region.setIds.length > 1));
+  assert.ok(regions.some(({ id }) => id === 'A|B'));
+});
+
+test('complexity follows geometry, not set count', () => {
+  // Eight sets in a sparse chain: more sets than the old ceiling of four ever
+  // allowed, and cheap enough to stay exact.
+  const sparse = createRegionLayout().update(Array.from({ length: 8 }, (_, index) => ({
+    id: `S${index}`,
+    outline: circle(index * 185, 0, 100),
+  })));
+  assert.ok(
+    sparse.some((region) => region.setIds.length > 1),
+    'a sparse eight-set chain should still get exact overlap regions',
+  );
+
+  // And a component small enough for the old rule still degrades if its actual
+  // geometry is pathological — here forced by a budget below its real cost.
+  const dense = createRegionLayout({ budget: { vertices: 5000 } })
+    .update(['A', 'B', 'C', 'D'].map((id, index) => ({
+      id,
+      outline: circle(index * 25, (index % 2) * 15, 100),
+    })));
+  assert.ok(dense.every((region) => region.setIds.length === 1), 'expected the layered fallback');
+  assert.equal(dense.length, 4);
+});
+
+test('the default budget is the calibrated vertex ceiling', () => {
+  assert.deepEqual(DEFAULT_WORK_BUDGET, { vertices: 210_000 });
+});
+
+/** Semantic equivalence against the legacy enumerator, not byte equivalence:
+ * two correct planar partitions may cut the same region into different convex
+ * fragments, and demanding identical polygons would pin the arrangement to the
+ * mask enumerator's incidental fragment boundaries. Identity and measure are
+ * what the renderer and the hue solver actually depend on. */
+test('exact regions stay semantically equivalent to direct decomposition', () => {
   for (const count of [2, 3, 4]) {
     const sets = Array.from({ length: count }, (_, index) => ({
       id: 'ABCD'[index],
@@ -194,11 +235,13 @@ test('exact region ids and geometry stay byte-compatible with direct decompositi
       direct.map(({ id, setIds }) => ({ id, setIds })),
       `region identity changed for ${count} sets`,
     );
-    assert.deepEqual(
-      viaLayout.map(({ polygons }) => polygons),
-      direct.map(({ polygons }) => polygons),
-      `region geometry changed for ${count} sets`,
-    );
+    for (const region of viaLayout) {
+      const match = direct.find(({ id }) => id === region.id);
+      assert.ok(
+        Math.abs(regionArea(region) - regionArea(match)) < 1e-6,
+        `${count} sets: ${region.id} area diverged`,
+      );
+    }
   }
 });
 

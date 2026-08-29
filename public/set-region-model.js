@@ -71,6 +71,25 @@ function clipToSet(polygon, outline, keepInside) {
   return result;
 }
 
+/** Axis-aligned bounds and their overlap test, kept here so the arrangement
+ * and the layout share one broad phase rather than each carrying a copy. */
+export function polygonBounds(polygon) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const { x, y } of polygon) {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+export function boundsOverlap(a, b) {
+  return a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
+}
 /** Convex-convex intersection, normalized on the way in so callers may pass raw
  * presentation outlines. Returns [] when the two do not overlap with positive
  * area, which is what makes it usable as an exact overlap predicate. */

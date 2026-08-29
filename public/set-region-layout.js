@@ -1,55 +1,49 @@
 import {
-  decomposeRegions,
+  boundsOverlap,
   intersectConvex,
   normalizePolygon,
+  polygonBounds,
   signedArea,
 } from './set-region-model.js';
+import { decomposeArrangement } from './set-region-arrangement.js';
 
 const EPSILON = 1e-7;
 
-/** How many sets may sit in one *overlapping* component before its exact Venn
- * decomposition is abandoned for the layered fallback. This is not a limit on
- * how many sets a workspace may hold: disjoint sets never share a component, so
- * a hundred separated sets are a hundred components of one. What it means is
- * that the region renderer no longer imposes a global total-set limit — set
- * separation and hue solving have their own scaling characteristics, which are
- * not established at arbitrary counts.
+/** How much geometric work one overlapping component may cost before its exact
+ * arrangement is abandoned for the layered fallback.
  *
- * Exact decomposition still enumerates 2**n masks inside a component. Warm
- * medians on 48-vertex production outlines, worst of 25 runs in brackets:
+ * This replaces the set-count ceiling that stood here. Cardinality was never
+ * the thing that made a component expensive — geometry was. Over a 140-sample
+ * corpus spanning 2 to 8 sets and five overlap densities
+ * (set-region-work-calibration.mjs), correlation with elapsed time was:
  *
- *   4 sets    4.4ms  [ 5.9ms]
- *   5 sets    7.9ms  [10.6ms]
- *   6 sets   13.0ms  [18.6ms]
+ *   clipping operations  r = 0.9984
+ *   vertices processed   r = 0.9977
+ *   fragments generated  r = 0.9946
+ *   peak live fragments  r = 0.9337
+ *   output vertices      r = 0.9312
+ *   set count            r = 0.7338   <- the weakest predictor by a wide margin
  *
- * A 60Hz frame is 16.7ms in total and decomposition shares it with physics, hue
- * solving, effects and the DOM write. Four leaves room for those; five spends up
- * to two thirds of the frame on regions alone; six can miss the frame outright.
- * Four is the largest demonstrated safe value, so four is what this holds.
+ * Only one dimension is enforced: several unrelated ceilings would be several
+ * things to get wrong, and the rest of the ledger stays measured and available
+ * for recalibration. Clips and vertices are statistically indistinguishable
+ * here and both separate cleanly, but vertices also carries the size of what is
+ * being clipped, so it stays honest if fragment complexity ever changes.
+ * Fragment counts, by contrast, do NOT separate: at a 4ms target their safe and
+ * over-budget ranges overlap, which is why peak live fragments is recorded for
+ * allocation pressure but never used as the time gate.
  *
- * Checkpoint 3 replaces this count with a budget measured in deterministic work
- * units, which is what lets a sparse seven-set component stay exact and a
- * pathological four-set one degrade. Until then this must stay at or below
- * decomposeRegions' own internal guard of 10. */
-export const DEFAULT_MAX_COMPONENT_SETS = 4;
-
-function boundsOf(outline) {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const { x, y } of outline) {
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
-  }
-  return { minX, minY, maxX, maxY };
-}
-
-function boundsOverlap(a, b) {
-  return a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
-}
+ * 210,000 is the <=4ms band: the highest vertex count that stayed within 4ms was
+ * 200,577 and the lowest that exceeded it was 218,508, so the threshold sits in
+ * a clean gap rather than splitting a contested range. Four milliseconds keeps
+ * regions to about a quarter of a 16.7ms frame, leaving the rest for physics,
+ * hue solving, effects and the DOM write.
+ *
+ * The consequence worth stating plainly, on production-resolution outlines: a
+ * twelve-set sparse chain costs 152k vertices and stays exact, while a six-set
+ * dense pile costs 536k and degrades. The old set-count rule would have rejected
+ * the first and accepted the second. */
+export const DEFAULT_WORK_BUDGET = Object.freeze({ vertices: 210_000 });
 
 /** Bounding boxes are only the broad phase. Two outlines lying diagonally to
  * each other have intersecting boxes and no common area, and must not be joined
@@ -123,22 +117,24 @@ const geometryKeyFor = (members) => members
  * caching each overlap component separately, so a set moving in one cluster
  * leaves every other cluster's region objects untouched. */
 export function createRegionLayout({
-  maxComponentSets = DEFAULT_MAX_COMPONENT_SETS,
-  decompose = decomposeRegions,
+  budget = DEFAULT_WORK_BUDGET,
+  arrange = decomposeArrangement,
 } = {}) {
   const cache = new Map();
-  const componentLimit = Math.min(maxComponentSets, 10);
 
   function regionsFor(members) {
-    // A lone set is its own region: no masks, no clipping, no decomposition.
-    // This is what keeps a workspace of separated sets linear.
+    // A lone set is its own region: no clipping, no arrangement at all. This is
+    // what keeps a workspace of separated sets linear.
     if (members.length === 1) return [singleSetRegion(members[0])];
-    // Too dense to decompose affordably. Fall back to one translucent body per
-    // set rather than returning nothing — the eleventh set used to make every
-    // region vanish. These ids match what the same sets produce when they are
-    // apart, so hues and effect ownership survive the transition both ways.
-    if (members.length > componentLimit) return members.map(singleSetRegion);
-    return decompose(members.map(({ id, outline }) => ({ id, outline })));
+    const attempt = arrange(members.map(({ id, outline }) => ({ id, outline })), { budget });
+    if (attempt.status === 'exact') return attempt.regions;
+    // The component cost more than its budget. Fall back to one translucent
+    // body per set rather than returning nothing — the eleventh set used to make
+    // every region vanish. The arrangement aborts atomically, so there is never
+    // a half-built partition to leak here. These ids match what the same sets
+    // produce when they are apart, so hues and effect ownership survive the
+    // transition in both directions.
+    return members.map(singleSetRegion);
   }
 
   return {
@@ -147,7 +143,7 @@ export function createRegionLayout({
         .map((set) => ({ id: String(set.id), outline: normalizePolygon(set.outline) }))
         .filter((set) => set.outline.length >= 3)
         .sort((a, b) => a.id.localeCompare(b.id))
-        .map((set) => ({ ...set, bounds: boundsOf(set.outline) }));
+        .map((set) => ({ ...set, bounds: polygonBounds(set.outline) }));
       if (sets.length === 0) {
         cache.clear();
         return [];
