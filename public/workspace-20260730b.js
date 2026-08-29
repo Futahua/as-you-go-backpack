@@ -78,7 +78,8 @@ import { assignBranchRigidity, branchCenterGravityStrength, branchLinkDistance, 
 import { glyphPath, layoutTitleGlyphs } from './set-glyph-model.js';
 import { createSetEffectsController } from './set-effects-model.js';
 import { createDragTrailController } from './drag-trail-model.js';
-import { decomposeRegions, regionCentroid, regionPath } from './set-region-model.js';
+import { regionCentroid, regionPath } from './set-region-model.js';
+import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey } from './app/window-layout-runtime.js';
@@ -2388,8 +2389,9 @@ function createGraphController() {
   // members' positions.
   const setShapes = new Map();
   const regionShapes = new Map();
-  let regionLayoutKey = null;
-  let regionCache = [];
+  // Overlap-component discovery, per-component caching and the dense-cluster
+  // fallback all live in the layout engine; this file only composes.
+  const regionLayout = createRegionLayout();
   const setRings = new Map();
   const setEffects = createSetEffectsController({ document, animate });
   const dragTrail = createDragTrailController({ document, animate });
@@ -2543,8 +2545,7 @@ function createGraphController() {
     // exist.
     setShapes.clear();
     regionShapes.clear();
-    regionLayoutKey = null;
-    regionCache = [];
+    regionLayout.update([]);
     setRings.clear();
     setEffects.clear();
     dragTrail.clear();
@@ -2991,15 +2992,12 @@ function createGraphController() {
       .filter((shape) => !shape.retiring && Array.isArray(shape.outline) && shape.outline.length >= 3)
       .map((shape) => ({ id: shape.setId, outline: shape.outline }))
       .sort((a, b) => a.id.localeCompare(b.id));
-    const layoutKey = source.map((shape) => `${shape.id}:${shape.outline.map(({ x, y }) => `${x},${y}`).join('|')}`).join(';');
-    if (layoutKey !== regionLayoutKey) {
-      regionCache = decomposeRegions(source).map((region) => ({
-        ...region,
-        center: regionCentroid(region),
-      }));
-      regionLayoutKey = layoutKey;
+    const regions = regionLayout.update(source);
+    // Regions come back identity-stable while their component is unchanged, so
+    // the centroid is computed once per rebuild rather than once per frame.
+    for (const region of regions) {
+      if (region.center === undefined) region.center = regionCentroid(region);
     }
-    const regions = regionCache;
     const wanted = new Set(regions.map(({ id }) => id));
     for (const region of regions) {
       let shape = regionShapes.get(region.id);

@@ -71,6 +71,16 @@ function clipToSet(polygon, outline, keepInside) {
   return result;
 }
 
+/** Convex-convex intersection, normalized on the way in so callers may pass raw
+ * presentation outlines. Returns [] when the two do not overlap with positive
+ * area, which is what makes it usable as an exact overlap predicate. */
+export function intersectConvex(first, second) {
+  const a = normalizePolygon(first);
+  const b = normalizePolygon(second);
+  if (a.length < 3 || b.length < 3) return [];
+  return clipToSet(a, b, true);
+}
+
 /** Subtracts a convex outline from a convex polygon, returning a partition of
  * the remainder. Each edge takes its slice out of what is *left*, not out of
  * the original: clipping every edge against the original polygon produces
