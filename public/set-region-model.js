@@ -71,6 +71,34 @@ function clipToSet(polygon, outline, keepInside) {
   return result;
 }
 
+/** Subtracts a convex outline from a convex polygon, returning a partition of
+ * the remainder. Each edge takes its slice out of what is *left*, not out of
+ * the original: clipping every edge against the original polygon produces
+ * overlapping half-plane strips, which both double-counts area in regionArea
+ * and regionCentroid and multiplies the piece count by the outline's vertex
+ * count for every excluded set. At the 48-vertex outlines resampleHull
+ * produces, that turns a fourth set into ~54k fragments per frame. */
+export function subtractConvex(polygon, outline) {
+  if (polygon.length < 3) return [];
+  if (outline.length < 3) return [polygon];
+  // Most sets on a workspace are spatially separate; a disjoint pair needs no
+  // cutting at all, and this keeps that case at one piece instead of one per edge.
+  if (clipToSet(polygon, outline, true).length < 3) return [polygon];
+
+  let remaining = polygon;
+  const outsidePieces = [];
+  for (let edge = 0; edge < outline.length && remaining.length >= 3; edge += 1) {
+    const start = outline[edge];
+    const end = outline[(edge + 1) % outline.length];
+    const outside = clipPolygon(remaining, start, end, false);
+    if (outside.length >= 3) outsidePieces.push(outside);
+    // Only what is still potentially inside the excluded set goes on to the
+    // next edge. Whatever survives every edge is the intersection, so it is dropped.
+    remaining = clipPolygon(remaining, start, end, true);
+  }
+  return outsidePieces;
+}
+
 function regionId(setIds) {
   return setIds.slice().sort().join('|');
 }
@@ -98,17 +126,7 @@ export function decomposeRegions(inputSets) {
     let pieces = [base];
     for (const set of excluded) {
       const nextPieces = [];
-      for (const piece of pieces) {
-        for (let edge = 0; edge < set.outline.length; edge += 1) {
-          const outside = clipPolygon(
-            piece,
-            set.outline[edge],
-            set.outline[(edge + 1) % set.outline.length],
-            false,
-          );
-          if (outside.length >= 3) nextPieces.push(outside);
-        }
-      }
+      for (const piece of pieces) nextPieces.push(...subtractConvex(piece, set.outline));
       pieces = nextPieces;
       if (pieces.length === 0) break;
     }

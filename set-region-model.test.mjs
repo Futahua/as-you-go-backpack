@@ -106,3 +106,69 @@ test('region rendering leaves hull, containment, hit-test, exclusion, and separa
   assert.equal(after, before);
   assert.deepEqual(sets.map((set) => set.outline), [square(0, 0), square(5, 0)]);
 });
+
+// Regression cover for the fourth-set brick. Production outlines are
+// resampleHull'd to 48 vertices, and the old subtraction clipped every edge
+// against the *original* piece rather than the remainder: the exterior pieces
+// overlapped, so areas double-counted, and each excluded set multiplied the
+// piece count by 48. Three sets stayed survivable; the fourth added a third
+// excluded set and buried the frame under ~54k fragments.
+const circle = (cx, cy, radius, count = 48) => Array.from({ length: count }, (_, index) => {
+  const angle = (index / count) * Math.PI * 2;
+  return { x: cx + (radius * Math.cos(angle)), y: cy + (radius * Math.sin(angle)) };
+});
+
+const piecewiseArea = (region) => region.polygons.reduce((total, polygon) => {
+  let doubled = 0;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const current = polygon[index];
+    const next = polygon[(index + 1) % polygon.length];
+    doubled += (current.x * next.y) - (next.x * current.y);
+  }
+  return total + Math.abs(doubled / 2);
+}, 0);
+
+test('subtracting a fully contained set leaves the true remaining area, not overlapping strips', () => {
+  const regions = decomposeRegions([
+    { id: 'A', outline: square(0, 0, 20) },
+    { id: 'B', outline: square(5, 5, 10) },
+  ]);
+  assert.deepEqual(regions.map(({ id }) => id), ['A', 'A|B']);
+  // 400 - 100. Four independent exterior half-planes each covered 100 units of
+  // A and overlapped at the corners, which reported the whole 400 back.
+  assert.equal(regionArea(regions.find(({ id }) => id === 'A')), 300);
+  assert.equal(regionArea(regions.find(({ id }) => id === 'A|B')), 100);
+});
+
+test('difference pieces partition the region instead of overlapping each other', () => {
+  const [aOnly] = decomposeRegions([
+    { id: 'A', outline: square(0, 0, 20) },
+    { id: 'B', outline: square(5, 5, 10) },
+  ]);
+  // A partition's piece areas sum to the region area; overlapping strips exceed it.
+  assert.equal(piecewiseArea(aOnly), 300);
+  assert.equal(piecewiseArea(aOnly), regionArea(aOnly));
+});
+
+test('four disjoint production-resolution sets stay one polygon per region', () => {
+  const regions = decomposeRegions(['A', 'B', 'C', 'D'].map((id, index) => ({
+    id,
+    outline: circle(index * 500, 0, 100),
+  })));
+  assert.deepEqual(regions.map(({ id }) => id), ['A', 'B', 'C', 'D']);
+  // Was 54,208 fragments across these four regions.
+  assert.deepEqual(regions.map((region) => region.polygons.length), [1, 1, 1, 1]);
+});
+
+test('four overlapping production-resolution sets stay within a bounded fragment count', () => {
+  const regions = decomposeRegions(['A', 'B', 'C', 'D'].map((id, index) => ({
+    id,
+    outline: circle(index * 60, (index % 2) * 40, 100),
+  })));
+  assert.ok(regions.some(({ id }) => id === 'A|B'));
+  assert.ok(regions.some(({ id }) => id === 'A|B|C|D'));
+  const fragments = regions.reduce((total, region) => total + region.polygons.length, 0);
+  // Was 29,947. The bound is what keeps a fourth G group off the frame budget;
+  // it is deliberately loose so ordinary geometry churn does not redden it.
+  assert.ok(fragments < 2000, 'expected a bounded fragment count, got ' + fragments);
+});
