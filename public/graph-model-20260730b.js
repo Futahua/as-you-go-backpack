@@ -1,3 +1,4 @@
+import { adjacencyFromPairs, classifyColourability } from './hue-colourability.js';
 import { itemsIn, binnedItems, itemsInBinnedGroup, ROOT_ID } from './workspace-model-20260730b.js';
 import { belongsToSet } from './sets-model.js';
 
@@ -432,6 +433,14 @@ const SET_BASE_MOVE = 0.03;
 
 /** Projection treats separations within this of MIN_HUE_SEPARATION as done. */
 const PROJECTION_EPSILON = 1e-6;
+/** Discrete hue slots available at the minimum separation. Colouring a
+ * proximity component with this many colours is exactly equivalent to placing
+ * its hues, which is why 8-colourability is the certificate. */
+const HUE_SLOTS = Math.floor(360 / MIN_HUE_SEPARATION);
+/** Deterministic work the classifier may spend per component. Generous next to
+ * the projection it can remove, and bounded so a pathological component costs a
+ * known amount and then reports unknown. */
+const COLOURABILITY_BUDGET = 20000;
 
 /** Max projection passes over the near-pair list per call. */
 const MAX_PROJECTION_PASSES = 100;
@@ -557,16 +566,27 @@ function greedySlotColoring(nodes, adjacency, k) {
  * component with the fewest slots that work (largest-first greedy) and pick
  * the slot rotation that best matches the folders' position bases, so the
  * effective minimum separation is 360 / slotCount rather than oscillating. */
-function slotColorComponent(componentIds, folderById, colors, center, hueState) {
+/** `knownAdjacency`, when given, is the component graph the caller already
+ * built from nearPairs. It describes the same edges this function would
+ * rediscover — both come from the same strict FOLDER_DISTANCE test over the
+ * same coordinates — so reusing it removes a second all-pairs distance scan
+ * without changing which vertices are adjacent. Sets are converted to sorted
+ * arrays because the greedy colouring reads length and includes. */
+function slotColorComponent(componentIds, folderById, colors, center, hueState, knownAdjacency = null) {
   const ids = [...componentIds].sort();
   const nodes = ids.map((id) => folderById.get(id));
-  const adjacency = new Map(ids.map((id) => [id, []]));
-  for (const [a, b] of [...ids.map((id, i) => ids.slice(i + 1).map((other) => [id, other]))].flat()) {
-    const fa = folderById.get(a);
-    const fb = folderById.get(b);
-    if (Math.hypot(fa.x - fb.x, fa.y - fb.y) < FOLDER_DISTANCE) {
-      adjacency.get(a).push(b);
-      adjacency.get(b).push(a);
+  let adjacency;
+  if (knownAdjacency) {
+    adjacency = new Map(ids.map((id) => [id, [...(knownAdjacency.get(id) ?? [])].sort()]));
+  } else {
+    adjacency = new Map(ids.map((id) => [id, []]));
+    for (const [a, b] of [...ids.map((id, i) => ids.slice(i + 1).map((other) => [id, other]))].flat()) {
+      const fa = folderById.get(a);
+      const fb = folderById.get(b);
+      if (Math.hypot(fa.x - fb.x, fa.y - fb.y) < FOLDER_DISTANCE) {
+        adjacency.get(a).push(b);
+        adjacency.get(b).push(a);
+      }
     }
   }
   let slotCount = 1;
@@ -720,12 +740,57 @@ export function groupPairsByComponent(nearPairs) {
  * Exported so the equivalence can be tested against a reference implementation
  * of the old global projector; production calls it only from
  * assignSpatialFolderHues. */
-export function projectNearPairs(nearPairs, colors, { collectComponents = false } = {}) {
+export function projectNearPairs(nearPairs, colors, {
+  collectComponents = false,
+  classifyBudget = COLOURABILITY_BUDGET,
+} = {}) {
   let pairVisits = 0;
   let componentPasses = 0;
   let maxPasses = 0;
+  let classificationWork = 0;
+  let classificationCliqueWork = 0;
+  let classificationSearchWork = 0;
+  let bypassedPairs = 0;
   const components = [];
+  const certifiedInfeasible = [];
   for (const componentPairs of groupPairsByComponent(nearPairs)) {
+    // Only a proof bypasses projection. A component that is merely slow, dense,
+    // large, or undecided within the budget takes the ordinary path: `unknown`
+    // is treated exactly as `feasible`, and pass count and density decide
+    // nothing. The stretched workload is the reason — every one of its
+    // components runs to the cap and every one of them is colourable.
+    const adjacency = adjacencyFromPairs(componentPairs);
+    const verdict = classifyColourability(adjacency, {
+      colours: HUE_SLOTS,
+      budget: classifyBudget,
+    });
+    classificationWork += verdict.work;
+    classificationCliqueWork += verdict.cliqueWork;
+    classificationSearchWork += verdict.searchWork;
+    if (verdict.verdict === 'infeasible') {
+      // Projection cannot succeed here, so it is not run. The component still
+      // reaches slotColorComponent, exactly as it would have after the cap: the
+      // slot colouring reads set targets from hueState and other bases from
+      // position, never from the hues projection would have produced.
+      certifiedInfeasible.push({ ids: [...adjacency.keys()], adjacency });
+      bypassedPairs += componentPairs.length;
+      if (collectComponents) {
+        const members = new Set();
+        for (const [a, b] of componentPairs) {
+          members.add(a.id);
+          members.add(b.id);
+        }
+        components.push({
+          size: members.size,
+          pairCount: componentPairs.length,
+          passes: 0,
+          pairVisits: 0,
+          converged: false,
+          bypassed: true,
+        });
+      }
+      continue;
+    }
     let passes = 0;
     let visits = 0;
     let converged = false;
@@ -772,7 +837,15 @@ export function projectNearPairs(nearPairs, colors, { collectComponents = false 
     }
   }
   return {
-    pairVisits, componentPasses, maxPasses, components,
+    pairVisits,
+    componentPasses,
+    maxPasses,
+    components,
+    certifiedInfeasible,
+    classificationWork,
+    classificationCliqueWork,
+    classificationSearchWork,
+    bypassedPairs,
   };
 }
 /** The optional fifth argument is a diagnostics sink. When absent — which is
@@ -874,8 +947,23 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
   const projectionComponents = projection.components;
   // Infeasible dense neighborhoods: deterministically slot-color the maximal
   // components that still violate the MIN_HUE_SEPARATION invariant.
+  // Certified-infeasible components go straight to the slot colouring the
+  // projector would have reached anyway, reusing the graph the classifier
+  // already built rather than rediscovering it by distance.
+  const directlyColoured = new Set();
+  const directFallbacks = [];
+  for (const component of projection.certifiedInfeasible) {
+    const slotCount = slotColorComponent(
+      component.ids, folderById, colors, center, hueState, component.adjacency,
+    );
+    directFallbacks.push({ size: component.ids.length, slotCount, direct: true });
+    for (const id of component.ids) directlyColoured.add(id);
+  }
+
   const violatedIds = new Set();
   for (const [a, b] of nearPairs) {
+    // Already resolved above; re-detecting them would slot-colour them twice.
+    if (directlyColoured.has(a.id) || directlyColoured.has(b.id)) continue;
     const hueA = colors.get(a.id);
     const hueB = colors.get(b.id);
     if (typeof hueA === 'number' && typeof hueB === 'number'
@@ -893,8 +981,15 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
     diagnostics.projectionComponentPasses = projectionComponentPasses;
     diagnostics.projectionPairVisits = projectionPairVisits;
     diagnostics.projectionComponents = projectionComponents;
+    diagnostics.classificationWork = projection.classificationWork;
+    diagnostics.classificationCliqueWork = projection.classificationCliqueWork;
+    diagnostics.classificationSearchWork = projection.classificationSearchWork;
+    diagnostics.certifiedInfeasibleComponents = projection.certifiedInfeasible.length;
+    diagnostics.bypassedProjectionPairs = projection.bypassedPairs;
     diagnostics.violatingIdsAfterProjection = violatedIds.size;
-    diagnostics.fallbackComponents = [];
+    // Direct fallbacks are recorded alongside the ones projection uncovered, so
+    // "this component was slot-coloured" stays visible however it got there.
+    diagnostics.fallbackComponents = [...directFallbacks];
   }
   if (violatedIds.size > 0) {
     for (const component of componentsNearViolations(nearPairs, [...violatedIds])) {

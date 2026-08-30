@@ -8,6 +8,7 @@ import {
   assignSpatialFolderHues, findNearPairs, groupPairsByComponent, projectNearPairs,
   FOLDER_DISTANCE, MIN_HUE_SEPARATION,
 } from './public/graph-model-20260730b.js';
+import { adjacencyFromPairs } from './public/hue-colourability.js';
 
 const square = (x, y, size = 10) => [
   { x, y }, { x: x + size, y }, { x: x + size, y: y + size }, { x, y: y + size },
@@ -236,8 +237,14 @@ test('the hue diagnostics sink does not change any colour it observes', () => {
   // reason.
   assert.ok(diagnostics.spatialEntities === 40);
   assert.ok(diagnostics.nearPairs > 0);
-  assert.ok(diagnostics.projectionPasses >= 1);
-  assert.ok(diagnostics.projectionPairVisits >= diagnostics.nearPairs);
+  // A component proved uncolourable is not projected at all, so passes and
+  // visits can both be zero. What must always be true is that the frame either
+  // projected something or certified something.
+  assert.ok(diagnostics.projectionPasses >= 0);
+  assert.ok(
+    diagnostics.projectionPasses > 0 || diagnostics.certifiedInfeasibleComponents > 0,
+    'the frame neither projected nor certified anything',
+  );
   assert.ok(Array.isArray(diagnostics.nearComponents));
   assert.ok(Array.isArray(diagnostics.fallbackComponents));
 });
@@ -483,7 +490,10 @@ test('per-component projection matches the old global projector exactly', () => 
   assert.equal(small.converged, true, 'the pair component should converge');
   assert.ok(small.passes < 10, `the pair component took ${small.passes} passes`);
   assert.equal(clique.converged, false, 'the twelve-way clique cannot converge');
-  assert.equal(clique.passes, 100, 'and should pay the full cap');
+  // Since H3B it does not pay the cap to discover that: it is proved
+  // uncolourable up front and never projected.
+  assert.equal(clique.bypassed, true, 'the clique should be certified, not projected');
+  assert.equal(clique.passes, 0, 'a certified component runs no passes');
   assert.ok(
     chain.passes >= small.passes,
     'the chain should need at least as many passes as the pair',
@@ -491,11 +501,12 @@ test('per-component projection matches the old global projector exactly', () => 
 
   // The whole point: the settled components stopped being walked. Under the old
   // global scheduler every component paid the cap because C did.
-  const globalEquivalentVisits = pairs.length * clique.passes;
+  const globalEquivalentVisits = pairs.length * 100;
   assert.ok(
     diagnostics.projectionPairVisits < globalEquivalentVisits,
     `expected fewer visits than a global cap sweep (${diagnostics.projectionPairVisits} vs ${globalEquivalentVisits})`,
   );
+  assert.ok(diagnostics.bypassedProjectionPairs > 0, 'the clique pairs should be bypassed');
 
   // And only the infeasible component reached the fallback.
   assert.equal(diagnostics.fallbackComponents.length, 1);
@@ -613,8 +624,31 @@ const referenceTieBreak = (a, b) => {
   return a.id < b.id ? 1 : -1;
 };
 
+/** Three neighbourhoods, none of them provably uncolourable, so projection runs
+ * for all of them and the old global projector is the right comparison. The
+ * uncolourable case is covered separately below, where the correct claim is
+ * about the whole solver rather than the projector alone. */
+function threeFeasibleComponentScene() {
+  const nodes = [];
+  nodes.push({ id: 'set:A0', x: 0, y: 0 });
+  nodes.push({ id: 'set:A1', x: 30, y: 0 });
+  for (let i = 0; i < 5; i += 1) {
+    nodes.push({ id: `set:B${i}`, x: 5000 + (i * 150), y: 0 });
+  }
+  // Six mutually near entities: dense, slow, and still colourable in eight.
+  for (let i = 0; i < 6; i += 1) {
+    const angle = (i / 6) * Math.PI * 2;
+    nodes.push({
+      id: `set:C${i}`,
+      x: 20000 + (Math.cos(angle) * 40),
+      y: Math.sin(angle) * 40,
+    });
+  }
+  return nodes.sort((a, b) => a.id.localeCompare(b.id));
+}
+
 test('the component scheduler and the global projector reach identical hues', () => {
-  const nodes = threeComponentScene();
+  const nodes = threeFeasibleComponentScene();
   const { referencePasses, actual } = assertProjectionEquivalent(
     nodes,
     (node, index) => (index * 7) % 360,
@@ -623,13 +657,17 @@ test('the component scheduler and the global projector reach identical hues', ()
 
   // And it got there by doing strictly less work: the global projector paid its
   // worst component's pass count across every pair, every pass.
-  assert.equal(referencePasses, 100, 'the clique should drive the global projector to the cap');
+  assert.ok(referencePasses > 1, 'the fixture should make the global projector work');
   assert.ok(
     actual.pairVisits < findNearPairs(nodes).length * referencePasses,
     'the scheduler should visit fewer pairs than a global sweep to the cap',
   );
   const settled = actual.components.filter((component) => component.converged);
   assert.ok(settled.length >= 2, 'the pair and chain components should both settle');
+  assert.ok(
+    actual.components.every((component) => !component.bypassed),
+    'no component in this fixture is provably uncolourable',
+  );
   assert.ok(
     settled.every((component) => component.passes < 100),
     'a settled component must stop before the cap',
@@ -707,4 +745,179 @@ test('the schedulers agree when the tie-break decides, against id order', () => 
     { id: 'set:bbb', x: 5, y: 5 },
   ];
   assertProjectionEquivalent(coincident, () => 10, 'id tie-break');
+});
+
+// ===========================================================================
+// H3B. A component proved uncolourable skips projection and is slot-coloured
+// directly. The equivalence argument is that projection could never have
+// succeeded there, so the old path had to end in the same slot colouring of the
+// same connected component — and slotColorComponent reads set targets from
+// hueState and other bases from position, never from the hues projection left
+// behind. These tests hold that argument to account.
+
+const solveScene = (nodes, { frames = 1, seed = null } = {}) => {
+  const colors = new Map();
+  const hueState = new Map();
+  if (seed) for (const [id, hue] of seed) colors.set(id, hue);
+  const diagnostics = {};
+  for (let frame = 0; frame < frames; frame += 1) {
+    assignSpatialFolderHues(nodes, colors, { cx: 0, cy: 0 }, hueState, diagnostics);
+  }
+  return { colors: [...colors.entries()].sort(([a], [b]) => a.localeCompare(b)), diagnostics };
+};
+
+const cliqueScene = (size, prefix = 'set:K') => Array.from({ length: size }, (unused, index) => {
+  const angle = (index / size) * Math.PI * 2;
+  return {
+    id: `${prefix}${String(index).padStart(2, '0')}`,
+    x: Math.cos(angle) * 40,
+    y: Math.sin(angle) * 40,
+  };
+}).sort((a, b) => a.id.localeCompare(b.id));
+
+/** The decisive property. For a certified-uncolourable component the old path
+ * ran 100 passes that mangled its hues and then overwrote them wholesale; the
+ * new path skips straight to the overwrite. Both are equivalent precisely
+ * because the outcome does not depend on those intermediate hues — so if the
+ * final colours are independent of what the component started with, the skipped
+ * work provably could not have changed them. */
+function assertOutcomeIndependentOfStartingHues(nodes, label) {
+  const ids = nodes.map((node) => node.id);
+  const first = solveScene(nodes, { seed: ids.map((id, index) => [id, (index * 11) % 360]) });
+  const second = solveScene(nodes, { seed: ids.map((id, index) => [id, (index * 197 + 40) % 360]) });
+  const third = solveScene(nodes, { seed: ids.map((id) => [id, 0]) });
+  assert.deepEqual(first.colors, second.colors, `${label}: outcome depended on starting hues`);
+  assert.deepEqual(first.colors, third.colors, `${label}: outcome depended on starting hues`);
+  return first;
+}
+
+test('a certified component is slot-coloured, and its result ignores the skipped work', () => {
+  for (const size of [9, 12, 17]) {
+    const nodes = cliqueScene(size);
+    const { diagnostics } = assertOutcomeIndependentOfStartingHues(nodes, `K${size}`);
+    assert.equal(diagnostics.certifiedInfeasibleComponents, 1, `K${size} should certify one component`);
+    assert.equal(diagnostics.projectionPairVisits, 0, `K${size} should project nothing`);
+    assert.ok(diagnostics.bypassedProjectionPairs > 0);
+    // It still gets coloured, with more slots than the hard separation allows.
+    assert.equal(diagnostics.fallbackComponents.length, 1);
+    assert.equal(diagnostics.fallbackComponents[0].direct, true);
+    assert.ok(
+      diagnostics.fallbackComponents[0].slotCount > Math.floor(360 / MIN_HUE_SEPARATION),
+      'an uncolourable component must need more slots than the separation allows',
+    );
+  }
+});
+
+test('certified components stay stable across persistent moving frames', () => {
+  const nodes = cliqueScene(12);
+  const live = nodes.map((node) => ({ ...node }));
+  const colors = new Map();
+  const hueState = new Map();
+  const diagnostics = {};
+  const history = [];
+  for (let frame = 0; frame < 8; frame += 1) {
+    for (const node of live) {
+      node.x += Math.cos(frame) * 1.5;
+      node.y += Math.sin(frame) * 1.5;
+    }
+    assignSpatialFolderHues(live, colors, { cx: 0, cy: 0 }, hueState, diagnostics);
+    history.push([...colors.values()].every((hue) => Number.isFinite(hue)));
+    assert.equal(diagnostics.projectionPairVisits, 0, `frame ${frame} projected a certified component`);
+    assert.equal(diagnostics.certifiedInfeasibleComponents, 1);
+  }
+  assert.ok(history.every(Boolean), 'a hue went non-finite while drifting');
+});
+
+test('one call takes all three paths at once', () => {
+  // A certified component, a slow but colourable one, and one forced to unknown
+  // by geometry alone would be ideal; unknown is instead forced in the test
+  // below, since no benchmark scene produces one.
+  const nodes = [
+    // Certified: twelve mutually near.
+    ...cliqueScene(12, 'set:C'),
+    // Colourable but dense: six mutually near, well inside eight slots.
+    ...cliqueScene(6, 'set:F').map((node) => ({ ...node, x: node.x + 6000 })),
+    // Isolated singletons: no near pairs at all.
+    { id: 'set:X0', x: 40000, y: 0 },
+    { id: 'set:X1', x: 60000, y: 0 },
+  ].sort((a, b) => a.id.localeCompare(b.id));
+
+  const { diagnostics } = solveScene(nodes);
+  assert.equal(diagnostics.certifiedInfeasibleComponents, 1, 'the twelve-clique should be certified');
+  assert.ok(diagnostics.bypassedProjectionPairs > 0);
+  // The colourable component was projected normally, not bypassed.
+  assert.ok(
+    diagnostics.projectionPairVisits > 0,
+    'the colourable component should still be projected',
+  );
+  const projected = diagnostics.projectionComponents.filter((component) => !component.bypassed);
+  assert.equal(projected.length, 1, 'exactly one component should take the projector');
+  assert.equal(projected[0].size, 6);
+  // Deliberately not asserting convergence: six entities fit in eight slots, but
+  // the projector is iterative and may still be working at the cap. Feasible
+  // does not mean fast, which is the whole reason pass count cannot certify.
+  assert.ok(projected[0].passes > 0, 'the colourable component must actually be projected');
+});
+
+test('a certified component is bypassed even on a zero budget, when the proof is free', () => {
+  // K12 has 66 edges where an 8-colourable graph on twelve vertices can have at
+  // most 62, so the Turan bound settles it without spending anything. A budget
+  // of zero therefore still bypasses — the certificate is what matters, not the
+  // budget.
+  const nodes = cliqueScene(12);
+  const pairs = findNearPairs(nodes);
+  for (const classifyBudget of [0, 20000]) {
+    const result = projectNearPairs(pairs, new Map(nodes.map(({ id }) => [id, 0])), {
+      collectComponents: true,
+      classifyBudget,
+    });
+    assert.equal(result.certifiedInfeasible.length, 1, `budget ${classifyBudget}`);
+    assert.equal(result.pairVisits, 0);
+  }
+});
+
+test('an undecided component keeps the projector rather than being bypassed', () => {
+  // The safety property the whole design rests on: only a proof bypasses, and
+  // `unknown` is not a proof. No measured scene produces one, so it is forced
+  // here with a component the free certificates cannot settle — nine entities
+  // in a chain, which is past the slot count but has eight edges where the
+  // Turan bound allows thirty-five, so deciding it requires actually searching.
+  const nodes = Array.from({ length: 9 }, (unused, index) => ({
+    id: `set:P${index}`,
+    x: index * 150,
+    y: 0,
+  }));
+  const pairs = findNearPairs(nodes);
+  const seed = () => new Map(nodes.map(({ id }, index) => [id, index * 3]));
+
+  const decided = projectNearPairs(pairs, seed(), { collectComponents: true });
+  assert.equal(decided.certifiedInfeasible.length, 0, 'a chain of nine is colourable');
+  assert.ok(decided.classificationWork > 0, 'deciding it should cost something');
+
+  const starved = projectNearPairs(pairs, seed(), {
+    collectComponents: true,
+    classifyBudget: 0,
+  });
+  assert.equal(starved.certifiedInfeasible.length, 0, 'an undecided component must not be bypassed');
+  assert.ok(starved.pairVisits > 0, 'it must be projected instead');
+});
+
+test('the reused adjacency describes the same graph the fallback would rebuild', () => {
+  // slotColorComponent used to rediscover adjacency with its own all-pairs
+  // distance scan. Reusing the classifier's graph is only safe if the two agree,
+  // and they do because both come from the same strict FOLDER_DISTANCE test.
+  const nodes = cliqueScene(12).concat([{ id: 'set:far', x: 9000, y: 0 }]);
+  const pairs = findNearPairs(nodes);
+  for (const component of groupPairsByComponent(pairs)) {
+    const reused = adjacencyFromPairs(component);
+    for (const [id, neighbours] of reused) {
+      const self = nodes.find((node) => node.id === id);
+      const rebuilt = nodes
+        .filter((other) => other.id !== id
+          && Math.hypot(self.x - other.x, self.y - other.y) < FOLDER_DISTANCE)
+        .map((other) => other.id)
+        .sort();
+      assert.deepEqual([...neighbours].sort(), rebuilt, `${id}: reused adjacency differs`);
+    }
+  }
 });
