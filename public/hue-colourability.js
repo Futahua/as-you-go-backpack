@@ -21,6 +21,22 @@
  * treat it exactly as they treat `feasible`.
  */
 
+/** Propagated out of the recursions the instant the ledger is spent. Returning
+ * a plain false instead would unwind only one frame, leaving parents free to
+ * explore further branches — so the cap would be advisory, the reported work
+ * would understate what was done, and a colouring found after crossing the
+ * limit would still be reported as a decision. */
+const BUDGET_EXHAUSTED = Symbol('hue-colourability-budget-exhausted');
+
+const createLedger = (limit) => ({ limit, work: 0 });
+
+/** Charges one unit, or reports that there is nothing left to charge. */
+const spend = (ledger) => {
+  if (ledger.work >= ledger.limit) return false;
+  ledger.work += 1;
+  return true;
+};
+
 /** Maximum edges a k-colourable graph on n vertices can have: the balanced
  * complete k-partite Turan graph. More edges than this proves non-k-colourable;
  * equalling it proves nothing, since T_k(n) itself is k-colourable. */
@@ -40,10 +56,11 @@ export function turanMaxEdges(n, colours) {
 
 /** Deterministic bounded search for a clique of exactly `size`. A clique that
  * large cannot be coloured with fewer colours than its size, so finding one on
- * `colours + 1` vertices is a complete proof of infeasibility. */
-function findClique(nodes, neighbours, size, budget) {
-  if (nodes.length < size) return { found: false, work: 0 };
-  let work = 0;
+ * `colours + 1` vertices is a complete proof of infeasibility.
+ *
+ * Returns true, false, or BUDGET_EXHAUSTED. */
+function findClique(nodes, neighbours, size, ledger) {
+  if (nodes.length < size) return false;
   // Descending degree, then id: vertices likely to be in a large clique first,
   // and stable across runs.
   const ordered = nodes
@@ -54,8 +71,7 @@ function findClique(nodes, neighbours, size, budget) {
     if (clique.length === size) return true;
     if (clique.length + candidates.length < size) return false;
     for (let index = 0; index < candidates.length; index += 1) {
-      work += 1;
-      if (work > budget) return false;
+      if (!spend(ledger)) return BUDGET_EXHAUSTED;
       // Not enough candidates left to reach the target from here.
       if (clique.length + (candidates.length - index) < size) return false;
       const candidate = candidates[index];
@@ -63,25 +79,26 @@ function findClique(nodes, neighbours, size, budget) {
         .slice(index + 1)
         .filter((other) => neighbours.get(candidate).has(other));
       clique.push(candidate);
-      if (grow(clique, next)) return true;
+      const result = grow(clique, next);
       clique.pop();
+      if (result === BUDGET_EXHAUSTED) return BUDGET_EXHAUSTED;
+      if (result === true) return true;
     }
     return false;
   };
 
-  const found = grow([], ordered);
-  return { found, work };
+  return grow([], ordered);
 }
 
 /** DSATUR with backtracking. Returns true if a colouring exists, false if the
- * search space was exhausted without one, and null if the budget ran out first.
+ * search space was exhausted without one, and BUDGET_EXHAUSTED if the ledger ran
+ * out first — propagated immediately, so no sibling branch is explored past the
+ * cap and the charged work never exceeds it.
  *
- * The budget counts assignments attempted, not milliseconds, so the verdict for
+ * The ledger counts assignments attempted, not milliseconds, so the verdict for
  * a given graph is the same on every machine and every run. */
-function searchColouring(nodes, neighbours, colours, budget) {
+function searchColouring(nodes, neighbours, colours, ledger) {
   const assigned = new Map();
-  let work = 0;
-  let exhausted = true;
 
   const step = () => {
     if (assigned.size === nodes.length) return true;
@@ -116,28 +133,25 @@ function searchColouring(nodes, neighbours, colours, budget) {
     }
     for (let colour = 0; colour < colours; colour += 1) {
       if (used.has(colour)) continue;
-      work += 1;
-      if (work > budget) {
-        exhausted = false;
-        return false;
-      }
+      if (!spend(ledger)) return BUDGET_EXHAUSTED;
       assigned.set(chosen, colour);
-      if (step()) return true;
+      const result = step();
       assigned.delete(chosen);
+      if (result === BUDGET_EXHAUSTED) return BUDGET_EXHAUSTED;
+      if (result === true) return true;
     }
     return false;
   };
 
-  const coloured = step();
-  if (coloured) return true;
-  return exhausted ? false : null;
+  return step();
 }
 
 /** Classifies a proximity component as feasible, infeasible or unknown.
  *
  * `adjacency` is a Map from id to a Set of neighbouring ids. Escalates from the
- * cheapest complete certificates to a bounded search, and stops at the first
- * one that decides. */
+ * cheapest complete certificates to a bounded search, and stops at the first one
+ * that decides. One ledger is shared by both searches, so the reported work is
+ * the total charged and never exceeds the budget. */
 export function classifyColourability(adjacency, { colours = 8, budget = 20000 } = {}) {
   const nodes = [...adjacency.keys()].sort();
   const neighbours = adjacency;
@@ -146,32 +160,38 @@ export function classifyColourability(adjacency, { colours = 8, budget = 20000 }
   for (const node of nodes) edges += neighbours.get(node).size;
   edges /= 2;
 
+  const ledger = createLedger(budget);
+  // Split so the accounting is observable rather than asserted. An earlier
+  // version reported the total as budget minus the budget handed to the search,
+  // which is identically the clique cost, so every DSATUR assignment was
+  // invisible and the published work figures understated the classifier.
+  let cliqueWork = 0;
+  const decided = (verdict, certificate) => ({
+    verdict,
+    certificate,
+    work: ledger.work,
+    cliqueWork,
+    searchWork: ledger.work - cliqueWork,
+    n,
+    edges,
+  });
+
   // Fewer vertices than colours: give each its own.
-  if (n <= colours) return { verdict: 'feasible', certificate: 'size', work: 0, n, edges };
+  if (n <= colours) return decided('feasible', 'size');
 
   // Above the Turan bound there is no k-partite graph this dense.
-  if (edges > turanMaxEdges(n, colours)) {
-    return { verdict: 'infeasible', certificate: 'turan', work: 0, n, edges };
-  }
+  if (edges > turanMaxEdges(n, colours)) return decided('infeasible', 'turan');
 
   // A clique on colours + 1 vertices needs colours + 1 colours.
-  const clique = findClique(nodes, neighbours, colours + 1, budget);
-  if (clique.found) {
-    return { verdict: 'infeasible', certificate: 'clique', work: clique.work, n, edges };
-  }
+  const clique = findClique(nodes, neighbours, colours + 1, ledger);
+  cliqueWork = ledger.work;
+  if (clique === true) return decided('infeasible', 'clique');
+  if (clique === BUDGET_EXHAUSTED) return decided('unknown', 'budget');
 
-  const remaining = budget - clique.work;
-  if (remaining <= 0) {
-    return { verdict: 'unknown', certificate: 'budget', work: clique.work, n, edges };
-  }
-  const searched = searchColouring(nodes, neighbours, colours, remaining);
-  if (searched === true) {
-    return { verdict: 'feasible', certificate: 'search', work: budget - remaining, n, edges };
-  }
-  if (searched === false) {
-    return { verdict: 'infeasible', certificate: 'search', work: budget - remaining, n, edges };
-  }
-  return { verdict: 'unknown', certificate: 'budget', work: budget, n, edges };
+  const searched = searchColouring(nodes, neighbours, colours, ledger);
+  if (searched === true) return decided('feasible', 'search');
+  if (searched === false) return decided('infeasible', 'search');
+  return decided('unknown', 'budget');
 }
 
 /** Builds the adjacency a classifier needs from a component's pair list. */
