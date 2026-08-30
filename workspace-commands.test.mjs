@@ -42,6 +42,7 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     resolveBinTargets: (ids) => ids,
     graphContextId: () => 'ctx',
     removeGraphPositions: (s, ctxId, ids) => ({ ...s, positionsRemoved: ids }),
+    removeGraphRestPositions: (s, ctxId, ids) => ({ ...s, restPositionsRemoved: ids }),
     setGraphPositions: (s, ctxId, positions) => ({ ...s, pinned: positions }),
     createWebLink: (s, input) => ({ ...s, webLink: input }),
     createDroppedShortcuts: (s, targets, destination) => ({
@@ -251,6 +252,7 @@ test('resetGraphPositions removes saved positions, resets nodes, reheats, and sa
     model: {
       graphContextId: () => 'ctx-1',
       removeGraphPositions: (s, ctxId, ids) => ({ ...s, positionsRemoved: { ctxId, ids } }),
+      removeGraphRestPositions: (s, ctxId, ids) => ({ ...s, restPositionsRemoved: { ctxId, ids } }),
     },
   });
   h.graphNodes.set('s1', node);
@@ -373,6 +375,8 @@ test('dragDropToBin bins resolved targets and clears positions', async () => {
   await h.commands.dragDropToBin({ itemIds: ['g1', 's1'] });
   assert.deepEqual(h.store.getSnapshot().binned, ['g1', 'p1', 'p1b']);
   assert.deepEqual(h.store.getSnapshot().positionsRemoved, ['g1', 's1']);
+  assert.deepEqual(h.store.getSnapshot().restPositionsRemoved, ['g1', 's1'],
+    'a binned item must not keep the place it was remembered at');
 });
 
 test('dragDropToFolder moves groups and single placements into the folder', async () => {
