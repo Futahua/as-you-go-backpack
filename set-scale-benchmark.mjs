@@ -332,7 +332,7 @@ for (const count of COUNTS) {
 
 console.log();
 console.log('H0 hue solver diagnostics, one settled frame per scene:');
-console.log('sets regime     entities possPr nearPr | comps maxComp maxEdge dens | passes  pairVisits | violAfter | fbComps slots');
+console.log('sets regime     entities possPr nearPr | comps maxComp maxEdge dens | maxPass compPass  pairVisits | violAfter | fbComps slots');
 for (const row of rows) {
   const d = row.diagnostics;
   const comps = d.nearComponents ?? [];
@@ -350,7 +350,8 @@ for (const row of rows) {
     pad(biggest?.edges ?? 0, 7),
     pad((biggest?.density ?? 0).toFixed(2), 4),
     '|',
-    pad(d.projectionPasses, 6),
+    pad(d.projectionMaxPasses, 7),
+    pad(d.projectionComponentPasses, 8),
     pad(d.projectionPairVisits, 11),
     '|',
     pad(d.violatingIdsAfterProjection, 9),

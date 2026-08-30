@@ -668,6 +668,113 @@ export function findNearPairs(list, distance = FOLDER_DISTANCE) {
   }
   return nearPairs;
 }
+/** Splits nearPairs into one list per connected proximity component, each list
+ * preserving its pairs relative order within the global sequence.
+ *
+ * Components come out in order of first appearance, which keeps diagnostics
+ * stable. The projections themselves commute, so emission order cannot affect
+ * the result. */
+export function groupPairsByComponent(nearPairs) {
+  const parent = new Map();
+  const find = (id) => {
+    let root = id;
+    while (parent.get(root) !== root) {
+      parent.set(root, parent.get(parent.get(root)));
+      root = parent.get(root);
+    }
+    return root;
+  };
+  for (const [a, b] of nearPairs) {
+    if (!parent.has(a.id)) parent.set(a.id, a.id);
+    if (!parent.has(b.id)) parent.set(b.id, b.id);
+    const rootA = find(a.id);
+    const rootB = find(b.id);
+    if (rootA !== rootB) parent.set(rootA, rootB);
+  }
+
+  const grouped = new Map();
+  for (const pair of nearPairs) {
+    const root = find(pair[0].id);
+    if (!grouped.has(root)) grouped.set(root, []);
+    grouped.get(root).push(pair);
+  }
+  return [...grouped.values()];
+}
+/** Runs the hard projection over near pairs, scheduled one proximity component
+ * at a time.
+ *
+ * Disconnected components share no constraint and mutate disjoint colour
+ * entries, so their operations commute and this is exactly equivalent to the
+ * single global sweep it replaces — not merely close. A component that finishes
+ * a pass with no correction can never be made dirty again, because nothing
+ * outside it touches its hues, so it is frozen rather than re-walked while some
+ * other component grinds on to the cap. Previously one pathological
+ * neighbourhood kept every settled neighbourhood in the loop with it.
+ *
+ * Two things carry the equivalence. Each component keeps its pairs as a
+ * SUBSEQUENCE of the global nearPairs order rather than an adjacency-derived
+ * one, because projection is order-sensitive. And pass parity belongs to each
+ * component own history starting at zero, not to a shared counter, so a
+ * component always sees the forward/reverse alternation it would have seen.
+ *
+ * Exported so the equivalence can be tested against a reference implementation
+ * of the old global projector; production calls it only from
+ * assignSpatialFolderHues. */
+export function projectNearPairs(nearPairs, colors, { collectComponents = false } = {}) {
+  let pairVisits = 0;
+  let componentPasses = 0;
+  let maxPasses = 0;
+  const components = [];
+  for (const componentPairs of groupPairsByComponent(nearPairs)) {
+    let passes = 0;
+    let visits = 0;
+    let converged = false;
+    for (let pass = 0; pass < MAX_PROJECTION_PASSES; pass += 1) {
+      let violated = false;
+      const order = pass % 2 === 0 ? componentPairs : [...componentPairs].reverse();
+      passes += 1;
+      visits += order.length;
+      for (const [a, b] of order) {
+        const hueA = colors.get(a.id);
+        const hueB = colors.get(b.id);
+        if (typeof hueA !== 'number' || typeof hueB !== 'number') continue;
+        const delta = signedAngle(hueA, hueB);
+        const separation = Math.abs(delta);
+        if (separation < MIN_HUE_SEPARATION) {
+          const direction = separation > PROJECTION_EPSILON ? Math.sign(delta) : tieBreakDirection(a, b);
+          const correction = (MIN_HUE_SEPARATION - separation) / 2;
+          colors.set(a.id, wrapDeg(hueA - direction * correction));
+          colors.set(b.id, wrapDeg(hueB + direction * correction));
+          violated = true;
+        }
+      }
+      if (!violated) {
+        converged = true;
+        break;
+      }
+    }
+    pairVisits += visits;
+    componentPasses += passes;
+    if (passes > maxPasses) maxPasses = passes;
+    if (collectComponents) {
+      const members = new Set();
+      for (const [a, b] of componentPairs) {
+        members.add(a.id);
+        members.add(b.id);
+      }
+      components.push({
+        size: members.size,
+        pairCount: componentPairs.length,
+        passes,
+        pairVisits: visits,
+        converged,
+      });
+    }
+  }
+  return {
+    pairVisits, componentPasses, maxPasses, components,
+  };
+}
 /** The optional fifth argument is a diagnostics sink. When absent — which is
  * every production call — nothing extra is computed and the function behaves
  * exactly as before. When present it is filled with the work the solver did,
@@ -759,30 +866,12 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
   }
 
   // Hard projection: fully resolve every violating pair (never damped).
-  let projectionPasses = 0;
-  let projectionPairVisits = 0;
-  for (let pass = 0; pass < MAX_PROJECTION_PASSES; pass += 1) {
-    let violated = false;
-    const order = pass % 2 === 0 ? nearPairs : [...nearPairs].reverse();
-    projectionPasses += 1;
-    projectionPairVisits += order.length;
-    for (const [a, b] of order) {
-      const hueA = colors.get(a.id);
-      const hueB = colors.get(b.id);
-      if (typeof hueA !== 'number' || typeof hueB !== 'number') continue;
-      const delta = signedAngle(hueA, hueB);
-      const separation = Math.abs(delta);
-      if (separation < MIN_HUE_SEPARATION) {
-        const direction = separation > PROJECTION_EPSILON ? Math.sign(delta) : tieBreakDirection(a, b);
-        const correction = (MIN_HUE_SEPARATION - separation) / 2;
-        colors.set(a.id, wrapDeg(hueA - direction * correction));
-        colors.set(b.id, wrapDeg(hueB + direction * correction));
-        violated = true;
-      }
-    }
-    if (!violated) break;
-  }
-
+  // Scheduled per proximity component; see projectNearPairs.
+  const projection = projectNearPairs(nearPairs, colors, { collectComponents: Boolean(diagnostics) });
+  const projectionPairVisits = projection.pairVisits;
+  const projectionComponentPasses = projection.componentPasses;
+  const projectionMaxPasses = projection.maxPasses;
+  const projectionComponents = projection.components;
   // Infeasible dense neighborhoods: deterministically slot-color the maximal
   // components that still violate the MIN_HUE_SEPARATION invariant.
   const violatedIds = new Set();
@@ -796,8 +885,14 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
     }
   }
   if (diagnostics) {
-    diagnostics.projectionPasses = projectionPasses;
+    // NOTE: projectionPasses now means the MAXIMUM any single component needed,
+    // not a count of global sweeps, because there are no global sweeps any more.
+    // Aggregate effort is projectionComponentPasses.
+    diagnostics.projectionPasses = projectionMaxPasses;
+    diagnostics.projectionMaxPasses = projectionMaxPasses;
+    diagnostics.projectionComponentPasses = projectionComponentPasses;
     diagnostics.projectionPairVisits = projectionPairVisits;
+    diagnostics.projectionComponents = projectionComponents;
     diagnostics.violatingIdsAfterProjection = violatedIds.size;
     diagnostics.fallbackComponents = [];
   }
