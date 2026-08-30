@@ -7,8 +7,7 @@ import {
   DEFAULT_WORK_BUDGET,
 } from './public/set-region-layout.js';
 import { decomposeArrangement } from './public/set-region-arrangement.js';
-// Retained as a reference oracle only. Production no longer routes through it.
-import { decomposeRegions, regionArea } from './public/set-region-model.js';
+import { regionArea } from './public/set-region-model.js';
 
 const square = (x, y, size = 10) => [
   { x, y }, { x: x + size, y }, { x: x + size, y: y + size }, { x, y: y + size },
@@ -151,7 +150,8 @@ test('an eleventh disjoint set does not make the existing regions disappear', ()
     outline: square(index * 100, 0),
   }));
   const regions = layout.update(sets);
-  // decomposeRegions bails to [] above ten sets; nothing may reach it in bulk.
+  // The old mask enumerator returned [] above ten sets, so an eleventh made
+  // every region vanish. Nothing enumerates masks any more.
   assert.equal(regions.length, 11);
   assert.ok(regions.every((region) => region.polygons.length === 1));
 });
@@ -217,24 +217,31 @@ test('the default budget is the calibrated vertex ceiling', () => {
   assert.deepEqual(DEFAULT_WORK_BUDGET, { vertices: 210_000 });
 });
 
-/** Semantic equivalence against the legacy enumerator, not byte equivalence:
- * two correct planar partitions may cut the same region into different convex
- * fragments, and demanding identical polygons would pin the arrangement to the
- * mask enumerator's incidental fragment boundaries. Identity and measure are
- * what the renderer and the hue solver actually depend on. */
-test('exact regions stay semantically equivalent to direct decomposition', () => {
+/** The layout is composition over the arrangement, so what it has to preserve
+ * is that routing through components does not alter the regions a component
+ * would produce on its own. Expected memberships are fixed here rather than
+ * compared against a second engine. */
+const SINGLE_COMPONENT_MEMBERSHIPS = {
+  2: ['A', 'A|B', 'B'],
+  3: ['A', 'A|B', 'A|B|C', 'A|C', 'B', 'B|C', 'C'],
+  4: ['A', 'A|B', 'A|B|C', 'A|B|C|D', 'A|C', 'B', 'B|C', 'B|C|D', 'B|D', 'C', 'C|D', 'D'],
+};
+
+test('routing through components does not change a component own regions', () => {
   for (const count of [2, 3, 4]) {
     const sets = Array.from({ length: count }, (_, index) => ({
       id: 'ABCD'[index],
       outline: circle(index * 60, (index % 2) * 40, 100),
     }));
     const viaLayout = createRegionLayout().update(sets);
-    const direct = decomposeRegions(sets);
     assert.deepEqual(
-      viaLayout.map(({ id, setIds }) => ({ id, setIds })),
-      direct.map(({ id, setIds }) => ({ id, setIds })),
+      viaLayout.map(({ id }) => id),
+      SINGLE_COMPONENT_MEMBERSHIPS[count],
       `region identity changed for ${count} sets`,
     );
+    // These sets form one component, so the layout must hand back exactly what
+    // the arrangement produces for them, region for region.
+    const direct = decomposeArrangement(sets).regions;
     for (const region of viaLayout) {
       const match = direct.find(({ id }) => id === region.id);
       assert.ok(

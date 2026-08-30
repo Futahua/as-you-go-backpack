@@ -128,44 +128,6 @@ export function subtractConvex(polygon, outline) {
   return outsidePieces;
 }
 
-function regionId(setIds) {
-  return setIds.slice().sort().join('|');
-}
-
-/** Decomposes convex presentation outlines into one region per non-empty
- * membership mask. Difference regions can have several convex sub-polygons;
- * they remain one region object and therefore receive one hue and one SVG path. */
-export function decomposeRegions(inputSets) {
-  const sets = (inputSets ?? [])
-    .map((set) => ({ id: String(set.id), outline: normalizePolygon(set.outline) }))
-    .filter((set) => set.outline.length >= 3)
-    .sort((a, b) => a.id.localeCompare(b.id));
-  if (sets.length === 0) return [];
-  if (sets.length > 10) return [];
-
-  const regions = [];
-  const combinations = 2 ** sets.length;
-  for (let mask = 1; mask < combinations; mask += 1) {
-    const included = sets.filter((_, index) => (mask & (1 << index)) !== 0);
-    const excluded = sets.filter((_, index) => (mask & (1 << index)) === 0);
-    let base = included[0].outline.map((point) => ({ ...point }));
-    for (const set of included.slice(1)) base = clipToSet(base, set.outline, true);
-    if (base.length < 3) continue;
-
-    let pieces = [base];
-    for (const set of excluded) {
-      const nextPieces = [];
-      for (const piece of pieces) nextPieces.push(...subtractConvex(piece, set.outline));
-      pieces = nextPieces;
-      if (pieces.length === 0) break;
-    }
-    if (pieces.length === 0) continue;
-    const setIds = included.map((set) => set.id).sort();
-    regions.push({ id: regionId(setIds), setIds, polygons: pieces });
-  }
-  return regions.sort((a, b) => a.id.localeCompare(b.id));
-}
-
 export function regionArea(region) {
   return (region?.polygons ?? []).reduce((total, polygon) => total + Math.abs(signedArea(polygon)), 0);
 }

@@ -6,7 +6,6 @@ import {
   UNLIMITED_BUDGET,
 } from './public/set-region-arrangement.js';
 import {
-  decomposeRegions,
   intersectConvex,
   normalizePolygon,
   regionArea,
@@ -151,10 +150,15 @@ function assertPartitionInvariants(regions, label) {
   }
 }
 
+/** Expected values are fixed and independently checkable, not borrowed from a
+ * second implementation. Two 10x10 squares offset by 5 cover 150; a 20x20 with
+ * a 10x10 inside it covers 400; a disjoint pair covers 200. */
 const FIXTURES = [
   {
     name: 'two overlapping squares',
     sets: [{ id: 'A', outline: square(0, 0) }, { id: 'B', outline: square(5, 0) }],
+    ids: ['A', 'A|B', 'B'],
+    unionArea: 150,
   },
   {
     name: 'three overlapping squares with a common centre',
@@ -163,10 +167,14 @@ const FIXTURES = [
       { id: 'B', outline: square(5, 0) },
       { id: 'C', outline: square(2, 4) },
     ],
+    ids: ['A', 'A|B', 'A|B|C', 'A|C', 'B', 'B|C', 'C'],
+    unionArea: 190,
   },
   {
     name: 'nested squares',
     sets: [{ id: 'A', outline: square(0, 0, 20) }, { id: 'B', outline: square(5, 5, 10) }],
+    ids: ['A', 'A|B'],
+    unionArea: 400,
   },
   {
     name: 'four overlapping production-resolution outlines',
@@ -174,82 +182,69 @@ const FIXTURES = [
       id,
       outline: circle(index * 60, (index % 2) * 40, 100),
     })),
+    ids: ['A', 'A|B', 'A|B|C', 'A|B|C|D', 'A|C', 'B', 'B|C', 'B|C|D', 'B|D', 'C', 'C|D', 'D'],
+    unionArea: 72641.9416,
   },
   {
     name: 'disjoint pair',
     sets: [{ id: 'A', outline: square(0, 0) }, { id: 'B', outline: square(100, 0) }],
+    ids: ['A', 'B'],
+    unionArea: 200,
   },
 ];
 
-test('arrangement and legacy enumerator agree on region identity and measure', () => {
-  for (const { name, sets } of FIXTURES) {
+test('known fixtures produce their expected memberships', () => {
+  for (const { name, sets, ids } of FIXTURES) {
     const arrangement = decomposeArrangement(sets);
     assert.equal(arrangement.status, 'exact', name);
-    const oracle = decomposeRegions(sets);
-
-    assert.deepEqual(
-      arrangement.regions.map(({ id, setIds }) => ({ id, setIds })),
-      oracle.map(({ id, setIds }) => ({ id, setIds })),
-      `${name}: membership identity diverged`,
-    );
-
+    assert.deepEqual(arrangement.regions.map(({ id }) => id), ids, `${name}: memberships changed`);
+    // setIds must agree with the id it is keyed by, or the hue solver and the
+    // renderer would disagree about what a region belongs to.
     for (const region of arrangement.regions) {
-      const match = oracle.find(({ id }) => id === region.id);
-      assert.ok(
-        Math.abs(regionArea(region) - regionArea(match)) < EPSILON,
-        `${name}: ${region.id} area ${regionArea(region)} vs ${regionArea(match)}`,
-      );
-      const fromArrangement = regionCentroid(region);
-      const fromOracle = regionCentroid(match);
-      assert.ok(
-        Math.abs(fromArrangement.x - fromOracle.x) < 1e-4
-        && Math.abs(fromArrangement.y - fromOracle.y) < 1e-4,
-        `${name}: ${region.id} centroid diverged`,
-      );
+      assert.equal(region.setIds.join('|'), region.id, `${name}: ${region.id} setIds disagree with its id`);
     }
   }
 });
 
-test('both implementations produce a true partition', () => {
+test('the arrangement produces a true partition', () => {
   for (const { name, sets } of FIXTURES) {
-    assertPartitionInvariants(decomposeArrangement(sets).regions, `arrangement/${name}`);
-    assertPartitionInvariants(decomposeRegions(sets), `oracle/${name}`);
+    assertPartitionInvariants(decomposeArrangement(sets).regions, name);
   }
 });
 
-test('interior points classify into the same membership under both, and under the sources', () => {
+/** The strongest check here, and the one that needs no second implementation:
+ * every interior sample is classified straight from the source outlines, and
+ * the region covering that point must carry exactly that membership. */
+test('interior points classify to the membership their source outlines imply', () => {
   for (const { name, sets } of FIXTURES) {
-    const arrangement = decomposeArrangement(sets).regions;
-    const oracle = decomposeRegions(sets);
+    const regions = decomposeArrangement(sets).regions;
     let covered = 0;
     for (const point of samplePoints(sets)) {
       const expected = trueMask(sets, point);
-      const fromArrangement = regionHolding(arrangement, point);
-      const fromOracle = regionHolding(oracle, point);
+      const holding = regionHolding(regions, point);
       if (expected === '') {
-        // Outside every set: neither implementation may claim it.
-        assert.equal(fromArrangement.length, 0, `${name}: arrangement covered empty space`);
-        assert.equal(fromOracle.length, 0, `${name}: oracle covered empty space`);
+        // Outside every set: nothing may claim it.
+        assert.equal(holding.length, 0, `${name}: a region covered empty space`);
         continue;
       }
       covered += 1;
-      assert.equal(fromArrangement.length, 1, `${name}: ${expected} covered ${fromArrangement.length} times by arrangement`);
-      assert.equal(fromOracle.length, 1, `${name}: ${expected} covered ${fromOracle.length} times by oracle`);
-      assert.equal(fromArrangement[0].id, expected, `${name}: arrangement misclassified a point`);
-      assert.equal(fromOracle[0].id, expected, `${name}: oracle misclassified a point`);
+      assert.equal(holding.length, 1, `${name}: ${expected} covered ${holding.length} times`);
+      assert.equal(holding[0].id, expected, `${name}: point misclassified as ${holding[0].id}`);
     }
     assert.ok(covered > 20, `${name}: only ${covered} interior samples, fixture is not exercising much`);
   }
 });
 
 test('region areas sum to the union of the source sets', () => {
-  for (const { name, sets } of FIXTURES) {
-    const arrangement = decomposeArrangement(sets).regions;
-    const total = arrangement.reduce((sum, region) => sum + regionArea(region), 0);
-    const oracleTotal = decomposeRegions(sets).reduce((sum, region) => sum + regionArea(region), 0);
-    assert.ok(Math.abs(total - oracleTotal) < EPSILON, `${name}: union area diverged`);
-    // No region may exceed the union, and the union may not exceed the sum of
-    // the parts — together these pin the total from both sides.
+  for (const { name, sets, unionArea } of FIXTURES) {
+    const regions = decomposeArrangement(sets).regions;
+    const total = regions.reduce((sum, region) => sum + regionArea(region), 0);
+    assert.ok(
+      Math.abs(total - unionArea) < 1e-3,
+      `${name}: union area ${total} but expected ${unionArea}`,
+    );
+    // Independent of the fixed figure above: the union can never exceed the sum
+    // of the parts, nor be smaller than the largest single set.
     const sumOfSets = sets.reduce((sum, set) => sum + polygonArea(normalizePolygon(set.outline)), 0);
     assert.ok(total <= sumOfSets + EPSILON, `${name}: union ${total} exceeds sum of sets ${sumOfSets}`);
     const largest = Math.max(...sets.map((set) => polygonArea(normalizePolygon(set.outline))));
@@ -274,18 +269,19 @@ test('fuzzed convex outlines keep every partition invariant', () => {
     assert.equal(result.status, 'exact', `seed ${seed}`);
     assertPartitionInvariants(result.regions, `fuzz seed ${seed}`);
 
-    const oracle = decomposeRegions(sets);
-    assert.deepEqual(
-      result.regions.map(({ id }) => id),
-      oracle.map(({ id }) => id),
-      `seed ${seed}: membership identity diverged`,
-    );
-    for (const region of result.regions) {
-      const match = oracle.find(({ id }) => id === region.id);
-      assert.ok(
-        Math.abs(regionArea(region) - regionArea(match)) < 1e-4,
-        `seed ${seed}: ${region.id} area diverged`,
-      );
+    // Classified against the source outlines rather than a second engine, so
+    // this stays a real check now that the mask enumerator is gone. A coarser
+    // step than the fixture sweep: these shapes span ~200 units and there are
+    // forty of them.
+    for (const point of samplePoints(sets, 11.3)) {
+      const expected = trueMask(sets, point);
+      const holding = regionHolding(result.regions, point);
+      if (expected === '') {
+        assert.equal(holding.length, 0, `seed ${seed}: a region covered empty space`);
+        continue;
+      }
+      assert.equal(holding.length, 1, `seed ${seed}: ${expected} covered ${holding.length} times`);
+      assert.equal(holding[0].id, expected, `seed ${seed}: point misclassified as ${holding[0].id}`);
     }
 
     const memberships = result.regions.map((region) => region.setIds.length);

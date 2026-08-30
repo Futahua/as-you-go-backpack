@@ -16,7 +16,8 @@
 </figure>
 <script type="module">
   import { assignSpatialFolderHues } from './public/graph-model-20260730b.js';
-  import { decomposeRegions, regionCentroid, regionPath } from './public/set-region-model.js';
+  import { regionCentroid, regionPath } from './public/set-region-model.js';
+  import { decomposeArrangement } from './public/set-region-arrangement.js';
 
   const svg = document.querySelector('#fixture');
   const NS = 'http://www.w3.org/2000/svg';
@@ -32,7 +33,7 @@
       { id: 'E', outline: [{x:545,y:235},{x:745,y:235},{x:745,y:435},{x:545,y:435}] },
     ],
   ];
-  const regions = examples.flatMap((sets) => decomposeRegions(sets));
+  const regions = examples.flatMap((sets) => decomposeArrangement(sets).regions ?? []);
   const nodes = regions.map((region) => {
     const point = regionCentroid(region);
     return { id: `region:${region.id}`, x: point.x, y: point.y };
