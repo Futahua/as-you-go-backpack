@@ -30,6 +30,8 @@ import {
   graphContextId,
   getGraphPosition,
   setGraphPositions,
+  getGraphRestPosition,
+  setGraphRestPositions,
   removeGraphPositions,
   setToolbarPosition,
   getToolbarPosition,
@@ -2374,6 +2376,7 @@ function createGraphController() {
   const edges = new Map();
   const originEdges = new Map();
   let onDragCancel = null;
+  let onRestPositions = null;
   let simulation = null;
   let zoomBehavior = null;
   let viewportSelection = null;
@@ -3161,7 +3164,13 @@ function createGraphController() {
       // appeared stuck off screen. Ancestors are derived from the path, not
       // creator-placed, so they always seed fresh and float.
       const saved = vi.ancestor ? null : getGraphPosition(state, ctxId, vi.id);
-      const seed = seedPosition(vi.id, parent, index, siblings.length, originX, originY);
+      // Where this node last came to rest, if it is not pinned. Applied to x/y
+      // only — never to fx/fy — so the node still floats and every force still
+      // moves it. Without this an unpinned node seeds onto a generic ring and
+      // the solver settles it somewhere new on every open, which rearranges a
+      // workspace the creator had learned the shape of.
+      const remembered = (saved || vi.ancestor) ? null : getGraphRestPosition(state, ctxId, vi.id);
+      const seed = remembered ?? seedPosition(vi.id, parent, index, siblings.length, originX, originY);
       node = {
         id: vi.id,
         candidate,
@@ -3618,9 +3627,53 @@ function createGraphController() {
       }))
       .alphaDecay(0.028)
       .velocityDecay(0.32);
-    simulation.on('tick', scheduleRender);
+    simulation.on('tick', () => {
+      scheduleRender();
+      scheduleRestPositionSave();
+    });
   }
 
+  // Remembering where unpinned nodes rest. Throttled, NOT debounced: the
+  // simulation never truly stops ticking — sets keep nudging each other — so a
+  // debounce that waits for quiet waits forever and nothing is ever written.
+  // This fires at most once an interval while the layout is live, which keeps
+  // the durable snapshot from being rewritten every frame while still recording
+  // where things ended up.
+  let restSaveTimer = null;
+  const lastSavedRest = new Map();
+  const REST_SAVE_INTERVAL_MS = 1500;
+  // Below this a node has not meaningfully moved, and rewriting it would churn
+  // the snapshot over sub-pixel drift.
+  const REST_SAVE_MIN_SHIFT = 4;
+
+  function scheduleRestPositionSave() {
+    if (!onRestPositions || restSaveTimer) return;
+    restSaveTimer = setTimeout(() => {
+      restSaveTimer = null;
+      saveRestPositions();
+    }, REST_SAVE_INTERVAL_MS);
+  }
+
+  function saveRestPositions() {
+    if (!onRestPositions) return;
+    const updates = {};
+    let changed = false;
+    for (const node of nodes.values()) {
+      // Pinned nodes already persist through graphPositions; ring nodes and
+      // ancestors are derived rather than placed, and a node on its way out
+      // should not leave a resting place behind.
+      if (node.exiting || node.ring || node.fx != null) continue;
+      if (isTrailNode(node.id)) continue;
+      if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue;
+      const previous = lastSavedRest.get(node.id);
+      if (previous && Math.hypot(node.x - previous.x, node.y - previous.y) < REST_SAVE_MIN_SHIFT) continue;
+      updates[node.id] = { x: node.x, y: node.y };
+      changed = true;
+    }
+    if (!changed) return;
+    for (const [id, pos] of Object.entries(updates)) lastSavedRest.set(id, pos);
+    onRestPositions(updates);
+  }
   function syncSimulation() {
     ensureSimulation();
     syncSetRings();
@@ -3818,6 +3871,8 @@ function createGraphController() {
     // rather than by whatever happens to be on screen.
     setIdsContaining: (id) => setIdsContaining(id),
     _setOnDragCancel(callback) { onDragCancel = callback; },
+    _setOnRestPositions(callback) { onRestPositions = callback; },
+    _saveRestPositionsNow() { saveRestPositions(); },
     _setSimulationDecay() {
       if (simulation) {
         simulation.alphaTarget(0);
@@ -4816,6 +4871,16 @@ const pointer = createPointerController({
   },
 });
 graph._setOnDragCancel(() => pointer.cancelDrag());
+// Where unpinned nodes came to rest. Written through `state` rather than
+// through the store alone: saveWorkspaceView rebuilds the view from this
+// variable, so an update that only reached the store would be overwritten by
+// the next save before it ever hit disk.
+graph._setOnRestPositions((positions) => {
+  state = store.replace(
+    setGraphRestPositions(state, graphContextId(session.currentId, session.binMode), positions),
+  );
+  saveWorkspaceView();
+});
 
 const editorDialog = createEditorDialog({
   elements,
