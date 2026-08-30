@@ -408,7 +408,7 @@ function referenceGlobalProjection(nearPairs, colors, tieBreak) {
       const delta = signedAngleReference(hueA, hueB);
       const separation = Math.abs(delta);
       if (separation < MIN_SEPARATION_REFERENCE) {
-        const direction = separation > 1e-9 ? Math.sign(delta) : tieBreak(a, b);
+        const direction = separation > REFERENCE_PROJECTION_EPSILON ? Math.sign(delta) : tieBreak(a, b);
         const correction = (MIN_SEPARATION_REFERENCE - separation) / 2;
         colors.set(a.id, wrapDegReference(hueA - direction * correction));
         colors.set(b.id, wrapDegReference(hueB + direction * correction));
@@ -502,7 +502,11 @@ test('per-component projection matches the old global projector exactly', () => 
   assert.equal(diagnostics.fallbackComponents[0].size, 12);
 });
 
-test('component scheduling leaves hues and hueState identical across moving frames', () => {
+// NOT an equivalence test: this drives production against production, so it
+// establishes determinism and finiteness across persistent moving frames and
+// nothing more. The old-vs-new discriminator is
+// assertProjectionEquivalent below.
+test('the solver is deterministic and finite across persistent moving frames', () => {
   // Equivalence has to survive persistent state, not just one call, so both
   // schedulers are driven over the same drifting scene and compared each frame.
   const nodes = threeComponentScene();
@@ -594,9 +598,20 @@ function assertProjectionEquivalent(nodes, seedHue, label) {
   return { referencePasses, actual, pairs };
 }
 
-/** tieBreakDirection is module-private, and this mirrors it. If the two ever
- * disagree the equivalence tests fail loudly rather than silently weakening. */
-const referenceTieBreak = (a, b) => (a.id < b.id ? 1 : -1);
+/** tieBreakDirection is module-private, and this mirrors it exactly: vertical
+ * offset first, then horizontal, and only then id. An earlier version of this
+ * reference compared ids alone. The equivalence tests still passed, because
+ * their seed hues never landed on the exact-equality branch that consults it —
+ * a coverage gap rather than a scheduler bug, now covered by the fixture below
+ * where spatial direction and id order deliberately disagree. */
+const REFERENCE_PROJECTION_EPSILON = 1e-6;
+const referenceTieBreak = (a, b) => {
+  const dy = b.y - a.y;
+  if (Math.abs(dy) > REFERENCE_PROJECTION_EPSILON) return Math.sign(dy);
+  const dx = b.x - a.x;
+  if (Math.abs(dx) > REFERENCE_PROJECTION_EPSILON) return Math.sign(dx);
+  return a.id < b.id ? 1 : -1;
+};
 
 test('the component scheduler and the global projector reach identical hues', () => {
   const nodes = threeComponentScene();
@@ -664,4 +679,32 @@ test('the schedulers agree when every component is already settled', () => {
     actual.components.every((component) => component.converged && component.passes === 1),
     'a settled component should cost exactly one confirming pass',
   );
+});
+
+
+test('the schedulers agree when the tie-break decides, against id order', () => {
+  // Identical starting hues force separation to zero, which is the only path
+  // that consults tieBreakDirection. Spatial order and id order are made to
+  // disagree: dy puts set:aaa below set:bbb, while id order puts it first. A
+  // reference that compared ids alone would pick the opposite direction.
+  const nodes = [
+    { id: 'set:aaa', x: 0, y: 100 },
+    { id: 'set:bbb', x: 0, y: 0 },
+  ];
+  const { actual } = assertProjectionEquivalent(nodes, () => 123.75, 'vertical tie-break');
+  assert.equal(actual.components.length, 1, 'the pair should be one component');
+
+  // And horizontally, where dy ties and dx decides.
+  const horizontal = [
+    { id: 'set:aaa', x: 100, y: 0 },
+    { id: 'set:bbb', x: 0, y: 0 },
+  ];
+  assertProjectionEquivalent(horizontal, () => 200, 'horizontal tie-break');
+
+  // And coincident, where only id can decide.
+  const coincident = [
+    { id: 'set:aaa', x: 5, y: 5 },
+    { id: 'set:bbb', x: 5, y: 5 },
+  ];
+  assertProjectionEquivalent(coincident, () => 10, 'id tie-break');
 });

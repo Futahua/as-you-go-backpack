@@ -37,6 +37,8 @@
 import { forceSetSeparation } from './public/set-gravity-model.js';
 import { assignSpatialFolderHues, FOLDER_DISTANCE } from './public/graph-model-20260730b.js';
 import { reconcileRing } from './public/set-ring-model.js';
+import { findNearPairs, groupPairsByComponent } from './public/graph-model-20260730b.js';
+import { adjacencyFromPairs, classifyColourability } from './public/hue-colourability.js';
 import { createRegionLayout } from './public/set-region-layout.js';
 import { regionCentroid } from './public/set-region-model.js';
 
@@ -270,11 +272,21 @@ function measure(count, regime, seed) {
   const diagnostics = {};
   assignSpatialFolderHues(spatial, settledColors, { cx: 0, cy: 0 }, settledState, diagnostics);
 
+  // Certificate coverage over the same components projection just worked on.
+  const classification = { feasible: 0, infeasible: 0, unknown: 0, byCertificate: {}, work: 0 };
+  for (const componentPairs of groupPairsByComponent(findNearPairs(spatial))) {
+    const verdict = classifyColourability(adjacencyFromPairs(componentPairs));
+    classification[verdict.verdict] += 1;
+    classification.byCertificate[verdict.certificate] = (classification.byCertificate[verdict.certificate] ?? 0) + 1;
+    classification.work += verdict.work;
+  }
+
   return {
     count,
     regime,
     seed,
     diagnostics,
+    classification,
     ringTotal: scene.ringCounts.reduce((sum, value) => sum + value, 0),
     ringMedian: median(scene.ringCounts),
     ringMax: Math.max(...scene.ringCounts),
@@ -358,6 +370,30 @@ for (const row of rows) {
     '|',
     pad((d.fallbackComponents ?? []).length, 7),
     pad(slots.join('/') || '-', 5),
+  );
+}
+
+console.log();
+console.log('H3A colourability certificates per scene (measurement only, no bypass):');
+console.log('sets regime      comps | feasible infeasible unknown | certificates                | work');
+for (const row of rows) {
+  const c = row.classification;
+  const comps = c.feasible + c.infeasible + c.unknown;
+  const certs = Object.entries(c.byCertificate)
+    .map(([name, n]) => name + ':' + n)
+    .join(' ');
+  console.log(
+    pad(row.count, 4),
+    row.regime.padEnd(10),
+    pad(comps, 6),
+    '|',
+    pad(c.feasible, 8),
+    pad(c.infeasible, 10),
+    pad(c.unknown, 7),
+    '|',
+    (certs || '-').padEnd(27),
+    '|',
+    pad(c.work, 8),
   );
 }
 
