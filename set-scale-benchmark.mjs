@@ -36,7 +36,9 @@
  */
 import { forceSetSeparation } from './public/set-gravity-model.js';
 import { assignSpatialFolderHues, FOLDER_DISTANCE } from './public/graph-model-20260730b.js';
-import { reconcileRing } from './public/set-ring-model.js';
+import {
+  reconcileRing, ringHull, resampleHull, memberFloorHull, floorOutline, easeOutline,
+} from './public/set-ring-model.js';
 import { findNearPairs, groupPairsByComponent } from './public/graph-model-20260730b.js';
 import { adjacencyFromPairs, classifyColourability } from './public/hue-colourability.js';
 import { createRegionLayout } from './public/set-region-layout.js';
@@ -150,9 +152,22 @@ function buildScene(count, regime, seed) {
     });
     ringCounts.push(ring.nodes.length);
     nodes.push(...ring.nodes);
-    // The drawn outline is the hull of those ring nodes, which is what the hull
-    // pass separates and what the region layout decomposes.
-    hulls.set(setId, ring.nodes.map(({ x, y }) => ({ x, y })));
+    // The outline production actually hands forceSetSeparation and the region
+    // layout, built through the same chain drawSetRings uses:
+    //
+    //   ringHull -> resampleHull -> floorOutline(memberFloorHull) -> easeOutline
+    //
+    // An earlier version of this harness passed the raw ring polygon instead.
+    // That skips the member floor, which widens the outline to enclose the icons
+    // themselves, and skips the resample that fixes the vertex count — so both
+    // the shape and its size were wrong, and the hull pass was measured against
+    // geometry production never produces.
+    const floor = memberFloorHull(members, RING_PADDING);
+    const target = floorOutline(resampleHull(ringHull(ring.nodes)), floor);
+    // Settled: easing from nothing returns the target, and easing again leaves a
+    // converged outline where it is. Production passes the eased result, never
+    // the target directly, so this goes through the same call.
+    hulls.set(setId, easeOutline(easeOutline(null, target), target));
   });
 
   return { nodes, membership, hulls, setIds, centres, ringCounts };
