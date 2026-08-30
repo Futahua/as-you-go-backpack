@@ -43,14 +43,38 @@ npm test
 No build step, no framework — plain ES modules served as static files inside
 the Papers host.
 
-**Papers is at** `D:\Letters\MatTroiSeConMoc\PAPERS 3\Papers-3\release\win-unpacked\Papers.exe`.
-It reads these files from disk, so edits are live.
+**Do not write the Papers path down.** It moves. In one working week it was
+`PAPERS 3\Papers-3\release\win-unpacked`, then `Products\Papers\Runtime`, then
+`Products\Papers\Source\release\win-unpacked`, and the Start Menu shortcut
+`Papers.exe.lnk` was left pointing at a build from three weeks earlier. Every
+pinned path in this file has gone stale at least once, and a stale path is
+expensive in a specific way: the wrong build reads the same source files but
+serves an older bundle, so the app looks fine and the fix looks broken.
 
-The Start Menu shortcut `Papers.exe.lnk` is **stale**: it still points at
-`release-eyetest-019r1`, built 11 Aug 2026. Two dozen `release-*` directories
-sit side by side, so check the build date before trusting one. Launching the
-wrong build looks exactly like a fix that did not work — this session lost a
-first attempt to it.
+Find it instead. If Papers is running, the running build is the one that matters:
+
+```powershell
+Get-Process -Name papers | Select-Object Id, Path, MainWindowTitle
+```
+
+Several processes share one binary — Electron's helpers — so any non-empty
+`Path` is the answer, and the one with `MainWindowTitle` is the visible window.
+If it is not running, take the newest build rather than a remembered directory:
+
+```powershell
+Get-ChildItem <papers-source-root> -Recurse -Filter Papers.exe |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 3 FullName, LastWriteTime
+```
+
+Check the date before trusting the result: many `release-*` directories sit side
+by side and only one of them is current.
+
+Papers reads the backpack's files from disk, so edits are live once reloaded.
+The backpack itself may also be reached through a compatibility junction rather
+than its real location — `MatTroiSeConMoc\Papers` currently points at
+`MatTroiSeConMoc\Products\Papers\Runtime` — so two paths can be the same
+directory. `Get-Item <path> -Force` shows `ReparsePoint` and its target when
+that is what you are looking at.
 
 **Use Ctrl+Shift+R, not Ctrl+R.** Papers serves the backpack through a custom
 scheme with no cache headers, and Chromium holds the ES modules. A plain reload

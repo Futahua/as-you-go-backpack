@@ -849,3 +849,175 @@ test('the adverse A/B rectangles settle with the A-only item still inside A', ()
   assert.ok(!inB, `and outside B at (${item.x.toFixed(1)},${item.y.toFixed(1)})`);
   assert.ok(item.x < 95, `it moved out of the lens (x ${item.x.toFixed(1)})`);
 });
+
+// ===========================================================================
+// Relation discovery. Which sets share a member used to be rediscovered by
+// asking every pair of sets whether they intersect; it is now derived from each
+// member's own membership list. These pin the behaviour that equivalence rests
+// on, since the two formulations must agree exactly or sets start separating
+// that should not.
+
+/** Module-scope twin of the helper the older separation test keeps local. */
+const relationRingNode = (id, setId, x, y) => ({
+  id, setId, ring: true, ringIndex: 0, x, y, vx: 0, vy: 0,
+});
+/** Drives one tick and reports whether the two rings were pushed apart. Related
+ * sets are skipped by the proximity pass, so movement is the observable proxy
+ * for "these were treated as unrelated". */
+function separated(setsOf, extraMembers = []) {
+  const a = relationRingNode('A:ring:0', 'A', 0, 0);
+  const b = relationRingNode('B:ring:0', 'B', 40, 0);
+  const force = forceSetSeparation({ setsOf });
+  force.initialize([a, b, ...extraMembers]);
+  force(1);
+  return (a.vx ?? 0) !== 0 || (b.vx ?? 0) !== 0;
+}
+
+test('sets with no shared member are unrelated and separate', () => {
+  const members = [
+    { id: 'ma', x: -100, y: 0, vx: 0, vy: 0 },
+    { id: 'mb', x: 140, y: 0, vx: 0, vy: 0 },
+  ];
+  const setsOf = (id) => (id === 'ma' ? ['A'] : id === 'mb' ? ['B'] : []);
+  assert.equal(separated(setsOf, members), true);
+});
+
+test('one directly shared member relates both sets', () => {
+  const shared = [{ id: 'sh', x: 20, y: 0, vx: 0, vy: 0 }];
+  assert.equal(separated(() => ['A', 'B'], shared), false);
+});
+
+test('membership inherited onto one member relates its sets', () => {
+  // The member itself is what names both sets; nothing asks the sets directly.
+  const members = [
+    { id: 'ma', x: -100, y: 0, vx: 0, vy: 0 },
+    { id: 'inherited', x: 20, y: 0, vx: 0, vy: 0 },
+  ];
+  const setsOf = (id) => (id === 'inherited' ? ['A', 'B'] : id === 'ma' ? ['A'] : []);
+  assert.equal(separated(setsOf, members), false);
+});
+
+test('a member in three sets relates every pair among them', () => {
+  const nodes = [
+    relationRingNode('A:ring:0', 'A', 0, 0),
+    relationRingNode('B:ring:0', 'B', 40, 0),
+    relationRingNode('C:ring:0', 'C', 80, 0),
+    { id: 'triple', x: 40, y: 0, vx: 0, vy: 0 },
+  ];
+  const force = forceSetSeparation({ setsOf: (id) => (id === 'triple' ? ['A', 'B', 'C'] : []) });
+  force.initialize(nodes);
+  force(1);
+  // A-B, B-C and A-C must all be related, including the pair whose rings are
+  // furthest apart — a pairwise scan and a per-member derivation agree only if
+  // every pair is generated, not just adjacent ones.
+  for (const node of nodes) {
+    assert.equal(node.vx ?? 0, 0, `${node.id} was pushed despite sharing a member`);
+  }
+});
+
+test('duplicate entries from setsOf cannot change the outcome', () => {
+  const members = [
+    { id: 'ma', x: -100, y: 0, vx: 0, vy: 0 },
+    { id: 'mb', x: 140, y: 0, vx: 0, vy: 0 },
+  ];
+  // Characterisation, not mutation-sensitive: removing the dedupe in the source
+  // leaves this green, because a self-pair is unreachable (the proximity pass
+  // skips same-set nodes first) and repeated cross-pairs collapse in the Set.
+  // It is pinned so that a future change which DOES make duplicates observable
+  // has to break a test to do it.
+  const withDuplicates = (id) => (id === 'ma' ? ['A', 'A', 'A'] : id === 'mb' ? ['B', 'B'] : []);
+  assert.equal(separated(withDuplicates, members), true);
+
+  const sharedDuplicated = [{ id: 'sh', x: 20, y: 0, vx: 0, vy: 0 }];
+  assert.equal(separated(() => ['B', 'A', 'B', 'A'], sharedDuplicated), false);
+});
+
+test('a set whose members are all off-screen never enters a relation', () => {
+  // membersBySet only ever held sets with a visible member, and deriving
+  // relations from members preserves that: nothing invents a pair for a set
+  // that contributed no member this tick.
+  const members = [{ id: 'ma', x: -100, y: 0, vx: 0, vy: 0 }];
+  const setsOf = (id) => (id === 'ma' ? ['A'] : []);
+  assert.equal(separated(setsOf, members), true);
+});
+
+// ===========================================================================
+// The hull pass broad phase. Bounding boxes are sorted on minX and the inner
+// scan stops once a candidate starts to the right of where the current hull
+// ends. That is exact — boxes that miss cannot contain shapes that meet — but
+// it is only exact if the sweep actually reaches every pair whose boxes do meet,
+// including pairs that are not neighbours in x order.
+
+const sweepRing = (id, setId, x) => ({ id, setId, ring: true, ringIndex: 0, x, y: 0, vx: 0, vy: 0 });
+const boxHull = (left, right, top = 0, bottom = 400) => [
+  { x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom },
+];
+
+test('the sweep still finds an overlapping pair that is not adjacent in x order', () => {
+  // A spans 0..300 and C spans 200..500, so they overlap. B sits between them
+  // in minX order at 100..150 and overlaps neither. If the scan stopped at the
+  // first non-overlapping candidate instead of testing on to the end of A's
+  // extent, A and C would silently never be separated.
+  const hulls = {
+    A: boxHull(0, 300),
+    B: boxHull(100, 150, 900, 1000),
+    C: boxHull(200, 500),
+  };
+  const nodes = ['A', 'B', 'C'].map((setId, index) => sweepRing(`${setId}:ring:0`, setId, index * 5000));
+  const force = forceSetSeparation({
+    setsOf: () => [],
+    hullOf: (setId) => hulls[setId],
+  });
+  force.initialize(nodes);
+  force(1);
+
+  const [a, b, c] = nodes;
+  assert.ok(a.vx < 0, `A is pushed away from C (got ${a.vx})`);
+  assert.ok(c.vx > 0, `C is pushed away from A (got ${c.vx})`);
+  assert.equal(b.vx ?? 0, 0, 'B overlaps neither and is left alone');
+});
+
+test('the sweep separates hulls that meet only in x, and leaves ones that miss in y', () => {
+  // Same x extent for both pairs; only the y bounds differ. Characterisation,
+  // not mutation-sensitive: deleting the y rejection from the source leaves this
+  // green, because hullOverlap rejects those pairs too. The y test is a cost
+  // filter — it stops a tall column of unrelated sets paying for a full SAT
+  // sweep each — whereas the x break is what is load-bearing for correctness.
+  const meeting = {
+    A: boxHull(0, 100, 0, 100),
+    B: boxHull(80, 180, 0, 100),
+  };
+  const missing = {
+    A: boxHull(0, 100, 0, 100),
+    B: boxHull(80, 180, 900, 1000),
+  };
+  for (const [label, hulls, expectPush] of [['meeting', meeting, true], ['missing', missing, false]]) {
+    const nodes = ['A', 'B'].map((setId, index) => sweepRing(`${setId}:ring:0`, setId, index * 5000));
+    const force = forceSetSeparation({ setsOf: () => [], hullOf: (setId) => hulls[setId] });
+    force.initialize(nodes);
+    force(1);
+    const moved = (nodes[0].vx ?? 0) !== 0 || (nodes[1].vx ?? 0) !== 0;
+    assert.equal(moved, expectPush, `${label}: expected pushed=${expectPush}`);
+  }
+});
+
+test('the broad phase does not change which pairs separate across a spread of sets', () => {
+  // Eight sets in a row, each overlapping only its neighbour. Every adjacent
+  // pair must part and no distant pair may move, which is the property a broken
+  // break condition would violate in one direction or the other.
+  const hulls = {};
+  const ids = Array.from({ length: 8 }, (unused, index) => `S${index}`);
+  ids.forEach((id, index) => { hulls[id] = boxHull(index * 80, (index * 80) + 100); });
+  const nodes = ids.map((setId, index) => sweepRing(`${setId}:ring:0`, setId, index * 5000));
+  const force = forceSetSeparation({ setsOf: () => [], hullOf: (setId) => hulls[setId] });
+  force.initialize(nodes);
+  force(1);
+
+  // The end sets are pushed outward; everything moves, because every set has at
+  // least one overlapping neighbour.
+  assert.ok(nodes[0].vx < 0, 'the leftmost set is pushed left');
+  assert.ok(nodes[7].vx > 0, 'the rightmost set is pushed right');
+  for (const node of nodes) {
+    assert.ok(Math.abs(node.vy ?? 0) < 1e-9, `${node.id} leaked onto the orthogonal axis`);
+  }
+});

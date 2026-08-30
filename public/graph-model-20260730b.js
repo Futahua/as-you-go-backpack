@@ -1,3 +1,4 @@
+import { adjacencyFromPairs, classifyColourability } from './hue-colourability.js';
 import { itemsIn, binnedItems, itemsInBinnedGroup, ROOT_ID } from './workspace-model-20260730b.js';
 import { belongsToSet } from './sets-model.js';
 
@@ -418,7 +419,7 @@ export function allUniquePositions(nodes) {
 }
 
 /** A folder is "near" another when they are within this many canvas pixels. */
-const FOLDER_DISTANCE = 220;
+export const FOLDER_DISTANCE = 220;
 
 /** Hard minimum hue separation in degrees for nearby folders (8 slots at 45°).
  * 45° is a perceptual, not just numeric, step apart on the color wheel. */
@@ -432,6 +433,14 @@ const SET_BASE_MOVE = 0.03;
 
 /** Projection treats separations within this of MIN_HUE_SEPARATION as done. */
 const PROJECTION_EPSILON = 1e-6;
+/** Discrete hue slots available at the minimum separation. Colouring a
+ * proximity component with this many colours is exactly equivalent to placing
+ * its hues, which is why 8-colourability is the certificate. */
+const HUE_SLOTS = Math.floor(360 / MIN_HUE_SEPARATION);
+/** Deterministic work the classifier may spend per component. Generous next to
+ * the projection it can remove, and bounded so a pathological component costs a
+ * known amount and then reports unknown. */
+const COLOURABILITY_BUDGET = 20000;
 
 /** Max projection passes over the near-pair list per call. */
 const MAX_PROJECTION_PASSES = 100;
@@ -557,16 +566,27 @@ function greedySlotColoring(nodes, adjacency, k) {
  * component with the fewest slots that work (largest-first greedy) and pick
  * the slot rotation that best matches the folders' position bases, so the
  * effective minimum separation is 360 / slotCount rather than oscillating. */
-function slotColorComponent(componentIds, folderById, colors, center, hueState) {
+/** `knownAdjacency`, when given, is the component graph the caller already
+ * built from nearPairs. It describes the same edges this function would
+ * rediscover — both come from the same strict FOLDER_DISTANCE test over the
+ * same coordinates — so reusing it removes a second all-pairs distance scan
+ * without changing which vertices are adjacent. Sets are converted to sorted
+ * arrays because the greedy colouring reads length and includes. */
+function slotColorComponent(componentIds, folderById, colors, center, hueState, knownAdjacency = null) {
   const ids = [...componentIds].sort();
   const nodes = ids.map((id) => folderById.get(id));
-  const adjacency = new Map(ids.map((id) => [id, []]));
-  for (const [a, b] of [...ids.map((id, i) => ids.slice(i + 1).map((other) => [id, other]))].flat()) {
-    const fa = folderById.get(a);
-    const fb = folderById.get(b);
-    if (Math.hypot(fa.x - fb.x, fa.y - fb.y) < FOLDER_DISTANCE) {
-      adjacency.get(a).push(b);
-      adjacency.get(b).push(a);
+  let adjacency;
+  if (knownAdjacency) {
+    adjacency = new Map(ids.map((id) => [id, [...(knownAdjacency.get(id) ?? [])].sort()]));
+  } else {
+    adjacency = new Map(ids.map((id) => [id, []]));
+    for (const [a, b] of [...ids.map((id, i) => ids.slice(i + 1).map((other) => [id, other]))].flat()) {
+      const fa = folderById.get(a);
+      const fb = folderById.get(b);
+      if (Math.hypot(fa.x - fb.x, fa.y - fb.y) < FOLDER_DISTANCE) {
+        adjacency.get(a).push(b);
+        adjacency.get(b).push(a);
+      }
     }
   }
   let slotCount = 1;
@@ -601,6 +621,8 @@ function slotColorComponent(componentIds, folderById, colors, center, hueState) 
   for (const id of ids) {
     colors.set(id, wrapDeg(bestRotation + slots.get(id) * gap));
   }
+  // Reported for diagnostics only; no caller changes behaviour on it.
+  return slotCount;
 }
 
 /**
@@ -618,16 +640,274 @@ function slotColorComponent(componentIds, folderById, colors, center, hueState) 
  * map. `hueState` is session-only set state: callers keep it alive while a set
  * may disappear and reappear, and never persist it.
  */
-export function assignSpatialFolderHues(folders, colors, center, hueState = new Map()) {
+/** Every pair of entities closer than FOLDER_DISTANCE, in exactly the order an
+ * all-pairs double loop over the id-sorted list would emit them: ascending i,
+ * then ascending j within each i.
+ *
+ * The order is not incidental. Projection walks these pairs and mutates hues as
+ * it goes, so a different sequence over the same pairs converges to different
+ * colours. Any faster discovery has to reproduce the sequence element for
+ * element, which is what the equivalence tests check.
+ *
+ * A uniform grid of exactly FOLDER_DISTANCE is what makes the shortcut safe: if
+ * two entities are closer than that, neither their column nor their row indices
+ * can differ by more than one, so the nine cells around an entity contain every
+ * partner it could possibly have. The distance test itself is unchanged, so
+ * boundary cases decide exactly as they did.
+ *
+ * Discovery was 146,070 distance tests at 128 clustered sets, for 4,003 pairs.
+ */
+export function findNearPairs(list, distance = FOLDER_DISTANCE) {
+  const cells = new Map();
+  for (let index = 0; index < list.length; index += 1) {
+    const key = `${Math.floor(list[index].x / distance)},${Math.floor(list[index].y / distance)}`;
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(index);
+  }
+
+  const nearPairs = [];
+  const candidates = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const a = list[i];
+    const cx = Math.floor(a.x / distance);
+    const cy = Math.floor(a.y / distance);
+    candidates.length = 0;
+    for (let ox = -1; ox <= 1; ox += 1) {
+      for (let oy = -1; oy <= 1; oy += 1) {
+        const bucket = cells.get(`${cx + ox},${cy + oy}`);
+        if (!bucket) continue;
+        for (const j of bucket) if (j > i) candidates.push(j);
+      }
+    }
+    // Ascending j, so the emitted sequence matches the double loop exactly.
+    candidates.sort((left, right) => left - right);
+    for (const j of candidates) {
+      const b = list[j];
+      if (Math.hypot(a.x - b.x, a.y - b.y) < distance) nearPairs.push([a, b]);
+    }
+  }
+  return nearPairs;
+}
+/** Splits nearPairs into one list per connected proximity component, each list
+ * preserving its pairs relative order within the global sequence.
+ *
+ * Components come out in order of first appearance, which keeps diagnostics
+ * stable. The projections themselves commute, so emission order cannot affect
+ * the result. */
+export function groupPairsByComponent(nearPairs) {
+  const parent = new Map();
+  const find = (id) => {
+    let root = id;
+    while (parent.get(root) !== root) {
+      parent.set(root, parent.get(parent.get(root)));
+      root = parent.get(root);
+    }
+    return root;
+  };
+  for (const [a, b] of nearPairs) {
+    if (!parent.has(a.id)) parent.set(a.id, a.id);
+    if (!parent.has(b.id)) parent.set(b.id, b.id);
+    const rootA = find(a.id);
+    const rootB = find(b.id);
+    if (rootA !== rootB) parent.set(rootA, rootB);
+  }
+
+  const grouped = new Map();
+  for (const pair of nearPairs) {
+    const root = find(pair[0].id);
+    if (!grouped.has(root)) grouped.set(root, []);
+    grouped.get(root).push(pair);
+  }
+  return [...grouped.values()];
+}
+/** Runs the hard projection over near pairs, scheduled one proximity component
+ * at a time.
+ *
+ * Disconnected components share no constraint and mutate disjoint colour
+ * entries, so their operations commute and this is exactly equivalent to the
+ * single global sweep it replaces — not merely close. A component that finishes
+ * a pass with no correction can never be made dirty again, because nothing
+ * outside it touches its hues, so it is frozen rather than re-walked while some
+ * other component grinds on to the cap. Previously one pathological
+ * neighbourhood kept every settled neighbourhood in the loop with it.
+ *
+ * Two things carry the equivalence. Each component keeps its pairs as a
+ * SUBSEQUENCE of the global nearPairs order rather than an adjacency-derived
+ * one, because projection is order-sensitive. And pass parity belongs to each
+ * component own history starting at zero, not to a shared counter, so a
+ * component always sees the forward/reverse alternation it would have seen.
+ *
+ * Exported so the equivalence can be tested against a reference implementation
+ * of the old global projector; production calls it only from
+ * assignSpatialFolderHues. */
+export function projectNearPairs(nearPairs, colors, {
+  collectComponents = false,
+  classifyBudget = COLOURABILITY_BUDGET,
+} = {}) {
+  let pairVisits = 0;
+  let componentPasses = 0;
+  let maxPasses = 0;
+  let classificationWork = 0;
+  let classificationCliqueWork = 0;
+  let classificationSearchWork = 0;
+  let bypassedPairs = 0;
+  const components = [];
+  const certifiedInfeasible = [];
+  for (const componentPairs of groupPairsByComponent(nearPairs)) {
+    // Only a proof bypasses projection. A component that is merely slow, dense,
+    // large, or undecided within the budget takes the ordinary path: `unknown`
+    // is treated exactly as `feasible`, and pass count and density decide
+    // nothing. The stretched workload is the reason — every one of its
+    // components runs to the cap and every one of them is colourable.
+    const adjacency = adjacencyFromPairs(componentPairs);
+    const verdict = classifyColourability(adjacency, {
+      colours: HUE_SLOTS,
+      budget: classifyBudget,
+    });
+    classificationWork += verdict.work;
+    classificationCliqueWork += verdict.cliqueWork;
+    classificationSearchWork += verdict.searchWork;
+    if (verdict.verdict === 'infeasible') {
+      // Projection cannot succeed here, so it is not run. The component still
+      // reaches slotColorComponent, exactly as it would have after the cap: the
+      // slot colouring reads set targets from hueState and other bases from
+      // position, never from the hues projection would have produced.
+      certifiedInfeasible.push({ ids: [...adjacency.keys()], adjacency });
+      bypassedPairs += componentPairs.length;
+      if (collectComponents) {
+        const members = new Set();
+        for (const [a, b] of componentPairs) {
+          members.add(a.id);
+          members.add(b.id);
+        }
+        components.push({
+          size: members.size,
+          pairCount: componentPairs.length,
+          passes: 0,
+          pairVisits: 0,
+          converged: false,
+          bypassed: true,
+        });
+      }
+      continue;
+    }
+    let passes = 0;
+    let visits = 0;
+    let converged = false;
+    for (let pass = 0; pass < MAX_PROJECTION_PASSES; pass += 1) {
+      let violated = false;
+      const order = pass % 2 === 0 ? componentPairs : [...componentPairs].reverse();
+      passes += 1;
+      visits += order.length;
+      for (const [a, b] of order) {
+        const hueA = colors.get(a.id);
+        const hueB = colors.get(b.id);
+        if (typeof hueA !== 'number' || typeof hueB !== 'number') continue;
+        const delta = signedAngle(hueA, hueB);
+        const separation = Math.abs(delta);
+        if (separation < MIN_HUE_SEPARATION) {
+          const direction = separation > PROJECTION_EPSILON ? Math.sign(delta) : tieBreakDirection(a, b);
+          const correction = (MIN_HUE_SEPARATION - separation) / 2;
+          colors.set(a.id, wrapDeg(hueA - direction * correction));
+          colors.set(b.id, wrapDeg(hueB + direction * correction));
+          violated = true;
+        }
+      }
+      if (!violated) {
+        converged = true;
+        break;
+      }
+    }
+    pairVisits += visits;
+    componentPasses += passes;
+    if (passes > maxPasses) maxPasses = passes;
+    if (collectComponents) {
+      const members = new Set();
+      for (const [a, b] of componentPairs) {
+        members.add(a.id);
+        members.add(b.id);
+      }
+      components.push({
+        size: members.size,
+        pairCount: componentPairs.length,
+        passes,
+        pairVisits: visits,
+        converged,
+      });
+    }
+  }
+  return {
+    pairVisits,
+    componentPasses,
+    maxPasses,
+    components,
+    certifiedInfeasible,
+    classificationWork,
+    classificationCliqueWork,
+    classificationSearchWork,
+    bypassedPairs,
+  };
+}
+/** The optional fifth argument is a diagnostics sink. When absent — which is
+ * every production call — nothing extra is computed and the function behaves
+ * exactly as before. When present it is filled with the work the solver did,
+ * so a benchmark can tell pair discovery apart from projection effort without
+ * timing internals or guessing. */
+export function assignSpatialFolderHues(folders, colors, center, hueState = new Map(), diagnostics = null) {
   const list = [...folders].sort((a, b) => a.id.localeCompare(b.id));
   const folderById = new Map(list.map((folder) => [folder.id, folder]));
-  const nearPairs = [];
-  for (let i = 0; i < list.length; i += 1) {
-    for (let j = i + 1; j < list.length; j += 1) {
-      const a = list[i];
-      const b = list[j];
-      if (Math.hypot(a.x - b.x, a.y - b.y) < FOLDER_DISTANCE) nearPairs.push([a, b]);
+  const nearPairs = findNearPairs(list);
+
+  if (diagnostics) {
+    diagnostics.spatialEntities = list.length;
+    diagnostics.possiblePairs = (list.length * (list.length - 1)) / 2;
+    diagnostics.nearPairs = nearPairs.length;
+    // NONTRIVIAL components only: adjacency is built from nearPairs, so an
+    // entity with no near neighbour appears nowhere here. 128 separated sets
+    // report zero components rather than 256 singletons. Isolates are counted
+    // separately, since they are exactly the entities projection never touches.
+    const adjacency = new Map();
+    for (const [a, b] of nearPairs) {
+      if (!adjacency.has(a.id)) adjacency.set(a.id, []);
+      if (!adjacency.has(b.id)) adjacency.set(b.id, []);
+      adjacency.get(a.id).push(b.id);
+      adjacency.get(b.id).push(a.id);
     }
+    const seen = new Set();
+    const components = [];
+    for (const startId of adjacency.keys()) {
+      if (seen.has(startId)) continue;
+      const stack = [startId];
+      const members = [];
+      seen.add(startId);
+      while (stack.length > 0) {
+        const id = stack.pop();
+        members.push(id);
+        for (const neighbor of adjacency.get(id) ?? []) {
+          if (seen.has(neighbor)) continue;
+          seen.add(neighbor);
+          stack.push(neighbor);
+        }
+      }
+      const memberSet = new Set(members);
+      let edges = 0;
+      for (const [a, b] of nearPairs) if (memberSet.has(a.id) && memberSet.has(b.id)) edges += 1;
+      const complete = (members.length * (members.length - 1)) / 2;
+      components.push({
+        size: members.length,
+        edges,
+        density: complete > 0 ? edges / complete : 1,
+        // Narrowly truthful: a complete graph larger than the number of 45
+        // degree slots cannot be coloured, and that is all this establishes.
+        // Density does NOT decide it — the extremal 8-colourable graph on 17
+        // nodes has exactly 126 edges, which is what the largest observed
+        // component has. Proving infeasibility needs a real certificate.
+        completeCliqueOverCapacity:
+          members.length > Math.floor(360 / MIN_HUE_SEPARATION) && edges === complete,
+      });
+    }
+    diagnostics.nearComponents = components;
+    diagnostics.isolatedEntities = list.length - seen.size;
   }
 
   // Folders retain their position mapping. Sets seed from stable identity and
@@ -659,30 +939,31 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
   }
 
   // Hard projection: fully resolve every violating pair (never damped).
-  for (let pass = 0; pass < MAX_PROJECTION_PASSES; pass += 1) {
-    let violated = false;
-    const order = pass % 2 === 0 ? nearPairs : [...nearPairs].reverse();
-    for (const [a, b] of order) {
-      const hueA = colors.get(a.id);
-      const hueB = colors.get(b.id);
-      if (typeof hueA !== 'number' || typeof hueB !== 'number') continue;
-      const delta = signedAngle(hueA, hueB);
-      const separation = Math.abs(delta);
-      if (separation < MIN_HUE_SEPARATION) {
-        const direction = separation > PROJECTION_EPSILON ? Math.sign(delta) : tieBreakDirection(a, b);
-        const correction = (MIN_HUE_SEPARATION - separation) / 2;
-        colors.set(a.id, wrapDeg(hueA - direction * correction));
-        colors.set(b.id, wrapDeg(hueB + direction * correction));
-        violated = true;
-      }
-    }
-    if (!violated) break;
-  }
-
+  // Scheduled per proximity component; see projectNearPairs.
+  const projection = projectNearPairs(nearPairs, colors, { collectComponents: Boolean(diagnostics) });
+  const projectionPairVisits = projection.pairVisits;
+  const projectionComponentPasses = projection.componentPasses;
+  const projectionMaxPasses = projection.maxPasses;
+  const projectionComponents = projection.components;
   // Infeasible dense neighborhoods: deterministically slot-color the maximal
   // components that still violate the MIN_HUE_SEPARATION invariant.
+  // Certified-infeasible components go straight to the slot colouring the
+  // projector would have reached anyway, reusing the graph the classifier
+  // already built rather than rediscovering it by distance.
+  const directlyColoured = new Set();
+  const directFallbacks = [];
+  for (const component of projection.certifiedInfeasible) {
+    const slotCount = slotColorComponent(
+      component.ids, folderById, colors, center, hueState, component.adjacency,
+    );
+    directFallbacks.push({ size: component.ids.length, slotCount, direct: true });
+    for (const id of component.ids) directlyColoured.add(id);
+  }
+
   const violatedIds = new Set();
   for (const [a, b] of nearPairs) {
+    // Already resolved above; re-detecting them would slot-colour them twice.
+    if (directlyColoured.has(a.id) || directlyColoured.has(b.id)) continue;
     const hueA = colors.get(a.id);
     const hueB = colors.get(b.id);
     if (typeof hueA === 'number' && typeof hueB === 'number'
@@ -691,9 +972,29 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
       violatedIds.add(b.id);
     }
   }
+  if (diagnostics) {
+    // NOTE: projectionPasses now means the MAXIMUM any single component needed,
+    // not a count of global sweeps, because there are no global sweeps any more.
+    // Aggregate effort is projectionComponentPasses.
+    diagnostics.projectionPasses = projectionMaxPasses;
+    diagnostics.projectionMaxPasses = projectionMaxPasses;
+    diagnostics.projectionComponentPasses = projectionComponentPasses;
+    diagnostics.projectionPairVisits = projectionPairVisits;
+    diagnostics.projectionComponents = projectionComponents;
+    diagnostics.classificationWork = projection.classificationWork;
+    diagnostics.classificationCliqueWork = projection.classificationCliqueWork;
+    diagnostics.classificationSearchWork = projection.classificationSearchWork;
+    diagnostics.certifiedInfeasibleComponents = projection.certifiedInfeasible.length;
+    diagnostics.bypassedProjectionPairs = projection.bypassedPairs;
+    diagnostics.violatingIdsAfterProjection = violatedIds.size;
+    // Direct fallbacks are recorded alongside the ones projection uncovered, so
+    // "this component was slot-coloured" stays visible however it got there.
+    diagnostics.fallbackComponents = [...directFallbacks];
+  }
   if (violatedIds.size > 0) {
     for (const component of componentsNearViolations(nearPairs, [...violatedIds])) {
-      slotColorComponent(component, folderById, colors, center, hueState);
+      const slotCount = slotColorComponent(component, folderById, colors, center, hueState);
+      if (diagnostics) diagnostics.fallbackComponents.push({ size: component.length, slotCount });
     }
   }
 
