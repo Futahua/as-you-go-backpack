@@ -35,6 +35,7 @@ export function createWorkspaceCommands({
   binSelection,
   graphContextId,
   removeGraphPositions,
+  removeGraphRestPositions,
   setGraphPositions,
   createWebLink,
   createDroppedShortcuts,
@@ -459,7 +460,13 @@ export function createWorkspaceCommands({
   function resetGraphPositions() {
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
-    store.replace(removeGraphPositions(store.getSnapshot(), ctxId, [...session.selected]));
+    // Both maps: releasing the pin while keeping the remembered position would
+    // leave the item exactly where it was, which is not a reset.
+    store.replace(removeGraphRestPositions(
+      removeGraphPositions(store.getSnapshot(), ctxId, [...session.selected]),
+      ctxId,
+      [...session.selected],
+    ));
     for (const id of session.selected) {
       const node = graph._getNode(id);
       if (node) {
@@ -487,8 +494,12 @@ export function createWorkspaceCommands({
       return;
     }
     try {
-      const next = removeGraphPositions(
-        binSelection(store.getSnapshot(), resolveBinTargets(deletable)),
+      const next = removeGraphRestPositions(
+        removeGraphPositions(
+          binSelection(store.getSnapshot(), resolveBinTargets(deletable)),
+          ctxId,
+          deletable,
+        ),
         ctxId,
         deletable,
       );
@@ -526,7 +537,7 @@ export function createWorkspaceCommands({
       for (const shortcutId of wholeShortcutIds) {
         next = collapsePlacements(next, shortcutId, folderId);
       }
-      await store.commit(removeGraphPositions(next, ctxId, movable));
+      await store.commit(removeGraphRestPositions(removeGraphPositions(next, ctxId, movable), ctxId, movable));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }

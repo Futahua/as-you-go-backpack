@@ -1316,7 +1316,26 @@ export function permanentlyDelete(state, ids) {
   const active = state.activeWindowLayoutId;
   const activeDeleted = typeof active === 'string' && active
     && !windowLayouts.some((candidate) => candidate.id === active);
-  return { ...state, groups, windowLayouts, shortcuts, activeWindowLayoutId: activeDeleted ? null : state.activeWindowLayoutId };
+  // Graph nodes are keyed by group id and by SHORTCUT id, while deletion works
+  // on placement ids — so pruning by the ids passed in would miss every
+  // shortcut. A shortcut is gone when its last placement went with it.
+  const survivingShortcutIds = new Set(shortcuts.map((candidate) => candidate.id));
+  const deletedShortcutIds = state.shortcuts
+    .map((candidate) => candidate.id)
+    .filter((shortcutId) => !survivingShortcutIds.has(shortcutId));
+  const deletedIds = [
+    ...selectedIds,
+    ...groupsToDelete,
+    ...deletedShortcutIds,
+  ];
+  const pruned = forgetRestPositionsEverywhere(state, deletedIds);
+  return {
+    ...pruned,
+    groups,
+    windowLayouts,
+    shortcuts,
+    activeWindowLayoutId: activeDeleted ? null : state.activeWindowLayoutId,
+  };
 }
 
 export function renameItem(state, itemId, name) {
@@ -1431,6 +1450,33 @@ function dropPositions(state, mapKey, contextId, itemIds) {
   return updateWorkspaceView(state, { [mapKey]: map });
 }
 
+/** Forgets remembered positions for these ids in EVERY context.
+ *
+ * A remembered position is keyed by item id, so an id that no longer exists is
+ * never read back — the entry is inert rather than harmful. It is still
+ * removed, because a map that only ever grows is a slow leak in a file the
+ * creator keeps for years, and because an id that came back would silently
+ * inherit a position from something unrelated. */
+function forgetRestPositionsEverywhere(state, itemIds) {
+  const ids = new Set(itemIds);
+  const map = state.view?.graphRestPositions ?? {};
+  const next = {};
+  let changed = false;
+  for (const [contextId, ctx] of Object.entries(map)) {
+    const kept = {};
+    for (const [itemId, pos] of Object.entries(ctx)) {
+      if (ids.has(itemId)) {
+        changed = true;
+        continue;
+      }
+      kept[itemId] = pos;
+    }
+    if (Object.keys(kept).length > 0) next[contextId] = kept;
+    else if (Object.keys(ctx).length > 0) changed = true;
+  }
+  if (!changed) return state;
+  return { ...state, view: { ...state.view, graphRestPositions: next } };
+}
 /** Where an UNPINNED node last came to rest.
  *
  * Distinct from graphPositions, which pins: a pinned position is applied as

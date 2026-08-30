@@ -2047,3 +2047,56 @@ test('a state file written before resting positions existed loads cleanly', () =
   assert.deepEqual(loaded.view.graphRestPositions, {});
   assert.equal(getGraphRestPosition(loaded, 'ctx', 'anything'), null);
 });
+
+test('permanently deleting an item forgets where it rested, in every context', () => {
+  // The leak this closes: a remembered position is keyed by item id, so an entry
+  // for a deleted item is never read again and simply accumulates in a file the
+  // creator keeps for years.
+  let state = createGroup(emptyState(), 'Folder');
+  const folderId = state.groups[0].id;
+  state = createShortcut(state, { name: 'Doomed', target: 'C:\a.exe', parentId: folderId });
+  const doomedId = state.shortcuts[0].id;
+
+  // Remembered in two different contexts, plus an unrelated item that must stay.
+  state = setGraphRestPositions(state, 'root', { [doomedId]: { x: 1, y: 2 }, keeper: { x: 9, y: 9 } });
+  state = setGraphRestPositions(state, folderId, { [doomedId]: { x: 3, y: 4 } });
+  assert.deepEqual(getGraphRestPosition(state, 'root', doomedId), { x: 1, y: 2 });
+  assert.deepEqual(getGraphRestPosition(state, folderId, doomedId), { x: 3, y: 4 });
+
+  state = binSelection(state, [state.shortcuts[0].placements[0].id]);
+  state = permanentlyDelete(state, [state.shortcuts[0].placements[0].id]);
+
+  assert.equal(getGraphRestPosition(state, 'root', doomedId), null, 'root context still remembers it');
+  assert.equal(getGraphRestPosition(state, folderId, doomedId), null, 'folder context still remembers it');
+  assert.deepEqual(getGraphRestPosition(state, 'root', 'keeper'), { x: 9, y: 9 },
+    'an unrelated item lost its position');
+});
+
+test('deleting a folder forgets its descendants resting positions too', () => {
+  let state = createGroup(emptyState(), 'Parent');
+  const parentId = state.groups[0].id;
+  state = createGroup(state, 'Child', parentId);
+  const childId = state.groups.find((g) => g.name === 'Child').id;
+
+  state = setGraphRestPositions(state, 'root', { [parentId]: { x: 1, y: 1 }, [childId]: { x: 2, y: 2 } });
+  state = binSelection(state, [parentId]);
+  state = permanentlyDelete(state, [parentId]);
+
+  assert.equal(getGraphRestPosition(state, 'root', parentId), null);
+  assert.equal(getGraphRestPosition(state, 'root', childId), null,
+    'a descendant deleted with its folder must be forgotten as well');
+});
+
+test('deleting nothing relevant leaves the remembered map untouched', () => {
+  let state = createGroup(emptyState(), 'Folder');
+  state = createShortcut(state, { name: 'Gone', target: 'C:\a.exe', parentId: state.groups[0].id });
+  state = setGraphRestPositions(state, 'root', { survivor: { x: 5, y: 6 } });
+  const before = state.view.graphRestPositions;
+
+  state = binSelection(state, [state.shortcuts[0].placements[0].id]);
+  state = permanentlyDelete(state, [state.shortcuts[0].placements[0].id]);
+
+  // Nothing to prune means the same object, not a needless rebuild of the map.
+  assert.equal(state.view.graphRestPositions, before);
+  assert.deepEqual(getGraphRestPosition(state, 'root', 'survivor'), { x: 5, y: 6 });
+});
