@@ -71,52 +71,61 @@ function clipToSet(polygon, outline, keepInside) {
   return result;
 }
 
-function regionId(setIds) {
-  return setIds.slice().sort().join('|');
+/** Axis-aligned bounds and their overlap test, kept here so the arrangement
+ * and the layout share one broad phase rather than each carrying a copy. */
+export function polygonBounds(polygon) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const { x, y } of polygon) {
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  return { minX, minY, maxX, maxY };
 }
 
-/** Decomposes convex presentation outlines into one region per non-empty
- * membership mask. Difference regions can have several convex sub-polygons;
- * they remain one region object and therefore receive one hue and one SVG path. */
-export function decomposeRegions(inputSets) {
-  const sets = (inputSets ?? [])
-    .map((set) => ({ id: String(set.id), outline: normalizePolygon(set.outline) }))
-    .filter((set) => set.outline.length >= 3)
-    .sort((a, b) => a.id.localeCompare(b.id));
-  if (sets.length === 0) return [];
-  if (sets.length > 10) return [];
+export function boundsOverlap(a, b) {
+  return a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
+}
+/** Convex-convex intersection, normalized on the way in so callers may pass raw
+ * presentation outlines. Returns [] when the two do not overlap with positive
+ * area, which is what makes it usable as an exact overlap predicate. */
+export function intersectConvex(first, second) {
+  const a = normalizePolygon(first);
+  const b = normalizePolygon(second);
+  if (a.length < 3 || b.length < 3) return [];
+  return clipToSet(a, b, true);
+}
 
-  const regions = [];
-  const combinations = 2 ** sets.length;
-  for (let mask = 1; mask < combinations; mask += 1) {
-    const included = sets.filter((_, index) => (mask & (1 << index)) !== 0);
-    const excluded = sets.filter((_, index) => (mask & (1 << index)) === 0);
-    let base = included[0].outline.map((point) => ({ ...point }));
-    for (const set of included.slice(1)) base = clipToSet(base, set.outline, true);
-    if (base.length < 3) continue;
+/** Subtracts a convex outline from a convex polygon, returning a partition of
+ * the remainder. Each edge takes its slice out of what is *left*, not out of
+ * the original: clipping every edge against the original polygon produces
+ * overlapping half-plane strips, which both double-counts area in regionArea
+ * and regionCentroid and multiplies the piece count by the outline's vertex
+ * count for every excluded set. At the 48-vertex outlines resampleHull
+ * produces, that turns a fourth set into ~54k fragments per frame. */
+export function subtractConvex(polygon, outline) {
+  if (polygon.length < 3) return [];
+  if (outline.length < 3) return [polygon];
+  // Most sets on a workspace are spatially separate; a disjoint pair needs no
+  // cutting at all, and this keeps that case at one piece instead of one per edge.
+  if (clipToSet(polygon, outline, true).length < 3) return [polygon];
 
-    let pieces = [base];
-    for (const set of excluded) {
-      const nextPieces = [];
-      for (const piece of pieces) {
-        for (let edge = 0; edge < set.outline.length; edge += 1) {
-          const outside = clipPolygon(
-            piece,
-            set.outline[edge],
-            set.outline[(edge + 1) % set.outline.length],
-            false,
-          );
-          if (outside.length >= 3) nextPieces.push(outside);
-        }
-      }
-      pieces = nextPieces;
-      if (pieces.length === 0) break;
-    }
-    if (pieces.length === 0) continue;
-    const setIds = included.map((set) => set.id).sort();
-    regions.push({ id: regionId(setIds), setIds, polygons: pieces });
+  let remaining = polygon;
+  const outsidePieces = [];
+  for (let edge = 0; edge < outline.length && remaining.length >= 3; edge += 1) {
+    const start = outline[edge];
+    const end = outline[(edge + 1) % outline.length];
+    const outside = clipPolygon(remaining, start, end, false);
+    if (outside.length >= 3) outsidePieces.push(outside);
+    // Only what is still potentially inside the excluded set goes on to the
+    // next edge. Whatever survives every edge is the intersection, so it is dropped.
+    remaining = clipPolygon(remaining, start, end, true);
   }
-  return regions.sort((a, b) => a.id.localeCompare(b.id));
+  return outsidePieces;
 }
 
 export function regionArea(region) {
