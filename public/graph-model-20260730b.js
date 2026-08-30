@@ -601,6 +601,8 @@ function slotColorComponent(componentIds, folderById, colors, center, hueState) 
   for (const id of ids) {
     colors.set(id, wrapDeg(bestRotation + slots.get(id) * gap));
   }
+  // Reported for diagnostics only; no caller changes behaviour on it.
+  return slotCount;
 }
 
 /**
@@ -618,7 +620,12 @@ function slotColorComponent(componentIds, folderById, colors, center, hueState) 
  * map. `hueState` is session-only set state: callers keep it alive while a set
  * may disappear and reappear, and never persist it.
  */
-export function assignSpatialFolderHues(folders, colors, center, hueState = new Map()) {
+/** The optional fifth argument is a diagnostics sink. When absent — which is
+ * every production call — nothing extra is computed and the function behaves
+ * exactly as before. When present it is filled with the work the solver did,
+ * so a benchmark can tell pair discovery apart from projection effort without
+ * timing internals or guessing. */
+export function assignSpatialFolderHues(folders, colors, center, hueState = new Map(), diagnostics = null) {
   const list = [...folders].sort((a, b) => a.id.localeCompare(b.id));
   const folderById = new Map(list.map((folder) => [folder.id, folder]));
   const nearPairs = [];
@@ -628,6 +635,50 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
       const b = list[j];
       if (Math.hypot(a.x - b.x, a.y - b.y) < FOLDER_DISTANCE) nearPairs.push([a, b]);
     }
+  }
+
+  if (diagnostics) {
+    diagnostics.spatialEntities = list.length;
+    diagnostics.possiblePairs = (list.length * (list.length - 1)) / 2;
+    diagnostics.nearPairs = nearPairs.length;
+    // Components of the whole proximity graph, not just the violating part:
+    // the question is how large and how dense the local graphs are, since a
+    // clique bigger than 360/MIN_HUE_SEPARATION cannot be satisfied at all.
+    const adjacency = new Map();
+    for (const [a, b] of nearPairs) {
+      if (!adjacency.has(a.id)) adjacency.set(a.id, []);
+      if (!adjacency.has(b.id)) adjacency.set(b.id, []);
+      adjacency.get(a.id).push(b.id);
+      adjacency.get(b.id).push(a.id);
+    }
+    const seen = new Set();
+    const components = [];
+    for (const startId of adjacency.keys()) {
+      if (seen.has(startId)) continue;
+      const stack = [startId];
+      const members = [];
+      seen.add(startId);
+      while (stack.length > 0) {
+        const id = stack.pop();
+        members.push(id);
+        for (const neighbor of adjacency.get(id) ?? []) {
+          if (seen.has(neighbor)) continue;
+          seen.add(neighbor);
+          stack.push(neighbor);
+        }
+      }
+      const memberSet = new Set(members);
+      let edges = 0;
+      for (const [a, b] of nearPairs) if (memberSet.has(a.id) && memberSet.has(b.id)) edges += 1;
+      const complete = (members.length * (members.length - 1)) / 2;
+      components.push({
+        size: members.length,
+        edges,
+        density: complete > 0 ? edges / complete : 1,
+        satisfiable: members.length <= Math.floor(360 / MIN_HUE_SEPARATION) || edges < complete,
+      });
+    }
+    diagnostics.nearComponents = components;
   }
 
   // Folders retain their position mapping. Sets seed from stable identity and
@@ -659,9 +710,13 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
   }
 
   // Hard projection: fully resolve every violating pair (never damped).
+  let projectionPasses = 0;
+  let projectionPairVisits = 0;
   for (let pass = 0; pass < MAX_PROJECTION_PASSES; pass += 1) {
     let violated = false;
     const order = pass % 2 === 0 ? nearPairs : [...nearPairs].reverse();
+    projectionPasses += 1;
+    projectionPairVisits += order.length;
     for (const [a, b] of order) {
       const hueA = colors.get(a.id);
       const hueB = colors.get(b.id);
@@ -691,9 +746,16 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
       violatedIds.add(b.id);
     }
   }
+  if (diagnostics) {
+    diagnostics.projectionPasses = projectionPasses;
+    diagnostics.projectionPairVisits = projectionPairVisits;
+    diagnostics.violatingIdsAfterProjection = violatedIds.size;
+    diagnostics.fallbackComponents = [];
+  }
   if (violatedIds.size > 0) {
     for (const component of componentsNearViolations(nearPairs, [...violatedIds])) {
-      slotColorComponent(component, folderById, colors, center, hueState);
+      const slotCount = slotColorComponent(component, folderById, colors, center, hueState);
+      if (diagnostics) diagnostics.fallbackComponents.push({ size: component.length, slotCount });
     }
   }
 

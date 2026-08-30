@@ -265,10 +265,16 @@ function measure(count, regime, seed) {
     assignSpatialFolderHues(movingNodes, movingColors, { cx: 0, cy: 0 }, movingState);
   });
 
+  // H0: what the solver actually did on one settled frame. The sink is only
+  // passed here; production calls omit it and compute none of this.
+  const diagnostics = {};
+  assignSpatialFolderHues(spatial, settledColors, { cx: 0, cy: 0 }, settledState, diagnostics);
+
   return {
     count,
     regime,
     seed,
+    diagnostics,
     ringTotal: scene.ringCounts.reduce((sum, value) => sum + value, 0),
     ringMedian: median(scene.ringCounts),
     ringMax: Math.max(...scene.ringCounts),
@@ -322,6 +328,36 @@ for (const count of COUNTS) {
       );
     }
   }
+}
+
+console.log();
+console.log('H0 hue solver diagnostics, one settled frame per scene:');
+console.log('sets regime     entities possPr nearPr | comps maxComp maxEdge dens | passes  pairVisits | violAfter | fbComps slots');
+for (const row of rows) {
+  const d = row.diagnostics;
+  const comps = d.nearComponents ?? [];
+  const biggest = comps.reduce((best, c) => (best && best.size >= c.size ? best : c), null);
+  const slots = [...new Set((d.fallbackComponents ?? []).map((c) => c.slotCount))].sort((a, b) => a - b);
+  console.log(
+    pad(row.count, 4),
+    row.regime.padEnd(10),
+    pad(d.spatialEntities, 8),
+    pad(d.possiblePairs, 6),
+    pad(d.nearPairs, 6),
+    '|',
+    pad(comps.length, 5),
+    pad(biggest?.size ?? 0, 7),
+    pad(biggest?.edges ?? 0, 7),
+    pad((biggest?.density ?? 0).toFixed(2), 4),
+    '|',
+    pad(d.projectionPasses, 6),
+    pad(d.projectionPairVisits, 11),
+    '|',
+    pad(d.violatingIdsAfterProjection, 9),
+    '|',
+    pad((d.fallbackComponents ?? []).length, 7),
+    pad(slots.join('/') || '-', 5),
+  );
 }
 
 console.log('\nworst combined median (separation + moving hue) per count and regime:');

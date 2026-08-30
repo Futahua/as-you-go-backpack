@@ -193,3 +193,62 @@ test('four overlapping production-resolution sets stay within a bounded fragment
   // it is deliberately loose so ordinary geometry churn does not redden it.
   assert.ok(fragments < 2000, `expected a bounded fragment count, got ${fragments}`);
 });
+
+// ===========================================================================
+// The hue solver's optional diagnostics sink. It exists so a benchmark can tell
+// pair discovery apart from projection effort without timing internals, and it
+// must therefore be provably inert: production passes no sink and must compute
+// none of it, and passing one must not change a single hue.
+
+test('the hue diagnostics sink does not change any colour it observes', () => {
+  let state = 20260830;
+  const random = () => {
+    state = ((state * 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+  // A deliberately dense neighbourhood, so projection runs its full course and
+  // the slot-colouring fallback is reached — the paths most at risk of being
+  // perturbed by observation.
+  const nodes = Array.from({ length: 40 }, (unused, index) => ({
+    id: (index % 2 === 0 ? 'set:' : 'region:') + index,
+    x: random() * 300,
+    y: random() * 300,
+  }));
+
+  const run = (sink) => {
+    const colors = new Map();
+    const hueState = new Map();
+    for (let frame = 0; frame < 12; frame += 1) {
+      assignSpatialFolderHues(nodes, colors, { cx: 150, cy: 150 }, hueState, sink);
+    }
+    return [...colors.entries()].sort(([a], [b]) => a.localeCompare(b));
+  };
+
+  const withoutSink = run(undefined);
+  const diagnostics = {};
+  const withSink = run(diagnostics);
+  assert.deepEqual(withSink, withoutSink, 'observing the solver changed its output');
+
+  // And the sink actually reported the work, or it would be inert for the wrong
+  // reason.
+  assert.ok(diagnostics.spatialEntities === 40);
+  assert.ok(diagnostics.nearPairs > 0);
+  assert.ok(diagnostics.projectionPasses >= 1);
+  assert.ok(diagnostics.projectionPairVisits >= diagnostics.nearPairs);
+  assert.ok(Array.isArray(diagnostics.nearComponents));
+  assert.ok(Array.isArray(diagnostics.fallbackComponents));
+});
+
+test('a scene with no near pairs costs one projection pass and no fallback', () => {
+  const nodes = Array.from({ length: 12 }, (unused, index) => ({
+    id: `set:${index}`,
+    x: index * 5000,
+    y: 0,
+  }));
+  const diagnostics = {};
+  assignSpatialFolderHues(nodes, new Map(), { cx: 0, cy: 0 }, new Map(), diagnostics);
+  assert.equal(diagnostics.nearPairs, 0);
+  assert.equal(diagnostics.projectionPasses, 1);
+  assert.equal(diagnostics.projectionPairVisits, 0);
+  assert.deepEqual(diagnostics.fallbackComponents, []);
+});
