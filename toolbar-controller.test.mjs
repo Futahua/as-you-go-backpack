@@ -165,7 +165,19 @@ function pointerEvent(pointerId, x, y, element) {
   return { button: 0, pointerId, clientX: x, clientY: y, target: element };
 }
 
-test('toolbar mount restores saved positions as percentage offsets', () => {
+/** Horizontal offsets are percentages; the vertical one is deliberately not.
+ *
+ * The pills live inside .navigation, which is height:0, so a percentage top or
+ * bottom resolves against nothing and lands the element off-screen above the
+ * window — that is how a pill dragged near the bottom edge became unreachable.
+ * d0059e2 converted the vertical offset to pixels against the workspace height
+ * to fix it. These assertions were written before that and went stale; the
+ * workspace is 1000x800 here, so y 0.25 is 200px and y 0.1 is 80px.
+ *
+ * If a future change makes these percentages again, check that a pill dropped
+ * near the bottom edge is still reachable before believing it.
+ */
+test('toolbar mount restores saved positions, horizontally in percent and vertically in pixels', () => {
   const h = createHarness({
     'bin-button': { x: 0.5, y: 0.25 },
     'delete-all-bin': { x: -0.2, y: 0.1 },
@@ -178,10 +190,13 @@ test('toolbar mount restores saved positions as percentage offsets', () => {
   // x >= 0 anchors left as a percentage of workspace width.
   assert.equal(bin.style.left, '50%');
   assert.equal(bin.style.right, 'auto');
-  assert.equal(bin.style.top, '25%');
+  assert.equal(bin.style.top, '200px');
+  assert.equal(bin.style.bottom, 'auto');
   // x < 0 anchors right as a percentage of workspace width.
   assert.equal(del.style.right, '20%');
   assert.equal(del.style.left, 'auto');
+  assert.equal(del.style.top, '80px');
+  assert.equal(del.style.bottom, 'auto');
 });
 
 test('toolbar drag clamps within the workspace and persists the new position', async () => {
@@ -227,7 +242,8 @@ test('toolbar resize re-applies saved positions after the debounce', async () =>
   await new Promise((resolve) => setTimeout(resolve, 120));
 
   assert.equal(el.style.left, '50%');
-  assert.equal(el.style.top, '25%');
+  // Pixels, not percent, for the reason given on the mount test above.
+  assert.equal(el.style.top, '200px');
 });
 
 test('toolbar destroy removes listeners and clears a pending resize timer', async () => {
