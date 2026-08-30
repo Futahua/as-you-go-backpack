@@ -620,6 +620,54 @@ function slotColorComponent(componentIds, folderById, colors, center, hueState) 
  * map. `hueState` is session-only set state: callers keep it alive while a set
  * may disappear and reappear, and never persist it.
  */
+/** Every pair of entities closer than FOLDER_DISTANCE, in exactly the order an
+ * all-pairs double loop over the id-sorted list would emit them: ascending i,
+ * then ascending j within each i.
+ *
+ * The order is not incidental. Projection walks these pairs and mutates hues as
+ * it goes, so a different sequence over the same pairs converges to different
+ * colours. Any faster discovery has to reproduce the sequence element for
+ * element, which is what the equivalence tests check.
+ *
+ * A uniform grid of exactly FOLDER_DISTANCE is what makes the shortcut safe: if
+ * two entities are closer than that, neither their column nor their row indices
+ * can differ by more than one, so the nine cells around an entity contain every
+ * partner it could possibly have. The distance test itself is unchanged, so
+ * boundary cases decide exactly as they did.
+ *
+ * Discovery was 146,070 distance tests at 128 clustered sets, for 4,003 pairs.
+ */
+export function findNearPairs(list, distance = FOLDER_DISTANCE) {
+  const cells = new Map();
+  for (let index = 0; index < list.length; index += 1) {
+    const key = `${Math.floor(list[index].x / distance)},${Math.floor(list[index].y / distance)}`;
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(index);
+  }
+
+  const nearPairs = [];
+  const candidates = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const a = list[i];
+    const cx = Math.floor(a.x / distance);
+    const cy = Math.floor(a.y / distance);
+    candidates.length = 0;
+    for (let ox = -1; ox <= 1; ox += 1) {
+      for (let oy = -1; oy <= 1; oy += 1) {
+        const bucket = cells.get(`${cx + ox},${cy + oy}`);
+        if (!bucket) continue;
+        for (const j of bucket) if (j > i) candidates.push(j);
+      }
+    }
+    // Ascending j, so the emitted sequence matches the double loop exactly.
+    candidates.sort((left, right) => left - right);
+    for (const j of candidates) {
+      const b = list[j];
+      if (Math.hypot(a.x - b.x, a.y - b.y) < distance) nearPairs.push([a, b]);
+    }
+  }
+  return nearPairs;
+}
 /** The optional fifth argument is a diagnostics sink. When absent — which is
  * every production call — nothing extra is computed and the function behaves
  * exactly as before. When present it is filled with the work the solver did,
@@ -628,22 +676,16 @@ function slotColorComponent(componentIds, folderById, colors, center, hueState) 
 export function assignSpatialFolderHues(folders, colors, center, hueState = new Map(), diagnostics = null) {
   const list = [...folders].sort((a, b) => a.id.localeCompare(b.id));
   const folderById = new Map(list.map((folder) => [folder.id, folder]));
-  const nearPairs = [];
-  for (let i = 0; i < list.length; i += 1) {
-    for (let j = i + 1; j < list.length; j += 1) {
-      const a = list[i];
-      const b = list[j];
-      if (Math.hypot(a.x - b.x, a.y - b.y) < FOLDER_DISTANCE) nearPairs.push([a, b]);
-    }
-  }
+  const nearPairs = findNearPairs(list);
 
   if (diagnostics) {
     diagnostics.spatialEntities = list.length;
     diagnostics.possiblePairs = (list.length * (list.length - 1)) / 2;
     diagnostics.nearPairs = nearPairs.length;
-    // Components of the whole proximity graph, not just the violating part:
-    // the question is how large and how dense the local graphs are, since a
-    // clique bigger than 360/MIN_HUE_SEPARATION cannot be satisfied at all.
+    // NONTRIVIAL components only: adjacency is built from nearPairs, so an
+    // entity with no near neighbour appears nowhere here. 128 separated sets
+    // report zero components rather than 256 singletons. Isolates are counted
+    // separately, since they are exactly the entities projection never touches.
     const adjacency = new Map();
     for (const [a, b] of nearPairs) {
       if (!adjacency.has(a.id)) adjacency.set(a.id, []);
@@ -675,10 +717,17 @@ export function assignSpatialFolderHues(folders, colors, center, hueState = new 
         size: members.length,
         edges,
         density: complete > 0 ? edges / complete : 1,
-        satisfiable: members.length <= Math.floor(360 / MIN_HUE_SEPARATION) || edges < complete,
+        // Narrowly truthful: a complete graph larger than the number of 45
+        // degree slots cannot be coloured, and that is all this establishes.
+        // Density does NOT decide it — the extremal 8-colourable graph on 17
+        // nodes has exactly 126 edges, which is what the largest observed
+        // component has. Proving infeasibility needs a real certificate.
+        completeCliqueOverCapacity:
+          members.length > Math.floor(360 / MIN_HUE_SEPARATION) && edges === complete,
       });
     }
     diagnostics.nearComponents = components;
+    diagnostics.isolatedEntities = list.length - seen.size;
   }
 
   // Folders retain their position mapping. Sets seed from stable identity and

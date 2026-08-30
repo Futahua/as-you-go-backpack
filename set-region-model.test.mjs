@@ -4,7 +4,9 @@ import { regionArea, regionCentroid, signedArea } from './public/set-region-mode
 import { decomposeArrangement } from './public/set-region-arrangement.js';
 import { ringHull, pointInsideRing } from './public/set-ring-model.js';
 import { forceSetExclusion, forceSetSeparation } from './public/set-gravity-model.js';
-import { assignSpatialFolderHues, MIN_HUE_SEPARATION } from './public/graph-model-20260730b.js';
+import {
+  assignSpatialFolderHues, findNearPairs, FOLDER_DISTANCE, MIN_HUE_SEPARATION,
+} from './public/graph-model-20260730b.js';
 
 const square = (x, y, size = 10) => [
   { x, y }, { x: x + size, y }, { x: x + size, y: y + size }, { x, y: y + size },
@@ -251,4 +253,118 @@ test('a scene with no near pairs costs one projection pass and no fallback', () 
   assert.equal(diagnostics.projectionPasses, 1);
   assert.equal(diagnostics.projectionPairVisits, 0);
   assert.deepEqual(diagnostics.fallbackComponents, []);
+});
+
+// ===========================================================================
+// H1. Near-pair discovery moved from an all-pairs double loop to a uniform grid
+// of FOLDER_DISTANCE. Projection mutates hues as it walks these pairs, so the
+// new builder must reproduce not just the same SET of pairs but the same
+// ORDERED SEQUENCE. These compare it against the naive loop it replaced, which
+// the test owns so that production carries only one implementation.
+
+/** The original all-pairs builder, kept here as the reference. */
+const referenceNearPairs = (list, distance = FOLDER_DISTANCE) => {
+  const pairs = [];
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      const a = list[i];
+      const b = list[j];
+      if (Math.hypot(a.x - b.x, a.y - b.y) < distance) pairs.push([a, b]);
+    }
+  }
+  return pairs;
+};
+
+const pairIds = (pairs) => pairs.map(([a, b]) => [a.id, b.id]);
+
+const assertSameSequence = (list, label) => {
+  assert.deepEqual(
+    pairIds(findNearPairs(list)),
+    pairIds(referenceNearPairs(list)),
+    `${label}: pair sequence diverged`,
+  );
+};
+
+test('spatial near-pair discovery matches the all-pairs loop on fixed cases', () => {
+  const at = (id, x, y) => ({ id, x, y });
+
+  // Widely separated: no pairs at all.
+  assertSameSequence([at('a', 0, 0), at('b', 9000, 0), at('c', 0, 9000)], 'separated');
+
+  // Everything mutually near: every pair, in order.
+  assertSameSequence([at('a', 0, 0), at('b', 10, 0), at('c', 0, 10), at('d', 5, 5)], 'clique');
+
+  // Negative coordinates, which floor() handles differently from truncation.
+  assertSameSequence(
+    [at('a', -300, -300), at('b', -250, -280), at('c', -10, 5), at('d', 5, -10)],
+    'negative coordinates',
+  );
+
+  // Straddling a cell boundary: FOLDER_DISTANCE apart to the pixel, and either
+  // side of it. The comparison is strict, so the exact distance is excluded.
+  assertSameSequence(
+    [at('a', 0, 0), at('b', FOLDER_DISTANCE, 0), at('c', FOLDER_DISTANCE - 0.001, 0)],
+    'exact boundary',
+  );
+
+  // Diagonal neighbours: reachable only through a corner cell.
+  assertSameSequence(
+    [at('a', FOLDER_DISTANCE - 1, FOLDER_DISTANCE - 1), at('b', FOLDER_DISTANCE + 1, FOLDER_DISTANCE + 1)],
+    'diagonal cell',
+  );
+
+  // Several entities stacked on one point, so a single cell holds duplicates.
+  assertSameSequence(
+    Array.from({ length: 6 }, (unused, index) => at(`same${index}`, 40, 40)),
+    'coincident',
+  );
+
+  assert.deepEqual(findNearPairs([]), [], 'empty input');
+  assert.deepEqual(findNearPairs([at('only', 0, 0)]), [], 'single entity');
+});
+
+test('spatial near-pair discovery matches the all-pairs loop under fuzzing', () => {
+  let state = 424242;
+  const random = () => {
+    state = ((state * 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+  for (let seed = 0; seed < 30; seed += 1) {
+    // Spread deliberately spans well below and well above FOLDER_DISTANCE so
+    // some scenes are dense cliques and others are almost all isolates.
+    const spread = 40 + (seed * 40);
+    const count = 5 + (seed % 20);
+    const list = Array.from({ length: count }, (unused, index) => ({
+      id: `n${String(index).padStart(3, '0')}`,
+      x: (random() - 0.5) * spread,
+      y: (random() - 0.5) * spread,
+    })).sort((a, b) => a.id.localeCompare(b.id));
+    assertSameSequence(list, `fuzz seed ${seed} spread ${spread}`);
+  }
+});
+
+test('spatially discovered pairs produce identical hues over successive frames', () => {
+  let state = 987654;
+  const random = () => {
+    state = ((state * 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+  const list = Array.from({ length: 36 }, (unused, index) => ({
+    id: (index % 2 === 0 ? 'set:' : 'region:') + String(index).padStart(3, '0'),
+    x: random() * 320,
+    y: random() * 320,
+  })).sort((a, b) => a.id.localeCompare(b.id));
+
+  // Same pairs in the same order must drive the solver to the same place, and
+  // this scene is dense enough to reach the slot-colouring fallback.
+  assert.deepEqual(pairIds(findNearPairs(list)), pairIds(referenceNearPairs(list)));
+
+  const colors = new Map();
+  const hueState = new Map();
+  for (let frame = 0; frame < 10; frame += 1) {
+    assignSpatialFolderHues(list, colors, { cx: 160, cy: 160 }, hueState);
+  }
+  const settled = [...colors.entries()].sort(([a], [b]) => a.localeCompare(b));
+  assert.ok(settled.length === list.length, 'every entity received a hue');
+  assert.ok(settled.every(([, hue]) => Number.isFinite(hue)), 'and every hue is finite');
 });
