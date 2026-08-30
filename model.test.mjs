@@ -28,6 +28,9 @@ import {
   graphContextId,
   getGraphPosition,
   setGraphPositions,
+  getGraphRestPosition,
+  setGraphRestPositions,
+  removeGraphRestPositions,
   removeGraphPositions,
   normalizeGraphPositions,
   setPromptLibrary,
@@ -338,6 +341,9 @@ test('the local project preserves its explorer working position', () => {
     binMode: false,
     layout: 'explorer',
     graphPositions: {},
+    // Remembered, not pinned: where an unpinned node last rested, so it seeds
+    // from there instead of a generic ring on the next open.
+    graphRestPositions: {},
     toolbarPositions: {},
     preferences: {},
     promptLibrary: [],
@@ -1953,4 +1959,91 @@ test('024 window-layout name/icon customization is removed (updateGroup rejects,
   const folderId = state.groups.find((g) => g.name === 'Folder').id;
   state = updateGroup(state, folderId, { name: 'Renamed Folder', icon: 'x' });
   assert.equal(state.groups.find((g) => g.id === folderId).name, 'Renamed Folder', 'ordinary group rename still works');
+});
+
+// ===========================================================================
+// Remembered resting positions. An unpinned node used to seed onto a generic
+// ring, so the solver settled it somewhere new on every open and a workspace
+// rearranged itself under the creator. It now seeds from where it last rested.
+//
+// The distinction that matters: remembered is NOT pinned. graphPositions is
+// applied as fx/fy and freezes a node; graphRestPositions is only a starting
+// point, and every force still moves the node afterwards.
+
+test('a remembered resting position round-trips and is kept apart from pinning', () => {
+  let state = emptyState();
+  state = setGraphRestPositions(state, 'ctx', { 'item-a': { x: 12, y: 34 } });
+
+  assert.deepEqual(getGraphRestPosition(state, 'ctx', 'item-a'), { x: 12, y: 34 });
+  // Remembering must not pin: the pinned map stays empty, so nothing gains fx/fy.
+  assert.equal(getGraphPosition(state, 'ctx', 'item-a'), null);
+  assert.deepEqual(state.view.graphPositions, {});
+
+  // And pinning must not write a resting place, so releasing a pin cannot leave
+  // a stale coordinate behind that looks like one.
+  let pinned = setGraphPositions(emptyState(), 'ctx', { 'item-b': { x: 5, y: 6 } });
+  assert.deepEqual(getGraphPosition(pinned, 'ctx', 'item-b'), { x: 5, y: 6 });
+  assert.equal(getGraphRestPosition(pinned, 'ctx', 'item-b'), null);
+});
+
+test('resting positions are scoped per context and survive unrelated view updates', () => {
+  let state = emptyState();
+  state = setGraphRestPositions(state, 'ctx-one', { shared: { x: 1, y: 1 } });
+  state = setGraphRestPositions(state, 'ctx-two', { shared: { x: 99, y: 99 } });
+  assert.deepEqual(getGraphRestPosition(state, 'ctx-one', 'shared'), { x: 1, y: 1 });
+  assert.deepEqual(getGraphRestPosition(state, 'ctx-two', 'shared'), { x: 99, y: 99 });
+
+  state = updateWorkspaceView(state, { binMode: true });
+  assert.deepEqual(getGraphRestPosition(state, 'ctx-one', 'shared'), { x: 1, y: 1 });
+  assert.equal(state.view.binMode, true);
+});
+
+test('a resting position can be dropped, and dropping the last one drops the context', () => {
+  let state = setGraphRestPositions(emptyState(), 'ctx', {
+    keep: { x: 1, y: 2 },
+    drop: { x: 3, y: 4 },
+  });
+  state = removeGraphRestPositions(state, 'ctx', ['drop']);
+  assert.deepEqual(getGraphRestPosition(state, 'ctx', 'keep'), { x: 1, y: 2 });
+  assert.equal(getGraphRestPosition(state, 'ctx', 'drop'), null);
+
+  state = removeGraphRestPositions(state, 'ctx', ['keep']);
+  assert.deepEqual(state.view.graphRestPositions, {}, 'an empty context should not linger');
+});
+
+test('resting positions survive a save and reload, and reject malformed entries', () => {
+  let state = setGraphRestPositions(emptyState(), 'ctx', { good: { x: 7, y: 8 } });
+  const reloaded = normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(getGraphRestPosition(reloaded, 'ctx', 'good'), { x: 7, y: 8 });
+
+  // Anything non-finite is discarded rather than seeding a node to NaN, which
+  // would put it somewhere unrecoverable.
+  const damaged = normalizeState({
+    ...JSON.parse(JSON.stringify(state)),
+    view: {
+      ...state.view,
+      graphRestPositions: {
+        ctx: {
+          good: { x: 7, y: 8 },
+          nan: { x: Number.NaN, y: 3 },
+          missing: { x: 1 },
+          nonsense: 'over there',
+        },
+      },
+    },
+  });
+  assert.deepEqual(getGraphRestPosition(damaged, 'ctx', 'good'), { x: 7, y: 8 });
+  for (const id of ['nan', 'missing', 'nonsense']) {
+    assert.equal(getGraphRestPosition(damaged, 'ctx', id), null, `${id} should be rejected`);
+  }
+});
+
+test('a state file written before resting positions existed loads cleanly', () => {
+  // Backwards compatibility: the key simply arrives empty rather than throwing
+  // or leaving the view without it.
+  const legacy = JSON.parse(JSON.stringify(emptyState()));
+  delete legacy.view.graphRestPositions;
+  const loaded = normalizeState(legacy);
+  assert.deepEqual(loaded.view.graphRestPositions, {});
+  assert.equal(getGraphRestPosition(loaded, 'ctx', 'anything'), null);
 });

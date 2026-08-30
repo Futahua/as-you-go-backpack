@@ -47,6 +47,7 @@ export function emptyState() {
       layout: 'explorer',
       promptLibrary: [],
       graphPositions: {},
+      graphRestPositions: {},
       toolbarPositions: {},
       preferences: {},
       itemSets: [],
@@ -501,6 +502,7 @@ export function normalizeState(raw) {
       binMode: raw?.view?.binMode === true,
       layout: raw?.view?.layout === 'graph' ? 'graph' : 'explorer',
       graphPositions: normalizeGraphPositions(raw?.view?.graphPositions),
+      graphRestPositions: normalizeGraphPositions(raw?.view?.graphRestPositions),
       toolbarPositions: normalizeFlatPositions(raw?.view?.toolbarPositions),
       preferences: normalizeViewPreferences(raw?.view?.preferences),
       // promptLibrary replaces promptCards/pickupPrompt: the older shapes are
@@ -1372,6 +1374,9 @@ export function updateWorkspaceView(state, changes) {
       graphPositions: has('graphPositions')
         ? normalizeGraphPositions(changes.graphPositions)
         : (state.view?.graphPositions ?? {}),
+      graphRestPositions: has('graphRestPositions')
+        ? normalizeGraphPositions(changes.graphRestPositions)
+        : (state.view?.graphRestPositions ?? {}),
       toolbarPositions: has('toolbarPositions')
         ? normalizeFlatPositions(changes.toolbarPositions)
         : (state.view?.toolbarPositions ?? {}),
@@ -1390,6 +1395,61 @@ export function graphContextId(currentGroupId, binMode) {
   return binMode ? 'bin' : (currentGroupId ?? ROOT_ID);
 }
 
+function readPosition(state, mapKey, contextId, itemId) {
+  const ctx = state.view?.[mapKey]?.[contextId];
+  if (!ctx || !ctx[itemId]) return null;
+  return { x: ctx[itemId].x, y: ctx[itemId].y };
+}
+
+function writePositions(state, mapKey, contextId, updates) {
+  const ctx = { ...(state.view?.[mapKey]?.[contextId] ?? {}) };
+  for (const [itemId, pos] of Object.entries(updates)) {
+    if (!hasNumber(pos?.x) || !hasNumber(pos?.y)) {
+      delete ctx[itemId];
+    } else {
+      ctx[itemId] = { x: pos.x, y: pos.y };
+    }
+  }
+  const map = { ...(state.view?.[mapKey] ?? {}) };
+  if (Object.keys(ctx).length > 0) {
+    map[contextId] = ctx;
+  } else {
+    delete map[contextId];
+  }
+  return updateWorkspaceView(state, { [mapKey]: map });
+}
+
+function dropPositions(state, mapKey, contextId, itemIds) {
+  const ctx = { ...(state.view?.[mapKey]?.[contextId] ?? {}) };
+  for (const itemId of itemIds) delete ctx[itemId];
+  const map = { ...(state.view?.[mapKey] ?? {}) };
+  if (Object.keys(ctx).length > 0) {
+    map[contextId] = ctx;
+  } else {
+    delete map[contextId];
+  }
+  return updateWorkspaceView(state, { [mapKey]: map });
+}
+
+/** Where an UNPINNED node last came to rest.
+ *
+ * Distinct from graphPositions, which pins: a pinned position is applied as
+ * fx/fy and the solver may never move the node again. A remembered position is
+ * only a seed. The node still floats, still responds to every force, and can
+ * still be pushed anywhere — it simply starts from where it was last seen
+ * instead of from a generic ring, so reopening a workspace does not rearrange
+ * everything the creator had learned the shape of. */
+export function getGraphRestPosition(state, contextId, itemId) {
+  return readPosition(state, 'graphRestPositions', contextId, itemId);
+}
+
+export function setGraphRestPositions(state, contextId, updates) {
+  return writePositions(state, 'graphRestPositions', contextId, updates);
+}
+
+export function removeGraphRestPositions(state, contextId, itemIds) {
+  return dropPositions(state, 'graphRestPositions', contextId, itemIds);
+}
 export function getGraphPosition(state, contextId, itemId) {
   const ctx = state.view?.graphPositions?.[contextId];
   if (!ctx || !ctx[itemId]) return null;
