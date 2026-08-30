@@ -418,7 +418,7 @@ export function allUniquePositions(nodes) {
 }
 
 /** A folder is "near" another when they are within this many canvas pixels. */
-const FOLDER_DISTANCE = 220;
+export const FOLDER_DISTANCE = 220;
 
 /** Hard minimum hue separation in degrees for nearby folders (8 slots at 45°).
  * 45° is a perceptual, not just numeric, step apart on the color wheel. */

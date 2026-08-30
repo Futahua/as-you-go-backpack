@@ -1,38 +1,51 @@
-/** Scale harness for the two systems that are now the plausible next ceilings
+/** Scale harness for the two systems that became the plausible next ceilings
  * once the region renderer stopped scaling with set count.
  *
  * MEASUREMENT ONLY. Nothing here asserts, and it is deliberately not in
- * `npm test`: hardware-sensitive timings do not belong in correctness tests.
- * This is the analogue of set-region-work-calibration.mjs — evidence to decide
- * whether either system needs redesigning, not a decision in itself.
+ * `npm test`: hardware-sensitive timings are not correctness assertions. This
+ * is the analogue of set-region-work-calibration.mjs.
  *
  *   node set-scale-benchmark.mjs
+ *
+ * Everything is built through the production constructors rather than through
+ * plausible-looking stand-ins, because the first version of this harness got
+ * the answer wrong by inventing its own:
+ *
+ *   - ring nodes come from reconcileRing, which sizes the ring from the ellipse
+ *     the shape force actually pulls onto. A fixed 24 per set was roughly twice
+ *     what a compact set really gets and well under what a stretched one does,
+ *     so the ring-grid cost it reported was not a production number.
+ *   - hue input is set centroids plus real region centroids from
+ *     createRegionLayout, which is what the solver sees on a draw frame. A
+ *     hundred disjoint sets are about two hundred hue entities, not one hundred.
+ *   - hue state persists across frames in production, so measuring it cold
+ *     measured convergence rather than steady-state cost.
+ *   - FOLDER_DISTANCE is imported, not copied, so the harness cannot drift away
+ *     from the proximity radius the solver actually uses.
  *
  * What is quadratic, and where:
  *
  *   forceSetSeparation
- *     - ring-node proximity: already grid-bucketed on the clearance
- *     - `related` pair scan:  sets^2, each pair scanning members
- *     - visible-hull SAT:     sets^2, each pair over hull edges
+ *     - ring-node proximity: grid-bucketed on the clearance
+ *     - visible-hull SAT:    x-sweep broad phase, then SAT on survivors
+ *     (the sets^2 `related` scan and the all-pairs SAT were removed in ce9f563)
  *
  *   assignSpatialFolderHues
- *     - nearPairs build:      sets^2 outright
- *     - projection:           re-walks nearPairs up to 100 passes
- *
- * The separation figure is reported twice — once whole, and once with hulls
- * withheld — so the sets^2 SAT phase can be read off as the difference without
- * instrumenting production code.
+ *     - nearPairs build:     spatial nodes^2 outright
+ *     - projection:          re-walks nearPairs up to 100 passes
  */
 import { forceSetSeparation } from './public/set-gravity-model.js';
-import { assignSpatialFolderHues } from './public/graph-model-20260730b.js';
-import { ringHull, resampleHull } from './public/set-ring-model.js';
+import { assignSpatialFolderHues, FOLDER_DISTANCE } from './public/graph-model-20260730b.js';
+import { reconcileRing } from './public/set-ring-model.js';
+import { createRegionLayout } from './public/set-region-layout.js';
+import { regionCentroid } from './public/set-region-model.js';
 
 const SEEDS = [1, 2, 3];
 const COUNTS = [16, 32, 64, 128];
 const MEMBERS_PER_SET = 6;
-const RING_NODES_PER_SET = 24;
-const HULL_RADIUS = 100;
-const HULL_POINTS = 48; // production resolution, as resampleHull produces
+const MEMBER_SIZE = 56; // an icon tile, which is what sizes the enclosing ellipse
+const RING_PADDING = 40; // reconcileRing's default, and what the floor agrees with
+const RING_LINK_DISTANCE = 60; // production spacing; 34 would double the node count
 const REPETITIONS = 40;
 const WARMUP = 8;
 
@@ -44,18 +57,22 @@ function lcg(seed) {
   };
 }
 
-/** Deterministic spatial regimes over the same set centres both systems see. */
+/** Deterministic spatial regimes over the same set centres both systems see.
+ *
+ * `stretched` exists because ring count follows the outline's perimeter: a
+ * compact set gets ~13 nodes and a spread-out one ~39 for the same member
+ * count, so a scene of large sets is a different question from a scene of many
+ * sets. That is geometry driving cost, which is the distinction this whole
+ * exercise is about. */
 const REGIMES = {
-  // Far apart: nothing overlaps. Establishes the bookkeeping floor.
   separated(count, random) {
     const perRow = Math.ceil(Math.sqrt(count));
     return Array.from({ length: count }, (unused, index) => ({
       x: (index % perRow) * 620 + (random() * 20),
       y: Math.floor(index / perRow) * 620 + (random() * 20),
+      spread: 45,
     }));
   },
-  // Small clusters of overlapping sets, clusters far from each other. The
-  // realistic case: bounded neighbours, most pairs irrelevant.
   clustered(count, random) {
     const perCluster = 4;
     const clusters = Math.ceil(count / perCluster);
@@ -65,23 +82,34 @@ const REGIMES = {
       return {
         x: (cluster % perRow) * 900 + (random() * 150),
         y: Math.floor(cluster / perRow) * 900 + (random() * 150),
+        spread: 45,
       };
     });
   },
-  // Everything piled into one box regardless of count: worst case for both the
-  // hull SAT pass and hue projection.
+  // Compact sets, but far more of them per unit area.
   dense(count, random) {
     return Array.from({ length: count }, () => ({
       x: random() * 320,
       y: random() * 320,
+      spread: 45,
     }));
   },
+  // Sets whose members are spread out, so each ring carries many more nodes.
+  // Same count, same clustering, much more real geometry.
+  stretched(count, random) {
+    const perCluster = 4;
+    const clusters = Math.ceil(count / perCluster);
+    const perRow = Math.ceil(Math.sqrt(clusters));
+    return Array.from({ length: count }, (unused, index) => {
+      const cluster = Math.floor(index / perCluster);
+      return {
+        x: (cluster % perRow) * 1400 + (random() * 200),
+        y: Math.floor(cluster / perRow) * 1400 + (random() * 200),
+        spread: 260,
+      };
+    });
+  },
 };
-
-const circle = (cx, cy, radius, points) => Array.from({ length: points }, (unused, index) => {
-  const angle = (index / points) * Math.PI * 2;
-  return { x: cx + (radius * Math.cos(angle)), y: cy + (radius * Math.sin(angle)) };
-});
 
 function buildScene(count, regime, seed) {
   const random = lcg(seed);
@@ -91,38 +119,41 @@ function buildScene(count, regime, seed) {
   const nodes = [];
   const membership = new Map();
   const hulls = new Map();
+  const ringCounts = [];
 
   centres.forEach((centre, index) => {
     const setId = setIds[index];
-    for (let m = 0; m < MEMBERS_PER_SET; m += 1) {
+    const members = Array.from({ length: MEMBERS_PER_SET }, (unused, m) => {
       const angle = (m / MEMBERS_PER_SET) * Math.PI * 2;
       const id = `${setId}:member:${m}`;
       membership.set(id, [setId]);
-      nodes.push({
+      return {
         id,
-        x: centre.x + (Math.cos(angle) * HULL_RADIUS * 0.45),
-        y: centre.y + (Math.sin(angle) * HULL_RADIUS * 0.45),
+        x: centre.x + (Math.cos(angle) * centre.spread),
+        y: centre.y + (Math.sin(angle) * centre.spread),
+        width: MEMBER_SIZE,
+        height: MEMBER_SIZE,
         vx: 0,
         vy: 0,
-      });
-    }
-    for (let r = 0; r < RING_NODES_PER_SET; r += 1) {
-      const angle = (r / RING_NODES_PER_SET) * Math.PI * 2;
-      nodes.push({
-        id: `${setId}:ring:${String(r).padStart(3, '0')}`,
-        setId,
-        ring: true,
-        x: centre.x + (Math.cos(angle) * HULL_RADIUS),
-        y: centre.y + (Math.sin(angle) * HULL_RADIUS),
-        vx: 0,
-        vy: 0,
-      });
-    }
-    hulls.set(setId, resampleHull(ringHull(circle(centre.x, centre.y, HULL_RADIUS, 32)), HULL_POINTS));
+      };
+    });
+    nodes.push(...members);
+
+    // The production ring, sized from the ellipse the shape force pulls onto.
+    const ring = reconcileRing({
+      setId,
+      members,
+      padding: RING_PADDING,
+      linkDistance: RING_LINK_DISTANCE,
+    });
+    ringCounts.push(ring.nodes.length);
+    nodes.push(...ring.nodes);
+    // The drawn outline is the hull of those ring nodes, which is what the hull
+    // pass separates and what the region layout decomposes.
+    hulls.set(setId, ring.nodes.map(({ x, y }) => ({ x, y })));
   });
 
-  const folders = centres.map((centre, index) => ({ id: setIds[index], x: centre.x, y: centre.y }));
-  return { nodes, membership, hulls, folders, setIds, centres };
+  return { nodes, membership, hulls, setIds, centres, ringCounts };
 }
 
 const resetVelocities = (nodes) => {
@@ -148,69 +179,121 @@ function timeIt(run) {
   };
 }
 
-/** Counts what the sets^2 phases would actually find, so a timing can be read
- * against the work it implies rather than guessed at. */
-function sceneStats({ hulls, centres }) {
-  const ids = [...hulls.keys()];
-  const candidatePairs = (ids.length * (ids.length - 1)) / 2;
-  let hullOverlapPairs = 0;
-  for (let i = 0; i < ids.length; i += 1) {
-    for (let j = i + 1; j < ids.length; j += 1) {
-      const a = centres[i];
-      const b = centres[j];
-      // Two discs of HULL_RADIUS overlap when their centres are closer than 2r.
-      if (Math.hypot(a.x - b.x, a.y - b.y) < HULL_RADIUS * 2) hullOverlapPairs += 1;
-    }
-  }
-  let nearHuePairs = 0;
-  for (let i = 0; i < centres.length; i += 1) {
-    for (let j = i + 1; j < centres.length; j += 1) {
-      if (Math.hypot(centres[i].x - centres[j].x, centres[i].y - centres[j].y) < 220) nearHuePairs += 1;
-    }
-  }
-  return { candidatePairs, hullOverlapPairs, nearHuePairs };
+const median = (values) => {
+  const sorted = values.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+};
+
+/** The hue solver's real input on a draw frame: one node per set outline, plus
+ * one per region the layout produced. Disjoint sets contribute a region each,
+ * so the entity count is roughly double the set count before folders. */
+function hueNodes(scene) {
+  const layout = createRegionLayout();
+  const regions = layout.update([...scene.hulls].map(([id, outline]) => ({ id, outline })));
+  const setNodes = scene.centres.map((centre, index) => ({
+    id: scene.setIds[index],
+    x: centre.x,
+    y: centre.y,
+  }));
+  // regionCentroid, not a point average: it is what syncSetRegions stores as
+  // shape.center and hands the hue solver, and it is area-weighted.
+  const regionNodes = regions
+    .map((region) => ({ id: `region:${region.id}`, centre: regionCentroid(region) }))
+    .filter(({ centre }) => centre && Number.isFinite(centre.x) && Number.isFinite(centre.y))
+    .map(({ id, centre }) => ({ id, x: centre.x, y: centre.y }));
+  return { nodes: [...setNodes, ...regionNodes], regionCount: regionNodes.length };
 }
+
+const countNearPairs = (nodes) => {
+  let pairs = 0;
+  for (let i = 0; i < nodes.length; i += 1) {
+    for (let j = i + 1; j < nodes.length; j += 1) {
+      if (Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) < FOLDER_DISTANCE) pairs += 1;
+    }
+  }
+  return pairs;
+};
 
 function measure(count, regime, seed) {
   const scene = buildScene(count, regime, seed);
-  const stats = sceneStats(scene);
-
   const setsOf = (id) => scene.membership.get(id) ?? [];
 
-  const withHulls = forceSetSeparation({ setsOf, hullOf: (setId) => scene.hulls.get(setId) });
-  withHulls.initialize(scene.nodes);
+  const separationForce = forceSetSeparation({ setsOf, hullOf: (setId) => scene.hulls.get(setId) });
+  separationForce.initialize(scene.nodes);
   const separation = timeIt(() => {
     resetVelocities(scene.nodes);
-    withHulls(1);
+    separationForce(1);
   });
 
-  // Same scene, hull pass withheld: the difference is the sets^2 SAT phase.
-  const withoutHulls = forceSetSeparation({ setsOf });
-  withoutHulls.initialize(scene.nodes);
+  const nodeOnly = forceSetSeparation({ setsOf });
+  nodeOnly.initialize(scene.nodes);
   const nodePhase = timeIt(() => {
     resetVelocities(scene.nodes);
-    withoutHulls(1);
+    nodeOnly(1);
   });
 
-  const hue = timeIt(() => {
-    const colors = new Map();
-    const hueState = new Map();
-    assignSpatialFolderHues(scene.folders, colors, { cx: 0, cy: 0 }, hueState);
+  const { nodes: spatial, regionCount } = hueNodes(scene);
+
+  // Settled: state persists and has already converged, which is what a workspace
+  // sitting still actually costs.
+  const settledColors = new Map();
+  const settledState = new Map();
+  for (let i = 0; i < 30; i += 1) {
+    assignSpatialFolderHues(spatial, settledColors, { cx: 0, cy: 0 }, settledState);
+  }
+  const settledHue = timeIt(() => {
+    assignSpatialFolderHues(spatial, settledColors, { cx: 0, cy: 0 }, settledState);
   });
 
-  return { count, regime, seed, ...stats, separation, nodePhase, hue };
+  // Moving: same persistent maps, but the scene drifts every frame so the set
+  // drift and projection paths keep doing real work.
+  const movingColors = new Map();
+  const movingState = new Map();
+  const movingNodes = spatial.map((node) => ({ ...node }));
+  for (let i = 0; i < 30; i += 1) {
+    assignSpatialFolderHues(movingNodes, movingColors, { cx: 0, cy: 0 }, movingState);
+  }
+  let frame = 0;
+  const movingHue = timeIt(() => {
+    frame += 1;
+    const dx = Math.cos(frame * 0.37) * 1.5;
+    const dy = Math.sin(frame * 0.37) * 1.5;
+    for (const node of movingNodes) {
+      node.x += dx;
+      node.y += dy;
+    }
+    assignSpatialFolderHues(movingNodes, movingColors, { cx: 0, cy: 0 }, movingState);
+  });
+
+  return {
+    count,
+    regime,
+    seed,
+    ringTotal: scene.ringCounts.reduce((sum, value) => sum + value, 0),
+    ringMedian: median(scene.ringCounts),
+    ringMax: Math.max(...scene.ringCounts),
+    regionCount,
+    spatialNodes: spatial.length,
+    nearPairs: countNearPairs(spatial),
+    separation,
+    nodePhase,
+    settledHue,
+    movingHue,
+  };
 }
 
 const pad = (value, width) => String(value).padStart(width);
 const ms = (value) => value.toFixed(3);
 
-console.log(`seeds ${SEEDS.join(', ')} | ${MEMBERS_PER_SET} members and ${RING_NODES_PER_SET} ring nodes per set`);
-console.log(`${HULL_POINTS}-point hulls at radius ${HULL_RADIUS} | ${REPETITIONS} reps after ${WARMUP} warm-up\n`);
-console.log('sets regime      pairs  hullOv  huePr | separation med/p95/max | nodePhase med | hullSAT | hue med/p95/max | combined');
+console.log(`seeds ${SEEDS.join(', ')} | ${MEMBERS_PER_SET} members of ${MEMBER_SIZE}px per set`);
+console.log(`rings from reconcileRing (padding ${RING_PADDING}, linkDistance ${RING_LINK_DISTANCE})`);
+console.log(`hue input = set centroids + region centroids | FOLDER_DISTANCE ${FOLDER_DISTANCE} imported`);
+console.log(`${REPETITIONS} reps after ${WARMUP} warm-up, hue state persistent and pre-converged\n`);
+console.log('sets regime     ring/set ringTot regions spatial nearPr | separation med/p95 | nodePh | hullSAT | hueSettled | hueMoving | combined');
 
 const rows = [];
 for (const count of COUNTS) {
-  for (const regime of ['separated', 'clustered', 'dense']) {
+  for (const regime of ['separated', 'clustered', 'dense', 'stretched']) {
     for (const seed of SEEDS) {
       const row = measure(count, regime, seed);
       rows.push(row);
@@ -218,33 +301,34 @@ for (const count of COUNTS) {
       console.log(
         pad(row.count, 4),
         regime.padEnd(10),
-        pad(row.candidatePairs, 6),
-        pad(row.hullOverlapPairs, 7),
-        pad(row.nearHuePairs, 6),
+        pad(`${row.ringMedian}/${row.ringMax}`, 8),
+        pad(row.ringTotal, 7),
+        pad(row.regionCount, 7),
+        pad(row.spatialNodes, 7),
+        pad(row.nearPairs, 6),
         '|',
         pad(ms(row.separation.median), 7),
         pad(ms(row.separation.p95), 7),
-        pad(ms(row.separation.max), 7),
         '|',
-        pad(ms(row.nodePhase.median), 8),
+        pad(ms(row.nodePhase.median), 6),
         '|',
         pad(ms(hullSat), 7),
         '|',
-        pad(ms(row.hue.median), 6),
-        pad(ms(row.hue.p95), 6),
-        pad(ms(row.hue.max), 6),
+        pad(ms(row.settledHue.median), 10),
         '|',
-        pad(ms(row.separation.median + row.hue.median), 8),
+        pad(ms(row.movingHue.median), 9),
+        '|',
+        pad(ms(row.separation.median + row.movingHue.median), 8),
       );
     }
   }
 }
 
-console.log('\nworst combined median per count and regime:');
+console.log('\nworst combined median (separation + moving hue) per count and regime:');
 for (const count of COUNTS) {
-  for (const regime of ['separated', 'clustered', 'dense']) {
+  for (const regime of ['separated', 'clustered', 'dense', 'stretched']) {
     const matching = rows.filter((row) => row.count === count && row.regime === regime);
-    const worst = Math.max(...matching.map((row) => row.separation.median + row.hue.median));
+    const worst = Math.max(...matching.map((row) => row.separation.median + row.movingHue.median));
     console.log(`  ${pad(count, 4)} ${regime.padEnd(10)} ${ms(worst)}ms`);
   }
 }
