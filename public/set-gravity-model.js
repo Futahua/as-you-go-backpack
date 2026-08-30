@@ -429,11 +429,33 @@ export function forceSetSeparation({
     // kept as objects, not ids: the hull pass has to push them, and it can only
     // push what it holds.
     const membersBySet = new Map();
+    // Sets that share a member, derived from the members themselves rather than
+    // rediscovered by asking every pair of sets whether they intersect. A member
+    // already names the sets it belongs to, and every pair among those names is
+    // related by definition — so the answer falls out of the same walk that
+    // builds membersBySet.
+    //
+    // Cost goes from sets^2 x members-per-set to the sum over members of their
+    // set-degree squared. In the ordinary case, where a member belongs to one
+    // set, that is linear and produces no pairs at all. The pair scan cost 2.9ms
+    // of the non-hull separation path at 128 sets with nothing overlapping.
+    const related = new Set();
     for (const node of nodes) {
       if (node.ring) continue;
-      for (const setId of setsOf(node.id) ?? []) {
+      // Deduplicated for cost, not for correctness: a repeat would only ever
+      // add a self-pair, which the proximity pass already skips on setId, or
+      // re-add a pair the Set collapses. What it avoids is squaring the inner
+      // loop over whatever multiplicity setsOf happens to return.
+      const setIds = [...new Set(setsOf(node.id) ?? [])].sort();
+      for (const setId of setIds) {
         if (!membersBySet.has(setId)) membersBySet.set(setId, new Set());
         membersBySet.get(setId).add(node);
+      }
+      for (let i = 0; i < setIds.length; i += 1) {
+        for (let j = i + 1; j < setIds.length; j += 1) {
+          related.add(`${setIds[i]} ${setIds[j]}`);
+          related.add(`${setIds[j]} ${setIds[i]}`);
+        }
       }
     }
     // A droplet whose member is under the pointer is anchored: it takes no
@@ -444,20 +466,6 @@ export function forceSetSeparation({
       for (const member of members) {
         if (isHeld(member.id)) {
           anchored.add(setId);
-          break;
-        }
-      }
-    }
-    const related = new Set();
-    const setIds = [...membersBySet.keys()];
-    for (let i = 0; i < setIds.length; i += 1) {
-      for (let j = i + 1; j < setIds.length; j += 1) {
-        const a = membersBySet.get(setIds[i]);
-        const b = membersBySet.get(setIds[j]);
-        for (const member of a) {
-          if (!b.has(member)) continue;
-          related.add(`${setIds[i]} ${setIds[j]}`);
-          related.add(`${setIds[j]} ${setIds[i]}`);
           break;
         }
       }
@@ -523,11 +531,42 @@ export function forceSetSeparation({
       if (hull && hull.length >= 3) hulls.set(setId, hull);
     }
 
+    // Broad phase before the separating-axis test, for the same reason the ring
+    // pass is bucketed: without it every pair of sets pays for a full SAT sweep
+    // over two 48-point hulls whether or not they are anywhere near each other.
+    // At 128 sets that is 8,128 sweeps per tick, ~2ms, on a scene where nothing
+    // overlaps and the right answer is to do nothing.
+    //
+    // Sorting on minX and stopping the inner scan once a candidate starts to the
+    // right of where the current hull ends is exact, not a heuristic: bounding
+    // boxes that do not meet cannot contain shapes that do, so no real overlap
+    // can be skipped. hullOverlap still decides every pair that survives.
     const ids = [...hulls.keys()];
-    for (let i = 0; i < ids.length; i += 1) {
-      for (let j = i + 1; j < ids.length; j += 1) {
-        if (related.has(`${ids[i]} ${ids[j]}`)) continue;
-        const overlap = hullOverlap(hulls.get(ids[i]), hulls.get(ids[j]));
+    const bounds = new Map();
+    for (const id of ids) {
+      const hull = hulls.get(id);
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const point of hull) {
+        if (point.x < minX) minX = point.x;
+        if (point.y < minY) minY = point.y;
+        if (point.x > maxX) maxX = point.x;
+        if (point.y > maxY) maxY = point.y;
+      }
+      bounds.set(id, { minX, minY, maxX, maxY });
+    }
+    const sweep = ids.slice().sort((left, right) => bounds.get(left).minX - bounds.get(right).minX);
+    for (let i = 0; i < sweep.length; i += 1) {
+      const boundsI = bounds.get(sweep[i]);
+      for (let j = i + 1; j < sweep.length; j += 1) {
+        const boundsJ = bounds.get(sweep[j]);
+        // Sorted on minX, so nothing after this one can reach back either.
+        if (boundsJ.minX > boundsI.maxX) break;
+        if (boundsJ.minY > boundsI.maxY || boundsI.minY > boundsJ.maxY) continue;
+        if (related.has(`${sweep[i]} ${sweep[j]}`)) continue;
+        const overlap = hullOverlap(hulls.get(sweep[i]), hulls.get(sweep[j]));
         if (!overlap) continue;
 
         // Along the axis of least overlap, which is the shortest way to part
@@ -539,8 +578,8 @@ export function forceSetSeparation({
         // enclose the members: moving only the ring leaves the drawn shapes
         // overlapping exactly as much as the member regions do. A uniform delta
         // translates the droplet without changing its internal offsets.
-        const anchoredI = anchored.has(ids[i]);
-        const anchoredJ = anchored.has(ids[j]);
+        const anchoredI = anchored.has(sweep[i]);
+        const anchoredJ = anchored.has(sweep[j]);
         // Both droplets under the pointer: nothing can move, so nothing is
         // pushed. The overlap lasts only as long as the drag does.
         if (anchoredI && anchoredJ) continue;
@@ -552,19 +591,19 @@ export function forceSetSeparation({
         if (anchoredI) { pushI = 0; pushJ *= 2; }
         if (anchoredJ) { pushJ = 0; pushI *= 2; }
 
-        for (const node of bySet.get(ids[i])) {
+        for (const node of bySet.get(sweep[i])) {
           node.vx = (node.vx ?? 0) - (overlap.x * pushI);
           node.vy = (node.vy ?? 0) - (overlap.y * pushI);
         }
-        for (const node of membersBySet.get(ids[i]) ?? []) {
+        for (const node of membersBySet.get(sweep[i]) ?? []) {
           node.vx = (node.vx ?? 0) - (overlap.x * pushI);
           node.vy = (node.vy ?? 0) - (overlap.y * pushI);
         }
-        for (const node of bySet.get(ids[j])) {
+        for (const node of bySet.get(sweep[j])) {
           node.vx = (node.vx ?? 0) + (overlap.x * pushJ);
           node.vy = (node.vy ?? 0) + (overlap.y * pushJ);
         }
-        for (const node of membersBySet.get(ids[j]) ?? []) {
+        for (const node of membersBySet.get(sweep[j]) ?? []) {
           node.vx = (node.vx ?? 0) + (overlap.x * pushJ);
           node.vy = (node.vy ?? 0) + (overlap.y * pushJ);
         }
