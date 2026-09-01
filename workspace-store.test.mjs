@@ -400,3 +400,70 @@ test('0B: session-only changes stay allowed in a view', async () => {
   assert.deepEqual([...h.store.getSession().selected], ['x']);
   assert.deepEqual(h.blocked, [], 'navigating and selecting are not document mutations');
 });
+
+test('0B: invalidating the save generation abandons queued saves without persisting them', async () => {
+  const h = createGatedHarness();
+  let releaseFirst;
+  const gate = new Promise((resolve) => { releaseFirst = resolve; });
+  const persisted = [];
+  let state = { items: ['root'] };
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async (snapshot) => { persisted.push(snapshot); await gate; },
+    normalizeState: (s) => s,
+  });
+  void h;
+
+  const first = store.save({ items: ['A'] });
+  const queuedB = store.save({ items: ['B'] });
+  const queuedC = store.save({ items: ['C'] });
+
+  // A must genuinely be in flight before the conflict arrives — that is the
+  // sequence being defended against, and a generation check cannot save a job
+  // that already called persist.
+  await new Promise((resolve) => { setImmediate(resolve); });
+  assert.equal(persisted.length, 1, 'A is in flight');
+
+  // A loses its compare-and-set; B and C are still queued and were built on
+  // the same superseded document.
+  const latest = store.invalidatePendingSaves();
+  assert.equal(JSON.parse(latest).items[0], 'C', 'the newest queued snapshot is what the creator would keep');
+
+  releaseFirst();
+  await Promise.all([first, queuedB, queuedC]);
+
+  assert.deepEqual(persisted.map((s) => JSON.parse(s).items[0]), ['A'], 'B and C must never reach persistence');
+});
+
+test('0B: a save queued after invalidation belongs to the fresh generation and does persist', async () => {
+  const persisted = [];
+  let state = { items: ['root'] };
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async (snapshot) => { persisted.push(snapshot); },
+    normalizeState: (s) => s,
+  });
+
+  const stale = store.save({ items: ['old-generation'] });
+  store.invalidatePendingSaves();
+  await stale;
+
+  await store.save({ items: ['after-recovery'] });
+
+  assert.deepEqual(persisted.map((s) => JSON.parse(s).items[0]), ['after-recovery']);
+});
+
+test('0B: invalidating twice reports nothing the second time', () => {
+  let state = { items: ['root'] };
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => {},
+    normalizeState: (s) => s,
+  });
+  store.save({ items: ['A'] });
+  assert.equal(JSON.parse(store.invalidatePendingSaves()).items[0], 'A');
+  assert.equal(store.invalidatePendingSaves(), null);
+});

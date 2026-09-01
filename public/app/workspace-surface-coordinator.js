@@ -82,6 +82,11 @@ export function createSurfaceCoordinator({
   channel,
   host,
   installDocument,
+  /** Abandons the store's queued saves and returns the newest serialized
+   * snapshot of that generation. Called the moment a save is refused, so the
+   * frozen "my version" is the creator's latest local work rather than
+   * whichever snapshot happened to lose the race. */
+  invalidatePendingSaves = () => null,
   onRoleChange = () => {},
   newClientId = () => `s-${Math.random().toString(36).slice(2, 10)}`,
 }) {
@@ -104,12 +109,15 @@ export function createSurfaceCoordinator({
     onRoleChange(role, detail);
   }
 
-  function publish(snapshot, atRevision) {
+  /** Broadcast the exact bytes that were committed. Views decode these; a
+   * second representation built alongside the save could differ from what is
+   * actually on disk. */
+  function publish(serialized, atRevision) {
     channel.postMessage({
       type: SNAPSHOT_MESSAGE,
       clientId,
       revision: atRevision,
-      snapshot,
+      serialized,
     });
   }
 
@@ -131,10 +139,17 @@ export function createSurfaceCoordinator({
     get frozen() { return frozenSnapshot; },
     get transferSuspended() { return transferSuspended; },
 
-    /** Queue for write ownership. Resolves when this surface becomes the
-     * writer, which may be immediately or when the current writer goes away. */
-    async start() {
-      if (transferSuspended) return null;
+    /**
+     * Queue for write ownership. Resolves when this surface becomes the
+     * writer, which may be immediately or when the current writer goes away.
+     *
+     * `designated` is the surface a detach handoff is transferring ownership
+     * TO. It is the one surface allowed through a reservation, because the
+     * reservation exists to keep everyone ELSE out of the queue until the
+     * handoff completes.
+     */
+    async start({ designated = false } = {}) {
+      if (transferSuspended && !designated) return null;
       if (pendingAcquire) return pendingAcquire;
       pendingAcquire = (async () => {
         held = await lock.request(SURFACE_DOCUMENT_LOCK);
@@ -148,22 +163,29 @@ export function createSurfaceCoordinator({
     },
 
     /**
-     * Save the board. Only the writer may; a view calling this is a bug in the
-     * caller, not a race to resolve, so it throws rather than failing quietly.
+     * Save the board. The store owns serialization and ordering, so the
+     * already-serialized snapshot arrives here as-is and is never decoded and
+     * re-encoded on the way to disk.
+     *
+     * Only the writer may save; a view reaching here is a caller bug, not a
+     * race to resolve.
      */
-    async save(snapshot) {
+    async saveSerialized(serialized) {
       if (role !== SURFACE_ROLE.WRITER) {
         throw new Error('This surface is not the writer and may not save the board.');
       }
-      const result = await host.saveChecked(snapshot, revision);
+      const result = await host.saveChecked(serialized, revision);
       if (result && result.ok === true) {
         revision = result.revision;
-        publish(snapshot, revision);
+        publish(serialized, revision);
         return { ok: true, revision };
       }
-      // Fail closed. The board changed elsewhere; this snapshot is unsaved and
-      // is kept exactly as it is until the creator decides.
-      frozenSnapshot = snapshot;
+      // Fail closed, synchronously enough that no further durable mutation is
+      // accepted: the role changes before this returns. Queued saves from the
+      // same generation are abandoned without ever reaching persistence, and
+      // the newest of them becomes the version the creator is offered.
+      const latestLocal = invalidatePendingSaves();
+      frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : serialized;
       setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
       return { ok: false, code: 'STALE_REVISION' };
     },
@@ -188,13 +210,13 @@ export function createSurfaceCoordinator({
      */
     async keepMine() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
-      const snapshot = frozenSnapshot;
+      const serialized = frozenSnapshot;
       const loaded = await host.loadVersioned();
-      const result = await host.saveChecked(snapshot, loaded.revision);
+      const result = await host.saveChecked(serialized, loaded.revision);
       if (result && result.ok === true) {
         revision = result.revision;
         frozenSnapshot = null;
-        publish(snapshot, revision);
+        publish(serialized, revision);
         setRole(SURFACE_ROLE.WRITER, { revision });
         return { ok: true, revision };
       }
@@ -208,16 +230,49 @@ export function createSurfaceCoordinator({
       if (!isPlainObject(message) || message.type !== SNAPSHOT_MESSAGE) return false;
       if (message.clientId === clientId) return false;
       if (role !== SURFACE_ROLE.VIEW) return false;
-      if (typeof message.revision !== 'string' || !isPlainObject(message.snapshot)) return false;
+      if (typeof message.revision !== 'string' || typeof message.serialized !== 'string') return false;
+      let decoded;
+      try {
+        decoded = JSON.parse(message.serialized);
+      } catch {
+        // A malformed broadcast is ignored rather than installed: a view must
+        // never replace a good document with something it could not read.
+        return false;
+      }
+      if (!isPlainObject(decoded)) return false;
       revision = message.revision;
-      installDocument(message.snapshot);
+      installDocument(decoded);
       return true;
     },
 
-    /** 018 seam: hold ordinary surfaces out of the election while a detach
-     * handshake transfers ownership deliberately. */
-    suspendTransfer() { transferSuspended = true; },
-    resumeTransfer() { transferSuspended = false; },
+    /**
+     * 018 seam. The handoff ordering this supports, in full:
+     *
+     *   reserveTransfer()      ordinary surfaces leave the election
+     *   ...FLUSH settles...    the old writer still owns the lock, so its one
+     *                          authorized final save is still valid
+     *   release()              only now is the lock given up
+     *   ...ACTIVATE...         the designated surface starts
+     *   start({designated})    it, and only it, may take the lock
+     *   (reload from disk)     mandatory, never from cached state
+     *   completeTransfer()     ordinary surfaces may queue again
+     *
+     * The reservation must be taken BEFORE the flush, and must outlive the
+     * release: releasing while ordinary surfaces are queued would turn the
+     * handoff into a free-for-all that the designated surface could lose.
+     */
+    reserveTransfer() { transferSuspended = true; },
+
+    /** The handoff finished — ownership reached the designated surface. */
+    completeTransfer() { transferSuspended = false; },
+
+    /**
+     * The handoff failed. If it failed before release(), this surface still
+     * owns the lock and simply keeps writing. If it failed after, nobody owns
+     * it and the next surface to elect itself still reloads from disk first —
+     * an aborted transfer never leaves anyone writable from cached state.
+     */
+    abortTransfer() { transferSuspended = false; },
 
     /** Give up write ownership. The lock is released, so a waiting surface
      * elects itself and reloads from disk before it may write. */

@@ -8,6 +8,10 @@
  * entry uses it to fold the current navigation session into the saved view.
  * The store clears the session selection directly before invoking prepare().
  * afterCommit() runs after the new state is installed but before persisting. */
+/** A queued save that was abandoned because its generation was invalidated.
+ * It never reached persistence. */
+export const SUPERSEDED_SAVE = Object.freeze({ superseded: true });
+
 export function createWorkspaceStore({
   getState,
   setState,
@@ -30,6 +34,23 @@ export function createWorkspaceStore({
   let undoStack = [];
   let redoStack = [];
   let saveQueue = Promise.resolve();
+  /**
+   * 0B: persistence generation.
+   *
+   * A save that loses a compare-and-set is not the only save in flight —
+   * later edits may already be queued behind it, and they carry snapshots
+   * built on the same superseded document. Letting them run after the
+   * creator resolves the conflict would write a prehistoric board over the
+   * resolution. Throwing them away instead loses the creator's newest edit,
+   * which may only exist in the last queued snapshot.
+   *
+   * So the queue is stamped with a generation. Invalidating it settles every
+   * queued job as superseded WITHOUT calling persist, and hands back the
+   * newest serialized snapshot from that generation so the conflict can offer
+   * it as "my version".
+   */
+  let saveGeneration = 0;
+  let latestQueuedSnapshot = null;
   const session = {
     selected: new Set(),
     // Sets are selected separately from items, and deliberately so: it lets
@@ -53,9 +74,16 @@ export function createWorkspaceStore({
 
   function save(nextState = getState(), metadata) {
     const snapshot = JSON.stringify(nextState);
+    const generation = saveGeneration;
+    latestQueuedSnapshot = snapshot;
     const operation = saveQueue
       .catch(() => undefined)
-      .then(() => persist(snapshot, metadata));
+      .then(() => {
+        // Checked when the job actually runs, not when it was queued: the
+        // generation may have been invalidated while it waited.
+        if (generation !== saveGeneration) return SUPERSEDED_SAVE;
+        return persist(snapshot, metadata);
+      });
     saveQueue = operation;
     return operation;
   }
@@ -152,5 +180,16 @@ export function createWorkspaceStore({
     commit,
     undo,
     redo,
+    /**
+     * Abandon every queued save without running it, and report the newest
+     * serialized snapshot that generation held — the creator's latest local
+     * work, including edits queued behind the save that lost.
+     */
+    invalidatePendingSaves() {
+      const latest = latestQueuedSnapshot;
+      saveGeneration += 1;
+      latestQueuedSnapshot = null;
+      return latest;
+    },
   };
 }
