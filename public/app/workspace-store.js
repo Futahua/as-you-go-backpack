@@ -17,6 +17,15 @@ export function createWorkspaceStore({
   afterCommit,
   setStatus,
   initialSession = {},
+  // 0B: document-write authority. A surface that is not the writer must stop
+  // before it changes local document or history state -- not after, and never
+  // by quietly dropping the save. A dropped save is the silent loss this whole
+  // effort exists to remove. `install` is deliberately NOT gated: the writer's
+  // broadcasts and conflict recovery must still be able to replace the
+  // authoritative document, and session-only setters stay free so a view can
+  // still navigate, select and expand.
+  canMutateDocument = () => true,
+  onMutationBlocked = () => {},
 }) {
   let undoStack = [];
   let redoStack = [];
@@ -52,6 +61,12 @@ export function createWorkspaceStore({
   }
 
   function commit(nextState, { isUndo = false, isRedo = false } = {}) {
+    if (!canMutateDocument()) {
+      // Refused before the history stacks or the document are touched, so a
+      // blocked edit leaves nothing behind to resurface later.
+      onMutationBlocked('commit');
+      return Promise.resolve(false);
+    }
     const previous = getState();
     if (isUndo) {
       redoStack.push(previous);
@@ -81,12 +96,14 @@ export function createWorkspaceStore({
   }
 
   async function undo() {
+    if (!canMutateDocument()) { onMutationBlocked('undo'); return; }
     if (undoStack.length === 0) return;
     const previous = undoStack.pop();
     return commit(previous, { isUndo: true });
   }
 
   async function redo() {
+    if (!canMutateDocument()) { onMutationBlocked('redo'); return; }
     if (redoStack.length === 0) return;
     const next = redoStack.pop();
     return commit(next, { isRedo: true });
@@ -124,6 +141,10 @@ export function createWorkspaceStore({
       return getState();
     },
     replace(nextState) {
+      if (!canMutateDocument()) {
+        onMutationBlocked('replace');
+        return getState();
+      }
       setState(nextState);
       return getState();
     },

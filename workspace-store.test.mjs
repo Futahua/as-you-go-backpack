@@ -297,3 +297,106 @@ test('the session trail-expanded set is distinct from ordinary graph expansion',
   h.store.setTrailExpanded([]);
   assert.deepEqual([...h.store.getSession().trailExpanded], []);
 });
+
+/** 0B: a store whose document-write authority can be withdrawn, as a
+ * non-writer surface's store is. */
+function createGatedHarness() {
+  let state = { items: ['root'] };
+  let mayMutate = true;
+  const saved = [];
+  const blocked = [];
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async (snapshot) => { saved.push(snapshot); },
+    normalizeState: (s) => s,
+    canMutateDocument: () => mayMutate,
+    onMutationBlocked: (reason) => blocked.push(reason),
+  });
+  return {
+    store, saved, blocked,
+    getState: () => state,
+    revoke: () => { mayMutate = false; },
+    grant: () => { mayMutate = true; },
+  };
+}
+
+test('0B: a blocked commit changes neither the document nor history, and does not persist', async () => {
+  const h = createGatedHarness();
+  await h.store.commit({ items: ['a'] }, {});
+  h.revoke();
+
+  const result = await h.store.commit({ items: ['blocked'] }, {});
+
+  assert.equal(result, false);
+  assert.deepEqual(h.getState(), { items: ['a'] }, 'the document must not change');
+  assert.equal(h.saved.length, 1, 'a refused edit must not reach persistence');
+  assert.deepEqual(h.blocked, ['commit']);
+});
+
+test('0B: a blocked edit leaves no history behind to resurface after promotion', async () => {
+  const h = createGatedHarness();
+  await h.store.commit({ items: ['a'] }, {});
+  h.revoke();
+
+  // The view tries to edit while read-only. Refused.
+  await h.store.commit({ items: ['speculative'] }, {});
+  assert.equal(h.store.canUndo(), true, 'only the one legitimate edit is in history');
+
+  // It is promoted to writer and the authoritative document is installed.
+  h.grant();
+  h.store.install({ items: ['from-disk'] });
+
+  // Nothing speculative may reappear, and undo must not walk back into it.
+  assert.deepEqual(h.getState(), { items: ['from-disk'] });
+  await h.store.undo();
+  assert.notDeepEqual(h.getState(), { items: ['speculative'] });
+  // Undo after promotion legitimately commits and saves; what must never
+  // appear in anything written is the edit that was refused.
+  assert.equal(
+    h.saved.some((snapshot) => snapshot.includes('speculative')),
+    false,
+    'the refused edit must never reach disk, before or after promotion',
+  );
+});
+
+test('0B: replace is refused and reports the current document unchanged', async () => {
+  const h = createGatedHarness();
+  h.revoke();
+  const returned = h.store.replace({ items: ['nope'] });
+  assert.deepEqual(returned, { items: ['root'] });
+  assert.deepEqual(h.getState(), { items: ['root'] });
+  assert.deepEqual(h.blocked, ['replace']);
+});
+
+test('0B: undo and redo are refused while write authority is withdrawn', async () => {
+  const h = createGatedHarness();
+  await h.store.commit({ items: ['a'] }, {});
+  await h.store.commit({ items: ['b'] }, {});
+  h.revoke();
+
+  await h.store.undo();
+  assert.deepEqual(h.getState(), { items: ['b'] });
+  await h.store.redo();
+  assert.deepEqual(h.getState(), { items: ['b'] });
+  assert.deepEqual(h.blocked, ['undo', 'redo']);
+});
+
+test('0B: install stays allowed so a view can follow the writer', async () => {
+  const h = createGatedHarness();
+  h.revoke();
+  h.store.install({ items: ['from-the-writer'] });
+  assert.deepEqual(h.getState(), { items: ['from-the-writer'] });
+  assert.deepEqual(h.blocked, [], 'following the writer is not a blocked mutation');
+});
+
+test('0B: session-only changes stay allowed in a view', async () => {
+  const h = createGatedHarness();
+  h.revoke();
+  h.store.setNavigation({ currentId: 'elsewhere' });
+  h.store.setSelection(['x']);
+  h.store.toggleGraphExpanded('g');
+  assert.equal(h.store.getSession().currentId, 'elsewhere');
+  assert.deepEqual([...h.store.getSession().selected], ['x']);
+  assert.deepEqual(h.blocked, [], 'navigating and selecting are not document mutations');
+});
