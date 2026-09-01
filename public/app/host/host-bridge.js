@@ -162,6 +162,20 @@ export function createHostBridge(window) {
     saveWorkspace: (state) => request('papers:project:as-you-go-save', {
       state: encodeWorkspaceState(state),
     }),
+    // 0B: the versioned pair. `loadVersioned` reports the revision the surface
+    // observed; `saveChecked` offers a save built on that revision, and Papers
+    // refuses it if the board changed elsewhere first. The refusal arrives
+    // wrapped under `stateSave`, so its own `ok: false` is a real answer rather
+    // than a failed request.
+    loadWorkspaceVersioned: () => request('papers:project:state-load-versioned')
+      .then((payload) => ({
+        state: decodeWorkspaceState(payload),
+        revision: payload.revision,
+      })),
+    saveWorkspaceChecked: (state, revision) => request('papers:project:state-save-checked', {
+      state: encodeWorkspaceState(state),
+      revision,
+    }).then((payload) => payload.stateSave),
     launchShortcut: (actionId) => request('papers:project:as-you-go-launch', { actionId }),
     revealShortcut: (actionId) => request('papers:project:as-you-go-reveal', { actionId }),
     openWebLink: (url) => request('papers:project:open-web-link', { url }),
