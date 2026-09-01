@@ -246,7 +246,22 @@ export function createSurfaceCoordinator({
     },
 
     /**
-     * 018 seam. The handoff ordering this supports, in full:
+     * 018 seam. DORMANT, deliberately kept.
+     *
+     * The legacy full-surface detach is retired from reachability -- see the
+     * `windowLayoutDetachment` stub in the entry file, where mode is always
+     * 'workspace'. Detach now opens the compact widget, which never writes the
+     * store, so the ownership race this seam exists for cannot occur on the
+     * live path. It is not wired to anything, and its tests stand as the
+     * specification rather than as coverage of a running path.
+     *
+     * INVARIANT: if full-surface ownership transfer is ever made reachable
+     * again, it MUST integrate this coordinator before shipping -- reserve
+     * before FLUSH, release only after the flush settles, designated
+     * acquisition after ACTIVATE, and the mandatory versioned reload. Enabling
+     * that path without this is the split brain the Web Lock exists to prevent.
+     *
+     * The handoff ordering it supports, in full:
      *
      *   reserveTransfer()      ordinary surfaces leave the election
      *   ...FLUSH settles...    the old writer still owns the lock, so its one
