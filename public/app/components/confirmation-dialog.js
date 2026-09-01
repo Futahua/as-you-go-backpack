@@ -15,6 +15,39 @@ export function createConfirmationDialog({
   let pendingPermanentIds = [];
   let pendingRestoreIds = [];
   let abortController = null;
+  /** 0B: a generic yes/no question answered through this same layer, so a
+   * destructive choice outside the Bin still looks and behaves like every
+   * other confirmation. Resolves false if the creator cancels or the layer is
+   * closed any other way -- never left hanging. */
+  let pendingConfirm = null;
+  let confirmLabelBefore = null;
+
+  function restoreConfirmLabel() {
+    if (confirmLabelBefore === null) return;
+    elements.confirmDelete.textContent = confirmLabelBefore;
+    confirmLabelBefore = null;
+  }
+
+  function settleConfirm(answer) {
+    const resolve = pendingConfirm;
+    pendingConfirm = null;
+    restoreConfirmLabel();
+    if (resolve) resolve(answer);
+  }
+
+  function askConfirm({ title, copy, confirmLabel = 'Continue' }) {
+    settleConfirm(false);
+    pendingPermanentIds = [];
+    pendingRestoreIds = [];
+    elements.confirmTitle.textContent = title;
+    elements.confirmCopy.textContent = copy;
+    confirmLabelBefore = elements.confirmDelete.textContent;
+    elements.confirmDelete.textContent = confirmLabel;
+    elements.confirmDelete.hidden = false;
+    elements.confirmRestore.hidden = true;
+    elements.confirmLayer.hidden = false;
+    return new Promise((resolve) => { pendingConfirm = resolve; });
+  }
 
   function askPermanentDelete(ids, deletingAll = false) {
     const targetIds = ids ?? getSelectedIds();
@@ -49,6 +82,7 @@ export function createConfirmationDialog({
   }
 
   function close() {
+    settleConfirm(false);
     pendingPermanentIds = [];
     pendingRestoreIds = [];
     elements.confirmLayer.hidden = true;
@@ -59,6 +93,13 @@ export function createConfirmationDialog({
     const signal = abortController.signal;
     elements.cancelConfirm.addEventListener('click', close, { signal });
     elements.confirmDelete.addEventListener('click', async () => {
+      // A generic question owns the button while it is pending; it must not
+      // fall through into a permanent delete.
+      if (pendingConfirm) {
+        elements.confirmLayer.hidden = true;
+        settleConfirm(true);
+        return;
+      }
       const next = permanentlyDelete(getState(), pendingPermanentIds);
       pendingPermanentIds = [];
       elements.confirmLayer.hidden = true;
@@ -75,9 +116,10 @@ export function createConfirmationDialog({
   function destroy() {
     abortController?.abort();
     abortController = null;
+    settleConfirm(false);
     pendingPermanentIds = [];
     pendingRestoreIds = [];
   }
 
-  return { askPermanentDelete, askRestoreConfirm, close, mount, destroy };
+  return { askPermanentDelete, askRestoreConfirm, askConfirm, close, mount, destroy };
 }

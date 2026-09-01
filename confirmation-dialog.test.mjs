@@ -124,3 +124,45 @@ test('destroy removes confirm button listeners', () => {
     + h.elements.cancelConfirm._listeners.length;
   assert.equal(after, 0);
 });
+
+test('0B: a generic question resolves true only when confirmed', async () => {
+  const h = createHarness();
+  h.dialog.mount();
+  const answer = h.dialog.askConfirm({ title: 'Keep your version?', copy: 'This will replace changes saved elsewhere.', confirmLabel: 'Keep my version' });
+
+  assert.equal(h.elements.confirmTitle.textContent, 'Keep your version?');
+  assert.equal(h.elements.confirmCopy.textContent, 'This will replace changes saved elsewhere.');
+  assert.equal(h.elements.confirmDelete.textContent, 'Keep my version');
+  assert.equal(h.elements.confirmLayer.hidden, false);
+
+  await h.elements.confirmDelete._dispatch('click', {});
+  assert.equal(await answer, true);
+  assert.equal(h.elements.confirmLayer.hidden, true);
+  assert.equal(h.committed.length, 0, 'a generic question must never fall through into a delete');
+});
+
+test('0B: cancelling a generic question answers false rather than hanging', async () => {
+  const h = createHarness();
+  h.dialog.mount();
+  const answer = h.dialog.askConfirm({ title: 'Keep your version?', copy: 'copy' });
+  await h.elements.cancelConfirm._dispatch('click', {});
+  assert.equal(await answer, false);
+});
+
+test('0B: the confirm button label is restored for the next ordinary confirmation', async () => {
+  const h = createHarness();
+  h.dialog.mount();
+  const original = h.elements.confirmDelete.textContent;
+  const answer = h.dialog.askConfirm({ title: 't', copy: 'c', confirmLabel: 'Keep my version' });
+  await h.elements.cancelConfirm._dispatch('click', {});
+  await answer;
+  assert.equal(h.elements.confirmDelete.textContent, original);
+});
+
+test('0B: destroying while a question is pending answers false', async () => {
+  const h = createHarness();
+  h.dialog.mount();
+  const answer = h.dialog.askConfirm({ title: 't', copy: 'c' });
+  h.dialog.destroy();
+  assert.equal(await answer, false);
+});

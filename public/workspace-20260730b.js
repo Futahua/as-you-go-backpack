@@ -112,6 +112,16 @@ import { createKeyboardController } from './app/interactions/keyboard-controller
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
 import { createPointerController } from './app/interactions/pointer-controller.js';
+import {
+  SURFACE_DOCUMENT_CHANNEL,
+  SURFACE_ROLE,
+  createSurfaceCoordinator,
+  webLockAdapter,
+} from './app/workspace-surface-coordinator.js';
+import {
+  VIEW_BLOCKED_MESSAGE,
+  createDocumentConflictPanel,
+} from './app/components/document-conflict-panel.js';
 
 const host = createHostBridge(window);
 
@@ -170,16 +180,40 @@ const workspaceStoreStatus = createReadOnlyStatusSink({
   show: (text, options) => statusToast.show(text, options),
 });
 
+// 0B: created after the store, because it needs the store's queue. Until it
+// exists this surface behaves exactly as it always has -- a single writer.
+let surfaceCoordinator = null;
+
+/** Does this surface currently own the shared document? */
+function hasDocumentWriteAuthority() {
+  return !surfaceCoordinator || surfaceCoordinator.role === SURFACE_ROLE.WRITER;
+}
+
 const store = createWorkspaceStore({
   getState: () => state,
   setState: (next) => { state = next; },
   normalizeState,
+  // 0B: a surface that does not own the document stops here, before any
+  // document or history state changes. This is conjunctive with the 018
+  // read-only gate below, not a replacement for it.
+  canMutateDocument: hasDocumentWriteAuthority,
+  onMutationBlocked: () => {
+    // A plain view being blocked is ordinary, not a conflict: say so lightly
+    // and leave the conflict panel for an actual refused save.
+    if (surfaceCoordinator?.role === SURFACE_ROLE.VIEW) {
+      statusToast.show(VIEW_BLOCKED_MESSAGE);
+    }
+  },
   persist: (snapshot, metadata) => {
     // 018X1/018X8: every save funnels through the store's persist callback.
     // Persistence is blocked while read-only UNLESS the metadata carries the
     // gate's exact current flush permit (an older queued save has no token and
     // resolves as suppressed; the handoff FLUSH saves the final snapshot once).
     if (!detachSaveGate.permitsPersist(metadata)) return Promise.resolve();
+    // 0B: the coordinator owns the revision and the compare-and-set, and
+    // broadcasts the exact bytes that landed. The snapshot is already
+    // serialized here, and is passed through untouched.
+    if (surfaceCoordinator) return surfaceCoordinator.saveSerialized(snapshot);
     return host.saveWorkspace(snapshot);
   },
   setStatus: workspaceStoreStatus,
@@ -365,6 +399,11 @@ function restoreWorkspaceView() {
 
 function saveWorkspaceView() {
   if (detachSaveGate.isReadOnly()) return;
+  // 0B: a view's navigation is deliberately local and ephemeral. Checked
+  // explicitly here rather than inferred from replace()'s return value, so an
+  // ordinary view never reaches store.save at all -- `state.view` is a
+  // fallback for a fresh surface, not a channel between live ones.
+  if (!hasDocumentWriteAuthority()) return;
   state = store.replace(captureWorkspaceView());
   void store.save(state).catch((error) => {
     // 018X6: a delayed persistence error must not paint status over the
@@ -5755,6 +5794,50 @@ if (WIDGET_SURFACE) {
   if (DETACHED_SURFACE) {
     void windowLayoutDetachment.reportReady();
   }
+  /**
+   * 0B composition. The coordinator owns write authority, the revision and the
+   * conflict; the store keeps the document, history, serialization and save
+   * ordering; the panel only follows the role.
+   */
+  function startSurfaceCoordination() {
+    if (typeof navigator === 'undefined' || !navigator.locks || typeof BroadcastChannel !== 'function') {
+      // Without both primitives there can be no safe election, so this surface
+      // stays exactly as it was rather than pretending to coordinate.
+      return;
+    }
+    const channel = new BroadcastChannel(SURFACE_DOCUMENT_CHANNEL);
+    const conflictPanel = createDocumentConflictPanel({
+      document,
+      onUseLatest: () => surfaceCoordinator.useLatest().then(render),
+      onKeepMine: () => surfaceCoordinator.keepMine().then(render),
+      confirm: (message) => confirmDialog.askConfirm({
+        title: 'Keep your version?',
+        copy: message,
+        confirmLabel: 'Keep my version',
+      }),
+    });
+    surfaceCoordinator = createSurfaceCoordinator({
+      lock: webLockAdapter(navigator),
+      channel,
+      host: {
+        loadVersioned: () => host.loadWorkspaceVersioned(),
+        saveChecked: (serialized, revision) => host.saveWorkspaceChecked(serialized, revision),
+      },
+      // Installs the document only. This surface's navigation is deliberately
+      // preserved, so two windows keep showing different places.
+      installDocument: (document_) => { state = store.install(document_); render(); },
+      invalidatePendingSaves: () => store.invalidatePendingSaves(),
+      onRoleChange: (role) => {
+        conflictPanel.syncToRole(role, elements.explorer);
+        render();
+      },
+    });
+    channel.addEventListener('message', (event) => {
+      if (surfaceCoordinator.receive(event.data)) render();
+    });
+    void surfaceCoordinator.start();
+  }
+
   void bootstrapWorkspace({
     loadState: DETACHED_SURFACE
       ? () => windowLayoutDetachment.waitForActivate().then((transferId) => {
@@ -5779,6 +5862,14 @@ if (WIDGET_SURFACE) {
     promptLibrary,
   }).then(() => {
     if (!windowLayoutDetachment.isStopped()) bootstrapWindowLayoutRecording();
+    // 0B: elect a document writer among the surfaces of this project.
+    //
+    // Only ordinary workspace surfaces take part. A detached surface receives
+    // ownership through the existing 018 STOP -> FLUSH -> ACTIVATE handshake,
+    // and until the coordinator's reservation is wired into that handshake,
+    // giving a detached surface a lock to wait on could deadlock against a
+    // workspace that never releases. That integration is deliberately separate.
+    if (!DETACHED_SURFACE) startSurfaceCoordination();
     // 019G/021: after durable state loads, broadcast a real snapshot for every
     // layout so an already-open widget is never stuck on `unknown-layout` /
     // the empty default card (cold-open readiness race).
