@@ -297,6 +297,33 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
   assert.deepEqual(await closePicker, { action: 'cancel', candidateId: null });
 });
 
+test('host bridge preserves the versioned state envelope and decodes its document', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const state = {
+    schemaVersion: 1,
+    groups: [{ id: 'group-a', parentId: 'root', name: 'A' }],
+    shortcuts: [],
+  };
+
+  const promise = host.loadWorkspaceVersioned();
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:state-load-versioned');
+
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: sent.requestId,
+    ok: true,
+    state: JSON.stringify(state),
+    revision: 'a'.repeat(64),
+  });
+
+  assert.deepEqual(await promise, {
+    state,
+    revision: 'a'.repeat(64),
+  });
+});
+
 test('host bridge window observation/control methods carry the capability and unwrap outcomes', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);

@@ -65,6 +65,13 @@ export function createHostBridge(window) {
       task.reject(new Error(event.data.error || 'The request could not be completed.'));
       return;
     }
+    if (task.type === 'papers:project:state-load-versioned') {
+      task.resolve({
+        state: event.data.state,
+        revision: event.data.revision,
+      });
+      return;
+    }
     if (task.type === 'papers:project:window-thumbnail') {
       // 019GR: the compact hover preview consumes ONLY the exact shared result.
       // Success is exactly { outcome, imageUrl, width, height }; a fallback is
@@ -168,10 +175,13 @@ export function createHostBridge(window) {
     // wrapped under `stateSave`, so its own `ok: false` is a real answer rather
     // than a failed request.
     loadWorkspaceVersioned: () => request('papers:project:state-load-versioned')
-      .then((payload) => ({
-        state: decodeWorkspaceState(payload),
-        revision: payload.revision,
-      })),
+      .then((payload) => {
+        const decoded = decodeWorkspaceState(payload.state);
+        return {
+          state: typeof decoded === 'string' ? JSON.parse(decoded) : decoded,
+          revision: payload.revision,
+        };
+      }),
     saveWorkspaceChecked: (state, revision) => request('papers:project:state-save-checked', {
       state: encodeWorkspaceState(state),
       revision,
