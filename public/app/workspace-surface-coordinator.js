@@ -134,7 +134,7 @@ function mergeKeyedArray(baseValue, localValue, currentValue) {
       result.push(currentItem);
       continue;
     }
-    result.push({
+    const mergedItem = {
       ...currentItem,
       ...Object.fromEntries(Object.keys(localItem)
         .filter((key) => key !== 'id' && key !== 'placements' && key !== 'arrangement'
@@ -153,7 +153,12 @@ function mergeKeyedArray(baseValue, localValue, currentValue) {
           ),
         },
       } : {}),
-    });
+    };
+    for (const key of Object.keys(baseById.get(id) ?? {})) {
+      if (key !== 'id' && !Object.prototype.hasOwnProperty.call(localItem, key)
+        && Object.prototype.hasOwnProperty.call(currentItem, key)) delete mergedItem[key];
+    }
+    result.push(mergedItem);
   }
   for (const localItem of local) {
     const id = localItem?.id;
@@ -187,6 +192,10 @@ function mergeItemSet(baseItem, localItem, currentItem) {
   for (const key of Object.keys(localItem)) {
     if (key === 'id' || key === 'itemIds' || key === 'memberIds' || key === 'excludedIds') continue;
     if (!sameJson(localItem[key], baseItem[key])) result[key] = localItem[key];
+  }
+  for (const key of Object.keys(baseItem)) {
+    if (key !== 'id' && !Object.prototype.hasOwnProperty.call(localItem, key)
+      && Object.prototype.hasOwnProperty.call(currentItem, key)) delete result[key];
   }
   return result;
 }
@@ -253,6 +262,10 @@ export function mergeSurfaceSnapshots(base, local, current) {
                 && !sameJson(localItem[key], baseItem?.[key]))
               .map((key) => [key, localItem[key]])),
           };
+          for (const key of Object.keys(baseItem ?? {})) {
+            if (key !== 'id' && !Object.prototype.hasOwnProperty.call(localItem, key)
+              && Object.prototype.hasOwnProperty.call(currentItem, key)) delete mergedItem[key];
+          }
           if (Array.isArray(localItem.placements)) {
             mergedItem.placements = mergeKeyedArray(baseItem?.placements, localItem.placements, currentItem.placements);
           }
@@ -633,6 +646,7 @@ export function createSurfaceCoordinator({
           if (result && result.ok === true) {
             revision = result.revision;
             lastSerialized = payload;
+            try { installDocument(JSON.parse(payload)); } catch { /* host bytes are already committed */ }
             publish(payload, revision);
             return { ok: true, revision };
           }

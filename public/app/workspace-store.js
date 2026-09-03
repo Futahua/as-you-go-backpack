@@ -85,7 +85,9 @@ export function createWorkspaceStore({
         if (generation !== saveGeneration) return SUPERSEDED_SAVE;
         const persistMetadata = metadata && typeof metadata === 'object'
           ? { ...metadata, baseSerialized: metadata.baseSerialized ?? lastPersistedSnapshot }
-          : metadata;
+          : metadata === undefined
+            ? { baseSerialized: lastPersistedSnapshot }
+            : metadata;
         let result = await persist(snapshot, persistMetadata);
         // A coordinated follower returns an optimistic envelope plus a
         // correlated writer acknowledgement. Do not report the commit as
