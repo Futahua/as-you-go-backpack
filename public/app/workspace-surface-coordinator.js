@@ -45,6 +45,7 @@ const MUTATION_ACK_MESSAGE = 'mutation-ack';
 const MUTATION_CANCEL_MESSAGE = 'mutation-cancel';
 const MUTATION_CANCEL_RETRY_LIMIT = 3;
 const MUTATION_CANCEL_RETRY_DELAY_MS = 100;
+const TERMINAL_AUTHORITY_RETRY_LIMIT = 3;
 
 function sameJson(a, b) {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
@@ -639,6 +640,7 @@ export function createSurfaceCoordinator({
     pending.settled = true;
     clearTimeout(pending.timer);
     clearTimeout(pending.cancelTimer);
+    clearTimeout(pending.authorityRetryTimer);
     pendingRequests.delete(requestId);
     removePendingOverlay(pending.localPending);
     pending.resolve(outcome);
@@ -703,6 +705,40 @@ export function createSurfaceCoordinator({
       if ((pending.cancelRequested || pending.successObserved) && !pending.settled) return true;
     }
     return false;
+  }
+  function freezeAuthorityValidationFailure() {
+    frozenSnapshot = lastSerialized;
+    conflictGeneration = null;
+    conflictNeedsLock = !held;
+    setRole(SURFACE_ROLE.CONFLICT, { revision });
+  }
+  function retrySuccessfulAckAuthority(requestId, pending, outcome, attempt = 0) {
+    if (!pendingRequests.has(requestId) || pending.settled) return;
+    void reloadAuthoritativeAfterFailedMutation(outcome.code, { forceFresh: true })
+      .then((recovery) => {
+        if (!pendingRequests.has(requestId) || pending.settled) return;
+        if (!recovery.ok) {
+          if (attempt < TERMINAL_AUTHORITY_RETRY_LIMIT) {
+            pending.authorityRetryTimer = setTimeout(() => {
+              pending.authorityRetryTimer = null;
+              retrySuccessfulAckAuthority(requestId, pending, outcome, attempt + 1);
+            }, MUTATION_CANCEL_RETRY_DELAY_MS);
+            pending.authorityRetryTimer.unref?.();
+            return;
+          }
+          pending.successObserved = false;
+          freezeFollowerFailure(pending);
+          markForwardFailure(pending);
+          settlePendingRequest(requestId, pending, {
+            ok: false,
+            code: 'MUTATION_UNCERTAIN',
+            revision: outcome.revision ?? revision,
+          });
+          return;
+        }
+        clearRecoveredConflict(pending);
+        settlePendingRequest(requestId, pending, outcome);
+      });
   }
   function freezeFollowerFailure(pending) {
     frozenSnapshot = pending?.serialized ?? frozenSnapshot;
@@ -1221,8 +1257,8 @@ export function createSurfaceCoordinator({
         if (role !== SURFACE_ROLE.WRITER) return { ok: false, code: 'WRITER_LOCK_UNAVAILABLE' };
         conflictNeedsLock = false;
         const serialized = stripLocalViewFields(mine, lastSerialized);
-          const parentRevision = revision;
-          const result = await host.saveChecked(serialized, parentRevision);
+        const parentRevision = revision;
+        const result = await host.saveChecked(serialized, parentRevision);
         if (result && result.ok === true) {
           revision = result.revision;
           lastSerialized = serialized;
@@ -1230,7 +1266,7 @@ export function createSurfaceCoordinator({
           try { installDocument(JSON.parse(serialized), serialized); } catch { /* host bytes are already committed */ }
           frozenSnapshot = null;
           conflictGeneration = null;
-          publish(serialized, revision);
+          publish(serialized, revision, null, parentRevision);
           return { ok: true, revision };
         }
         conflictNeedsLock = !held;
@@ -1239,7 +1275,8 @@ export function createSurfaceCoordinator({
       }
       const loaded = await host.loadVersioned();
       const serialized = stripLocalViewFields(frozenSnapshot, JSON.stringify(loaded.state));
-      const result = await host.saveChecked(serialized, loaded.revision);
+      const parentRevision = loaded.revision;
+      const result = await host.saveChecked(serialized, parentRevision);
       if (result && result.ok === true) {
         revision = result.revision;
         lastSerialized = serialized;
@@ -1247,7 +1284,7 @@ export function createSurfaceCoordinator({
         try { installDocument(JSON.parse(serialized), serialized); } catch { /* host bytes are already committed */ }
         frozenSnapshot = null;
         conflictGeneration = null;
-        publish(serialized, revision);
+        publish(serialized, revision, null, parentRevision);
         setRole(SURFACE_ROLE.WRITER, { revision });
         return { ok: true, revision };
       }
@@ -1409,19 +1446,7 @@ export function createSurfaceCoordinator({
         // negative ACKs retain their semantic durability check below.
         removePendingOverlay(pending.localPending);
         if (outcome.ok) {
-          void reloadAuthoritativeAfterFailedMutation(outcome.code, { forceFresh: true })
-            .then((recovery) => {
-              if (!recovery.ok) {
-                freezeFollowerFailure(pending);
-                // A genuine success ACK owns terminal resolution. Keep the
-                // request pending in explicit CONFLICT until a later authority
-                // read can prove the committed bytes, rather than allowing a
-                // cancellation timeout to invalidate dependent edits.
-                return;
-              }
-              clearRecoveredConflict(pending);
-              settlePendingRequest(message.requestId, pending, outcome);
-            });
+          retrySuccessfulAckAuthority(message.requestId, pending, outcome);
         } else if (outcome.code === 'MUTATION_CANCELLED') {
           void reloadAuthoritativeAfterFailedMutation(outcome.code, { forceFresh: true })
             .then((recovery) => settleFailedForward(message.requestId, pending, outcome, recovery));
@@ -1447,27 +1472,27 @@ export function createSurfaceCoordinator({
         onHydrationFailed('decode', 'broadcast-state-invalid', message.revision);
         return false;
       }
-      // A committed frame from a former writer can arrive after a promoted
-      // writer has already committed a descendant. The opaque host revision
-      // is not orderable, so the producer includes its parent revision; a
-      // mismatch requires a host-authoritative read rather than regressing the
-      // view by installing the stale frame directly.
-      if (typeof message.parentRevision === 'string' && revision
-        && message.parentRevision !== revision) {
+      // Every producer-issued frame carries a parent revision. Because Papers
+      // revisions are content hashes (ABA is possible), parent equality alone
+      // cannot establish lineage. Validate the frame against host authority
+      // and fence the asynchronous result against any newer install.
+      if (typeof message.parentRevision === 'string') {
+        const validationEpoch = authoritativeEpoch;
         void host.loadVersioned().then((loaded) => {
-          if (!loaded || loaded.revision === revision) return;
+          if (authoritativeEpoch !== validationEpoch || !loaded) return;
+          if (loaded.revision !== message.revision && loaded.revision === revision) return;
           try { installExternalPreservingPending(loaded.state); } catch {
             onHydrationFailed('install', 'model-install-failed', loaded.revision);
             return;
           }
           authoritativeEpoch += 1;
-          revision = loaded.revision;
-          lastSerialized = JSON.stringify(loaded.state);
+          revision = loaded.revision === message.revision ? message.revision : loaded.revision;
+          lastSerialized = loaded.revision === message.revision ? message.serialized : JSON.stringify(loaded.state);
           baselineReady = true;
-          onHydrated(loaded.state, revision);
+          onHydrated(loaded.revision === message.revision ? decoded : loaded.state, revision);
           if (typeof message.requestId === 'string') {
             const pending = pendingRequests.get(message.requestId);
-            if (pending && pendingIntentIsDurable(pending, loaded)) {
+            if (pending && pendingIntentIsDurable(pending, { state: loaded.revision === message.revision ? decoded : loaded.state })) {
               clearRecoveredConflict(pending);
               settlePendingRequest(message.requestId, pending, {
                 ok: true,
@@ -1476,7 +1501,10 @@ export function createSurfaceCoordinator({
               });
             }
           }
-        }).catch(() => onHydrationFailed('recovery', 'committed-order-validation-failed', revision ?? undefined));
+        }).catch(() => {
+          onHydrationFailed('recovery', 'committed-order-validation-failed', revision ?? undefined);
+          freezeAuthorityValidationFailure();
+        });
         return true;
       }
       try {

@@ -1009,6 +1009,7 @@ test('Keep my version replaces the other version, and only then', async () => {
   assert.equal(a.coordinator.role, SURFACE_ROLE.WRITER);
   assert.deepEqual(disk.state, mine);
   assert.equal(a.coordinator.frozen, null);
+  assert.equal(a.channel.sent.at(-1).parentRevision, 'r1');
 });
 
 test('Keep my version losing a second race stays frozen instead of looping', async () => {
