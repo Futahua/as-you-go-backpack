@@ -386,14 +386,27 @@ export function createSurfaceCoordinator({
         return { ok: true, forwarded: true, revision };
       }
       if (role !== SURFACE_ROLE.WRITER) throw new Error('This surface is not the writer and may not save the board.');
+      const baseSerialized = lastSerialized;
       mutationQueue = mutationQueue
         .catch(() => undefined)
         .then(async () => {
-          const result = await host.saveChecked(serialized, revision);
+          let payload = serialized;
+          if (baseSerialized && lastSerialized && !sameJson(baseSerialized, lastSerialized)) {
+            try {
+              payload = JSON.stringify(mergeSurfaceSnapshots(
+                JSON.parse(baseSerialized),
+                JSON.parse(serialized),
+                JSON.parse(lastSerialized),
+              ));
+            } catch {
+              payload = serialized;
+            }
+          }
+          const result = await host.saveChecked(payload, revision);
           if (result && result.ok === true) {
             revision = result.revision;
-            lastSerialized = serialized;
-            publish(serialized, revision);
+            lastSerialized = payload;
+            publish(payload, revision);
             return { ok: true, revision };
           }
           // Fail closed, synchronously enough that no further durable mutation
@@ -401,7 +414,7 @@ export function createSurfaceCoordinator({
           // the same generation are abandoned without ever reaching persistence,
           // and the newest of them becomes the version the creator is offered.
           const latestLocal = invalidatePendingSaves();
-          frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : serialized;
+          frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : payload;
           setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
           return { ok: false, code: 'STALE_REVISION' };
         });

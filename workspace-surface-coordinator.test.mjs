@@ -239,6 +239,36 @@ test('queued peer mutations rebase in arrival order instead of dropping the seco
   ]);
 });
 
+test('a writer-local snapshot queued behind a peer mutation rebases instead of erasing it', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({
+    schemaVersion: 1,
+    groups: [{ id: 'g1', title: 'one' }, { id: 'g2', title: 'two' }],
+    shortcuts: [],
+  });
+  const a = surface(lock, disk, 'A');
+  await a.coordinator.start();
+  const base = ser(disk.state);
+  const peer = ser({
+    schemaVersion: 1,
+    groups: [{ id: 'g1', title: 'one' }, { id: 'g2', title: 'TWO' }],
+    shortcuts: [],
+  });
+  const local = ser({
+    schemaVersion: 1,
+    groups: [{ id: 'g1', title: 'ONE' }, { id: 'g2', title: 'two' }],
+    shortcuts: [],
+  });
+  a.coordinator.receive({ type: 'mutation-request', clientId: 'B', revision: 'r0', serialized: peer, baseSerialized: base });
+  const localSave = a.coordinator.saveSerialized(local);
+  await localSave;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(disk.state.groups, [
+    { id: 'g1', title: 'ONE' },
+    { id: 'g2', title: 'TWO' },
+  ]);
+});
+
 test('a successful save advances the revision and broadcasts the committed snapshot', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();
