@@ -39,6 +39,17 @@ export function createWorkspaceStore({
   let lastQueuedSnapshot = null;
   const queuedSaves = [];
   let saveSequence = 0;
+  function invalidateGeneration(generation) {
+    onSaveGenerationInvalidated(generation);
+    for (let index = queuedSaves.length - 1; index >= 0; index -= 1) {
+      if (queuedSaves[index].generation === generation) queuedSaves.splice(index, 1);
+    }
+    saveGeneration += 1;
+    latestQueuedSnapshot = null;
+    // The next generation must merge against authoritative bytes immediately;
+    // asynchronous cleanup of abandoned promises cannot remain its base.
+    lastQueuedSnapshot = lastPersistedSnapshot;
+  }
   /**
    * 0B: persistence generation.
    *
@@ -118,9 +129,7 @@ export function createWorkspaceStore({
             // later snapshots were based on the failed optimistic document and
             // must not be reported successful while silently dropping it.
             if (result?.forwarded && generation === saveGeneration) {
-              onSaveGenerationInvalidated(generation);
-              saveGeneration += 1;
-              latestQueuedSnapshot = null;
+              invalidateGeneration(generation);
             }
             throw new Error(acknowledgement?.code ?? 'Writer did not commit the mutation.');
           }
@@ -128,9 +137,7 @@ export function createWorkspaceStore({
         }
         if (result?.ok === false) {
           if (result?.forwarded && generation === saveGeneration) {
-            onSaveGenerationInvalidated(generation);
-            saveGeneration += 1;
-            latestQueuedSnapshot = null;
+            invalidateGeneration(generation);
           }
           throw new Error(result.code ?? 'The document was not committed.');
         }
@@ -267,8 +274,7 @@ export function createWorkspaceStore({
      */
     invalidatePendingSaves() {
       const latest = latestQueuedSnapshot;
-      saveGeneration += 1;
-      latestQueuedSnapshot = null;
+      invalidateGeneration(saveGeneration);
       return latest;
     },
   };

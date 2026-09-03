@@ -226,6 +226,10 @@ function mergePromptTree(baseValue, localValue, currentValue, global = null, par
       // reorder/insert. Nodes that the local snapshot moved away or deleted
       // are handled from their destination/source collection instead.
       if (baseById.has(id)) continue;
+      // A local identity deletion is global, not a parent-local absence. It
+      // must beat a stale current move that would otherwise look like a new
+      // destination-only node.
+      if (baseGlobal.has(id) && !localGlobal.has(id)) continue;
       if (localGlobal.has(id)) {
         const localMoved = localParents.get(id) !== baseParents.get(id);
         const currentMoved = currentParents.get(id) !== baseParents.get(id);

@@ -376,6 +376,22 @@ test('a current-lane subtree move preserves a stale descendant edit', () => {
   assert.equal(moved.children[0].text, 'descendant edit');
 });
 
+test('a local deletion beats a stale current relocation of the same identity', () => {
+  const base = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'p', type: 'prompt' }] },
+    { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const local = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [] }, { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const current = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [] },
+    { id: 'b', type: 'folder', children: [{ id: 'p', type: 'prompt' }] },
+  ] } };
+  const folders = mergeSurfaceSnapshots(base, local, current).view.promptLibrary;
+  assert.deepEqual(folders.flatMap((folder) => folder.children), []);
+});
+
 test('Use latest retires invalidated pending overlays before the next save', async () => {
   const lock = fakeLock();
   const disk = fakeDisk({ schemaVersion: 1, groups: [], shortcuts: [] });
