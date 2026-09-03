@@ -73,13 +73,8 @@ export function mergeSurfaceSnapshots(base, local, current) {
         }
       }
     }
-    for (const [id] of baseItems) {
-      if (!localItems.has(id) && currentItems.has(id)) {
-        const at = index.get(id);
-        if (at !== undefined) result.splice(at, 1);
-      }
-    }
-    merged[key] = result;
+    const deleted = new Set([...baseItems.keys()].filter((id) => !localItems.has(id) && currentItems.has(id)));
+    merged[key] = result.filter((item) => !deleted.has(item?.id));
   }
   const baseView = isPlainObject(base.view) ? base.view : {};
   const localView = isPlainObject(local.view) ? local.view : {};

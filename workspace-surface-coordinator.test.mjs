@@ -140,6 +140,13 @@ test('stale action snapshots merge entities while the incoming position wins', (
   assert.equal(merged.view.iconSize, 40);
 });
 
+test('a multi-item delete removes every requested entity without index drift', () => {
+  const base = { schemaVersion: 1, groups: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], shortcuts: [] };
+  const local = { ...base, groups: [{ id: 'c' }] };
+  const merged = mergeSurfaceSnapshots(base, local, base);
+  assert.deepEqual(merged.groups, [{ id: 'c' }]);
+});
+
 test('a successful save advances the revision and broadcasts the committed snapshot', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();
