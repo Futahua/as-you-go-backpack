@@ -5,7 +5,7 @@ export const VISUAL_PROFILE = Object.freeze({
   theme: 'light',
   transparency: false,
   animations: 'disabled',
-  reducedMotion: true,
+  reducedMotion: false,
   locale: 'en-US',
   fixtureFont: 'Arial',
 });

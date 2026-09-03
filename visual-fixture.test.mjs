@@ -30,7 +30,7 @@ test('deterministic profile and semantic geometry contract are explicit', () => 
     theme: 'light',
     transparency: false,
     animations: 'disabled',
-    reducedMotion: true,
+    reducedMotion: false,
     locale: 'en-US',
     fixtureFont: 'Arial',
   });

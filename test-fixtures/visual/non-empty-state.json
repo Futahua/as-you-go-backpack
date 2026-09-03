@@ -4,7 +4,7 @@
   "state": {
     "schemaVersion": 1,
     "groups": [
-      { "id": "fixture-group", "name": "Synthetic group", "parentId": null, "order": 0 }
+      { "id": "fixture-group", "name": "Synthetic group", "parentId": "root", "order": 0 }
     ],
     "shortcuts": [
       {
