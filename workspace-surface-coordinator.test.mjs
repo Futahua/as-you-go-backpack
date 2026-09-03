@@ -267,6 +267,35 @@ test('terminal success waits for a fresh read after a pre-ACK recovery read', as
   assert.deepEqual(b.installed.at(-1), committed);
 });
 
+test('a generic validation conflict clears when a pending success proves authority', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  let loads = 0;
+  const loadVersioned = disk.loadVersioned.bind(disk);
+  disk.loadVersioned = async () => {
+    loads += 1;
+    if (loads === 2) throw new Error('validation unavailable');
+    return loadVersioned();
+  };
+  const b = surface(fakeLock(), disk, 'B');
+  const committed = { schemaVersion: 1, groups: [{ id: 'committed' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(committed), { generation: 4 });
+  b.coordinator.receive({
+    type: 'committed', clientId: 'A', revision: 'r1', parentRevision: 'r0',
+    serialized: ser({ schemaVersion: 1, groups: [{ id: 'other' }], shortcuts: [] }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+  await disk.saveChecked(ser(committed), 'r0');
+  const request = b.channel.sent.find((message) => message.type === 'mutation-request');
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: true, revision: disk.revision,
+  });
+  const outcome = await forwarded.acknowledgement;
+  assert.equal(outcome.ok, true);
+  assert.equal(b.coordinator.role, SURFACE_ROLE.VIEW);
+});
+
 test('timeout recovery recognizes a commit already durable on disk', async () => {
   const lock = fakeLock();
   const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });

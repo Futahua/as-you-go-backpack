@@ -694,7 +694,9 @@ export function createSurfaceCoordinator({
     } catch { return false; }
   }
   function clearRecoveredConflict(pending) {
-    if (role !== SURFACE_ROLE.CONFLICT || conflictGeneration !== (pending?.generation ?? null)) return;
+    const sameGeneration = conflictGeneration === (pending?.generation ?? null);
+    const genericValidationConflict = conflictGeneration == null;
+    if (role !== SURFACE_ROLE.CONFLICT || (!sameGeneration && !genericValidationConflict)) return;
     frozenSnapshot = null;
     conflictGeneration = null;
     conflictNeedsLock = false;
