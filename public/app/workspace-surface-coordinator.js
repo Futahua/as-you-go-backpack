@@ -118,6 +118,79 @@ function mergePromptTree(baseValue, localValue, currentValue) {
   return result;
 }
 
+function mergeKeyedArray(baseValue, localValue, currentValue) {
+  const base = Array.isArray(baseValue) ? baseValue : [];
+  const local = Array.isArray(localValue) ? localValue : [];
+  const current = Array.isArray(currentValue) ? currentValue : [];
+  const baseById = new Map(base.map((item) => [item?.id, item]));
+  const localById = new Map(local.map((item) => [item?.id, item]));
+  const currentById = new Map(current.map((item) => [item?.id, item]));
+  const result = [];
+  for (const currentItem of current) {
+    const id = currentItem?.id;
+    if (baseById.has(id) && !localById.has(id)) continue;
+    const localItem = localById.get(id);
+    if (!localItem || !baseById.has(id) || sameJson(localItem, baseById.get(id))) {
+      result.push(currentItem);
+      continue;
+    }
+    result.push({
+      ...currentItem,
+      ...Object.fromEntries(Object.keys(localItem)
+        .filter((key) => key !== 'id' && key !== 'placements' && key !== 'arrangement'
+          && !sameJson(localItem[key], baseById.get(id)?.[key]))
+        .map((key) => [key, localItem[key]])),
+      ...(Array.isArray(localItem.placements) ? {
+        placements: mergeKeyedArray(baseById.get(id)?.placements, localItem.placements, currentItem.placements),
+      } : {}),
+      ...(localItem.arrangement?.members && currentItem.arrangement?.members ? {
+        arrangement: {
+          ...currentItem.arrangement,
+          members: mergeKeyedArray(
+            baseById.get(id)?.arrangement?.members,
+            localItem.arrangement.members,
+            currentItem.arrangement.members,
+          ),
+        },
+      } : {}),
+    });
+  }
+  for (const localItem of local) {
+    const id = localItem?.id;
+    if (id == null || currentById.has(id) || baseById.has(id)) continue;
+    result.push(localItem);
+  }
+  return result;
+}
+
+function mergeSetArray(baseValue, localValue, currentValue) {
+  const base = Array.isArray(baseValue) ? baseValue : [];
+  const local = Array.isArray(localValue) ? localValue : [];
+  const current = Array.isArray(currentValue) ? currentValue : [];
+  const removed = new Set(base.filter((id) => !local.includes(id)));
+  const result = current.filter((id) => !removed.has(id));
+  for (const id of local) if (!base.includes(id) && !result.includes(id)) result.push(id);
+  return result;
+}
+
+function mergeItemSet(baseItem, localItem, currentItem) {
+  if (!currentItem) return null;
+  if (!baseItem || sameJson(localItem, baseItem)) return currentItem;
+  const result = { ...currentItem };
+  for (const key of ['itemIds', 'memberIds', 'excludedIds']) {
+    if (Array.isArray(localItem[key])) {
+      result[key] = mergeSetArray(baseItem[key], localItem[key], currentItem[key]);
+    } else if (!sameJson(localItem[key], baseItem[key])) {
+      result[key] = localItem[key];
+    }
+  }
+  for (const key of Object.keys(localItem)) {
+    if (key === 'id' || key === 'itemIds' || key === 'memberIds' || key === 'excludedIds') continue;
+    if (!sameJson(localItem[key], baseItem[key])) result[key] = localItem[key];
+  }
+  return result;
+}
+
 const LOCAL_VIEW_KEYS = Object.freeze([
   'currentGroupId',
   'graphExpandedGroupIds',
@@ -167,10 +240,33 @@ export function mergeSurfaceSnapshots(base, local, current) {
       const currentItem = currentItems.get(id);
       if (!baseItems.has(id) || !sameJson(localItem, baseItem)) {
         if (!currentItems.has(id)) {
+          // A deletion in the current authoritative lane wins over a stale
+          // edit; do not resurrect the pre-delete identity.
+          if (baseItems.has(id)) continue;
           index.set(id, result.length);
           result.push(localItem);
         } else if (!sameJson(currentItem, localItem)) {
-          result[index.get(id)] = localItem;
+          const mergedItem = {
+            ...currentItem,
+            ...Object.fromEntries(Object.keys(localItem)
+              .filter((key) => key !== 'id' && key !== 'placements' && key !== 'arrangement'
+                && !sameJson(localItem[key], baseItem?.[key]))
+              .map((key) => [key, localItem[key]])),
+          };
+          if (Array.isArray(localItem.placements)) {
+            mergedItem.placements = mergeKeyedArray(baseItem?.placements, localItem.placements, currentItem.placements);
+          }
+          if (localItem.arrangement?.members && currentItem.arrangement?.members) {
+            mergedItem.arrangement = {
+              ...currentItem.arrangement,
+              members: mergeKeyedArray(
+                baseItem?.arrangement?.members,
+                localItem.arrangement.members,
+                currentItem.arrangement.members,
+              ),
+            };
+          }
+          result[index.get(id)] = mergedItem;
         }
       }
     }
@@ -205,8 +301,8 @@ export function mergeSurfaceSnapshots(base, local, current) {
         if (!baseById.has(id)) {
           if (!currentById.has(id)) { indexes.set(id, mergedSets.length); mergedSets.push(item); }
         } else if (!sameJson(item, baseById.get(id))) {
-          if (currentById.has(id)) mergedSets[indexes.get(id)] = item;
-          else { indexes.set(id, mergedSets.length); mergedSets.push(item); }
+          if (currentById.has(id)) mergedSets[indexes.get(id)] = mergeItemSet(baseById.get(id), item, currentById.get(id));
+          else { /* current deletion wins over a stale set edit */ }
         }
       }
       const deletedSetIds = new Set([...baseById.keys()].filter((id) => !localById.has(id)));
@@ -304,6 +400,11 @@ export function createSurfaceCoordinator({
   let requestSequence = 0;
   const pendingRequests = new Map();
   const appliedRequests = new Map();
+  const rememberApplied = (key, result) => {
+    if (!key) return;
+    appliedRequests.set(key, result);
+    while (appliedRequests.size > 512) appliedRequests.delete(appliedRequests.keys().next().value);
+  };
 
   function setRole(next, detail = {}) {
     if (role === next) return;
@@ -382,6 +483,36 @@ export function createSurfaceCoordinator({
     baselineReady = true;
     onHydrated(loaded.state, revision);
     setRole(SURFACE_ROLE.WRITER, { revision });
+    // Any follower mutations that were awaiting the old writer's ACK remain
+    // recoverable across promotion. Replay them in request order against the
+    // freshly hydrated authoritative base instead of silently discarding the
+    // optimistic work on the promotion install.
+    for (const [requestId, pending] of pendingRequests) {
+      mutationQueue = mutationQueue.then(async () => {
+        try {
+          const current = lastSerialized ? JSON.parse(lastSerialized) : loaded.state;
+          const incoming = JSON.parse(pending.serialized);
+          const base = pending.baseSerialized ? JSON.parse(pending.baseSerialized) : current;
+          const decoded = mergeSurfaceSnapshots(base, incoming, current);
+          const payload = JSON.stringify(decoded);
+          const result = await host.saveChecked(payload, revision);
+          if (!result || result.ok !== true) {
+            pending.resolve({ ok: false, code: 'PROMOTION_REPLAY_REFUSED' });
+            return;
+          }
+          installDocument(decoded);
+          revision = result.revision;
+          lastSerialized = payload;
+          publish(payload, revision);
+          pending.resolve({ ok: true, revision });
+        } catch {
+          pending.resolve({ ok: false, code: 'PROMOTION_REPLAY_FAILED' });
+        } finally {
+          clearTimeout(pending.timer);
+          pendingRequests.delete(requestId);
+        }
+      });
+    }
     return loaded;
   }
 
@@ -408,7 +539,16 @@ export function createSurfaceCoordinator({
       pendingAcquire = (async () => {
         await ensureBaseline();
         held = await lock.request(SURFACE_DOCUMENT_LOCK);
-        return becomeWriter();
+        try {
+          return await becomeWriter();
+        } catch (error) {
+          // A failed post-lock load/install must not strand the Web Lock and
+          // prevent every other surface from recovering ownership.
+          held?.release?.();
+          held = null;
+          setRole(SURFACE_ROLE.VIEW, {});
+          throw error;
+        }
       })();
       try {
         return await pendingAcquire;
@@ -425,15 +565,19 @@ export function createSurfaceCoordinator({
      * Only the writer may save; a view reaching here is a caller bug, not a
      * race to resolve.
      */
-    async saveSerialized(serialized) {
+    async saveSerialized(serialized, metadata = {}) {
       if (role === SURFACE_ROLE.VIEW) {
         // Views may edit optimistically. The elected writer serializes their
         // request and broadcasts the committed result back to every surface.
         // This keeps ordinary document actions usable from every window while
         // retaining one durable writer and CAS protection.
         if (!baselineReady) await ensureBaseline();
-        const baseSerialized = lastSerialized;
+        const baseSerialized = typeof metadata.baseSerialized === 'string'
+          ? metadata.baseSerialized : lastSerialized;
         serialized = stripLocalViewFields(serialized, baseSerialized);
+        if (baseSerialized && sameJson(serialized, baseSerialized)) {
+          return { ok: true, forwarded: true, unchanged: true, revision };
+        }
         const requestId = ackEnabled ? `${clientId}:${++requestSequence}` : null;
         let acknowledgement = null;
         if (requestId) {
@@ -444,7 +588,7 @@ export function createSurfaceCoordinator({
             resolve({ ok: false, code: 'WRITER_ACK_TIMEOUT' });
           }, 30000);
           timer.unref?.();
-          pendingRequests.set(requestId, { timer, resolve });
+          pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized });
           });
         }
         const message = {
@@ -464,7 +608,12 @@ export function createSurfaceCoordinator({
         return forwarded;
       }
       if (role !== SURFACE_ROLE.WRITER) throw new Error('This surface is not the writer and may not save the board.');
-      const baseSerialized = lastSerialized;
+      const baseSerialized = typeof metadata.baseSerialized === 'string'
+        ? metadata.baseSerialized : lastSerialized;
+      serialized = stripLocalViewFields(serialized, baseSerialized);
+      if (lastSerialized && sameJson(serialized, lastSerialized)) {
+        return { ok: true, revision, unchanged: true };
+      }
       mutationQueue = mutationQueue
         .catch(() => undefined)
         .then(async () => {
@@ -558,22 +707,22 @@ export function createSurfaceCoordinator({
           ? `${message.clientId}:${message.requestId}` : null;
         const hasPrior = requestKey ? appliedRequests.has(requestKey) : false;
         const prior = requestKey ? appliedRequests.get(requestKey) : null;
-        if (hasPrior && prior) {
-          channel.postMessage({
-            type: MUTATION_ACK_MESSAGE,
-            clientId,
-            ackClientId: message.clientId,
-            requestId: message.requestId,
-            ok: prior.ok,
-            revision: prior.revision,
-            code: prior.code,
-          });
+        if (hasPrior) {
+          if (prior) channel.postMessage({
+              type: MUTATION_ACK_MESSAGE,
+              clientId,
+              ackClientId: message.clientId,
+              requestId: message.requestId,
+              ok: prior.ok,
+              revision: prior.revision,
+              code: prior.code,
+            });
           return true;
         }
         // Mark before queueing so duplicate delivery while this request is
         // still in flight cannot schedule a second durable save. The first
         // execution will emit the one correlated acknowledgement.
-        if (requestKey) appliedRequests.set(requestKey, null);
+        if (requestKey) rememberApplied(requestKey, null);
         mutationQueue = mutationQueue
           .catch(() => undefined)
           .then(async () => {
@@ -609,7 +758,7 @@ export function createSurfaceCoordinator({
                 onHydrationFailed('mutation', 'remote-save-stale', revision ?? undefined);
                 if (requestKey) {
                   const failed = { ok: false, code: 'STALE_REVISION', revision };
-                  appliedRequests.set(requestKey, failed);
+                  rememberApplied(requestKey, failed);
                   channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...failed });
                 }
                 return;
@@ -620,14 +769,14 @@ export function createSurfaceCoordinator({
               publish(serialized, revision);
               if (requestKey) {
                 const committed = { ok: true, revision };
-                appliedRequests.set(requestKey, committed);
+                rememberApplied(requestKey, committed);
                 channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...committed });
               }
             } catch {
               onHydrationFailed('mutation', 'remote-save-failed', revision ?? undefined);
               if (requestKey) {
                 const failed = { ok: false, code: 'REMOTE_SAVE_FAILED', revision };
-                appliedRequests.set(requestKey, failed);
+                rememberApplied(requestKey, failed);
                 channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...failed });
               }
             }

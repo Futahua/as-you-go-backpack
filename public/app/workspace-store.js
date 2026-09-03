@@ -34,6 +34,7 @@ export function createWorkspaceStore({
   let undoStack = [];
   let redoStack = [];
   let saveQueue = Promise.resolve();
+  let lastPersistedSnapshot = null;
   /**
    * 0B: persistence generation.
    *
@@ -78,11 +79,30 @@ export function createWorkspaceStore({
     latestQueuedSnapshot = snapshot;
     const operation = saveQueue
       .catch(() => undefined)
-      .then(() => {
+      .then(async () => {
         // Checked when the job actually runs, not when it was queued: the
         // generation may have been invalidated while it waited.
         if (generation !== saveGeneration) return SUPERSEDED_SAVE;
-        return persist(snapshot, metadata);
+        const persistMetadata = metadata && typeof metadata === 'object'
+          ? { ...metadata, baseSerialized: metadata.baseSerialized ?? lastPersistedSnapshot }
+          : metadata;
+        let result = await persist(snapshot, persistMetadata);
+        // A coordinated follower returns an optimistic envelope plus a
+        // correlated writer acknowledgement. Do not report the commit as
+        // durable until that ACK arrives; writer death becomes an explicit
+        // failed save instead of a silent success.
+        if (result?.acknowledgement && typeof result.acknowledgement.then === 'function') {
+          const acknowledgement = await result.acknowledgement;
+          if (!acknowledgement?.ok) {
+            throw new Error(acknowledgement?.code ?? 'Writer did not commit the mutation.');
+          }
+          result = { ...result, ...acknowledgement };
+        }
+        // Forwarded view saves are only optimistic; their committed broadcast
+        // (installExternal) is the durable acknowledgement. A writer save is
+        // authoritative and advances the store's queue base here.
+        if (!result?.forwarded && result?.ok !== false) lastPersistedSnapshot = snapshot;
+        return result;
       });
     saveQueue = operation;
     return operation;
@@ -166,6 +186,7 @@ export function createWorkspaceStore({
     canRedo: () => redoStack.length > 0,
     install(nextState) {
       setState(normalizeState(nextState));
+      lastPersistedSnapshot = JSON.stringify(getState());
       return getState();
     },
     /** Install a peer/host document generation and invalidate snapshot history
@@ -175,6 +196,7 @@ export function createWorkspaceStore({
       undoStack = [];
       redoStack = [];
       setState(normalizeState(nextState));
+      lastPersistedSnapshot = JSON.stringify(getState());
       return getState();
     },
     replace(nextState) {

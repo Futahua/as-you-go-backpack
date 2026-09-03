@@ -228,7 +228,7 @@ const store = createWorkspaceStore({
     // 0B: the coordinator owns the revision and the compare-and-set, and
     // broadcasts the exact bytes that landed. The snapshot is already
     // serialized here, and is passed through untouched.
-    if (surfaceCoordinator) return surfaceCoordinator.saveSerialized(snapshot);
+    if (surfaceCoordinator) return surfaceCoordinator.saveSerialized(snapshot, metadata);
     return Promise.reject(new Error('Shared document coordination is unavailable; durable editing is disabled.'));
   },
   setStatus: workspaceStoreStatus,
