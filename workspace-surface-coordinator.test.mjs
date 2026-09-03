@@ -219,6 +219,54 @@ test('conflict recovery choices wait for an unresolved cancellation', async () =
   assert.equal((await b.coordinator.keepMine()).code, 'MUTATION_CANCELLATION_PENDING');
 });
 
+test('timeout freezes a view before a slow authority recovery returns', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  let loads = 0;
+  let releaseRecovery;
+  const loadVersioned = disk.loadVersioned.bind(disk);
+  disk.loadVersioned = async () => {
+    loads += 1;
+    if (loads === 2) await new Promise((resolve) => { releaseRecovery = resolve; });
+    return loadVersioned();
+  };
+  const b = surface(fakeLock(), disk, 'B', { ackTimeoutMs: 5 });
+  const forwarded = await b.coordinator.saveSerialized(ser({
+    schemaVersion: 1, groups: [{ id: 'speculative' }], shortcuts: [],
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+  releaseRecovery();
+  const outcome = await forwarded.acknowledgement;
+  assert.equal(outcome.ok, false);
+});
+
+test('terminal success waits for a fresh read after a pre-ACK recovery read', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  let loads = 0;
+  let releaseRecovery;
+  const loadVersioned = disk.loadVersioned.bind(disk);
+  disk.loadVersioned = async () => {
+    loads += 1;
+    if (loads === 2) await new Promise((resolve) => { releaseRecovery = resolve; });
+    return loadVersioned();
+  };
+  const b = surface(fakeLock(), disk, 'B', { ackTimeoutMs: 5 });
+  const committed = { schemaVersion: 1, groups: [{ id: 'committed' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(committed));
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  const request = b.channel.sent.find((message) => message.type === 'mutation-request');
+  await disk.saveChecked(ser(committed), 'r0');
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: true, revision: disk.revision,
+  });
+  releaseRecovery();
+  const outcome = await forwarded.acknowledgement;
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.revision, 'r1');
+  assert.deepEqual(b.installed.at(-1), committed);
+});
+
 test('timeout recovery recognizes a commit already durable on disk', async () => {
   const lock = fakeLock();
   const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });

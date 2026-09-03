@@ -767,8 +767,12 @@ export function createSurfaceCoordinator({
    * If delivery or the writer fails, never leave that speculative document
    * painted indefinitely: remove its overlay, reload the host-authoritative
    * generation, and preserve only this surface's local navigation/session. */
-  function reloadAuthoritativeAfterFailedMutation(code) {
-    if (recoveryPromise) return recoveryPromise;
+  function reloadAuthoritativeAfterFailedMutation(code, { forceFresh = false } = {}) {
+    if (recoveryPromise) {
+      if (!forceFresh) return recoveryPromise;
+      const priorRecovery = recoveryPromise;
+      return priorRecovery.catch(() => undefined).then(() => reloadAuthoritativeAfterFailedMutation(code));
+    }
     const startedEpoch = authoritativeEpoch;
     recoveryPromise = (async () => {
       let loaded;
@@ -887,6 +891,12 @@ export function createSurfaceCoordinator({
     authoritativeEpoch += 1;
     onHydrated(loaded.state, revision);
     setRole(SURFACE_ROLE.WRITER, { revision });
+    // Promotion transfers physical write authority. Any follower timeout
+    // conflict bookkeeping from the old writer must not survive that transfer
+    // and later misclassify a writer-owned CAS conflict as lockless.
+    frozenSnapshot = null;
+    conflictGeneration = null;
+    conflictNeedsLock = false;
     // Any follower mutations that were awaiting the old writer's ACK remain
     // recoverable across promotion. Replay them in request order against the
     // freshly hydrated authoritative base instead of silently discarding the
@@ -1046,8 +1056,11 @@ export function createSurfaceCoordinator({
           const timer = setTimeout(() => {
             const pending = pendingRequests.get(requestId);
             if (!pending || pending.settled || pending.timedOut) return;
-            pending.timedOut = true;
-            removePendingOverlay(localPending);
+          pending.timedOut = true;
+          removePendingOverlay(localPending);
+          // Fail closed at the timeout boundary, before a potentially slow
+          // versioned load can leave an ordinary VIEW accepting R2/R3.
+          freezeFollowerFailure(pending);
             onHydrationFailed('mutation', 'writer-ack-timeout', revision ?? undefined);
             void reloadAuthoritativeAfterFailedMutation('writer-ack-timeout')
               .then((recovery) => settleFailedForward(requestId, pending, { ok: false, code: 'WRITER_ACK_TIMEOUT' }, recovery, { cancelIfUnresolved: true }));
@@ -1118,6 +1131,7 @@ export function createSurfaceCoordinator({
           // the same generation are abandoned without ever reaching persistence,
           // and the newest of them becomes the version the creator is offered.
           conflictGeneration = metadata.generation;
+          conflictNeedsLock = false;
           clearPendingGeneration(conflictGeneration);
           const latestLocal = invalidatePendingSaves();
           frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : payload;
@@ -1386,7 +1400,7 @@ export function createSurfaceCoordinator({
         // negative ACKs retain their semantic durability check below.
         removePendingOverlay(pending.localPending);
         if (outcome.ok) {
-          void reloadAuthoritativeAfterFailedMutation(outcome.code)
+          void reloadAuthoritativeAfterFailedMutation(outcome.code, { forceFresh: true })
             .then((recovery) => {
               if (!recovery.ok) {
                 freezeFollowerFailure(pending);
@@ -1402,10 +1416,10 @@ export function createSurfaceCoordinator({
               settlePendingRequest(message.requestId, pending, outcome);
             });
         } else if (outcome.code === 'MUTATION_CANCELLED') {
-          void reloadAuthoritativeAfterFailedMutation(outcome.code)
+          void reloadAuthoritativeAfterFailedMutation(outcome.code, { forceFresh: true })
             .then((recovery) => settleFailedForward(message.requestId, pending, outcome, recovery));
         } else {
-          void reloadAuthoritativeAfterFailedMutation(outcome.code)
+          void reloadAuthoritativeAfterFailedMutation(outcome.code, { forceFresh: true })
             .then((recovery) => settleFailedForward(message.requestId, pending, outcome, recovery));
         }
         return true;
