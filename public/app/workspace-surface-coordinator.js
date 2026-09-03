@@ -604,8 +604,11 @@ export function createSurfaceCoordinator({
   function registerQueuedHints(metadata) {
     for (const hint of Array.isArray(metadata?.pendingSnapshots) ? metadata.pendingSnapshots : []) {
       if (typeof hint?.serialized !== 'string') continue;
-      if (!pendingLocalSnapshots.some((pending) => pending.serialized === hint.serialized
-        && pending.baseSerialized === hint.baseSerialized)) {
+      if (!pendingLocalSnapshots.some((pending) => (
+        Number.isFinite(hint.sequence) && Number.isFinite(pending.sequence)
+          ? pending.sequence === hint.sequence
+          : pending.serialized === hint.serialized && pending.baseSerialized === hint.baseSerialized
+      ))) {
         pendingLocalSnapshots.push({ ...hint, queuedHint: true });
       }
     }
@@ -620,11 +623,13 @@ export function createSurfaceCoordinator({
     const index = pendingLocalSnapshots.indexOf(pending);
     if (index >= 0) pendingLocalSnapshots.splice(index, 1);
   }
-  function retireQueuedHint(serialized, baseSerialized) {
+  function retireQueuedHint(sequence, serialized, baseSerialized) {
     for (let index = pendingLocalSnapshots.length - 1; index >= 0; index -= 1) {
       const pending = pendingLocalSnapshots[index];
-      if (pending.queuedHint && pending.serialized === serialized
-        && (baseSerialized == null || pending.baseSerialized === baseSerialized)) pendingLocalSnapshots.splice(index, 1);
+      const sameIdentity = Number.isFinite(sequence) && Number.isFinite(pending.sequence)
+        ? pending.sequence === sequence
+        : pending.serialized === serialized && (baseSerialized == null || pending.baseSerialized === baseSerialized);
+      if (pending.queuedHint && sameIdentity) pendingLocalSnapshots.splice(index, 1);
     }
   }
 
@@ -808,7 +813,7 @@ export function createSurfaceCoordinator({
           ? metadata.baseSerialized : lastSerialized;
         serialized = stripLocalViewFields(serialized, baseSerialized);
         if (baseSerialized && sameJson(serialized, baseSerialized)) {
-          retireQueuedHint(serialized, baseSerialized);
+          retireQueuedHint(metadata.sequence, serialized, baseSerialized);
           return { ok: true, forwarded: true, unchanged: true, revision };
         }
         const requestId = ackEnabled ? `${clientId}:${++requestSequence}` : null;
@@ -817,7 +822,9 @@ export function createSurfaceCoordinator({
           acknowledgement = new Promise((resolve) => {
           const localPending = { serialized, baseSerialized, generation: metadata.generation, sequence: metadata.sequence };
           const hintIndex = pendingLocalSnapshots.findIndex((pending) => pending.queuedHint
-            && pending.serialized === serialized && pending.baseSerialized === baseSerialized);
+            && (Number.isFinite(metadata.sequence) && Number.isFinite(pending.sequence)
+              ? pending.sequence === metadata.sequence
+              : pending.serialized === serialized && pending.baseSerialized === baseSerialized));
           if (hintIndex >= 0) pendingLocalSnapshots.splice(hintIndex, 1);
           pendingLocalSnapshots.push(localPending);
           const timer = setTimeout(() => {
@@ -852,12 +859,14 @@ export function createSurfaceCoordinator({
         ? metadata.baseSerialized : lastSerialized;
       serialized = stripLocalViewFields(serialized, baseSerialized);
       if (lastSerialized && sameJson(serialized, lastSerialized)) {
-        retireQueuedHint(serialized, baseSerialized);
+        retireQueuedHint(metadata.sequence, serialized, baseSerialized);
         return { ok: true, revision, unchanged: true };
       }
       const localPending = { serialized, baseSerialized, generation: metadata.generation, sequence: metadata.sequence };
       const hintIndex = pendingLocalSnapshots.findIndex((pending) => pending.queuedHint
-        && pending.serialized === serialized && pending.baseSerialized === baseSerialized);
+        && (Number.isFinite(metadata.sequence) && Number.isFinite(pending.sequence)
+          ? pending.sequence === metadata.sequence
+          : pending.serialized === serialized && pending.baseSerialized === baseSerialized));
       if (hintIndex >= 0) pendingLocalSnapshots.splice(hintIndex, 1);
       pendingLocalSnapshots.push(localPending);
       mutationQueue = mutationQueue

@@ -242,6 +242,7 @@ export function createWorkspaceStore({
       setState(normalizeState(nextState));
       lastPersistedSnapshot = typeof metadata.authoritativeSerialized === 'string'
         ? metadata.authoritativeSerialized : JSON.stringify(getState());
+      if (queuedSaves.length === 0) lastQueuedSnapshot = lastPersistedSnapshot;
       return getState();
     },
     /** Install a peer/host document generation and invalidate snapshot history
@@ -253,6 +254,7 @@ export function createWorkspaceStore({
       setState(normalizeState(nextState));
       lastPersistedSnapshot = typeof metadata.authoritativeSerialized === 'string'
         ? metadata.authoritativeSerialized : JSON.stringify(getState());
+      if (queuedSaves.length === 0) lastQueuedSnapshot = lastPersistedSnapshot;
       return getState();
     },
     replace(nextState) {

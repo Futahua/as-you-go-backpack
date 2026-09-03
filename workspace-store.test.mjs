@@ -110,6 +110,21 @@ test('a failed follower acknowledgement invalidates dependent queued edits', asy
   assert.match(statuses.at(-1), /superseded|WRITER_ACK_TIMEOUT/);
 });
 
+test('an authoritative install becomes the immediate base for the next save', async () => {
+  let state = { items: ['root'] };
+  let observedMetadata;
+  const authoritative = JSON.stringify({ items: ['peer'] });
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async (_snapshot, metadata) => { observedMetadata = metadata; },
+    normalizeState: (s) => s,
+  });
+  store.install({ items: ['peer'] }, { authoritativeSerialized: authoritative });
+  await store.save({ items: ['local'] });
+  assert.equal(observedMetadata.baseSerialized, authoritative);
+});
+
 test('replace installs without touching history or persisting', () => {
   const h = createHarness();
   const result = h.store.replace({ items: ['z'] });
