@@ -100,6 +100,9 @@ export function createWorkspaceStore({
           }
           result = { ...result, ...acknowledgement };
         }
+        if (result?.ok === false) {
+          throw new Error(result.code ?? 'The document was not committed.');
+        }
         // Forwarded view saves are only optimistic; their committed broadcast
         // (installExternal) is the durable acknowledgement. A writer save is
         // authoritative and advances the store's queue base here.

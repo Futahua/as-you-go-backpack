@@ -450,6 +450,7 @@ export function createSurfaceCoordinator({
   const ackEnabled = typeof channel?.addEventListener === 'function';
   let requestSequence = 0;
   const pendingRequests = new Map();
+  const pendingLocalSnapshots = [];
   const appliedRequests = new Map();
   const inFlightRequests = new Set();
   const rememberApplied = (key, result) => {
@@ -457,6 +458,26 @@ export function createSurfaceCoordinator({
     appliedRequests.set(key, result);
     while (appliedRequests.size > 512) appliedRequests.delete(appliedRequests.keys().next().value);
   };
+  function overlayPendingSnapshots(serialized) {
+    if (!pendingLocalSnapshots.length) return serialized;
+    try {
+      let merged = JSON.parse(serialized);
+      for (const pending of pendingLocalSnapshots) {
+        merged = mergeSurfaceSnapshots(
+          JSON.parse(pending.baseSerialized ?? serialized),
+          JSON.parse(pending.serialized),
+          merged,
+        );
+      }
+      return JSON.stringify(merged);
+    } catch {
+      return serialized;
+    }
+  }
+  function installExternalPreservingPending(decoded) {
+    const preserved = JSON.parse(overlayPendingSnapshots(JSON.stringify(decoded)));
+    installExternalDocument(preserved);
+  }
 
   function setRole(next, detail = {}) {
     if (role === next) return;
@@ -639,13 +660,17 @@ export function createSurfaceCoordinator({
         let acknowledgement = null;
         if (requestId) {
           acknowledgement = new Promise((resolve) => {
+          const localPending = { serialized, baseSerialized };
+          pendingLocalSnapshots.push(localPending);
           const timer = setTimeout(() => {
             if (!pendingRequests.delete(requestId)) return;
+            const pendingIndex = pendingLocalSnapshots.indexOf(localPending);
+            if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
             onHydrationFailed('mutation', 'writer-ack-timeout', revision ?? undefined);
             resolve({ ok: false, code: 'WRITER_ACK_TIMEOUT' });
           }, 30000);
           timer.unref?.();
-          pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision });
+          pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision, localPending });
           });
         }
         const message = {
@@ -671,6 +696,8 @@ export function createSurfaceCoordinator({
       if (lastSerialized && sameJson(serialized, lastSerialized)) {
         return { ok: true, revision, unchanged: true };
       }
+      const localPending = { serialized, baseSerialized };
+      pendingLocalSnapshots.push(localPending);
       mutationQueue = mutationQueue
         .catch(() => undefined)
         .then(async () => {
@@ -690,7 +717,9 @@ export function createSurfaceCoordinator({
           if (result && result.ok === true) {
             revision = result.revision;
             lastSerialized = payload;
-            try { installDocument(JSON.parse(payload)); } catch { /* host bytes are already committed */ }
+            const pendingIndex = pendingLocalSnapshots.indexOf(localPending);
+            if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
+            try { installDocument(JSON.parse(overlayPendingSnapshots(payload))); } catch { /* host bytes are already committed */ }
             publish(payload, revision);
             return { ok: true, revision };
           }
@@ -702,6 +731,10 @@ export function createSurfaceCoordinator({
           frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : payload;
           setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
           return { ok: false, code: 'STALE_REVISION' };
+        })
+        .finally(() => {
+          const pendingIndex = pendingLocalSnapshots.indexOf(localPending);
+          if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
         });
       return mutationQueue;
     },
@@ -804,7 +837,7 @@ export function createSurfaceCoordinator({
                 // and retry; never discard a queued peer action merely because
                 // the first CAS observed a stale revision.
                 const latest = await host.loadVersioned();
-                installExternalDocument(latest.state);
+                installExternalPreservingPending(latest.state);
                 revision = latest.revision;
                 lastSerialized = JSON.stringify(latest.state);
                 decoded = base
@@ -823,7 +856,7 @@ export function createSurfaceCoordinator({
                 }
                 return;
               }
-              installExternalDocument(decoded);
+              installExternalPreservingPending(decoded);
               revision = result.revision;
               lastSerialized = serialized;
               publish(serialized, revision, message.requestId);
@@ -851,6 +884,8 @@ export function createSurfaceCoordinator({
         if (!pending) return false;
         clearTimeout(pending.timer);
         pendingRequests.delete(message.requestId);
+        const pendingIndex = pendingLocalSnapshots.indexOf(pending.localPending);
+        if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
         pending.resolve({
           ok: message.ok === true,
           revision: message.revision,
@@ -875,7 +910,7 @@ export function createSurfaceCoordinator({
         return false;
       }
       try {
-        installExternalDocument(decoded);
+        installExternalPreservingPending(decoded);
       } catch {
         onHydrationFailed('install', 'model-install-failed', message.revision);
         return false;
@@ -885,6 +920,8 @@ export function createSurfaceCoordinator({
         if (pending) {
           clearTimeout(pending.timer);
           pendingRequests.delete(message.requestId);
+          const pendingIndex = pendingLocalSnapshots.indexOf(pending.localPending);
+          if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
           pending.resolve({ ok: true, revision: message.revision, via: 'committed-broadcast' });
         }
       }
