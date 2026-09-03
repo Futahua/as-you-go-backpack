@@ -62,8 +62,8 @@ acceptance('packaged Papers observes the As you Go success and failure fixtures'
     await wait(async () => { const result = await call('inspect.visual.elements', { windowId, surfaceId: opened.surfaceId }); return fixtureGeometryPasses(result.elements); });
     const elements = await call('inspect.visual.elements', { windowId, surfaceId: opened.surfaceId, keys: VISUAL_FIXTURE_KEYS });
     assert.equal(fixtureGeometryPasses(elements.elements), true);
-    const profile = await evalProject('({ width: innerWidth, height: innerHeight, theme: document.documentElement.dataset.theme, transparent: document.documentElement.dataset.transparentBackground, reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches, locale: navigator.language, activeAnimations: document.getAnimations().length })');
-    assert.deepEqual(profile, { width: 1280, height: 760, theme: 'light', transparent: 'false', reducedMotion: false, locale: 'en-US', activeAnimations: 0 });
+    const profile = await evalProject('({ width: innerWidth, height: innerHeight, theme: document.documentElement.dataset.theme, transparent: document.documentElement.dataset.transparentBackground, reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches, locale: navigator.language, activeAnimations: document.getAnimations().length, fontFamily: getComputedStyle(document.body).fontFamily })');
+    assert.deepEqual(profile, { width: 1280, height: 760, theme: 'light', transparent: 'false', reducedMotion: false, locale: 'en-US', activeAnimations: 0, fontFamily: '"Segoe UI", Arial, sans-serif' });
     const healthy = await call('visual.report.create', { windowId, surfaceId: opened.surfaceId, include: { surfaceCapture: true, semanticElements: true, recentLifecycle: true, recentDiagnostics: true, timeline: true }, beforeMs: 10000 });
     assert.equal(typeof healthy.artifactId, 'string');
     const healthyBytes = await readArtifact(healthy.artifactId);

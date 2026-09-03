@@ -7,7 +7,7 @@ export const VISUAL_PROFILE = Object.freeze({
   animations: 'disabled',
   reducedMotion: false,
   locale: 'en-US',
-  fixtureFont: 'Arial',
+  fixtureFont: 'Segoe UI',
 });
 
 export const VISUAL_FIXTURE_KEYS = Object.freeze([

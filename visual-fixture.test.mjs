@@ -32,7 +32,7 @@ test('deterministic profile and semantic geometry contract are explicit', () => 
     animations: 'disabled',
     reducedMotion: false,
     locale: 'en-US',
-    fixtureFont: 'Arial',
+    fixtureFont: 'Segoe UI',
   });
   const observations = VISUAL_FIXTURE_KEYS.map((key, index) => ({
     key,
