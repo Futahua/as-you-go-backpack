@@ -536,6 +536,9 @@ export function createSurfaceCoordinator({
   installExternalDocument = installDocument,
   onHydrated = () => {},
   onHydrationFailed = () => {},
+  /** Reload the authoritative document before reporting a failed forwarded
+   * mutation. Kept injectable only for deterministic timeout tests. */
+  ackTimeoutMs = 30000,
   /** Abandons the store's queued saves and returns the newest serialized
    * snapshot of that generation. Called the moment a save is refused, so the
    * frozen "my version" is the creator's latest local work rather than
@@ -560,6 +563,7 @@ export function createSurfaceCoordinator({
   let baselineReady = false;
   let baselinePromise = null;
   let conflictGeneration = null;
+  let recoveryPromise = null;
   // BroadcastChannel can deliver mutations from several views back-to-back.
   // Serialize them at the elected writer so each request rebases on the
   // revision committed immediately before it instead of racing two CAS calls
@@ -637,6 +641,40 @@ export function createSurfaceCoordinator({
     if (role === next) return;
     role = next;
     onRoleChange(role, detail);
+  }
+
+  /** A follower applies its edit optimistically before the writer ACKs it.
+   * If delivery or the writer fails, never leave that speculative document
+   * painted indefinitely: remove its overlay, reload the host-authoritative
+   * generation, and preserve only this surface's local navigation/session. */
+  function reloadAuthoritativeAfterFailedMutation(code) {
+    if (recoveryPromise) return recoveryPromise;
+    recoveryPromise = (async () => {
+      let loaded;
+      try {
+        loaded = await host.loadVersioned();
+      } catch (error) {
+        onHydrationFailed('recovery', 'versioned-load-failed', revision ?? undefined);
+        throw error;
+      }
+      try {
+        installExternalPreservingPending(loaded.state);
+      } catch (error) {
+        onHydrationFailed('recovery', 'model-install-failed', loaded.revision);
+        throw error;
+      }
+      revision = loaded.revision;
+      lastSerialized = JSON.stringify(loaded.state);
+      baselineReady = true;
+      onHydrated(loaded.state, revision);
+      return loaded;
+    })().catch((error) => {
+      onHydrationFailed('mutation', code, revision ?? undefined);
+      return null;
+    }).finally(() => {
+      recoveryPromise = null;
+    });
+    return recoveryPromise;
   }
 
   /** Every follower needs a versioned base before it can forward a durable
@@ -832,8 +870,9 @@ export function createSurfaceCoordinator({
             const pendingIndex = pendingLocalSnapshots.indexOf(localPending);
             if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
             onHydrationFailed('mutation', 'writer-ack-timeout', revision ?? undefined);
-            resolve({ ok: false, code: 'WRITER_ACK_TIMEOUT' });
-          }, 30000);
+            void reloadAuthoritativeAfterFailedMutation('writer-ack-timeout')
+              .finally(() => resolve({ ok: false, code: 'WRITER_ACK_TIMEOUT' }));
+          }, ackTimeoutMs);
           timer.unref?.();
           pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision, localPending });
           });
@@ -1063,11 +1102,14 @@ export function createSurfaceCoordinator({
         pendingRequests.delete(message.requestId);
         const pendingIndex = pendingLocalSnapshots.indexOf(pending.localPending);
         if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
-        pending.resolve({
+        const outcome = {
           ok: message.ok === true,
           revision: message.revision,
           ...(message.ok === true ? {} : { code: message.code ?? 'REMOTE_MUTATION_FAILED' }),
-        });
+        };
+        if (outcome.ok) pending.resolve(outcome);
+        else void reloadAuthoritativeAfterFailedMutation(outcome.code)
+          .finally(() => pending.resolve(outcome));
         return true;
       }
       if (message.type !== SNAPSHOT_MESSAGE) return false;

@@ -48,6 +48,13 @@ document/history mutations are disabled and never fall back to unchecked
 store gate freezes further document/history changes until Use latest or Keep
 my version resolves it. External installs and writer promotion reloads clear
 snapshot undo/redo history so an old generation cannot resurrect peer edits.
+If a forwarded mutation receives a negative acknowledgement or reaches the
+writer-ack timeout, its optimistic overlay is retired and the surface reloads
+the versioned authoritative document before reporting failure. This keeps a
+transport miss from leaving a folder, prompt, or rename painted in only one
+window. Installed-app proof still needs two native Papers windows on a cloned
+real profile; synthetic coordinator tests do not establish channel or session
+scope by themselves.
 
 The merge is three-way and stable-id aware for entities, item sets, prompt
 library trees, and per-context graph/rest/toolbar position keys. Local surface

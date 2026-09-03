@@ -52,10 +52,15 @@ function fakeDisk(initial = { schemaVersion: 1, groups: [], shortcuts: [] }) {
 
 function fakeChannel() {
   const sent = [];
-  return { postMessage(value) { sent.push(value); }, sent };
+  return {
+    postMessage(value) { sent.push(value); },
+    addEventListener() {},
+    removeEventListener() {},
+    sent,
+  };
 }
 
-function surface(lock, disk, name, { latestQueued = null } = {}) {
+function surface(lock, disk, name, { latestQueued = null, ackTimeoutMs } = {}) {
   const installed = [];
   const channel = fakeChannel();
   const invalidations = [];
@@ -65,6 +70,7 @@ function surface(lock, disk, name, { latestQueued = null } = {}) {
     host: disk,
     installDocument: (snapshot) => { installed.push(snapshot); },
     invalidatePendingSaves: () => { invalidations.push(true); return latestQueued; },
+    ...(ackTimeoutMs === undefined ? {} : { ackTimeoutMs }),
     newClientId: () => name,
   });
   return { coordinator, installed, channel, invalidations };
@@ -111,6 +117,7 @@ test('a view forwards an optimistic document action to the writer channel', asyn
     revision: 'r0',
     serialized: ser(board),
     baseSerialized: ser({ schemaVersion: 1, groups: [], shortcuts: [] }),
+    requestId: 'B:1',
   });
 });
 
@@ -134,6 +141,45 @@ test('a forwarded view mutation keeps navigation and selection local', async () 
   assert.equal(forwarded.view.currentGroupId, 'writer-folder');
   assert.deepEqual(forwarded.view.selectedItemIds, ['writer-item']);
   assert.equal(forwarded.view.binMode, false);
+});
+
+test('a failed forwarded mutation reloads the authoritative document before settling', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'durable' }], shortcuts: [] });
+  const b = surface(lock, disk, 'B');
+  const board = { schemaVersion: 1, groups: [{ id: 'speculative' }], shortcuts: [] };
+
+  const forwarded = await b.coordinator.saveSerialized(ser(board));
+  const request = b.channel.sent.at(-1);
+  assert.equal(forwarded.forwarded, true);
+  assert.equal(typeof request.requestId, 'string');
+
+  assert.equal(b.coordinator.receive({
+    type: 'mutation-ack',
+    clientId: 'A',
+    ackClientId: 'B',
+    requestId: request.requestId,
+    ok: false,
+    code: 'REMOTE_MUTATION_FAILED',
+    revision: disk.revision,
+  }), true);
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: false, revision: disk.revision, code: 'REMOTE_MUTATION_FAILED' });
+  assert.deepEqual(b.installed.at(-1), disk.state);
+  assert.equal(b.coordinator.revision, disk.revision);
+});
+
+test('a forwarded ACK timeout reloads the authoritative document', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'durable' }], shortcuts: [] });
+  const b = surface(lock, disk, 'B', { ackTimeoutMs: 5 });
+  const board = { schemaVersion: 1, groups: [{ id: 'lost' }], shortcuts: [] };
+
+  const forwarded = await b.coordinator.saveSerialized(ser(board));
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: false, code: 'WRITER_ACK_TIMEOUT' });
+  assert.deepEqual(b.installed.at(-1), disk.state);
+  assert.equal(b.coordinator.revision, disk.revision);
 });
 
 test('stale action snapshots merge entities while the incoming position wins', () => {
