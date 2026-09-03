@@ -158,9 +158,17 @@ function windowLayoutWidgetSurfaceParams(locationRef) {
 }
 const WIDGET_SURFACE = windowLayoutWidgetSurfaceParams(window.location);
 if (WIDGET_SURFACE) document.documentElement.dataset.widgetSurface = 'true';
-const windowLayoutWidgetSelectionChannel = typeof BroadcastChannel === 'function'
-  ? new BroadcastChannel('ayg-window-layout-widget-selection')
-  : null;
+function createSafeBroadcastChannel(name) {
+  if (typeof BroadcastChannel !== 'function') {
+    return { name, postMessage() {}, addEventListener() {}, removeEventListener() {}, close() {} };
+  }
+  try {
+    return new BroadcastChannel(name);
+  } catch {
+    return { name, postMessage() {}, addEventListener() {}, removeEventListener() {}, close() {} };
+  }
+}
+const windowLayoutWidgetSelectionChannel = createSafeBroadcastChannel('ayg-window-layout-widget-selection');
 if (!WIDGET_SURFACE) {
   // A click back in the Backpack explicitly exits every detached widget's
   // ephemeral Ctrl/Shift selection, even when its always-on-top native window
@@ -2216,7 +2224,7 @@ async function retireClosedWindowEverywhere(descriptor) {
 }
 
 const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorkspace({
-  channel: new BroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL),
+  channel: createSafeBroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL),
   getLayout: windowLayoutFromState,
   snapshot: (layout, memberIcon) => ({
     ...windowLayoutWidgetSnapshot(layout, memberIcon),
@@ -5104,7 +5112,7 @@ function bootstrapWindowLayoutWidget() {
       `${Math.round(opacity * 10000) / 100}%`,
     );
   }
-  const channel = new BroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL);
+  const channel = createSafeBroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL);
   const widgetState = {
     selection: new Set(),
     anchor: new Map(),
