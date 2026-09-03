@@ -401,6 +401,20 @@ export function seedPosition(itemId, parent, index, count, originX = 0, originY 
   };
 }
 
+/** Whether a visible graph can be reopened without another physics pass.
+ * Persisted coordinates are authoritative for ordinary bodies; breadcrumb,
+ * trail, and Bin-origin nodes are derived and therefore do not prevent an
+ * otherwise settled workspace from opening in place. */
+export function hasSettledGraphPositions(items, positionFor) {
+  if (!Array.isArray(items) || typeof positionFor !== 'function') return false;
+  return items.every((item) => (
+    item?.ancestor === true
+    || item?.trail === true
+    || item?.kind === 'bin-origin'
+    || Boolean(positionFor(item.id, item))
+  ));
+}
+
 export function hashString(value) {
   let h = 5381;
   for (let i = 0; i < value.length; i += 1) {

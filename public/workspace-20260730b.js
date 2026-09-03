@@ -61,7 +61,7 @@ import {
 import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { select } from './vendor/d3-selection.js';
 import { animate } from './vendor/anime.js';
-import { visibleGraphItems, directSetMemberIdsVisible, inheritedSetMemberIdsVisible, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
+import { visibleGraphItems, directSetMemberIdsVisible, inheritedSetMemberIdsVisible, graphEdges, binOriginEdges, seedPosition, hasSettledGraphPositions, assignSpatialFolderHues } from './graph-model-20260730b.js';
 import { belongsToSet } from './sets-model.js';
 import {
   reconcileRing,
@@ -2484,6 +2484,10 @@ function createGraphController() {
   let attached = false;
   let updatePending = false;
   let pendingInitialFit = false;
+  // Re-entering a folder must not reshuffle a layout the creator has already
+  // learned. This key lets us apply the settled-entry rule only when the graph
+  // context changes; ordinary same-folder actions still reheat as needed.
+  let lastGraphContextKey = null;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
   // Folder hues retain their position solver state; set hues retain a seeded,
@@ -2613,6 +2617,7 @@ function createGraphController() {
     setRings.clear();
     setEffects.clear();
     dragTrail.clear();
+    lastGraphContextKey = null;
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
@@ -3843,6 +3848,8 @@ function createGraphController() {
       state.view?.trailExpandedByContext?.[currentTrailContextKey()] ?? [],
     );
     store.setTrailExpanded([...trailExpanded]);
+    const contextKey = graphContextId(session.currentId, session.binMode);
+    const enteringContext = contextKey !== lastGraphContextKey;
     const visible = visibleGraphItems(
       state,
       // Navigating to the root via an ancestor tile sets currentId to null
@@ -3873,8 +3880,13 @@ function createGraphController() {
       // Nothing on screen means no members, so every ring goes too. Without
       // this the previous view's outlines would stay drawn over an empty graph.
       syncSetRings();
+      lastGraphContextKey = contextKey;
       return;
     }
+    const settledOnDisk = hasSettledGraphPositions(
+      visible,
+      (id) => getGraphPosition(state, contextKey, id) ?? getGraphRestPosition(state, contextKey, id),
+    );
     const originEdges = session.binMode ? binOriginEdges(visible) : [];
     const ghostIds = new Set(originEdges.filter((e) => e.ghost).map((e) => e.ghostGroupId));
     const ghostItems = [...ghostIds].map((groupId, index) => ({
@@ -3890,7 +3902,17 @@ function createGraphController() {
     syncEdges(visible);
     syncOriginEdges(originEdges);
     syncSimulation();
-    reheat(initialFit ? 0.7 : 0.35);
+    if (enteringContext && settledOnDisk) {
+      // The nodes were seeded from their remembered resting coordinates above.
+      // Stopping here prevents forceSimulation's initial/reheat pass from
+      // moving every item on entry. A later same-context action deliberately
+      // follows the normal reheat path so new topology can settle.
+      simulation.stop();
+      simulation.alpha(0);
+    } else {
+      reheat(initialFit ? 0.7 : 0.35);
+    }
+    lastGraphContextKey = contextKey;
     if (initialFit && !initialized) {
       fitPending = true;
       setTimeout(() => {
