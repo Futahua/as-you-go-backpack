@@ -189,6 +189,36 @@ test('a forwarded ACK timeout reloads the authoritative document', async () => {
   assert.equal(b.coordinator.revision, disk.revision);
 });
 
+test('a successful timeout recovery clears conflict before dependent work continues', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const b = surface(fakeLock(), disk, 'B', { ackTimeoutMs: 5 });
+  const forwarded = await b.coordinator.saveSerialized(ser({
+    schemaVersion: 1, groups: [{ id: 'committed' }], shortcuts: [],
+  }), { generation: 1 });
+  const request = b.channel.sent.at(-1);
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+  await disk.saveChecked(ser({ schemaVersion: 1, groups: [{ id: 'committed' }], shortcuts: [] }), 'r0');
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: true, revision: disk.revision,
+  });
+  const outcome = await forwarded.acknowledgement;
+  assert.equal(outcome.ok, true);
+  assert.equal(b.coordinator.role, SURFACE_ROLE.VIEW);
+});
+
+test('conflict recovery choices wait for an unresolved cancellation', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const b = surface(fakeLock(), disk, 'B', { ackTimeoutMs: 5 });
+  await b.coordinator.saveSerialized(ser({
+    schemaVersion: 1, groups: [{ id: 'speculative' }], shortcuts: [],
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal((await b.coordinator.useLatest()).code, 'MUTATION_CANCELLATION_PENDING');
+  assert.equal((await b.coordinator.keepMine()).code, 'MUTATION_CANCELLATION_PENDING');
+});
+
 test('timeout recovery recognizes a commit already durable on disk', async () => {
   const lock = fakeLock();
   const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
@@ -259,6 +289,39 @@ test('cancellation ACK reconciles a newer authoritative revision before settling
   assert.deepEqual(outcome, { ok: false, revision: disk.revision, code: 'MUTATION_CANCELLED' });
   assert.deepEqual(b.installed.at(-1), disk.state);
   assert.equal(b.coordinator.revision, disk.revision);
+});
+
+test('cancellation ACK upgrades an already-durable request to success', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const b = surface(fakeLock(), disk, 'B');
+  const committed = { schemaVersion: 1, groups: [{ id: 'committed' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(committed));
+  const request = b.channel.sent.at(-1);
+  await disk.saveChecked(ser(committed), 'r0');
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'C', ackClientId: 'B', requestId: request.requestId,
+    ok: false, code: 'MUTATION_CANCELLED', revision: disk.revision,
+  });
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: true, revision: disk.revision, via: 'recovery-authoritative' });
+});
+
+test('promotion recognizes a durable pending request instead of replay failure', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const a = surface(lock, disk, 'A');
+  const b = surface(lock, disk, 'B', { ackTimeoutMs: 500 });
+  await a.coordinator.start();
+  const bStart = b.coordinator.start();
+  await Promise.resolve();
+  const committed = { schemaVersion: 1, groups: [{ id: 'committed' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(committed));
+  await disk.saveChecked(ser(committed), 'r0');
+  a.coordinator.release();
+  await bStart;
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: true, revision: disk.revision, via: 'promotion-authority' });
+  assert.equal(b.coordinator.role, SURFACE_ROLE.WRITER);
 });
 
 test('a successful late ACK reloads the committed authority before settling', async () => {

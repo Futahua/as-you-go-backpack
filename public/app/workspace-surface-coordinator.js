@@ -681,6 +681,29 @@ export function createSurfaceCoordinator({
   function markForwardFailure(pending) {
     if (pending?.generation != null) generationsNeedingRestore.add(pending.generation);
   }
+  function pendingIntentIsDurable(pending, loaded) {
+    if (!pending || !loaded) return false;
+    try {
+      const incoming = JSON.parse(pending.serialized);
+      const base = pending.baseSerialized ? JSON.parse(pending.baseSerialized) : null;
+      const authoritative = loaded.state;
+      const merged = base ? mergeSurfaceSnapshots(base, incoming, authoritative) : incoming;
+      return sameJson(merged, { ...authoritative, view: authoritative.view ?? {} });
+    } catch { return false; }
+  }
+  function clearRecoveredConflict(pending) {
+    if (role !== SURFACE_ROLE.CONFLICT || conflictGeneration !== (pending?.generation ?? null)) return;
+    frozenSnapshot = null;
+    conflictGeneration = null;
+    conflictNeedsLock = false;
+    setRole(held ? SURFACE_ROLE.WRITER : SURFACE_ROLE.VIEW, { revision });
+  }
+  function hasUnresolvedCancellation() {
+    for (const pending of pendingRequests.values()) {
+      if (pending.cancelRequested && !pending.settled) return true;
+    }
+    return false;
+  }
   function freezeFollowerFailure(pending) {
     frozenSnapshot = pending?.serialized ?? frozenSnapshot;
     conflictGeneration = pending?.generation ?? null;
@@ -692,22 +715,13 @@ export function createSurfaceCoordinator({
   function settleFailedForward(requestId, pending, outcome, recovery, { cancelIfUnresolved = false } = {}) {
     const finish = () => {
       if (!pendingRequests.has(requestId) || pending.settled) return;
-      const authoritativeMatch = recovery.ok && recovery.loaded
-        && (() => {
-          try {
-            const incoming = JSON.parse(pending.serialized);
-            const base = pending.baseSerialized ? JSON.parse(pending.baseSerialized) : null;
-            const authoritative = recovery.loaded.state;
-            // A writer may have rebased this request with a concurrent edit,
-            // so equality with the submitted snapshot is too strict. If the
-            // three-way merge of this request onto the loaded authority is
-            // byte-stable, the request's intent is already durable there.
-            const merged = base ? mergeSurfaceSnapshots(base, incoming, authoritative) : incoming;
-            const comparable = { ...authoritative, view: authoritative.view ?? {} };
-            return sameJson(merged, comparable);
-          } catch { return false; }
-        })();
+      // A writer may have rebased this request with a concurrent edit, so
+      // equality with the submitted snapshot is too strict. If the three-way
+      // merge of this request onto the loaded authority is byte-stable, the
+      // request's intent is already durable there.
+      const authoritativeMatch = recovery.ok && pendingIntentIsDurable(pending, recovery.loaded);
       if (authoritativeMatch) {
+        clearRecoveredConflict(pending);
         settlePendingRequest(requestId, pending, {
           ok: true,
           revision: recovery.loaded.revision,
@@ -882,6 +896,15 @@ export function createSurfaceCoordinator({
         try {
           if (!pendingRequests.has(requestId) || pending.settled) return;
           if (pending.revision !== revision) {
+            if (pendingIntentIsDurable(pending, loaded)) {
+              clearRecoveredConflict(pending);
+              settlePendingRequest(requestId, pending, {
+                ok: true,
+                revision,
+                via: 'promotion-authority',
+              });
+              return;
+            }
             const outcome = { ok: false, code: 'PROMOTION_REPLAY_AMBIGUOUS' };
             markForwardFailure(pending);
             settlePendingRequest(requestId, pending, outcome);
@@ -1111,6 +1134,7 @@ export function createSurfaceCoordinator({
     /** Conflict recovery: abandon this surface's unsaved version. */
     async useLatest() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
+      if (hasUnresolvedCancellation()) return { ok: false, code: 'MUTATION_CANCELLATION_PENDING' };
       clearPendingGeneration(conflictGeneration);
       const startedEpoch = authoritativeEpoch;
       let loaded;
@@ -1159,6 +1183,7 @@ export function createSurfaceCoordinator({
      */
     async keepMine() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
+      if (hasUnresolvedCancellation()) return { ok: false, code: 'MUTATION_CANCELLATION_PENDING' };
       clearPendingGeneration(conflictGeneration);
       if (conflictNeedsLock) {
         // Follower conflict recovery must acquire the same Web Lock before it
@@ -1360,7 +1385,7 @@ export function createSurfaceCoordinator({
         // Reconcile first, then expose the result to the store. Ordinary
         // negative ACKs retain their semantic durability check below.
         removePendingOverlay(pending.localPending);
-        if (outcome.ok || outcome.code === 'MUTATION_CANCELLED') {
+        if (outcome.ok) {
           void reloadAuthoritativeAfterFailedMutation(outcome.code)
             .then((recovery) => {
               if (!recovery.ok) {
@@ -1373,12 +1398,12 @@ export function createSurfaceCoordinator({
                 });
                 return;
               }
-              if (outcome.ok) settlePendingRequest(message.requestId, pending, outcome);
-              else {
-                markForwardFailure(pending);
-                settlePendingRequest(message.requestId, pending, outcome);
-              }
+              clearRecoveredConflict(pending);
+              settlePendingRequest(message.requestId, pending, outcome);
             });
+        } else if (outcome.code === 'MUTATION_CANCELLED') {
+          void reloadAuthoritativeAfterFailedMutation(outcome.code)
+            .then((recovery) => settleFailedForward(message.requestId, pending, outcome, recovery));
         } else {
           void reloadAuthoritativeAfterFailedMutation(outcome.code)
             .then((recovery) => settleFailedForward(message.requestId, pending, outcome, recovery));
@@ -1411,6 +1436,7 @@ export function createSurfaceCoordinator({
       if (typeof message.requestId === 'string') {
         const pending = pendingRequests.get(message.requestId);
         if (pending) {
+          clearRecoveredConflict(pending);
           settlePendingRequest(message.requestId, pending, { ok: true, revision: message.revision, via: 'committed-broadcast' });
         }
       }
