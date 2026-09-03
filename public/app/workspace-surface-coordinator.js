@@ -706,9 +706,9 @@ export function createSurfaceCoordinator({
     }
     return false;
   }
-  function freezeAuthorityValidationFailure() {
-    frozenSnapshot = lastSerialized;
-    conflictGeneration = null;
+  function freezeAuthorityValidationFailure(pending = null) {
+    frozenSnapshot = pending?.serialized ?? lastSerialized;
+    conflictGeneration = pending?.generation ?? null;
     conflictNeedsLock = !held;
     setRole(SURFACE_ROLE.CONFLICT, { revision });
   }
@@ -1480,9 +1480,14 @@ export function createSurfaceCoordinator({
         const validationEpoch = authoritativeEpoch;
         void host.loadVersioned().then((loaded) => {
           if (authoritativeEpoch !== validationEpoch || !loaded) return;
+          const pending = typeof message.requestId === 'string'
+            ? pendingRequests.get(message.requestId) : null;
           if (loaded.revision !== message.revision && loaded.revision === revision) return;
           try { installExternalPreservingPending(loaded.state); } catch {
             onHydrationFailed('install', 'model-install-failed', loaded.revision);
+            if (authoritativeEpoch === validationEpoch && (role === SURFACE_ROLE.VIEW || pending)) {
+              freezeAuthorityValidationFailure(pending);
+            }
             return;
           }
           authoritativeEpoch += 1;
@@ -1490,8 +1495,7 @@ export function createSurfaceCoordinator({
           lastSerialized = loaded.revision === message.revision ? message.serialized : JSON.stringify(loaded.state);
           baselineReady = true;
           onHydrated(loaded.revision === message.revision ? decoded : loaded.state, revision);
-          if (typeof message.requestId === 'string') {
-            const pending = pendingRequests.get(message.requestId);
+          if (pending) {
             if (pending && pendingIntentIsDurable(pending, { state: loaded.revision === message.revision ? decoded : loaded.state })) {
               clearRecoveredConflict(pending);
               settlePendingRequest(message.requestId, pending, {
@@ -1502,8 +1506,11 @@ export function createSurfaceCoordinator({
             }
           }
         }).catch(() => {
+          if (authoritativeEpoch !== validationEpoch || (role !== SURFACE_ROLE.VIEW && role !== SURFACE_ROLE.CONFLICT)) return;
           onHydrationFailed('recovery', 'committed-order-validation-failed', revision ?? undefined);
-          freezeAuthorityValidationFailure();
+          const pending = typeof message.requestId === 'string'
+            ? pendingRequests.get(message.requestId) : null;
+          freezeAuthorityValidationFailure(pending);
         });
         return true;
       }
