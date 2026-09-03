@@ -23,6 +23,21 @@ clear responsibility lives in a module.
 | Styling | the matching file under `public/styles/` |
 | Compatibility composition | `public/workspace-20260730b.js` |
 
+## Multi-window document behavior
+
+Every open As you Go surface accepts document actions. One surface remains the
+durable writer, while other surfaces apply the action optimistically and send a
+bounded snapshot over the same-origin channel. The writer merges entity edits
+by stable id, commits through Papers' versioned state service, and broadcasts
+the exact committed bytes back to every surface. This prevents a delete, bin,
+rename, move, or other action in one window from disappearing in another.
+
+Graph, resting, and toolbar position maps are deliberately last-writer-wins;
+the most recently committed drag is the visible placement everywhere. A
+surface opening a folder with the context-menu action or middle mouse button
+requests a new generic Papers surface on its own authenticated project URL;
+the host does not interpret As you Go's folder id.
+
 ## Prompt library (copy button)
 
 The prompt library is a nested tree of prompts and folders persisted in
