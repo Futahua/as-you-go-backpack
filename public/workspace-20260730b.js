@@ -5884,6 +5884,10 @@ if (WIDGET_SURFACE) {
       // Installs the document only. This surface's navigation is deliberately
       // preserved, so two windows keep showing different places.
       installDocument: (document_) => { state = store.install(document_); render(); },
+      // A peer commit is a new document generation. Drop this surface's local
+      // snapshot undo chain rather than allowing Undo to resurrect stale work
+      // from before the external install.
+      installExternalDocument: (document_) => { state = store.installExternal(document_); render(); },
       onHydrated: (source, revision) => {
         if (hydrationSummaryDisagrees(source, state)) {
           visualObservability.hydrationFailed('normalize', 'nonempty-source-empty-model', revision);

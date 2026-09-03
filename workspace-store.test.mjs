@@ -92,6 +92,16 @@ test('install normalizes the initial state', () => {
   assert.deepEqual(state, { items: ['loaded'], normalized: true });
 });
 
+test('installExternal normalizes and invalidates stale snapshot undo/redo history', async () => {
+  const h = createHarness();
+  await h.store.commit({ items: ['local'] }, {});
+  assert.equal(h.store.canUndo(), true);
+  h.store.installExternal({ items: ['peer'] });
+  assert.deepEqual(h.getState(), { items: ['peer'] });
+  assert.equal(h.store.canUndo(), false);
+  assert.equal(h.store.canRedo(), false);
+});
+
 test('afterCommit runs after the new state is installed', async () => {
   const h = createHarness();
   await h.store.commit({ items: ['a'] }, {});

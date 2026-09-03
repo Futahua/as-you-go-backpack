@@ -168,6 +168,15 @@ export function createWorkspaceStore({
       setState(normalizeState(nextState));
       return getState();
     },
+    /** Install a peer/host document generation and invalidate snapshot history
+     * that was based on the previous generation. Session navigation remains
+     * untouched, but Undo/Redo must not replay an obsolete whole-board image. */
+    installExternal(nextState) {
+      undoStack = [];
+      redoStack = [];
+      setState(normalizeState(nextState));
+      return getState();
+    },
     replace(nextState) {
       if (!canMutateDocument()) {
         onMutationBlocked('replace');

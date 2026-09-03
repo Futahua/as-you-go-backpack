@@ -127,6 +127,8 @@ export function webLockAdapter(navigatorRef) {
  *           saveChecked(state: object, revision: string): Promise<object> }} options.host
  * @param {(snapshot: object) => void} options.installDocument
  *        Installs a document WITHOUT touching this surface's navigation session.
+ * @param {(snapshot: object) => void} [options.installExternalDocument]
+ *        Installs a peer/external document and may invalidate local history.
  * @param {(snapshot: object, revision: string) => void} [options.onHydrated]
  * @param {(stage: string, code: string, revision?: string) => void} [options.onHydrationFailed]
  * @param {(role: string, detail: object) => void} [options.onRoleChange]
@@ -137,6 +139,7 @@ export function createSurfaceCoordinator({
   channel,
   host,
   installDocument,
+  installExternalDocument = installDocument,
   onHydrated = () => {},
   onHydrationFailed = () => {},
   /** Abandons the store's queued saves and returns the newest serialized
@@ -361,7 +364,7 @@ export function createSurfaceCoordinator({
                 // and retry; never discard a queued peer action merely because
                 // the first CAS observed a stale revision.
                 const latest = await host.loadVersioned();
-                installDocument(latest.state);
+                installExternalDocument(latest.state);
                 revision = latest.revision;
                 lastSerialized = JSON.stringify(latest.state);
                 decoded = base
@@ -374,7 +377,7 @@ export function createSurfaceCoordinator({
                 onHydrationFailed('mutation', 'remote-save-stale', revision ?? undefined);
                 return;
               }
-              installDocument(decoded);
+              installExternalDocument(decoded);
               revision = result.revision;
               lastSerialized = serialized;
               publish(serialized, revision);
@@ -401,7 +404,7 @@ export function createSurfaceCoordinator({
         return false;
       }
       try {
-        installDocument(decoded);
+        installExternalDocument(decoded);
       } catch {
         onHydrationFailed('install', 'model-install-failed', message.revision);
         return false;
