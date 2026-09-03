@@ -32,8 +32,18 @@ by stable id, commits through Papers' versioned state service, and broadcasts
 the exact committed bytes back to every surface. This prevents a delete, bin,
 rename, move, or other action in one window from disappearing in another.
 
+Peer mutation requests are serialized at the writer. Each request is rebased
+against the latest committed snapshot before its compare-and-set; if an
+unexpected external revision advances the host, the writer reloads and retries
+that same request once instead of dropping it. This preserves disjoint edits
+when two windows act at nearly the same time.
+
 Graph, resting, and toolbar position maps are deliberately last-writer-wins;
-the most recently committed drag is the visible placement everywhere. A
+the most recently committed drag is the visible placement everywhere.
+When a graph context has complete remembered coordinates, entering or reopening
+it stops the physics simulation and renders those coordinates in place. A
+context with a new or unremembered body still reheats so the new layout can
+settle; same-context actions also reheat deliberately. A
 surface opening a folder with the context-menu action or middle mouse button
 requests a new generic Papers surface on its own authenticated project URL;
 the host does not interpret As you Go's folder id.
