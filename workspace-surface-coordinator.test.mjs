@@ -147,6 +147,36 @@ test('a multi-item delete removes every requested entity without index drift', (
   assert.deepEqual(merged.groups, [{ id: 'c' }]);
 });
 
+test('queued peer mutations rebase in arrival order instead of dropping the second edit', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({
+    schemaVersion: 1,
+    groups: [{ id: 'g1', title: 'one' }, { id: 'g2', title: 'two' }],
+    shortcuts: [],
+  });
+  const a = surface(lock, disk, 'A');
+  await a.coordinator.start();
+  const base = ser(disk.state);
+  const first = ser({
+    schemaVersion: 1,
+    groups: [{ id: 'g1', title: 'ONE' }, { id: 'g2', title: 'two' }],
+    shortcuts: [],
+  });
+  const second = ser({
+    schemaVersion: 1,
+    groups: [{ id: 'g1', title: 'one' }, { id: 'g2', title: 'TWO' }],
+    shortcuts: [],
+  });
+  assert.equal(a.coordinator.receive({ type: 'mutation-request', clientId: 'B', revision: 'r0', serialized: first, baseSerialized: base }), true);
+  assert.equal(a.coordinator.receive({ type: 'mutation-request', clientId: 'C', revision: 'r0', serialized: second, baseSerialized: base }), true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(disk.state.groups, [
+    { id: 'g1', title: 'ONE' },
+    { id: 'g2', title: 'TWO' },
+  ]);
+});
+
 test('a successful save advances the revision and broadcasts the committed snapshot', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();

@@ -160,6 +160,11 @@ export function createSurfaceCoordinator({
   let pendingAcquire = null;
   let held = null;
   let lastSerialized = null;
+  // BroadcastChannel can deliver mutations from several views back-to-back.
+  // Serialize them at the elected writer so each request rebases on the
+  // revision committed immediately before it instead of racing two CAS calls
+  // and silently dropping the loser.
+  let mutationQueue = Promise.resolve();
 
   function setRole(next, detail = {}) {
     if (role === next) return;
@@ -329,31 +334,49 @@ export function createSurfaceCoordinator({
       if (!isPlainObject(message) || typeof message.clientId !== 'string' || message.clientId === clientId) return false;
       if (message.type === MUTATION_MESSAGE) {
         if (role !== SURFACE_ROLE.WRITER || typeof message.serialized !== 'string') return false;
-        void (async () => {
-          let serialized = message.serialized;
-          try {
-            let decoded = JSON.parse(serialized);
-            if (typeof message.baseSerialized === 'string' && message.revision !== revision) {
-              const base = JSON.parse(message.baseSerialized);
-              const current = lastSerialized ? JSON.parse(lastSerialized) : (await host.loadVersioned()).state;
-              decoded = mergeSurfaceSnapshots(base, decoded, current);
-              serialized = JSON.stringify(decoded);
+        mutationQueue = mutationQueue
+          .catch(() => undefined)
+          .then(async () => {
+            let serialized = message.serialized;
+            try {
+              const incoming = JSON.parse(message.serialized);
+              let decoded = incoming;
+              const base = typeof message.baseSerialized === 'string'
+                ? JSON.parse(message.baseSerialized)
+                : null;
+              const current = lastSerialized ? JSON.parse(lastSerialized) : null;
+              if (base && current && (message.revision !== revision || !sameJson(base, current))) {
+                decoded = mergeSurfaceSnapshots(base, incoming, current);
+                serialized = JSON.stringify(decoded);
+              }
+              let result = await host.saveChecked(serialized, revision);
+              if (!result || result.ok !== true) {
+                // An external writer may have advanced the opaque host revision
+                // despite our Web Lock. Reload, rebase this same request once,
+                // and retry; never discard a queued peer action merely because
+                // the first CAS observed a stale revision.
+                const latest = await host.loadVersioned();
+                installDocument(latest.state);
+                revision = latest.revision;
+                lastSerialized = JSON.stringify(latest.state);
+                decoded = base
+                  ? mergeSurfaceSnapshots(base, incoming, latest.state)
+                  : incoming;
+                serialized = JSON.stringify(decoded);
+                result = await host.saveChecked(serialized, revision);
+              }
+              if (!result || result.ok !== true) {
+                onHydrationFailed('mutation', 'remote-save-stale', revision ?? undefined);
+                return;
+              }
+              installDocument(decoded);
+              revision = result.revision;
+              lastSerialized = serialized;
+              publish(serialized, revision);
+            } catch {
+              onHydrationFailed('mutation', 'remote-save-failed', revision ?? undefined);
             }
-            const result = await host.saveChecked(serialized, revision);
-            if (!result || result.ok !== true) {
-              const latest = await host.loadVersioned();
-              revision = latest.revision;
-              lastSerialized = JSON.stringify(latest.state);
-              return;
-            }
-            installDocument(decoded);
-            revision = result.revision;
-            lastSerialized = serialized;
-            publish(serialized, revision);
-          } catch {
-            onHydrationFailed('mutation', 'remote-save-failed', revision ?? undefined);
-          }
-        })();
+          });
         return true;
       }
       if (message.type !== SNAPSHOT_MESSAGE) return false;
