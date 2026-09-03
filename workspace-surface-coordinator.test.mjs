@@ -114,6 +114,28 @@ test('a view forwards an optimistic document action to the writer channel', asyn
   });
 });
 
+test('a forwarded view mutation keeps navigation and selection local', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({
+    schemaVersion: 1, groups: [], shortcuts: [],
+    view: { currentGroupId: 'writer-folder', selectedItemIds: ['writer-item'], binMode: false },
+  });
+  const b = surface(lock, disk, 'B');
+  const local = {
+    schemaVersion: 1,
+    groups: [{ id: 'new' }],
+    shortcuts: [],
+    view: { currentGroupId: 'b-folder', selectedItemIds: ['b-item'], binMode: true },
+  };
+  await b.coordinator.saveSerialized(ser(local));
+  const sent = b.channel.sent.at(-1);
+  const forwarded = JSON.parse(sent.serialized);
+  assert.equal(forwarded.groups[0].id, 'new');
+  assert.equal(forwarded.view.currentGroupId, 'writer-folder');
+  assert.deepEqual(forwarded.view.selectedItemIds, ['writer-item']);
+  assert.equal(forwarded.view.binMode, false);
+});
+
 test('stale action snapshots merge entities while the incoming position wins', () => {
   const base = {
     schemaVersion: 1,

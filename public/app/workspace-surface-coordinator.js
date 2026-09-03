@@ -75,6 +75,35 @@ function mergePositionMap(baseValue, localValue, currentValue, nested) {
   return result;
 }
 
+const LOCAL_VIEW_KEYS = Object.freeze([
+  'currentGroupId',
+  'graphExpandedGroupIds',
+  'trailExpandedByContext',
+  'selectedItemIds',
+  'binMode',
+]);
+
+/** Remove this surface's navigation/session fallback from a forwarded board
+ * snapshot. Those fields are useful when reopening a single surface, but are
+ * not shared document actions and must never make another window jump folders
+ * or inherit its selection. */
+function stripLocalViewFields(serialized, baseSerialized) {
+  if (typeof baseSerialized !== 'string') return serialized;
+  try {
+    const local = JSON.parse(serialized);
+    const base = JSON.parse(baseSerialized);
+    if (!isPlainObject(local?.view) || !isPlainObject(base?.view)) return serialized;
+    const view = { ...local.view };
+    for (const key of LOCAL_VIEW_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(base.view, key)) view[key] = base.view[key];
+      else delete view[key];
+    }
+    return JSON.stringify({ ...local, view });
+  } catch {
+    return serialized;
+  }
+}
+
 /** Merge a view's action snapshot onto the writer's current snapshot. Entity
  * collections are merged by stable id so two windows cannot erase unrelated
  * edits. View/position maps intentionally use last-writer-wins: a later drag
@@ -345,12 +374,14 @@ export function createSurfaceCoordinator({
         // This keeps ordinary document actions usable from every window while
         // retaining one durable writer and CAS protection.
         if (!baselineReady) await ensureBaseline();
+        const baseSerialized = lastSerialized;
+        serialized = stripLocalViewFields(serialized, baseSerialized);
         channel.postMessage({
           type: MUTATION_MESSAGE,
           clientId,
           revision,
           serialized,
-          baseSerialized: lastSerialized,
+          baseSerialized,
         });
         return { ok: true, forwarded: true, revision };
       }
