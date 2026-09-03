@@ -38,6 +38,22 @@ unexpected external revision advances the host, the writer reloads and retries
 that same request once instead of dropping it. This preserves disjoint edits
 when two windows act at nearly the same time.
 
+On real BroadcastChannel surfaces, forwarded mutations carry a stable request
+id. The writer deduplicates an id before queueing it and emits one correlated
+acknowledgement containing the committed revision; the sender exposes that
+acknowledgement for diagnostics and reports a bounded timeout if the writer
+dies. Missing or failing Web Locks/BroadcastChannel primitives fail closed:
+document/history mutations are disabled and never fall back to unchecked
+`host.saveWorkspace` writes. A stale compare-and-set enters CONFLICT and the
+store gate freezes further document/history changes until Use latest or Keep
+my version resolves it. External installs and writer promotion reloads clear
+snapshot undo/redo history so an old generation cannot resurrect peer edits.
+
+The merge is three-way and stable-id aware for entities, item sets, prompt
+library trees, and per-context graph/rest/toolbar position keys. Local surface
+navigation, selection, expansion, trail expansion, and Bin-mode UI are stripped
+from forwarded document snapshots; they remain owned by the live surface.
+
 Graph, resting, and toolbar position maps are deliberately last-writer-wins;
 the most recently committed drag is the visible placement everywhere.
 When a graph context has complete remembered coordinates, entering or reopening

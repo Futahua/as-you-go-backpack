@@ -185,6 +185,10 @@ const workspaceStoreStatus = createReadOnlyStatusSink({
 // 0B: created after the store, because it needs the store's queue. Until it
 // exists this surface behaves exactly as it always has -- a single writer.
 let surfaceCoordinator = null;
+// Coordination is fail-closed while startup is pending and when either
+// primitive cannot be constructed. An uncoordinated surface must never fall
+// back to the legacy unchecked host.saveWorkspace path.
+let coordinationState = 'pending';
 
 /** Does this surface currently own the shared document? */
 function hasDocumentWriteAuthority() {
@@ -194,7 +198,9 @@ function hasDocumentWriteAuthority() {
   // A new view is gated until its coordinator has loaded a versioned base;
   // otherwise its first forwarded snapshot would carry revision:null and no
   // three-way merge could protect a writer edit that raced startup.
-  if (surfaceCoordinator && !surfaceCoordinator.baselineReady) return false;
+  if (coordinationState !== 'ready' || !surfaceCoordinator) return false;
+  if (!surfaceCoordinator.baselineReady) return false;
+  if (surfaceCoordinator.role === SURFACE_ROLE.CONFLICT) return false;
   return true;
 }
 
@@ -223,7 +229,7 @@ const store = createWorkspaceStore({
     // broadcasts the exact bytes that landed. The snapshot is already
     // serialized here, and is passed through untouched.
     if (surfaceCoordinator) return surfaceCoordinator.saveSerialized(snapshot);
-    return host.saveWorkspace(snapshot);
+    return Promise.reject(new Error('Shared document coordination is unavailable; durable editing is disabled.'));
   },
   setStatus: workspaceStoreStatus,
   initialSession: { currentId: ROOT_ID },
@@ -5863,11 +5869,18 @@ if (WIDGET_SURFACE) {
    */
   function startSurfaceCoordination() {
     if (typeof navigator === 'undefined' || !navigator.locks || typeof BroadcastChannel !== 'function') {
-      // Without both primitives there can be no safe election, so this surface
-      // stays exactly as it was rather than pretending to coordinate.
+      coordinationState = 'unavailable';
+      statusToast.show('Shared document coordination is unavailable; durable editing is disabled.', { tone: 'error' });
       return;
     }
-    const channel = new BroadcastChannel(SURFACE_DOCUMENT_CHANNEL);
+    let channel;
+    try {
+      channel = new BroadcastChannel(SURFACE_DOCUMENT_CHANNEL);
+    } catch {
+      coordinationState = 'unavailable';
+      statusToast.show('Shared document coordination failed to start; durable editing is disabled.', { tone: 'error' });
+      return;
+    }
     const conflictPanel = createDocumentConflictPanel({
       document,
       onUseLatest: () => surfaceCoordinator.useLatest().then(render),
@@ -5906,10 +5919,14 @@ if (WIDGET_SURFACE) {
         render();
       },
     });
+    coordinationState = 'ready';
     channel.addEventListener('message', (event) => {
       if (surfaceCoordinator.receive(event.data)) render();
     });
-    void surfaceCoordinator.start().catch(() => undefined);
+    void surfaceCoordinator.start().catch(() => {
+      coordinationState = 'unavailable';
+      statusToast.show('Shared document coordination failed to elect a writer; durable editing is disabled.', { tone: 'error' });
+    });
   }
 
   void bootstrapWorkspace({

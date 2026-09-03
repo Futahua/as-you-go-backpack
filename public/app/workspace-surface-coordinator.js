@@ -41,6 +41,7 @@ export const SURFACE_ROLE = {
 
 const SNAPSHOT_MESSAGE = 'committed';
 const MUTATION_MESSAGE = 'mutation-request';
+const MUTATION_ACK_MESSAGE = 'mutation-ack';
 
 function sameJson(a, b) {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
@@ -71,6 +72,48 @@ function mergePositionMap(baseValue, localValue, currentValue, nested) {
   for (const context of contexts) {
     const merged = mergeChangedMap(base[context], local[context], current[context]);
     if (Object.keys(merged).length > 0) result[context] = merged;
+  }
+  return result;
+}
+
+/** Merge the recursive prompt/folder library by stable node id. */
+function mergePromptTree(baseValue, localValue, currentValue) {
+  const base = Array.isArray(baseValue) ? baseValue : [];
+  const local = Array.isArray(localValue) ? localValue : [];
+  const current = Array.isArray(currentValue) ? currentValue : [];
+  const baseById = new Map(base.map((node) => [node?.id, node]));
+  const localById = new Map(local.map((node) => [node?.id, node]));
+  const currentById = new Map(current.map((node) => [node?.id, node]));
+  const mergeNode = (baseNode, localNode, currentNode) => {
+    if (!localNode) return null;
+    if (!baseNode) return currentNode ?? localNode;
+    if (sameJson(localNode, baseNode)) return currentNode ?? localNode;
+    if (localNode.type === 'folder' && currentNode?.type === 'folder') {
+      const scalarChanges = Object.fromEntries(Object.keys(localNode)
+        .filter((key) => key !== 'children' && !sameJson(localNode[key], baseNode[key]))
+        .map((key) => [key, localNode[key]]));
+      return {
+        ...currentNode,
+        ...scalarChanges,
+        children: mergePromptTree(baseNode.children, localNode.children, currentNode.children),
+      };
+    }
+    const fieldChanges = Object.fromEntries(Object.keys(localNode)
+      .filter((key) => key !== 'id' && !sameJson(localNode[key], baseNode[key]))
+      .map((key) => [key, localNode[key]]));
+    return { ...(currentNode ?? {}), ...fieldChanges, id: localNode.id, type: localNode.type };
+  };
+  const result = [];
+  for (const currentNode of current) {
+    const id = currentNode?.id;
+    if (!localById.has(id) && baseById.has(id)) continue;
+    const merged = mergeNode(baseById.get(id), localById.get(id), currentNode);
+    if (merged) result.push(merged);
+  }
+  for (const localNode of local) {
+    const id = localNode?.id;
+    if (id == null || currentById.has(id) || baseById.has(id)) continue;
+    result.push(localNode);
   }
   return result;
 }
@@ -168,6 +211,8 @@ export function mergeSurfaceSnapshots(base, local, current) {
       }
       const deletedSetIds = new Set([...baseById.keys()].filter((id) => !localById.has(id)));
       view[key] = mergedSets.filter((item) => !deletedSetIds.has(item?.id));
+    } else if (key === 'promptLibrary' && Array.isArray(value)) {
+      view[key] = mergePromptTree(baseView[key], value, currentView[key]);
     } else if (!sameJson(value, baseView[key])) {
       view[key] = value;
     }
@@ -255,6 +300,10 @@ export function createSurfaceCoordinator({
   // revision committed immediately before it instead of racing two CAS calls
   // and silently dropping the loser.
   let mutationQueue = Promise.resolve();
+  const ackEnabled = typeof channel?.addEventListener === 'function';
+  let requestSequence = 0;
+  const pendingRequests = new Map();
+  const appliedRequests = new Map();
 
   function setRole(next, detail = {}) {
     if (role === next) return;
@@ -267,7 +316,7 @@ export function createSurfaceCoordinator({
   async function ensureBaseline() {
     if (baselineReady) return;
     if (!baselinePromise) {
-      baselinePromise = (async () => {
+      const loadPromise = (async () => {
         let loaded;
         try {
           loaded = await host.loadVersioned();
@@ -275,6 +324,9 @@ export function createSurfaceCoordinator({
           onHydrationFailed('load', 'versioned-load-failed');
           throw error;
         }
+        // A committed broadcast may have won the race while this load was in
+        // flight. Never let the older load regress the already-installed base.
+        if (baselineReady) return;
         try {
           installDocument(loaded.state);
         } catch (error) {
@@ -285,6 +337,12 @@ export function createSurfaceCoordinator({
         lastSerialized = JSON.stringify(loaded.state);
         baselineReady = true;
       })();
+      baselinePromise = loadPromise.catch((error) => {
+        // A transient load/install failure must be retryable; otherwise one
+        // rejected promise permanently bricks this surface until restart.
+        baselinePromise = null;
+        throw error;
+      });
     }
     return baselinePromise;
   }
@@ -314,7 +372,7 @@ export function createSurfaceCoordinator({
     // is read BEFORE this surface is allowed to write. Never inherit a
     // revision observed before waiting.
     try {
-      installDocument(loaded.state);
+      installExternalDocument(loaded.state);
     } catch (error) {
       onHydrationFailed('install', 'model-install-failed', loaded.revision);
       throw error;
@@ -376,14 +434,34 @@ export function createSurfaceCoordinator({
         if (!baselineReady) await ensureBaseline();
         const baseSerialized = lastSerialized;
         serialized = stripLocalViewFields(serialized, baseSerialized);
-        channel.postMessage({
+        const requestId = ackEnabled ? `${clientId}:${++requestSequence}` : null;
+        let acknowledgement = null;
+        if (requestId) {
+          acknowledgement = new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            if (!pendingRequests.delete(requestId)) return;
+            onHydrationFailed('mutation', 'writer-ack-timeout', revision ?? undefined);
+            resolve({ ok: false, code: 'WRITER_ACK_TIMEOUT' });
+          }, 30000);
+          timer.unref?.();
+          pendingRequests.set(requestId, { timer, resolve });
+          });
+        }
+        const message = {
           type: MUTATION_MESSAGE,
           clientId,
           revision,
           serialized,
           baseSerialized,
+        };
+        if (requestId) message.requestId = requestId;
+        channel.postMessage(message);
+        const forwarded = { ok: true, forwarded: true, revision };
+        if (acknowledgement) Object.defineProperty(forwarded, 'acknowledgement', {
+          value: acknowledgement,
+          enumerable: false,
         });
-        return { ok: true, forwarded: true, revision };
+        return forwarded;
       }
       if (role !== SURFACE_ROLE.WRITER) throw new Error('This surface is not the writer and may not save the board.');
       const baseSerialized = lastSerialized;
@@ -432,7 +510,7 @@ export function createSurfaceCoordinator({
         throw error;
       }
       try {
-        installDocument(loaded.state);
+        installExternalDocument(loaded.state);
       } catch (error) {
         onHydrationFailed('install', 'model-install-failed', loaded.revision);
         throw error;
@@ -476,6 +554,26 @@ export function createSurfaceCoordinator({
       if (!isPlainObject(message) || typeof message.clientId !== 'string' || message.clientId === clientId) return false;
       if (message.type === MUTATION_MESSAGE) {
         if (role !== SURFACE_ROLE.WRITER || typeof message.serialized !== 'string') return false;
+        const requestKey = typeof message.requestId === 'string'
+          ? `${message.clientId}:${message.requestId}` : null;
+        const hasPrior = requestKey ? appliedRequests.has(requestKey) : false;
+        const prior = requestKey ? appliedRequests.get(requestKey) : null;
+        if (hasPrior && prior) {
+          channel.postMessage({
+            type: MUTATION_ACK_MESSAGE,
+            clientId,
+            ackClientId: message.clientId,
+            requestId: message.requestId,
+            ok: prior.ok,
+            revision: prior.revision,
+            code: prior.code,
+          });
+          return true;
+        }
+        // Mark before queueing so duplicate delivery while this request is
+        // still in flight cannot schedule a second durable save. The first
+        // execution will emit the one correlated acknowledgement.
+        if (requestKey) appliedRequests.set(requestKey, null);
         mutationQueue = mutationQueue
           .catch(() => undefined)
           .then(async () => {
@@ -509,16 +607,44 @@ export function createSurfaceCoordinator({
               }
               if (!result || result.ok !== true) {
                 onHydrationFailed('mutation', 'remote-save-stale', revision ?? undefined);
+                if (requestKey) {
+                  const failed = { ok: false, code: 'STALE_REVISION', revision };
+                  appliedRequests.set(requestKey, failed);
+                  channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...failed });
+                }
                 return;
               }
               installExternalDocument(decoded);
               revision = result.revision;
               lastSerialized = serialized;
               publish(serialized, revision);
+              if (requestKey) {
+                const committed = { ok: true, revision };
+                appliedRequests.set(requestKey, committed);
+                channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...committed });
+              }
             } catch {
               onHydrationFailed('mutation', 'remote-save-failed', revision ?? undefined);
+              if (requestKey) {
+                const failed = { ok: false, code: 'REMOTE_SAVE_FAILED', revision };
+                appliedRequests.set(requestKey, failed);
+                channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...failed });
+              }
             }
           });
+        return true;
+      }
+      if (message.type === MUTATION_ACK_MESSAGE) {
+        if (message.ackClientId !== clientId || typeof message.requestId !== 'string') return false;
+        const pending = pendingRequests.get(message.requestId);
+        if (!pending) return false;
+        clearTimeout(pending.timer);
+        pendingRequests.delete(message.requestId);
+        pending.resolve({
+          ok: message.ok === true,
+          revision: message.revision,
+          ...(message.ok === true ? {} : { code: message.code ?? 'REMOTE_MUTATION_FAILED' }),
+        });
         return true;
       }
       if (message.type !== SNAPSHOT_MESSAGE) return false;
