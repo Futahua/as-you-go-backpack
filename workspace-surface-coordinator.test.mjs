@@ -337,6 +337,45 @@ test('same-prompt move conflict uses the local lane as the deterministic winner'
   assert.deepEqual(folders.map((folder) => folder.children.map((node) => node.id)), [[], ['p'], []]);
 });
 
+test('a current-lane move preserves a stale local field edit at the new destination', () => {
+  const base = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'base' }] },
+    { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const local = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'local edit' }] },
+    { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const current = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [] },
+    { id: 'b', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'base' }] },
+  ] } };
+  const folders = mergeSurfaceSnapshots(base, local, current).view.promptLibrary;
+  assert.deepEqual(folders[0].children, []);
+  assert.deepEqual(folders[1].children.map((node) => node.id), ['p']);
+  assert.equal(folders[1].children[0].text, 'local edit');
+});
+
+test('a current-lane subtree move preserves a stale descendant edit', () => {
+  const base = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'f', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'base' }] }] },
+    { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const local = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'f', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'descendant edit' }] }] },
+    { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const current = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [] },
+    { id: 'b', type: 'folder', children: [{ id: 'f', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'base' }] }] },
+  ] } };
+  const folders = mergeSurfaceSnapshots(base, local, current).view.promptLibrary;
+  const moved = folders[1].children[0];
+  assert.equal(moved.id, 'f');
+  assert.equal(moved.children[0].id, 'p');
+  assert.equal(moved.children[0].text, 'descendant edit');
+});
+
 test('Use latest retires invalidated pending overlays before the next save', async () => {
   const lock = fakeLock();
   const disk = fakeDisk({ schemaVersion: 1, groups: [], shortcuts: [] });
@@ -355,6 +394,22 @@ test('Use latest retires invalidated pending overlays before the next save', asy
   const next = ser({ schemaVersion: 1, groups: [{ id: 'remote' }, { id: 'next' }], shortcuts: [] });
   await a.coordinator.saveSerialized(next, { generation: 8 });
   assert.deepEqual(disk.state.groups.map((group) => group.id), ['remote', 'next']);
+});
+
+test('a queued hint that becomes a no-op is retired before later peer installs', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [], shortcuts: [] });
+  const b = surface(lock, disk, 'B');
+  const hinted = ser({ schemaVersion: 1, groups: [{ id: 'same' }], shortcuts: [] });
+  const unchanged = await b.coordinator.saveSerialized(hinted, {
+    generation: 3,
+    baseSerialized: hinted,
+    pendingSnapshots: [{ serialized: hinted, baseSerialized: hinted, generation: 3, sequence: 1 }],
+  });
+  assert.equal(unchanged.unchanged, true);
+  const latest = ser({ schemaVersion: 1, groups: [{ id: 'latest' }], shortcuts: [] });
+  b.coordinator.receive({ type: 'committed', clientId: 'A', revision: 'r9', serialized: latest });
+  assert.deepEqual(b.installed.at(-1).groups.map((group) => group.id), ['latest']);
 });
 
 test('a multi-item delete removes every requested entity without index drift', () => {

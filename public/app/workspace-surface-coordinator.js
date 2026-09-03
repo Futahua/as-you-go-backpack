@@ -85,6 +85,14 @@ function flattenPromptTree(nodes, map = new Map()) {
   }
   return map;
 }
+function promptParentMap(nodes, parentId = null, map = new Map()) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (!node?.id) continue;
+    map.set(node.id, parentId);
+    if (node.type === 'folder') promptParentMap(node.children, node.id, map);
+  }
+  return map;
+}
 
 /** Combine sibling ordering constraints without letting one stale reorder
  * erase a compatible reorder or positioned insertion from the other lane.
@@ -166,13 +174,16 @@ function mergePromptOrder(baseIds, localIds, currentIds, resultIds) {
   return ordered;
 }
 
-function mergePromptTree(baseValue, localValue, currentValue, global = null) {
+function mergePromptTree(baseValue, localValue, currentValue, global = null, parentId = null) {
   const base = Array.isArray(baseValue) ? baseValue : [];
   const local = Array.isArray(localValue) ? localValue : [];
   const current = Array.isArray(currentValue) ? currentValue : [];
   const baseGlobal = global?.base ?? flattenPromptTree(base);
   const localGlobal = global?.local ?? flattenPromptTree(local);
   const currentGlobal = global?.current ?? flattenPromptTree(current);
+  const baseParents = global?.baseParents ?? promptParentMap(base);
+  const localParents = global?.localParents ?? promptParentMap(local);
+  const currentParents = global?.currentParents ?? promptParentMap(current);
   const baseById = new Map(base.map((node) => [node?.id, node]));
   const localById = new Map(local.map((node) => [node?.id, node]));
   const currentById = new Map(current.map((node) => [node?.id, node]));
@@ -196,7 +207,10 @@ function mergePromptTree(baseValue, localValue, currentValue, global = null) {
       return {
         ...currentNode,
         ...scalarChanges,
-        children: mergePromptTree(baseNode.children, localNode.children, currentNode.children, { base: baseGlobal, local: localGlobal, current: currentGlobal }),
+        children: mergePromptTree(baseNode.children, localNode.children, currentNode.children, {
+          base: baseGlobal, local: localGlobal, current: currentGlobal,
+          baseParents, localParents, currentParents,
+        }, localNode.id),
       };
     }
     const fieldChanges = Object.fromEntries(Object.keys(localNode)
@@ -211,7 +225,20 @@ function mergePromptTree(baseValue, localValue, currentValue, global = null) {
       // A node created only by the current writer must survive a concurrent
       // reorder/insert. Nodes that the local snapshot moved away or deleted
       // are handled from their destination/source collection instead.
-      if (baseById.has(id) || localGlobal.has(id)) continue;
+      if (baseById.has(id)) continue;
+      if (localGlobal.has(id)) {
+        const localMoved = localParents.get(id) !== baseParents.get(id);
+        const currentMoved = currentParents.get(id) !== baseParents.get(id);
+        if (localMoved && currentMoved && localParents.get(id) !== currentParents.get(id)) continue;
+        // The current writer may have relocated this identity into a sibling
+        // collection while the local lane edited it in its old location. Use
+        // the global stable-id copy here so the node (or whole subtree) is
+        // installed exactly once at the current destination with local field
+        // changes merged.
+        const moved = mergeNode(baseGlobal.get(id), localGlobal.get(id), currentNode);
+        if (moved) result.push(moved);
+        continue;
+      }
       result.push(currentNode);
       continue;
     }
@@ -589,6 +616,13 @@ export function createSurfaceCoordinator({
     const index = pendingLocalSnapshots.indexOf(pending);
     if (index >= 0) pendingLocalSnapshots.splice(index, 1);
   }
+  function retireQueuedHint(serialized, baseSerialized) {
+    for (let index = pendingLocalSnapshots.length - 1; index >= 0; index -= 1) {
+      const pending = pendingLocalSnapshots[index];
+      if (pending.queuedHint && pending.serialized === serialized
+        && (baseSerialized == null || pending.baseSerialized === baseSerialized)) pendingLocalSnapshots.splice(index, 1);
+    }
+  }
 
   function setRole(next, detail = {}) {
     if (role === next) return;
@@ -770,6 +804,7 @@ export function createSurfaceCoordinator({
           ? metadata.baseSerialized : lastSerialized;
         serialized = stripLocalViewFields(serialized, baseSerialized);
         if (baseSerialized && sameJson(serialized, baseSerialized)) {
+          retireQueuedHint(serialized, baseSerialized);
           return { ok: true, forwarded: true, unchanged: true, revision };
         }
         const requestId = ackEnabled ? `${clientId}:${++requestSequence}` : null;
@@ -813,6 +848,7 @@ export function createSurfaceCoordinator({
         ? metadata.baseSerialized : lastSerialized;
       serialized = stripLocalViewFields(serialized, baseSerialized);
       if (lastSerialized && sameJson(serialized, lastSerialized)) {
+        retireQueuedHint(serialized, baseSerialized);
         return { ok: true, revision, unchanged: true };
       }
       const localPending = { serialized, baseSerialized, generation: metadata.generation, sequence: metadata.sequence };
