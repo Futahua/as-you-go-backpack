@@ -263,21 +263,26 @@ export function createSurfaceCoordinator({
         return { ok: true, forwarded: true, revision };
       }
       if (role !== SURFACE_ROLE.WRITER) throw new Error('This surface is not the writer and may not save the board.');
-      const result = await host.saveChecked(serialized, revision);
-      if (result && result.ok === true) {
-        revision = result.revision;
-        lastSerialized = serialized;
-        publish(serialized, revision);
-        return { ok: true, revision };
-      }
-      // Fail closed, synchronously enough that no further durable mutation is
-      // accepted: the role changes before this returns. Queued saves from the
-      // same generation are abandoned without ever reaching persistence, and
-      // the newest of them becomes the version the creator is offered.
-      const latestLocal = invalidatePendingSaves();
-      frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : serialized;
-      setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
-      return { ok: false, code: 'STALE_REVISION' };
+      mutationQueue = mutationQueue
+        .catch(() => undefined)
+        .then(async () => {
+          const result = await host.saveChecked(serialized, revision);
+          if (result && result.ok === true) {
+            revision = result.revision;
+            lastSerialized = serialized;
+            publish(serialized, revision);
+            return { ok: true, revision };
+          }
+          // Fail closed, synchronously enough that no further durable mutation
+          // is accepted: the role changes before this returns. Queued saves from
+          // the same generation are abandoned without ever reaching persistence,
+          // and the newest of them becomes the version the creator is offered.
+          const latestLocal = invalidatePendingSaves();
+          frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : serialized;
+          setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
+          return { ok: false, code: 'STALE_REVISION' };
+        });
+      return mutationQueue;
     },
 
     /** Conflict recovery: abandon this surface's unsaved version. */
