@@ -55,8 +55,10 @@ transport miss from leaving a folder, prompt, or rename painted in only one
 window. A timeout remains an uncertain request while recovery is in flight: the
 follower sends a correlated cancellation, and the writer either suppresses a
 queued request before `host.saveChecked` or returns the already-committed result.
-Only the actual Web-Lock writer may answer cancellation; the follower retries a
-bounded number of times so a newly promoted writer can observe it. If no writer
+Only the actual Web-Lock writer may answer cancellation; an observed successful
+ACK owns terminal resolution and suppresses cancellation exhaustion until a
+fresh authority read proves it. The follower retries a bounded number of times
+so a newly promoted writer can observe it. If no writer
 answers, the surface becomes an explicit non-editable CONFLICT and settles as
 `MUTATION_UNCERTAIN`, never continuing to accept speculative document actions.
 That cancellation fence prevents a late writer queue turn from committing after
@@ -74,6 +76,12 @@ recovery rather than invalidating dependent edits. A follower conflict never
 becomes a writer without first acquiring the same Web Lock; successful Keep my
 version also reinstalls its own committed bytes through the store before
 publishing them.
+
+Committed frames carry their parent revision. A view that receives a frame whose
+parent does not match its current authority performs a host-authoritative load
+instead of installing the frame directly; this prevents a delayed former-writer
+frame from regressing a view after a cross-writer promotion when opaque host
+revisions cannot be ordered locally.
 
 The merge is three-way and stable-id aware for entities, item sets, prompt
 library trees, and per-context graph/rest/toolbar position keys. Local surface

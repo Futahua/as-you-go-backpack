@@ -906,6 +906,7 @@ test('a successful save advances the revision and broadcasts the committed snaps
     clientId: 'A',
     revision: disk.revision,
     serialized: ser(board),
+    parentRevision: 'r0',
   }, 'the broadcast carries the exact bytes that were committed');
 });
 
@@ -920,6 +921,27 @@ test('a view installs a committed snapshot but never its own echo', async () => 
   assert.equal(b.coordinator.revision, 'r1');
 
   assert.equal(b.coordinator.receive({ type: 'committed', clientId: 'B', revision: 'r2', serialized: ser(board) }), false);
+});
+
+test('a delayed former-writer frame cannot regress a view after a cross-writer commit', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const b = surface(fakeLock(), disk, 'B');
+  const r1 = { schemaVersion: 1, groups: [{ id: 'r1' }], shortcuts: [] };
+  const r2 = { schemaVersion: 1, groups: [{ id: 'r2' }], shortcuts: [] };
+  await disk.saveChecked(ser(r1), 'r0');
+  await disk.saveChecked(ser(r2), 'r1');
+  assert.equal(b.coordinator.receive({
+    type: 'committed', clientId: 'A', revision: 'r1', parentRevision: 'r0', serialized: ser(r1),
+  }), true);
+  assert.equal(b.coordinator.receive({
+    type: 'committed', clientId: 'C', revision: 'r2', parentRevision: 'r1', serialized: ser(r2),
+  }), true);
+  assert.equal(b.coordinator.receive({
+    type: 'committed', clientId: 'A', revision: 'r1', parentRevision: 'r0', serialized: ser(r1),
+  }), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(b.installed.at(-1), r2);
+  assert.equal(b.coordinator.revision, 'r2');
 });
 
 test('a save refused as stale freezes the surface and keeps the unsaved snapshot', async () => {

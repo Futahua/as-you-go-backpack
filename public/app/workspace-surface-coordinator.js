@@ -645,17 +645,17 @@ export function createSurfaceCoordinator({
     return true;
   }
   function requestMutationCancellation(requestId, pending) {
-    if (!pending || pending.settled || pending.cancelRequested) return;
+    if (!pending || pending.settled || pending.cancelRequested || pending.successObserved) return;
     pending.cancelRequested = true;
     pending.cancelAttempts = 0;
     const send = () => {
-      if (!pendingRequests.has(requestId) || pending.settled) return;
+      if (!pendingRequests.has(requestId) || pending.settled || pending.successObserved) return;
       pending.cancelAttempts += 1;
       channel.postMessage({ type: MUTATION_CANCEL_MESSAGE, clientId, requestId });
-      if (!pendingRequests.has(requestId) || pending.settled) return;
+      if (!pendingRequests.has(requestId) || pending.settled || pending.successObserved) return;
       if (pending.cancelAttempts >= MUTATION_CANCEL_RETRY_LIMIT) {
         pending.cancelTimer = setTimeout(() => {
-          if (!pendingRequests.has(requestId) || pending.settled) return;
+          if (!pendingRequests.has(requestId) || pending.settled || pending.successObserved) return;
           // Cancellation could not be observed by any writer. Keep the
           // surface explicitly non-editable and settle as uncertain instead
           // of leaving a normal VIEW with speculative state forever.
@@ -700,7 +700,7 @@ export function createSurfaceCoordinator({
   }
   function hasUnresolvedCancellation() {
     for (const pending of pendingRequests.values()) {
-      if (pending.cancelRequested && !pending.settled) return true;
+      if ((pending.cancelRequested || pending.successObserved) && !pending.settled) return true;
     }
     return false;
   }
@@ -730,6 +730,7 @@ export function createSurfaceCoordinator({
         return;
       }
       if (cancelIfUnresolved) {
+        if (pending.successObserved) return;
         // An unresolved timeout is an explicit recovery state, not an
         // ordinary writable VIEW. Bounded cancellation retries give a newly
         // promoted writer a chance to observe the request; exhaustion settles
@@ -857,7 +858,7 @@ export function createSurfaceCoordinator({
   /** Broadcast the exact bytes that were committed. Views decode these; a
    * second representation built alongside the save could differ from what is
    * actually on disk. */
-  function publish(serialized, atRevision, requestId = null) {
+  function publish(serialized, atRevision, requestId = null, parentRevision = null) {
     lastSerialized = serialized;
     channel.postMessage({
       type: SNAPSHOT_MESSAGE,
@@ -865,6 +866,7 @@ export function createSurfaceCoordinator({
       revision: atRevision,
       serialized,
       ...(requestId ? { requestId } : {}),
+      ...(parentRevision ? { parentRevision } : {}),
     });
   }
 
@@ -925,7 +927,8 @@ export function createSurfaceCoordinator({
           const base = pending.baseSerialized ? JSON.parse(pending.baseSerialized) : current;
           const decoded = mergeSurfaceSnapshots(base, incoming, current);
           const payload = JSON.stringify(decoded);
-          const result = await host.saveChecked(payload, revision);
+          let parentRevision = revision;
+          const result = await host.saveChecked(payload, parentRevision);
           if (!result || result.ok !== true) {
             const outcome = { ok: false, code: 'PROMOTION_REPLAY_REFUSED' };
             const recovery = await reloadAuthoritativeAfterFailedMutation(outcome.code);
@@ -942,7 +945,7 @@ export function createSurfaceCoordinator({
           revision = result.revision;
           lastSerialized = payload;
           authoritativeEpoch += 1;
-          publish(payload, revision);
+          publish(payload, revision, null, parentRevision);
           settlePendingRequest(requestId, pending, { ok: true, revision });
         } catch {
           const outcome = { ok: false, code: 'PROMOTION_REPLAY_FAILED' };
@@ -1115,7 +1118,8 @@ export function createSurfaceCoordinator({
               payload = serialized;
             }
           }
-          const result = await host.saveChecked(payload, revision);
+          const parentRevision = revision;
+          const result = await host.saveChecked(payload, parentRevision);
           if (result && result.ok === true) {
             revision = result.revision;
             lastSerialized = payload;
@@ -1123,7 +1127,7 @@ export function createSurfaceCoordinator({
             const pendingIndex = pendingLocalSnapshots.indexOf(localPending);
             if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
             try { installDocument(JSON.parse(overlayPendingSnapshots(payload)), payload); } catch { /* host bytes are already committed */ }
-            publish(payload, revision);
+            publish(payload, revision, null, parentRevision);
             return { ok: true, revision, serialized: payload };
           }
           // Fail closed, synchronously enough that no further durable mutation
@@ -1217,7 +1221,8 @@ export function createSurfaceCoordinator({
         if (role !== SURFACE_ROLE.WRITER) return { ok: false, code: 'WRITER_LOCK_UNAVAILABLE' };
         conflictNeedsLock = false;
         const serialized = stripLocalViewFields(mine, lastSerialized);
-        const result = await host.saveChecked(serialized, revision);
+          const parentRevision = revision;
+          const result = await host.saveChecked(serialized, parentRevision);
         if (result && result.ok === true) {
           revision = result.revision;
           lastSerialized = serialized;
@@ -1299,7 +1304,8 @@ export function createSurfaceCoordinator({
                 decoded = mergeSurfaceSnapshots(base, incoming, current);
                 serialized = JSON.stringify(decoded);
               }
-              let result = await host.saveChecked(serialized, revision);
+              let parentRevision = revision;
+              let result = await host.saveChecked(serialized, parentRevision);
               if (!result || result.ok !== true) {
                 // An external writer may have advanced the opaque host revision
                 // despite our Web Lock. Reload, rebase this same request once,
@@ -1313,7 +1319,9 @@ export function createSurfaceCoordinator({
                   ? mergeSurfaceSnapshots(base, incoming, latest.state)
                   : incoming;
                 serialized = JSON.stringify(decoded);
-                result = await host.saveChecked(serialized, revision);
+                const retryParentRevision = revision;
+                result = await host.saveChecked(serialized, retryParentRevision);
+                parentRevision = retryParentRevision;
               }
               if (!result || result.ok !== true) {
                 onHydrationFailed('mutation', 'remote-save-stale', revision ?? undefined);
@@ -1330,7 +1338,7 @@ export function createSurfaceCoordinator({
               revision = result.revision;
               lastSerialized = serialized;
               authoritativeEpoch += 1;
-              publish(serialized, revision, message.requestId);
+              publish(serialized, revision, message.requestId, parentRevision);
               if (requestKey) {
                 cancelledRequests.delete(requestKey);
                 const committed = { ok: true, revision };
@@ -1393,6 +1401,7 @@ export function createSurfaceCoordinator({
           revision: message.revision,
           ...(message.ok === true ? {} : { code: message.code ?? 'REMOTE_MUTATION_FAILED' }),
         };
+        if (outcome.ok) pending.successObserved = true;
         // A successful or cancellation ACK is not itself proof that this
         // surface has the same authority: the committed broadcast may have
         // been dropped, and a cancellation ACK may carry a newer revision.
@@ -1404,12 +1413,10 @@ export function createSurfaceCoordinator({
             .then((recovery) => {
               if (!recovery.ok) {
                 freezeFollowerFailure(pending);
-                markForwardFailure(pending);
-                settlePendingRequest(message.requestId, pending, {
-                  ok: false,
-                  code: 'MUTATION_UNCERTAIN',
-                  revision: outcome.revision ?? revision,
-                });
+                // A genuine success ACK owns terminal resolution. Keep the
+                // request pending in explicit CONFLICT until a later authority
+                // read can prove the committed bytes, rather than allowing a
+                // cancellation timeout to invalidate dependent edits.
                 return;
               }
               clearRecoveredConflict(pending);
@@ -1439,6 +1446,38 @@ export function createSurfaceCoordinator({
       if (!isPlainObject(decoded)) {
         onHydrationFailed('decode', 'broadcast-state-invalid', message.revision);
         return false;
+      }
+      // A committed frame from a former writer can arrive after a promoted
+      // writer has already committed a descendant. The opaque host revision
+      // is not orderable, so the producer includes its parent revision; a
+      // mismatch requires a host-authoritative read rather than regressing the
+      // view by installing the stale frame directly.
+      if (typeof message.parentRevision === 'string' && revision
+        && message.parentRevision !== revision) {
+        void host.loadVersioned().then((loaded) => {
+          if (!loaded || loaded.revision === revision) return;
+          try { installExternalPreservingPending(loaded.state); } catch {
+            onHydrationFailed('install', 'model-install-failed', loaded.revision);
+            return;
+          }
+          authoritativeEpoch += 1;
+          revision = loaded.revision;
+          lastSerialized = JSON.stringify(loaded.state);
+          baselineReady = true;
+          onHydrated(loaded.state, revision);
+          if (typeof message.requestId === 'string') {
+            const pending = pendingRequests.get(message.requestId);
+            if (pending && pendingIntentIsDurable(pending, loaded)) {
+              clearRecoveredConflict(pending);
+              settlePendingRequest(message.requestId, pending, {
+                ok: true,
+                revision,
+                via: 'committed-authority-refresh',
+              });
+            }
+          }
+        }).catch(() => onHydrationFailed('recovery', 'committed-order-validation-failed', revision ?? undefined));
+        return true;
       }
       try {
         installExternalPreservingPending(decoded);
