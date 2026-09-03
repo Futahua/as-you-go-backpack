@@ -30,6 +30,7 @@ export function createWorkspaceStore({
   // still navigate, select and expand.
   canMutateDocument = () => true,
   onMutationBlocked = () => {},
+  onSaveGenerationInvalidated = () => {},
 }) {
   let undoStack = [];
   let redoStack = [];
@@ -37,6 +38,7 @@ export function createWorkspaceStore({
   let lastPersistedSnapshot = null;
   let lastQueuedSnapshot = null;
   const queuedSaves = [];
+  let saveSequence = 0;
   /**
    * 0B: persistence generation.
    *
@@ -79,7 +81,8 @@ export function createWorkspaceStore({
     const snapshot = JSON.stringify(nextState);
     const generation = saveGeneration;
     const baseSerialized = lastQueuedSnapshot ?? lastPersistedSnapshot;
-    const entry = { snapshot, generation, baseSerialized };
+    const sequence = ++saveSequence;
+    const entry = { snapshot, generation, baseSerialized, sequence };
     queuedSaves.push(entry);
     lastQueuedSnapshot = snapshot;
     latestQueuedSnapshot = snapshot;
@@ -91,16 +94,17 @@ export function createWorkspaceStore({
         if (generation !== saveGeneration) return SUPERSEDED_SAVE;
         const queuedPending = queuedSaves
           .filter((candidate) => candidate !== entry && candidate.generation === generation)
-          .map((candidate) => ({ serialized: candidate.snapshot, baseSerialized: candidate.baseSerialized, generation: candidate.generation }));
+          .map((candidate) => ({ serialized: candidate.snapshot, baseSerialized: candidate.baseSerialized, generation: candidate.generation, sequence: candidate.sequence }));
         const persistMetadata = metadata && typeof metadata === 'object'
           ? {
             ...metadata,
             generation,
+            sequence,
             baseSerialized: metadata.baseSerialized ?? baseSerialized,
             pendingSnapshots: [...(metadata.pendingSnapshots ?? []), ...queuedPending],
           }
           : metadata === undefined
-            ? { generation, baseSerialized, pendingSnapshots: queuedPending }
+            ? { generation, sequence, baseSerialized, pendingSnapshots: queuedPending }
             : metadata;
         let result = await persist(snapshot, persistMetadata);
         // A coordinated follower returns an optimistic envelope plus a
@@ -114,6 +118,7 @@ export function createWorkspaceStore({
             // later snapshots were based on the failed optimistic document and
             // must not be reported successful while silently dropping it.
             if (result?.forwarded && generation === saveGeneration) {
+              onSaveGenerationInvalidated(generation);
               saveGeneration += 1;
               latestQueuedSnapshot = null;
             }
@@ -123,6 +128,7 @@ export function createWorkspaceStore({
         }
         if (result?.ok === false) {
           if (result?.forwarded && generation === saveGeneration) {
+            onSaveGenerationInvalidated(generation);
             saveGeneration += 1;
             latestQueuedSnapshot = null;
           }

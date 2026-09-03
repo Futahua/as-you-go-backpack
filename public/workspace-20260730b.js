@@ -227,6 +227,7 @@ const store = createWorkspaceStore({
       statusToast.show(VIEW_BLOCKED_MESSAGE);
     }
   },
+  onSaveGenerationInvalidated: (generation) => surfaceCoordinator?.retirePendingGeneration(generation),
   persist: (snapshot, metadata) => {
     // 018X1/018X8: every save funnels through the store's persist callback.
     // Persistence is blocked while read-only UNLESS the metadata carries the

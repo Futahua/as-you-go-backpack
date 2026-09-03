@@ -549,7 +549,12 @@ export function createSurfaceCoordinator({
     if (!pendingLocalSnapshots.length) return serialized;
     try {
       let merged = JSON.parse(serialized);
-      for (const pending of pendingLocalSnapshots) {
+      const pendingInOrder = [...pendingLocalSnapshots].sort((left, right) => {
+        const leftSequence = Number.isFinite(left.sequence) ? left.sequence : Number.MAX_SAFE_INTEGER;
+        const rightSequence = Number.isFinite(right.sequence) ? right.sequence : Number.MAX_SAFE_INTEGER;
+        return leftSequence - rightSequence;
+      });
+      for (const pending of pendingInOrder) {
         merged = mergeSurfaceSnapshots(
           JSON.parse(pending.baseSerialized ?? serialized),
           JSON.parse(pending.serialized),
@@ -685,7 +690,8 @@ export function createSurfaceCoordinator({
             return;
           }
           removePendingOverlay(pending.localPending);
-          installDocument(decoded, payload);
+          const visible = JSON.parse(overlayPendingSnapshots(payload));
+          installDocument(visible, payload);
           revision = result.revision;
           lastSerialized = payload;
           publish(payload, revision);
@@ -709,6 +715,7 @@ export function createSurfaceCoordinator({
     get baselineReady() { return baselineReady; },
     get frozen() { return frozenSnapshot; },
     get transferSuspended() { return transferSuspended; },
+    retirePendingGeneration(generation) { clearPendingGeneration(generation); },
 
     /**
      * Queue for write ownership. Resolves when this surface becomes the
@@ -769,7 +776,7 @@ export function createSurfaceCoordinator({
         let acknowledgement = null;
         if (requestId) {
           acknowledgement = new Promise((resolve) => {
-          const localPending = { serialized, baseSerialized, generation: metadata.generation };
+          const localPending = { serialized, baseSerialized, generation: metadata.generation, sequence: metadata.sequence };
           const hintIndex = pendingLocalSnapshots.findIndex((pending) => pending.queuedHint
             && pending.serialized === serialized && pending.baseSerialized === baseSerialized);
           if (hintIndex >= 0) pendingLocalSnapshots.splice(hintIndex, 1);
@@ -808,7 +815,7 @@ export function createSurfaceCoordinator({
       if (lastSerialized && sameJson(serialized, lastSerialized)) {
         return { ok: true, revision, unchanged: true };
       }
-      const localPending = { serialized, baseSerialized, generation: metadata.generation };
+      const localPending = { serialized, baseSerialized, generation: metadata.generation, sequence: metadata.sequence };
       const hintIndex = pendingLocalSnapshots.findIndex((pending) => pending.queuedHint
         && pending.serialized === serialized && pending.baseSerialized === baseSerialized);
       if (hintIndex >= 0) pendingLocalSnapshots.splice(hintIndex, 1);
