@@ -5,7 +5,10 @@
   "visualProfileVersion": 1,
   "platform": "win32",
   "electronMajor": 43,
-  "pngSha256": "07aabbe0d18600b1b63649aca16fc71733322cb30d104a71b3a37cc4a0df58e7",
-  "dimensions": { "width": 1280, "height": 800 },
+  "pngSha256": "c8f42e5df044638d1ddd4d5a1729eeb5c36de677ade5c9e25029c146d8e07194",
+  "dimensions": {
+    "width": 1280,
+    "height": 800
+  },
   "createdFromCommit": "6e26c8217f3564717aad4143b240637e8881971e"
 }
