@@ -191,6 +191,10 @@ function hasDocumentWriteAuthority() {
   // Every open As you Go surface accepts document actions. Non-writers send
   // their optimistic snapshot to the elected writer, which serializes the
   // durable save and broadcasts the merged result back to all surfaces.
+  // A new view is gated until its coordinator has loaded a versioned base;
+  // otherwise its first forwarded snapshot would carry revision:null and no
+  // three-way merge could protect a writer edit that raced startup.
+  if (surfaceCoordinator && !surfaceCoordinator.baselineReady) return false;
   return true;
 }
 

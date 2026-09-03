@@ -163,6 +163,8 @@ export function createSurfaceCoordinator({
   let pendingAcquire = null;
   let held = null;
   let lastSerialized = null;
+  let baselineReady = false;
+  let baselinePromise = null;
   // BroadcastChannel can deliver mutations from several views back-to-back.
   // Serialize them at the elected writer so each request rebases on the
   // revision committed immediately before it instead of racing two CAS calls
@@ -173,6 +175,33 @@ export function createSurfaceCoordinator({
     if (role === next) return;
     role = next;
     onRoleChange(role, detail);
+  }
+
+  /** Every follower needs a versioned base before it can forward a durable
+   * action; waiting for the writer lock is not a substitute for hydration. */
+  async function ensureBaseline() {
+    if (baselineReady) return;
+    if (!baselinePromise) {
+      baselinePromise = (async () => {
+        let loaded;
+        try {
+          loaded = await host.loadVersioned();
+        } catch (error) {
+          onHydrationFailed('load', 'versioned-load-failed');
+          throw error;
+        }
+        try {
+          installDocument(loaded.state);
+        } catch (error) {
+          onHydrationFailed('install', 'model-install-failed', loaded.revision);
+          throw error;
+        }
+        revision = loaded.revision;
+        lastSerialized = JSON.stringify(loaded.state);
+        baselineReady = true;
+      })();
+    }
+    return baselinePromise;
   }
 
   /** Broadcast the exact bytes that were committed. Views decode these; a
@@ -207,6 +236,7 @@ export function createSurfaceCoordinator({
     }
     revision = loaded.revision;
     lastSerialized = JSON.stringify(loaded.state);
+    baselineReady = true;
     onHydrated(loaded.state, revision);
     setRole(SURFACE_ROLE.WRITER, { revision });
     return loaded;
@@ -216,6 +246,7 @@ export function createSurfaceCoordinator({
     get role() { return role; },
     get revision() { return revision; },
     get clientId() { return clientId; },
+    get baselineReady() { return baselineReady; },
     get frozen() { return frozenSnapshot; },
     get transferSuspended() { return transferSuspended; },
 
@@ -232,6 +263,7 @@ export function createSurfaceCoordinator({
       if (transferSuspended && !designated) return null;
       if (pendingAcquire) return pendingAcquire;
       pendingAcquire = (async () => {
+        await ensureBaseline();
         held = await lock.request(SURFACE_DOCUMENT_LOCK);
         return becomeWriter();
       })();
@@ -256,6 +288,7 @@ export function createSurfaceCoordinator({
         // request and broadcasts the committed result back to every surface.
         // This keeps ordinary document actions usable from every window while
         // retaining one durable writer and CAS protection.
+        if (!baselineReady) await ensureBaseline();
         channel.postMessage({
           type: MUTATION_MESSAGE,
           clientId,
@@ -306,6 +339,7 @@ export function createSurfaceCoordinator({
       }
       revision = loaded.revision;
       lastSerialized = JSON.stringify(loaded.state);
+      baselineReady = true;
       frozenSnapshot = null;
       onHydrated(loaded.state, revision);
       setRole(SURFACE_ROLE.WRITER, { revision });
@@ -411,6 +445,7 @@ export function createSurfaceCoordinator({
       }
       revision = message.revision;
       lastSerialized = message.serialized;
+      baselineReady = true;
       onHydrated(decoded, revision);
       return true;
     },

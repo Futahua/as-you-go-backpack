@@ -104,13 +104,13 @@ test('a view forwards an optimistic document action to the writer channel', asyn
   const b = surface(lock, disk, 'B');
   const board = { schemaVersion: 1, groups: [{ id: 'g1' }], shortcuts: [] };
   const result = await b.coordinator.saveSerialized(ser(board));
-  assert.deepEqual(result, { ok: true, forwarded: true, revision: null });
+  assert.deepEqual(result, { ok: true, forwarded: true, revision: 'r0' });
   assert.deepEqual(b.channel.sent.at(-1), {
     type: 'mutation-request',
     clientId: 'B',
-    revision: null,
+    revision: 'r0',
     serialized: ser(board),
-    baseSerialized: null,
+    baseSerialized: ser({ schemaVersion: 1, groups: [], shortcuts: [] }),
   });
 });
 
@@ -334,7 +334,7 @@ test('while an ownership transfer is suspended an ordinary view does not queue f
 
   b.coordinator.completeTransfer();
   const resumed = b.coordinator.start();
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(lock.waitingCount, 1);
   a.coordinator.release();
   await resumed;
@@ -391,7 +391,7 @@ test('C1: a versioned document reports hydration only after installation', async
   });
 
   await coordinator.start();
-  assert.deepEqual(order, ['installed', 'hydrated:r0']);
+  assert.deepEqual(order, ['installed', 'installed', 'hydrated:r0']);
 });
 
 test('C1: failed model installation reports bounded metadata and no hydration success', async () => {
@@ -454,7 +454,7 @@ test('018: the reservation holds ordinary surfaces out until the designated surf
 
   ordinary.coordinator.completeTransfer();
   const resumed = ordinary.coordinator.start();
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(lock.waitingCount, 1, 'ordinary surfaces may queue again only after the handoff');
   designated.coordinator.release();
   await resumed;
