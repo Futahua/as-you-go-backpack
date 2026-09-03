@@ -5919,9 +5919,16 @@ if (WIDGET_SURFACE) {
         saveChecked: (serialized, revision) => host.saveWorkspaceChecked(serialized, revision),
       },
       // Installs the document only. This surface's navigation is deliberately
-      // preserved, so two windows keep showing different places.
+      // preserved, so two windows keep showing different places. Trail
+      // expansion is also a local session concern: an in-flight document save
+      // must not reset a newer trail interaction when its authoritative bytes
+      // are reinstalled.
       installDocument: (document_, authoritativeSerialized) => {
-        state = store.install(document_, { authoritativeSerialized });
+        const trailExpandedByContext = state.view?.trailExpandedByContext;
+        const next = trailExpandedByContext === undefined
+          ? document_
+          : { ...document_, view: { ...(document_.view ?? {}), trailExpandedByContext } };
+        state = store.install(next, { authoritativeSerialized });
         render();
       },
       // A peer commit is a new document generation. Drop this surface's local
