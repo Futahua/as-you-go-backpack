@@ -236,6 +236,33 @@ test('recovery ignores an older load that loses to a newer committed broadcast',
   assert.equal(b.coordinator.revision, 'r11');
 });
 
+test('stale recovery checks the newer installed authority for durable request intent', async () => {
+  const lock = fakeLock();
+  const initial = { schemaVersion: 1, groups: [{ id: 'a', title: 'A0' }, { id: 'b', title: 'B0' }], shortcuts: [] };
+  const disk = fakeDisk(initial);
+  const firstLoad = disk.loadVersioned.bind(disk);
+  let releaseRecovery;
+  let loadCount = 0;
+  disk.loadVersioned = async () => {
+    loadCount += 1;
+    if (loadCount === 2) await new Promise((resolve) => { releaseRecovery = resolve; });
+    return firstLoad();
+  };
+  const b = surface(lock, disk, 'B', { ackTimeoutMs: 5 });
+  const r1 = { schemaVersion: 1, groups: [{ id: 'a', title: 'A1' }, { id: 'b', title: 'B0' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(r1), { generation: 9, sequence: 1 });
+  const request = b.channel.sent.at(-1);
+  await disk.saveChecked(ser(r1), 'r0');
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  const r2 = { schemaVersion: 1, groups: [{ id: 'a', title: 'A1' }, { id: 'b', title: 'B1' }], shortcuts: [] };
+  await disk.saveChecked(ser(r2), 'r1');
+  assert.equal(b.coordinator.receive({ type: 'committed', clientId: 'A', revision: 'r2', serialized: ser(r2) }), true);
+  releaseRecovery();
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: true, revision: 'r2', via: 'recovery-authoritative' });
+  assert.deepEqual(b.installed.at(-1), r2);
+});
+
 test('a late correlated commit wins over ACK-timeout recovery', async () => {
   const lock = fakeLock();
   const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });

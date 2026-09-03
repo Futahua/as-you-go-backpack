@@ -719,7 +719,17 @@ export function createSurfaceCoordinator({
       // A newer committed broadcast or promotion may have installed a later
       // generation while this load was in flight. Never let the older read
       // regress that already-visible authority.
-      if (authoritativeEpoch !== startedEpoch) return { ok: true, stale: true };
+      if (authoritativeEpoch !== startedEpoch) {
+        // A newer broadcast already installed the best authority. Reuse that
+        // in-memory generation for the semantic durability check instead of
+        // treating the older load race as proof that the request failed.
+        if (lastSerialized && revision) {
+          try {
+            return { ok: true, stale: true, loaded: { state: JSON.parse(lastSerialized), revision } };
+          } catch { /* fall through: no comparable authority */ }
+        }
+        return { ok: true, stale: true };
+      }
       try {
         installExternalPreservingPending(loaded.state);
       } catch (error) {
