@@ -54,7 +54,11 @@ the versioned authoritative document before reporting failure. This keeps a
 transport miss from leaving a folder, prompt, or rename painted in only one
 window. Installed-app proof still needs two native Papers windows on a cloned
 real profile; synthetic coordinator tests do not establish channel or session
-scope by themselves.
+scope by themselves. Recovery is fenced by the latest authoritative-generation
+epoch, keeps the request correlation alive through timeout recovery so a late
+committed broadcast can win, and enters CONFLICT if the authoritative reload
+itself cannot complete rather than silently presenting the speculative state as
+reconciled.
 
 The merge is three-way and stable-id aware for entities, item sets, prompt
 library trees, and per-context graph/rest/toolbar position keys. Local surface

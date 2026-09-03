@@ -182,6 +182,60 @@ test('a forwarded ACK timeout reloads the authoritative document', async () => {
   assert.equal(b.coordinator.revision, disk.revision);
 });
 
+test('recovery ignores an older load that loses to a newer committed broadcast', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'r10' }], shortcuts: [] });
+  const firstLoad = disk.loadVersioned.bind(disk);
+  let releaseRecovery;
+  let loadCount = 0;
+  disk.loadVersioned = async () => {
+    loadCount += 1;
+    if (loadCount === 2) await new Promise((resolve) => { releaseRecovery = resolve; });
+    return firstLoad();
+  };
+  const b = surface(lock, disk, 'B');
+  const forwarded = await b.coordinator.saveSerialized(ser({ schemaVersion: 1, groups: [{ id: 'lost' }], shortcuts: [] }));
+  const request = b.channel.sent.at(-1);
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: false, code: 'REMOTE_MUTATION_FAILED', revision: 'r10',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const newer = { schemaVersion: 1, groups: [{ id: 'r11' }], shortcuts: [] };
+  assert.equal(b.coordinator.receive({ type: 'committed', clientId: 'A', revision: 'r11', serialized: ser(newer) }), true);
+  releaseRecovery();
+  const outcome = await forwarded.acknowledgement;
+  assert.equal(outcome.ok, false);
+  assert.deepEqual(b.installed.at(-1), newer);
+  assert.equal(b.coordinator.revision, 'r11');
+});
+
+test('a late correlated commit wins over ACK-timeout recovery', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const firstLoad = disk.loadVersioned.bind(disk);
+  let releaseRecovery;
+  let loadCount = 0;
+  disk.loadVersioned = async () => {
+    loadCount += 1;
+    if (loadCount === 2) await new Promise((resolve) => { releaseRecovery = resolve; });
+    return firstLoad();
+  };
+  const b = surface(lock, disk, 'B', { ackTimeoutMs: 5 });
+  const forwarded = await b.coordinator.saveSerialized(ser({ schemaVersion: 1, groups: [{ id: 'late' }], shortcuts: [] }));
+  const request = b.channel.sent.at(-1);
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  const committed = { schemaVersion: 1, groups: [{ id: 'late' }], shortcuts: [] };
+  assert.equal(b.coordinator.receive({
+    type: 'committed', clientId: 'A', requestId: request.requestId, revision: 'r1', serialized: ser(committed),
+  }), true);
+  releaseRecovery();
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: true, revision: 'r1', via: 'committed-broadcast' });
+  assert.deepEqual(b.installed.at(-1), committed);
+  assert.equal(b.coordinator.revision, 'r1');
+});
+
 test('stale action snapshots merge entities while the incoming position wins', () => {
   const base = {
     schemaVersion: 1,

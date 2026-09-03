@@ -564,6 +564,7 @@ export function createSurfaceCoordinator({
   let baselinePromise = null;
   let conflictGeneration = null;
   let recoveryPromise = null;
+  let authoritativeEpoch = 0;
   // BroadcastChannel can deliver mutations from several views back-to-back.
   // Serialize them at the elected writer so each request rebases on the
   // revision committed immediately before it instead of racing two CAS calls
@@ -627,6 +628,15 @@ export function createSurfaceCoordinator({
     const index = pendingLocalSnapshots.indexOf(pending);
     if (index >= 0) pendingLocalSnapshots.splice(index, 1);
   }
+  function settlePendingRequest(requestId, pending, outcome) {
+    if (!pending || pending.settled) return false;
+    pending.settled = true;
+    clearTimeout(pending.timer);
+    pendingRequests.delete(requestId);
+    removePendingOverlay(pending.localPending);
+    pending.resolve(outcome);
+    return true;
+  }
   function retireQueuedHint(sequence, serialized, baseSerialized) {
     for (let index = pendingLocalSnapshots.length - 1; index >= 0; index -= 1) {
       const pending = pendingLocalSnapshots[index];
@@ -649,6 +659,7 @@ export function createSurfaceCoordinator({
    * generation, and preserve only this surface's local navigation/session. */
   function reloadAuthoritativeAfterFailedMutation(code) {
     if (recoveryPromise) return recoveryPromise;
+    const startedEpoch = authoritativeEpoch;
     recoveryPromise = (async () => {
       let loaded;
       try {
@@ -657,6 +668,10 @@ export function createSurfaceCoordinator({
         onHydrationFailed('recovery', 'versioned-load-failed', revision ?? undefined);
         throw error;
       }
+      // A newer committed broadcast or promotion may have installed a later
+      // generation while this load was in flight. Never let the older read
+      // regress that already-visible authority.
+      if (authoritativeEpoch !== startedEpoch) return { ok: true, stale: true };
       try {
         installExternalPreservingPending(loaded.state);
       } catch (error) {
@@ -666,11 +681,12 @@ export function createSurfaceCoordinator({
       revision = loaded.revision;
       lastSerialized = JSON.stringify(loaded.state);
       baselineReady = true;
+      authoritativeEpoch += 1;
       onHydrated(loaded.state, revision);
-      return loaded;
+      return { ok: true, loaded };
     })().catch((error) => {
       onHydrationFailed('mutation', code, revision ?? undefined);
-      return null;
+      return { ok: false, error };
     }).finally(() => {
       recoveryPromise = null;
     });
@@ -702,6 +718,7 @@ export function createSurfaceCoordinator({
         revision = loaded.revision;
         lastSerialized = JSON.stringify(loaded.state);
         baselineReady = true;
+        authoritativeEpoch += 1;
       })();
       baselinePromise = loadPromise.catch((error) => {
         // A transient load/install failure must be retryable; otherwise one
@@ -747,6 +764,7 @@ export function createSurfaceCoordinator({
     revision = loaded.revision;
     lastSerialized = JSON.stringify(loaded.state);
     baselineReady = true;
+    authoritativeEpoch += 1;
     onHydrated(loaded.state, revision);
     setRole(SURFACE_ROLE.WRITER, { revision });
     // Any follower mutations that were awaiting the old writer's ACK remain
@@ -757,7 +775,7 @@ export function createSurfaceCoordinator({
       mutationQueue = mutationQueue.then(async () => {
         try {
           if (pending.revision !== revision) {
-            pending.resolve({ ok: false, code: 'PROMOTION_REPLAY_AMBIGUOUS' });
+            settlePendingRequest(requestId, pending, { ok: false, code: 'PROMOTION_REPLAY_AMBIGUOUS' });
             return;
           }
           const current = lastSerialized ? JSON.parse(lastSerialized) : loaded.state;
@@ -767,7 +785,14 @@ export function createSurfaceCoordinator({
           const payload = JSON.stringify(decoded);
           const result = await host.saveChecked(payload, revision);
           if (!result || result.ok !== true) {
-            pending.resolve({ ok: false, code: 'PROMOTION_REPLAY_REFUSED' });
+            const outcome = { ok: false, code: 'PROMOTION_REPLAY_REFUSED' };
+            const recovery = await reloadAuthoritativeAfterFailedMutation(outcome.code);
+            if (!recovery.ok && pendingRequests.has(requestId)) {
+              frozenSnapshot = pending.serialized;
+              conflictGeneration = pending.generation ?? null;
+              setRole(SURFACE_ROLE.CONFLICT, { revision });
+            }
+            settlePendingRequest(requestId, pending, outcome);
             return;
           }
           removePendingOverlay(pending.localPending);
@@ -775,14 +800,20 @@ export function createSurfaceCoordinator({
           installDocument(visible, payload);
           revision = result.revision;
           lastSerialized = payload;
+          authoritativeEpoch += 1;
           publish(payload, revision);
-          pending.resolve({ ok: true, revision });
+          settlePendingRequest(requestId, pending, { ok: true, revision });
         } catch {
-          pending.resolve({ ok: false, code: 'PROMOTION_REPLAY_FAILED' });
+          const outcome = { ok: false, code: 'PROMOTION_REPLAY_FAILED' };
+          const recovery = await reloadAuthoritativeAfterFailedMutation(outcome.code);
+          if (!recovery.ok && pendingRequests.has(requestId)) {
+            frozenSnapshot = pending.serialized;
+            conflictGeneration = pending.generation ?? null;
+            setRole(SURFACE_ROLE.CONFLICT, { revision });
+          }
+          settlePendingRequest(requestId, pending, outcome);
         } finally {
           removePendingOverlay(pending.localPending);
-          clearTimeout(pending.timer);
-          pendingRequests.delete(requestId);
         }
       });
     }
@@ -866,15 +897,23 @@ export function createSurfaceCoordinator({
           if (hintIndex >= 0) pendingLocalSnapshots.splice(hintIndex, 1);
           pendingLocalSnapshots.push(localPending);
           const timer = setTimeout(() => {
-            if (!pendingRequests.delete(requestId)) return;
-            const pendingIndex = pendingLocalSnapshots.indexOf(localPending);
-            if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
+            const pending = pendingRequests.get(requestId);
+            if (!pending || pending.settled || pending.timedOut) return;
+            pending.timedOut = true;
+            removePendingOverlay(localPending);
             onHydrationFailed('mutation', 'writer-ack-timeout', revision ?? undefined);
-            void reloadAuthoritativeAfterFailedMutation('writer-ack-timeout')
-              .finally(() => resolve({ ok: false, code: 'WRITER_ACK_TIMEOUT' }));
+            void reloadAuthoritativeAfterFailedMutation('writer-ack-timeout').then((recovery) => {
+              if (!pendingRequests.has(requestId) || pending.settled) return;
+              if (!recovery.ok) {
+                frozenSnapshot = pending.serialized;
+                conflictGeneration = pending.generation ?? null;
+                setRole(SURFACE_ROLE.CONFLICT, { revision });
+              }
+              settlePendingRequest(requestId, pending, { ok: false, code: 'WRITER_ACK_TIMEOUT' });
+            });
           }, ackTimeoutMs);
           timer.unref?.();
-          pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision, localPending });
+          pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision, localPending, generation: metadata.generation });
           });
         }
         const message = {
@@ -927,6 +966,7 @@ export function createSurfaceCoordinator({
           if (result && result.ok === true) {
             revision = result.revision;
             lastSerialized = payload;
+            authoritativeEpoch += 1;
             const pendingIndex = pendingLocalSnapshots.indexOf(localPending);
             if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
             try { installDocument(JSON.parse(overlayPendingSnapshots(payload)), payload); } catch { /* host bytes are already committed */ }
@@ -971,6 +1011,7 @@ export function createSurfaceCoordinator({
       revision = loaded.revision;
       lastSerialized = JSON.stringify(loaded.state);
       baselineReady = true;
+      authoritativeEpoch += 1;
       frozenSnapshot = null;
       conflictGeneration = null;
       onHydrated(loaded.state, revision);
@@ -994,6 +1035,7 @@ export function createSurfaceCoordinator({
       if (result && result.ok === true) {
         revision = result.revision;
         lastSerialized = serialized;
+        authoritativeEpoch += 1;
         frozenSnapshot = null;
         conflictGeneration = null;
         publish(serialized, revision);
@@ -1075,6 +1117,7 @@ export function createSurfaceCoordinator({
               installExternalPreservingPending(decoded);
               revision = result.revision;
               lastSerialized = serialized;
+              authoritativeEpoch += 1;
               publish(serialized, revision, message.requestId);
               if (requestKey) {
                 const committed = { ok: true, revision };
@@ -1099,17 +1142,24 @@ export function createSurfaceCoordinator({
         const pending = pendingRequests.get(message.requestId);
         if (!pending) return false;
         clearTimeout(pending.timer);
-        pendingRequests.delete(message.requestId);
-        const pendingIndex = pendingLocalSnapshots.indexOf(pending.localPending);
-        if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
         const outcome = {
           ok: message.ok === true,
           revision: message.revision,
           ...(message.ok === true ? {} : { code: message.code ?? 'REMOTE_MUTATION_FAILED' }),
         };
-        if (outcome.ok) pending.resolve(outcome);
-        else void reloadAuthoritativeAfterFailedMutation(outcome.code)
-          .finally(() => pending.resolve(outcome));
+        if (outcome.ok) settlePendingRequest(message.requestId, pending, outcome);
+        else {
+          removePendingOverlay(pending.localPending);
+          void reloadAuthoritativeAfterFailedMutation(outcome.code).then((recovery) => {
+            if (!pendingRequests.has(message.requestId) || pending.settled) return;
+            if (!recovery.ok) {
+              frozenSnapshot = pending.serialized;
+              conflictGeneration = pending.generation ?? null;
+              setRole(SURFACE_ROLE.CONFLICT, { revision });
+            }
+            settlePendingRequest(message.requestId, pending, outcome);
+          });
+        }
         return true;
       }
       if (message.type !== SNAPSHOT_MESSAGE) return false;
@@ -1134,14 +1184,11 @@ export function createSurfaceCoordinator({
         onHydrationFailed('install', 'model-install-failed', message.revision);
         return false;
       }
+      authoritativeEpoch += 1;
       if (typeof message.requestId === 'string') {
         const pending = pendingRequests.get(message.requestId);
         if (pending) {
-          clearTimeout(pending.timer);
-          pendingRequests.delete(message.requestId);
-          const pendingIndex = pendingLocalSnapshots.indexOf(pending.localPending);
-          if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
-          pending.resolve({ ok: true, revision: message.revision, via: 'committed-broadcast' });
+          settlePendingRequest(message.requestId, pending, { ok: true, revision: message.revision, via: 'committed-broadcast' });
         }
       }
       revision = message.revision;
