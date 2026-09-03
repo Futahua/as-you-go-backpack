@@ -43,6 +43,8 @@ const SNAPSHOT_MESSAGE = 'committed';
 const MUTATION_MESSAGE = 'mutation-request';
 const MUTATION_ACK_MESSAGE = 'mutation-ack';
 const MUTATION_CANCEL_MESSAGE = 'mutation-cancel';
+const MUTATION_CANCEL_RETRY_LIMIT = 3;
+const MUTATION_CANCEL_RETRY_DELAY_MS = 100;
 
 function sameJson(a, b) {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
@@ -636,10 +638,45 @@ export function createSurfaceCoordinator({
     if (!pending || pending.settled) return false;
     pending.settled = true;
     clearTimeout(pending.timer);
+    clearTimeout(pending.cancelTimer);
     pendingRequests.delete(requestId);
     removePendingOverlay(pending.localPending);
     pending.resolve(outcome);
     return true;
+  }
+  function requestMutationCancellation(requestId, pending) {
+    if (!pending || pending.settled || pending.cancelRequested) return;
+    pending.cancelRequested = true;
+    pending.cancelAttempts = 0;
+    const send = () => {
+      if (!pendingRequests.has(requestId) || pending.settled) return;
+      pending.cancelAttempts += 1;
+      channel.postMessage({ type: MUTATION_CANCEL_MESSAGE, clientId, requestId });
+      if (!pendingRequests.has(requestId) || pending.settled) return;
+      if (pending.cancelAttempts >= MUTATION_CANCEL_RETRY_LIMIT) {
+        pending.cancelTimer = setTimeout(() => {
+          if (!pendingRequests.has(requestId) || pending.settled) return;
+          // Cancellation could not be observed by any writer. Keep the
+          // surface explicitly non-editable and settle as uncertain instead
+          // of leaving a normal VIEW with speculative state forever.
+          freezeFollowerFailure(pending);
+          markForwardFailure(pending);
+          settlePendingRequest(requestId, pending, {
+            ok: false,
+            code: 'MUTATION_UNCERTAIN',
+            revision,
+          });
+        }, MUTATION_CANCEL_RETRY_DELAY_MS);
+        pending.cancelTimer.unref?.();
+        return;
+      }
+      pending.cancelTimer = setTimeout(() => {
+        pending.cancelTimer = null;
+        send();
+      }, MUTATION_CANCEL_RETRY_DELAY_MS);
+      pending.cancelTimer.unref?.();
+    };
+    send();
   }
   function markForwardFailure(pending) {
     if (pending?.generation != null) generationsNeedingRestore.add(pending.generation);
@@ -679,12 +716,12 @@ export function createSurfaceCoordinator({
         return;
       }
       if (cancelIfUnresolved) {
-        pending.cancelRequested = true;
-        channel.postMessage({
-          type: MUTATION_CANCEL_MESSAGE,
-          clientId,
-          requestId,
-        });
+        // An unresolved timeout is an explicit recovery state, not an
+        // ordinary writable VIEW. Bounded cancellation retries give a newly
+        // promoted writer a chance to observe the request; exhaustion settles
+        // as uncertainty while remaining non-editable.
+        freezeFollowerFailure(pending);
+        requestMutationCancellation(requestId, pending);
         return;
       }
       if (!recovery.ok) freezeFollowerFailure(pending);
@@ -1243,6 +1280,7 @@ export function createSurfaceCoordinator({
                 onHydrationFailed('mutation', 'remote-save-stale', revision ?? undefined);
                 if (requestKey) {
                   const failed = { ok: false, code: 'STALE_REVISION', revision };
+                  cancelledRequests.delete(requestKey);
                   inFlightRequests.delete(requestKey);
                   rememberApplied(requestKey, failed);
                   channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...failed });
@@ -1265,6 +1303,7 @@ export function createSurfaceCoordinator({
               onHydrationFailed('mutation', 'remote-save-failed', revision ?? undefined);
               if (requestKey) {
                 const failed = { ok: false, code: 'REMOTE_SAVE_FAILED', revision };
+                cancelledRequests.delete(requestKey);
                 inFlightRequests.delete(requestKey);
                 rememberApplied(requestKey, failed);
                 channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...failed });
@@ -1274,6 +1313,7 @@ export function createSurfaceCoordinator({
         return true;
       }
       if (message.type === MUTATION_CANCEL_MESSAGE) {
+        if (role !== SURFACE_ROLE.WRITER) return false;
         if (typeof message.requestId !== 'string') return false;
         const requestKey = `${message.clientId}:${message.requestId}`;
         const prior = appliedRequests.get(requestKey);
@@ -1307,18 +1347,39 @@ export function createSurfaceCoordinator({
         const pending = pendingRequests.get(message.requestId);
         if (!pending) return false;
         clearTimeout(pending.timer);
+        clearTimeout(pending.cancelTimer);
+        pending.cancelTimer = null;
         const outcome = {
           ok: message.ok === true,
           revision: message.revision,
           ...(message.ok === true ? {} : { code: message.code ?? 'REMOTE_MUTATION_FAILED' }),
         };
-        if (outcome.ok) settlePendingRequest(message.requestId, pending, outcome);
-        else if (outcome.code === 'MUTATION_CANCELLED') {
-          markForwardFailure(pending);
-          settlePendingRequest(message.requestId, pending, outcome);
-        }
-        else {
-          removePendingOverlay(pending.localPending);
+        // A successful or cancellation ACK is not itself proof that this
+        // surface has the same authority: the committed broadcast may have
+        // been dropped, and a cancellation ACK may carry a newer revision.
+        // Reconcile first, then expose the result to the store. Ordinary
+        // negative ACKs retain their semantic durability check below.
+        removePendingOverlay(pending.localPending);
+        if (outcome.ok || outcome.code === 'MUTATION_CANCELLED') {
+          void reloadAuthoritativeAfterFailedMutation(outcome.code)
+            .then((recovery) => {
+              if (!recovery.ok) {
+                freezeFollowerFailure(pending);
+                markForwardFailure(pending);
+                settlePendingRequest(message.requestId, pending, {
+                  ok: false,
+                  code: 'MUTATION_UNCERTAIN',
+                  revision: outcome.revision ?? revision,
+                });
+                return;
+              }
+              if (outcome.ok) settlePendingRequest(message.requestId, pending, outcome);
+              else {
+                markForwardFailure(pending);
+                settlePendingRequest(message.requestId, pending, outcome);
+              }
+            });
+        } else {
           void reloadAuthoritativeAfterFailedMutation(outcome.code)
             .then((recovery) => settleFailedForward(message.requestId, pending, outcome, recovery));
         }

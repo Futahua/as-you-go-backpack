@@ -235,6 +235,66 @@ test('writer cancellation prevents a queued remote mutation from reaching disk',
   });
 });
 
+test('a view cannot forge a cancellation acknowledgement', async () => {
+  const b = surface(fakeLock(), fakeDisk(), 'B');
+  assert.equal(b.coordinator.receive({
+    type: 'mutation-cancel', clientId: 'B', requestId: 'B:1',
+  }), false);
+  assert.deepEqual(b.channel.sent, []);
+});
+
+test('cancellation ACK reconciles a newer authoritative revision before settling', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const b = surface(fakeLock(), disk, 'B');
+  const forwarded = await b.coordinator.saveSerialized(ser({
+    schemaVersion: 1, groups: [{ id: 'speculative' }], shortcuts: [],
+  }));
+  const request = b.channel.sent.at(-1);
+  await disk.saveChecked(ser({ schemaVersion: 1, groups: [{ id: 'newer' }], shortcuts: [] }), 'r0');
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: false, code: 'MUTATION_CANCELLED', revision: disk.revision,
+  });
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: false, revision: disk.revision, code: 'MUTATION_CANCELLED' });
+  assert.deepEqual(b.installed.at(-1), disk.state);
+  assert.equal(b.coordinator.revision, disk.revision);
+});
+
+test('a successful late ACK reloads the committed authority before settling', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const b = surface(fakeLock(), disk, 'B');
+  const committed = { schemaVersion: 1, groups: [{ id: 'committed' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(committed));
+  const request = b.channel.sent.at(-1);
+  await disk.saveChecked(ser(committed), 'r0');
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: true, revision: disk.revision,
+  });
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: true, revision: disk.revision });
+  assert.deepEqual(b.installed.at(-1), committed);
+});
+
+test('lost cancellation fails closed instead of leaving a writable speculative view', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  let loads = 0;
+  const loadVersioned = disk.loadVersioned.bind(disk);
+  disk.loadVersioned = async () => {
+    loads += 1;
+    if (loads > 1) throw new Error('recovery unavailable');
+    return loadVersioned();
+  };
+  const b = surface(fakeLock(), disk, 'B', { ackTimeoutMs: 5 });
+  const forwarded = await b.coordinator.saveSerialized(ser({
+    schemaVersion: 1, groups: [{ id: 'speculative' }], shortcuts: [],
+  }));
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: false, code: 'MUTATION_UNCERTAIN', revision: 'r0' });
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+});
+
 test('recovery ignores an older load that loses to a newer committed broadcast', async () => {
   const lock = fakeLock();
   const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'r10' }], shortcuts: [] });

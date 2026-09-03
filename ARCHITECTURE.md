@@ -55,6 +55,10 @@ transport miss from leaving a folder, prompt, or rename painted in only one
 window. A timeout remains an uncertain request while recovery is in flight: the
 follower sends a correlated cancellation, and the writer either suppresses a
 queued request before `host.saveChecked` or returns the already-committed result.
+Only the actual Web-Lock writer may answer cancellation; the follower retries a
+bounded number of times so a newly promoted writer can observe it. If no writer
+answers, the surface becomes an explicit non-editable CONFLICT and settles as
+`MUTATION_UNCERTAIN`, never continuing to accept speculative document actions.
 That cancellation fence prevents a late writer queue turn from committing after
 the follower has declared failure. Installed-app proof still needs two native
 Papers windows on a cloned real profile; synthetic coordinator tests do not
@@ -62,11 +66,14 @@ establish channel or session scope by themselves. Recovery is fenced by the
 latest authoritative-generation epoch, keeps the request correlation alive
 through timeout recovery so a late committed broadcast can win, and enters
 CONFLICT if the authoritative reload itself cannot complete rather than silently
-presenting the speculative state as reconciled. If the reload finds the
-forwarded bytes already durable, the request resolves as a successful recovery
-rather than invalidating dependent edits. A follower conflict never becomes a
-writer without first acquiring the same Web Lock; successful Keep my version also
-reinstalls its own committed bytes through the store before publishing them.
+presenting the speculative state as reconciled. Every terminal ACK, including a
+cancellation ACK, reloads the versioned authority before settling, so a dropped
+committed broadcast cannot leave a stale follower behind. If the reload finds
+the forwarded bytes already durable, the request resolves as a successful
+recovery rather than invalidating dependent edits. A follower conflict never
+becomes a writer without first acquiring the same Web Lock; successful Keep my
+version also reinstalls its own committed bytes through the store before
+publishing them.
 
 The merge is three-way and stable-id aware for entities, item sets, prompt
 library trees, and per-context graph/rest/toolbar position keys. Local surface
