@@ -194,6 +194,20 @@ test('timeout recovery recognizes a commit already durable on disk', async () =>
   assert.deepEqual(b.installed.at(-1), committed);
 });
 
+test('timeout recovery recognizes a durable writer rebase with unrelated edits', async () => {
+  const lock = fakeLock();
+  const initial = { schemaVersion: 1, groups: [{ id: 'a', title: 'A0' }, { id: 'b', title: 'B0' }], shortcuts: [] };
+  const disk = fakeDisk(initial);
+  const b = surface(lock, disk, 'B', { ackTimeoutMs: 5 });
+  const request = { schemaVersion: 1, groups: [{ id: 'a', title: 'A1' }, { id: 'b', title: 'B0' }], shortcuts: [] };
+  const merged = { schemaVersion: 1, groups: [{ id: 'a', title: 'A1' }, { id: 'b', title: 'B1' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(request));
+  await disk.saveChecked(ser(merged), 'r0');
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: true, revision: 'r1', via: 'recovery-authoritative' });
+  assert.deepEqual(b.installed.at(-1), merged);
+});
+
 test('recovery ignores an older load that loses to a newer committed broadcast', async () => {
   const lock = fakeLock();
   const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'r10' }], shortcuts: [] });

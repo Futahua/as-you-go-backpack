@@ -655,7 +655,18 @@ export function createSurfaceCoordinator({
       if (!pendingRequests.has(requestId) || pending.settled) return;
       const authoritativeMatch = recovery.ok && recovery.loaded
         && (() => {
-          try { return sameJson(JSON.parse(pending.serialized), recovery.loaded.state); } catch { return false; }
+          try {
+            const incoming = JSON.parse(pending.serialized);
+            const base = pending.baseSerialized ? JSON.parse(pending.baseSerialized) : null;
+            const authoritative = recovery.loaded.state;
+            // A writer may have rebased this request with a concurrent edit,
+            // so equality with the submitted snapshot is too strict. If the
+            // three-way merge of this request onto the loaded authority is
+            // byte-stable, the request's intent is already durable there.
+            const merged = base ? mergeSurfaceSnapshots(base, incoming, authoritative) : incoming;
+            const comparable = { ...authoritative, view: authoritative.view ?? {} };
+            return sameJson(merged, comparable);
+          } catch { return false; }
         })();
       if (authoritativeMatch) {
         settlePendingRequest(requestId, pending, {
