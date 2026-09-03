@@ -74,6 +74,8 @@ export function webLockAdapter(navigatorRef) {
  *           saveChecked(state: object, revision: string): Promise<object> }} options.host
  * @param {(snapshot: object) => void} options.installDocument
  *        Installs a document WITHOUT touching this surface's navigation session.
+ * @param {(snapshot: object, revision: string) => void} [options.onHydrated]
+ * @param {(stage: string, code: string, revision?: string) => void} [options.onHydrationFailed]
  * @param {(role: string, detail: object) => void} [options.onRoleChange]
  * @param {() => string} [options.newClientId]
  */
@@ -82,6 +84,8 @@ export function createSurfaceCoordinator({
   channel,
   host,
   installDocument,
+  onHydrated = () => {},
+  onHydrationFailed = () => {},
   /** Abandons the store's queued saves and returns the newest serialized
    * snapshot of that generation. Called the moment a save is refused, so the
    * frozen "my version" is the creator's latest local work rather than
@@ -122,12 +126,24 @@ export function createSurfaceCoordinator({
   }
 
   async function becomeWriter() {
-    const loaded = await host.loadVersioned();
-    revision = loaded.revision;
+    let loaded;
+    try {
+      loaded = await host.loadVersioned();
+    } catch (error) {
+      onHydrationFailed('load', 'versioned-load-failed');
+      throw error;
+    }
     // The lock may have been won after another writer committed, so the disk
     // is read BEFORE this surface is allowed to write. Never inherit a
     // revision observed before waiting.
-    installDocument(loaded.state);
+    try {
+      installDocument(loaded.state);
+    } catch (error) {
+      onHydrationFailed('install', 'model-install-failed', loaded.revision);
+      throw error;
+    }
+    revision = loaded.revision;
+    onHydrated(loaded.state, revision);
     setRole(SURFACE_ROLE.WRITER, { revision });
     return loaded;
   }
@@ -193,10 +209,22 @@ export function createSurfaceCoordinator({
     /** Conflict recovery: abandon this surface's unsaved version. */
     async useLatest() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
-      const loaded = await host.loadVersioned();
+      let loaded;
+      try {
+        loaded = await host.loadVersioned();
+      } catch (error) {
+        onHydrationFailed('load', 'versioned-load-failed');
+        throw error;
+      }
+      try {
+        installDocument(loaded.state);
+      } catch (error) {
+        onHydrationFailed('install', 'model-install-failed', loaded.revision);
+        throw error;
+      }
       revision = loaded.revision;
       frozenSnapshot = null;
-      installDocument(loaded.state);
+      onHydrated(loaded.state, revision);
       setRole(SURFACE_ROLE.WRITER, { revision });
       return loaded;
     },
@@ -235,13 +263,23 @@ export function createSurfaceCoordinator({
       try {
         decoded = JSON.parse(message.serialized);
       } catch {
+        onHydrationFailed('decode', 'broadcast-json-invalid', message.revision);
         // A malformed broadcast is ignored rather than installed: a view must
         // never replace a good document with something it could not read.
         return false;
       }
-      if (!isPlainObject(decoded)) return false;
+      if (!isPlainObject(decoded)) {
+        onHydrationFailed('decode', 'broadcast-state-invalid', message.revision);
+        return false;
+      }
+      try {
+        installDocument(decoded);
+      } catch {
+        onHydrationFailed('install', 'model-install-failed', message.revision);
+        return false;
+      }
       revision = message.revision;
-      installDocument(decoded);
+      onHydrated(decoded, revision);
       return true;
     },
 

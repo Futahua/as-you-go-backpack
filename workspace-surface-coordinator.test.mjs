@@ -302,6 +302,51 @@ test('0B: a malformed broadcast is ignored rather than installed', () => {
   assert.equal(b.coordinator.revision, null, 'a rejected broadcast must not move the revision');
 });
 
+test('C1: a versioned document reports hydration only after installation', async () => {
+  const order = [];
+  const coordinator = createSurfaceCoordinator({
+    lock: fakeLock(),
+    channel: fakeChannel(),
+    host: fakeDisk({ schemaVersion: 1, groups: [{ id: 'g1' }], shortcuts: [] }),
+    installDocument: () => order.push('installed'),
+    onHydrated: (_snapshot, revision) => order.push(`hydrated:${revision}`),
+  });
+
+  await coordinator.start();
+  assert.deepEqual(order, ['installed', 'hydrated:r0']);
+});
+
+test('C1: failed model installation reports bounded metadata and no hydration success', async () => {
+  const reports = [];
+  const coordinator = createSurfaceCoordinator({
+    lock: fakeLock(),
+    channel: fakeChannel(),
+    host: fakeDisk(),
+    installDocument: () => { throw new Error('private state bytes'); },
+    onHydrated: () => reports.push(['hydrated']),
+    onHydrationFailed: (...args) => reports.push(args),
+  });
+
+  await assert.rejects(coordinator.start(), /private state bytes/);
+  assert.deepEqual(reports, [['install', 'model-install-failed', 'r0']]);
+});
+
+test('C1: malformed broadcast reports decode failure without replacing the model', () => {
+  const installed = [];
+  const reports = [];
+  const coordinator = createSurfaceCoordinator({
+    lock: fakeLock(),
+    channel: fakeChannel(),
+    host: fakeDisk(),
+    installDocument: (snapshot) => installed.push(snapshot),
+    onHydrationFailed: (...args) => reports.push(args),
+  });
+
+  assert.equal(coordinator.receive({ type: 'committed', clientId: 'peer', revision: 'r7', serialized: '{bad' }), false);
+  assert.deepEqual(installed, []);
+  assert.deepEqual(reports, [['decode', 'broadcast-json-invalid', 'r7']]);
+});
+
 test('018: the reservation holds ordinary surfaces out until the designated surface owns the lock', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();

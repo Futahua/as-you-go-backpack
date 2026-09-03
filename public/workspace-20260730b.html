@@ -9,7 +9,7 @@
     <script type="module" src="workspace-20260730b.js"></script>
   </head>
   <body>
-    <main class="workspace">
+    <main class="workspace" data-papers-visual-key="document.root">
       <div class="workspace-backdrop" id="workspace-backdrop" aria-hidden="true"></div>
       <section class="navigation" aria-label="Folder navigation">
         <div class="backdrop-slider toolbar-float" id="backdrop-slider" data-toolbar-key="backdrop-slider">
@@ -45,10 +45,11 @@
           id="icon-grid"
           data-icon-grid
           data-view="graph"
+          data-papers-visual-key="primary-canvas"
           tabindex="0"
           aria-label="Items in this folder"
         ></div>
-        <div class="empty" id="empty" hidden></div>
+        <div class="empty" id="empty" data-papers-visual-key="empty-state" hidden></div>
         <div class="selection-marquee" id="selection-marquee" aria-hidden="true" hidden></div>
       </section>
 

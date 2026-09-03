@@ -105,6 +105,7 @@ import { createEditorDialog } from './app/components/editor-dialog.js';
 import { createBinControls } from './app/components/bin-controls.js';
 import { createSetMembershipMode } from './app/components/set-membership-mode.js';
 import { bootstrapWorkspace } from './app/bootstrap.js';
+import { createVisualObservability, hydrationSummaryDisagrees, semanticKeyForItem } from './app/visual-observability.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { resolveContextTarget } from './app/context-target-model.js';
@@ -171,6 +172,7 @@ if (!WIDGET_SURFACE) {
 
 const iconCache = new Map();
 let state = normalizeState({ schemaVersion: 1, groups: [], shortcuts: [] });
+const visualObservability = createVisualObservability(window);
 
 // 018X7: the store's internal commit save-rejection handler must not paint a
 // stale persistence error once a detach handoff is read-only. The sink checks
@@ -3415,6 +3417,9 @@ function createGraphController() {
     iconItem.className = `icon-item${isSelected ? ' selected' : ''}${isGhost ? ' bin-origin-ghost' : ''}${candidate.ancestor ? ' ancestor-item' : ''}${candidate.trail ? ' trail-item' : ''}`;
     applyFolderColor(iconItem, candidate);
     iconItem.dataset.id = candidate.id;
+    const semanticKey = isGhost ? null : semanticKeyForItem(candidate);
+    if (semanticKey) iconItem.setAttribute('data-papers-visual-key', semanticKey);
+    else iconItem.removeAttribute('data-papers-visual-key');
     iconItem.dataset.kind = candidate.kind;
     iconItem.dataset.parent = candidate.parentId ?? (session.binMode ? 'bin' : session.currentId);
     iconItem.setAttribute('draggable', 'false');
@@ -5826,6 +5831,14 @@ if (WIDGET_SURFACE) {
       // Installs the document only. This surface's navigation is deliberately
       // preserved, so two windows keep showing different places.
       installDocument: (document_) => { state = store.install(document_); render(); },
+      onHydrated: (source, revision) => {
+        if (hydrationSummaryDisagrees(source, state)) {
+          visualObservability.hydrationFailed('normalize', 'nonempty-source-empty-model', revision);
+          return;
+        }
+        visualObservability.hydrated(state, revision);
+      },
+      onHydrationFailed: (stage, code, revision) => visualObservability.hydrationFailed(stage, code, revision),
       invalidatePendingSaves: () => store.invalidatePendingSaves(),
       onRoleChange: (role) => {
         conflictPanel.syncToRole(role, elements.explorer);
@@ -5835,7 +5848,7 @@ if (WIDGET_SURFACE) {
     channel.addEventListener('message', (event) => {
       if (surfaceCoordinator.receive(event.data)) render();
     });
-    void surfaceCoordinator.start();
+    void surfaceCoordinator.start().catch(() => undefined);
   }
 
   void bootstrapWorkspace({
