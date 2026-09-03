@@ -324,6 +324,18 @@ test('host bridge preserves the versioned state envelope and decodes its documen
   });
 });
 
+test('host bridge can request a new Papers surface without naming a project id', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const url = 'papers-backpack://bp-test/open/one/public/workspace-20260730b.js?as-you-go-folder=g1';
+  const promise = host.openNewSurface(url);
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:open-new-surface');
+  assert.equal(sent.url, url);
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sent.requestId, ok: true });
+  await promise;
+});
+
 test('host bridge window observation/control methods carry the capability and unwrap outcomes', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);

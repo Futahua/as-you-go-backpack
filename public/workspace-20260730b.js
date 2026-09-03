@@ -188,7 +188,10 @@ let surfaceCoordinator = null;
 
 /** Does this surface currently own the shared document? */
 function hasDocumentWriteAuthority() {
-  return !surfaceCoordinator || surfaceCoordinator.role === SURFACE_ROLE.WRITER;
+  // Every open As you Go surface accepts document actions. Non-writers send
+  // their optimistic snapshot to the elected writer, which serializes the
+  // durable save and broadcasts the merged result back to all surfaces.
+  return true;
 }
 
 const store = createWorkspaceStore({
@@ -378,7 +381,10 @@ function captureWorkspaceView() {
 }
 
 function restoreWorkspaceView() {
-  const requestedCurrent = state.view.currentGroupId;
+  const requestedFromUrl = new URLSearchParams(window.location.search).get('as-you-go-folder');
+  const requestedCurrent = requestedFromUrl && group(requestedFromUrl)
+    ? requestedFromUrl
+    : state.view.currentGroupId;
   store.setNavigation({
     currentId:
       requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
@@ -1933,6 +1939,20 @@ elements.grid.addEventListener('mouseout', (event) => {
 });
 elements.grid.addEventListener('auxclick', (event) => {
   if (event.button !== 1) return;
+  const folderTile = event.target.closest('.icon-item[data-kind="group"]');
+  if (folderTile && !folderTile.classList.contains('ancestor-item')) {
+    event.preventDefault();
+    event.stopPropagation();
+    const folderId = folderTile.dataset.id;
+    if (folderId) {
+      const nextUrl = new URL(window.location.href);
+      nextUrl.searchParams.set('as-you-go-folder', folderId);
+      void host.openNewSurface(nextUrl.toString()).catch((error) => {
+        setStatus(error instanceof Error ? error.message : String(error));
+      });
+    }
+    return;
+  }
   const restoreAll = event.target.closest('[data-wl-restore-all]');
   if (restoreAll && !detachedWidgets.has(restoreAll.dataset.wlRestoreAll)) {
     event.preventDefault();
@@ -4118,6 +4138,17 @@ async function runMenuAction(action) {
   }
   if (action === 'paste') return commands.pasteInto(elements.menu.dataset.parent);
   if (action === 'open' && onlyId) return commands.activateItem(onlyId);
+  if (action === 'open-new-tab' && onlyId && group(onlyId)) {
+    closeMenu();
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set('as-you-go-folder', onlyId);
+    try {
+      await host.openNewSurface(nextUrl.toString());
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+    return;
+  }
   if (action === 'edit' && onlyId) {
     const chosen = shortcut(onlyId);
     return editorDialog.showEditor(isWebLink(chosen) ? 'web' : 'shortcut', chosen);

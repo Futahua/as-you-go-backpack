@@ -65,6 +65,7 @@ export function createContextMenu({
       const only = chosen.length === 1 ? chosen[0] : null;
       content = [
         only ? menuButton('open', only.target ? 'Open' : 'Open folder') : '',
+        only && !only.target ? menuButton('open-new-tab', 'Open folder in new Papers tab') : '',
         only?.target ? menuButton('edit', isWebLink(only) ? 'Edit web link' : 'Edit shortcut') : '',
         only && !only.target ? menuButton('rename', 'Edit folder') : '',
         only ? '<hr />' : '',

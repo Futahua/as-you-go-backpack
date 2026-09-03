@@ -95,6 +95,14 @@ test('openMenu with a single selection shows edit/rename and Open', () => {
   assert.doesNotMatch(menuNode.innerHTML, /data-action="rename"/);
 });
 
+test('openMenu with a folder offers a new Papers tab action', () => {
+  const selected = [{ id: 'g1', name: 'Folder' }];
+  const { menu, menuNode } = createHarness({ selected });
+  menu.openMenu(100, 100);
+  assert.match(menuNode.innerHTML, /data-action="open-new-tab"/);
+  assert.match(menuNode.innerHTML, /Open folder in new Papers tab/);
+});
+
 test('openMenu with a selected set offers only bounded set actions', () => {
   const { menu, menuNode } = createHarness({ selectedSets: [{ id: 'set-a' }] });
   menu.openMenu(100, 100);

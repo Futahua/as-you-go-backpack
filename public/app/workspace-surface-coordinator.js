@@ -40,6 +40,64 @@ export const SURFACE_ROLE = {
 };
 
 const SNAPSHOT_MESSAGE = 'committed';
+const MUTATION_MESSAGE = 'mutation-request';
+
+function sameJson(a, b) {
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+}
+
+/** Merge a view's action snapshot onto the writer's current snapshot. Entity
+ * collections are merged by stable id so two windows cannot erase unrelated
+ * edits. View/position maps intentionally use last-writer-wins: a later drag
+ * is the authoritative placement. */
+export function mergeSurfaceSnapshots(base, local, current) {
+  if (!isPlainObject(base) || !isPlainObject(local) || !isPlainObject(current)) return local;
+  const merged = { ...current };
+  for (const key of ['groups', 'shortcuts', 'windowLayouts']) {
+    if (!Array.isArray(local[key]) || !Array.isArray(current[key])) continue;
+    const baseItems = new Map((Array.isArray(base[key]) ? base[key] : []).map((item) => [item?.id, item]));
+    const localItems = new Map(local[key].map((item) => [item?.id, item]));
+    const currentItems = new Map(current[key].map((item) => [item?.id, item]));
+    const result = [...current[key]];
+    const index = new Map(result.map((item, i) => [item?.id, i]));
+    for (const [id, localItem] of localItems) {
+      if (id == null) continue;
+      const baseItem = baseItems.get(id);
+      const currentItem = currentItems.get(id);
+      if (!baseItems.has(id) || !sameJson(localItem, baseItem)) {
+        if (!currentItems.has(id)) {
+          index.set(id, result.length);
+          result.push(localItem);
+        } else if (!sameJson(currentItem, localItem)) {
+          result[index.get(id)] = localItem;
+        }
+      }
+    }
+    for (const [id] of baseItems) {
+      if (!localItems.has(id) && currentItems.has(id)) {
+        const at = index.get(id);
+        if (at !== undefined) result.splice(at, 1);
+      }
+    }
+    merged[key] = result;
+  }
+  const baseView = isPlainObject(base.view) ? base.view : {};
+  const localView = isPlainObject(local.view) ? local.view : {};
+  const currentView = isPlainObject(current.view) ? current.view : {};
+  const view = { ...currentView };
+  for (const [key, value] of Object.entries(localView)) {
+    if (key === 'graphPositions' || key === 'graphRestPositions' || key === 'toolbarPositions') {
+      if (!sameJson(value, baseView[key])) view[key] = value;
+    } else if (!sameJson(value, baseView[key])) {
+      view[key] = value;
+    }
+  }
+  merged.view = view;
+  if (!sameJson(local.activeWindowLayoutId, base.activeWindowLayoutId)) {
+    merged.activeWindowLayoutId = local.activeWindowLayoutId;
+  }
+  return merged;
+}
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -106,6 +164,7 @@ export function createSurfaceCoordinator({
   let transferSuspended = false;
   let pendingAcquire = null;
   let held = null;
+  let lastSerialized = null;
 
   function setRole(next, detail = {}) {
     if (role === next) return;
@@ -117,6 +176,7 @@ export function createSurfaceCoordinator({
    * second representation built alongside the save could differ from what is
    * actually on disk. */
   function publish(serialized, atRevision) {
+    lastSerialized = serialized;
     channel.postMessage({
       type: SNAPSHOT_MESSAGE,
       clientId,
@@ -143,6 +203,7 @@ export function createSurfaceCoordinator({
       throw error;
     }
     revision = loaded.revision;
+    lastSerialized = JSON.stringify(loaded.state);
     onHydrated(loaded.state, revision);
     setRole(SURFACE_ROLE.WRITER, { revision });
     return loaded;
@@ -187,12 +248,25 @@ export function createSurfaceCoordinator({
      * race to resolve.
      */
     async saveSerialized(serialized) {
-      if (role !== SURFACE_ROLE.WRITER) {
-        throw new Error('This surface is not the writer and may not save the board.');
+      if (role === SURFACE_ROLE.VIEW) {
+        // Views may edit optimistically. The elected writer serializes their
+        // request and broadcasts the committed result back to every surface.
+        // This keeps ordinary document actions usable from every window while
+        // retaining one durable writer and CAS protection.
+        channel.postMessage({
+          type: MUTATION_MESSAGE,
+          clientId,
+          revision,
+          serialized,
+          baseSerialized: lastSerialized,
+        });
+        return { ok: true, forwarded: true, revision };
       }
+      if (role !== SURFACE_ROLE.WRITER) throw new Error('This surface is not the writer and may not save the board.');
       const result = await host.saveChecked(serialized, revision);
       if (result && result.ok === true) {
         revision = result.revision;
+        lastSerialized = serialized;
         publish(serialized, revision);
         return { ok: true, revision };
       }
@@ -223,6 +297,7 @@ export function createSurfaceCoordinator({
         throw error;
       }
       revision = loaded.revision;
+      lastSerialized = JSON.stringify(loaded.state);
       frozenSnapshot = null;
       onHydrated(loaded.state, revision);
       setRole(SURFACE_ROLE.WRITER, { revision });
@@ -243,6 +318,7 @@ export function createSurfaceCoordinator({
       const result = await host.saveChecked(serialized, loaded.revision);
       if (result && result.ok === true) {
         revision = result.revision;
+        lastSerialized = serialized;
         frozenSnapshot = null;
         publish(serialized, revision);
         setRole(SURFACE_ROLE.WRITER, { revision });
@@ -255,8 +331,37 @@ export function createSurfaceCoordinator({
      * ignores its own echo, and a frozen surface ignores everything — its
      * unsaved work must not be overwritten behind the creator's back. */
     receive(message) {
-      if (!isPlainObject(message) || message.type !== SNAPSHOT_MESSAGE) return false;
-      if (message.clientId === clientId) return false;
+      if (!isPlainObject(message) || typeof message.clientId !== 'string' || message.clientId === clientId) return false;
+      if (message.type === MUTATION_MESSAGE) {
+        if (role !== SURFACE_ROLE.WRITER || typeof message.serialized !== 'string') return false;
+        void (async () => {
+          let serialized = message.serialized;
+          try {
+            let decoded = JSON.parse(serialized);
+            if (typeof message.baseSerialized === 'string' && message.revision !== revision) {
+              const base = JSON.parse(message.baseSerialized);
+              const current = lastSerialized ? JSON.parse(lastSerialized) : (await host.loadVersioned()).state;
+              decoded = mergeSurfaceSnapshots(base, decoded, current);
+              serialized = JSON.stringify(decoded);
+            }
+            const result = await host.saveChecked(serialized, revision);
+            if (!result || result.ok !== true) {
+              const latest = await host.loadVersioned();
+              revision = latest.revision;
+              lastSerialized = JSON.stringify(latest.state);
+              return;
+            }
+            installDocument(decoded);
+            revision = result.revision;
+            lastSerialized = serialized;
+            publish(serialized, revision);
+          } catch {
+            onHydrationFailed('mutation', 'remote-save-failed', revision ?? undefined);
+          }
+        })();
+        return true;
+      }
+      if (message.type !== SNAPSHOT_MESSAGE) return false;
       if (role !== SURFACE_ROLE.VIEW) return false;
       if (typeof message.revision !== 'string' || typeof message.serialized !== 'string') return false;
       let decoded;
@@ -279,6 +384,7 @@ export function createSurfaceCoordinator({
         return false;
       }
       revision = message.revision;
+      lastSerialized = message.serialized;
       onHydrated(decoded, revision);
       return true;
     },

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   SURFACE_ROLE,
   createSurfaceCoordinator,
+  mergeSurfaceSnapshots,
 } from './public/app/workspace-surface-coordinator.js';
 
 /** A lock that hands ownership to one holder at a time, in request order —
@@ -89,14 +90,54 @@ test('the first surface becomes the writer and a second stays a view', async () 
   assert.equal(b.coordinator.role, SURFACE_ROLE.WRITER);
 });
 
-test('a view may not save at all', async () => {
+test('a view forwards saves instead of silently blocking document actions', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();
   const b = surface(lock, disk, 'B');
-  await assert.rejects(
-    () => b.coordinator.saveSerialized(ser({ schemaVersion: 1, groups: [], shortcuts: [] })),
-    /not the writer/,
-  );
+  const result = await b.coordinator.saveSerialized(ser({ schemaVersion: 1, groups: [], shortcuts: [] }));
+  assert.equal(result.forwarded, true);
+});
+
+test('a view forwards an optimistic document action to the writer channel', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk();
+  const b = surface(lock, disk, 'B');
+  const board = { schemaVersion: 1, groups: [{ id: 'g1' }], shortcuts: [] };
+  const result = await b.coordinator.saveSerialized(ser(board));
+  assert.deepEqual(result, { ok: true, forwarded: true, revision: null });
+  assert.deepEqual(b.channel.sent.at(-1), {
+    type: 'mutation-request',
+    clientId: 'B',
+    revision: null,
+    serialized: ser(board),
+    baseSerialized: null,
+  });
+});
+
+test('stale action snapshots merge entities while the incoming position wins', () => {
+  const base = {
+    schemaVersion: 1,
+    groups: [{ id: 'g1', title: 'one' }, { id: 'g2', title: 'two' }],
+    shortcuts: [],
+    view: { graphPositions: { root: { g1: { x: 1, y: 1 } } }, iconSize: 32 },
+  };
+  const local = {
+    ...base,
+    groups: [{ id: 'g2', title: 'two' }, { id: 'g1', title: 'renamed' }],
+    view: { graphPositions: { root: { g1: { x: 90, y: 90 } } }, iconSize: 40 },
+  };
+  const current = {
+    ...base,
+    groups: [{ id: 'g1', title: 'one' }, { id: 'g2', title: 'changed elsewhere' }],
+    view: { graphPositions: { root: { g1: { x: 4, y: 4 } } }, iconSize: 32 },
+  };
+  const merged = mergeSurfaceSnapshots(base, local, current);
+  assert.deepEqual(merged.groups, [
+    { id: 'g1', title: 'renamed' },
+    { id: 'g2', title: 'changed elsewhere' },
+  ]);
+  assert.deepEqual(merged.view.graphPositions, { root: { g1: { x: 90, y: 90 } } });
+  assert.equal(merged.view.iconSize, 40);
 });
 
 test('a successful save advances the revision and broadcasts the committed snapshot', async () => {
