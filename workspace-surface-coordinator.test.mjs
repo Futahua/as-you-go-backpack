@@ -176,8 +176,15 @@ test('a forwarded ACK timeout reloads the authoritative document', async () => {
   const board = { schemaVersion: 1, groups: [{ id: 'lost' }], shortcuts: [] };
 
   const forwarded = await b.coordinator.saveSerialized(ser(board));
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  const cancel = b.channel.sent.at(-1);
+  assert.equal(cancel.type, 'mutation-cancel');
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: cancel.requestId,
+    ok: false, code: 'MUTATION_CANCELLED', revision: disk.revision,
+  });
   const outcome = await forwarded.acknowledgement;
-  assert.deepEqual(outcome, { ok: false, code: 'WRITER_ACK_TIMEOUT' });
+  assert.deepEqual(outcome, { ok: false, revision: disk.revision, code: 'MUTATION_CANCELLED' });
   assert.deepEqual(b.installed.at(-1), disk.state);
   assert.equal(b.coordinator.revision, disk.revision);
 });
@@ -206,6 +213,26 @@ test('timeout recovery recognizes a durable writer rebase with unrelated edits',
   const outcome = await forwarded.acknowledgement;
   assert.deepEqual(outcome, { ok: true, revision: 'r1', via: 'recovery-authoritative' });
   assert.deepEqual(b.installed.at(-1), merged);
+});
+
+test('writer cancellation prevents a queued remote mutation from reaching disk', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const a = surface(lock, disk, 'A');
+  await a.coordinator.start();
+  const incoming = { schemaVersion: 1, groups: [{ id: 'cancelled' }], shortcuts: [] };
+  const request = {
+    type: 'mutation-request', clientId: 'B', requestId: 'B:1', revision: 'r0',
+    serialized: ser(incoming), baseSerialized: ser(disk.state),
+  };
+  assert.equal(a.coordinator.receive(request), true);
+  assert.equal(a.coordinator.receive({ type: 'mutation-cancel', clientId: 'B', requestId: 'B:1' }), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(disk.state.groups.map((group) => group.id), ['base']);
+  assert.deepEqual(a.channel.sent.at(-1), {
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: 'B:1',
+    ok: false, code: 'MUTATION_CANCELLED', revision: 'r0',
+  });
 });
 
 test('recovery ignores an older load that loses to a newer committed broadcast', async () => {

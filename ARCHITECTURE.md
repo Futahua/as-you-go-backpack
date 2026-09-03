@@ -52,17 +52,21 @@ If a forwarded mutation receives a negative acknowledgement or reaches the
 writer-ack timeout, its optimistic overlay is retired and the surface reloads
 the versioned authoritative document before reporting failure. This keeps a
 transport miss from leaving a folder, prompt, or rename painted in only one
-window. Installed-app proof still needs two native Papers windows on a cloned
-real profile; synthetic coordinator tests do not establish channel or session
-scope by themselves. Recovery is fenced by the latest authoritative-generation
-epoch, keeps the request correlation alive through timeout recovery so a late
-committed broadcast can win, and enters CONFLICT if the authoritative reload
-itself cannot complete rather than silently presenting the speculative state as
-reconciled. If the reload finds the forwarded bytes already durable, the
-request resolves as a successful recovery rather than invalidating dependent
-edits. A follower conflict never becomes a writer without first acquiring the
-same Web Lock; successful Keep my version also reinstalls its own committed
-bytes through the store before publishing them.
+window. A timeout remains an uncertain request while recovery is in flight: the
+follower sends a correlated cancellation, and the writer either suppresses a
+queued request before `host.saveChecked` or returns the already-committed result.
+That cancellation fence prevents a late writer queue turn from committing after
+the follower has declared failure. Installed-app proof still needs two native
+Papers windows on a cloned real profile; synthetic coordinator tests do not
+establish channel or session scope by themselves. Recovery is fenced by the
+latest authoritative-generation epoch, keeps the request correlation alive
+through timeout recovery so a late committed broadcast can win, and enters
+CONFLICT if the authoritative reload itself cannot complete rather than silently
+presenting the speculative state as reconciled. If the reload finds the
+forwarded bytes already durable, the request resolves as a successful recovery
+rather than invalidating dependent edits. A follower conflict never becomes a
+writer without first acquiring the same Web Lock; successful Keep my version also
+reinstalls its own committed bytes through the store before publishing them.
 
 The merge is three-way and stable-id aware for entities, item sets, prompt
 library trees, and per-context graph/rest/toolbar position keys. Local surface

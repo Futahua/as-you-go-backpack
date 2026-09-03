@@ -42,6 +42,7 @@ export const SURFACE_ROLE = {
 const SNAPSHOT_MESSAGE = 'committed';
 const MUTATION_MESSAGE = 'mutation-request';
 const MUTATION_ACK_MESSAGE = 'mutation-ack';
+const MUTATION_CANCEL_MESSAGE = 'mutation-cancel';
 
 function sameJson(a, b) {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
@@ -578,6 +579,7 @@ export function createSurfaceCoordinator({
   const pendingLocalSnapshots = [];
   const appliedRequests = new Map();
   const inFlightRequests = new Set();
+  const cancelledRequests = new Set();
   const rememberApplied = (key, result) => {
     if (!key) return;
     appliedRequests.set(key, result);
@@ -650,7 +652,7 @@ export function createSurfaceCoordinator({
     conflictNeedsLock = !held;
     setRole(SURFACE_ROLE.CONFLICT, { revision });
   }
-  function settleFailedForward(requestId, pending, outcome, recovery) {
+  function settleFailedForward(requestId, pending, outcome, recovery, { cancelIfUnresolved = false } = {}) {
     const finish = () => {
       if (!pendingRequests.has(requestId) || pending.settled) return;
       const authoritativeMatch = recovery.ok && recovery.loaded
@@ -673,6 +675,15 @@ export function createSurfaceCoordinator({
           ok: true,
           revision: recovery.loaded.revision,
           via: 'recovery-authoritative',
+        });
+        return;
+      }
+      if (cancelIfUnresolved) {
+        pending.cancelRequested = true;
+        channel.postMessage({
+          type: MUTATION_CANCEL_MESSAGE,
+          clientId,
+          requestId,
         });
         return;
       }
@@ -979,7 +990,7 @@ export function createSurfaceCoordinator({
             removePendingOverlay(localPending);
             onHydrationFailed('mutation', 'writer-ack-timeout', revision ?? undefined);
             void reloadAuthoritativeAfterFailedMutation('writer-ack-timeout')
-              .then((recovery) => settleFailedForward(requestId, pending, { ok: false, code: 'WRITER_ACK_TIMEOUT' }, recovery));
+              .then((recovery) => settleFailedForward(requestId, pending, { ok: false, code: 'WRITER_ACK_TIMEOUT' }, recovery, { cancelIfUnresolved: true }));
           }, ackTimeoutMs);
           timer.unref?.();
           pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision, localPending, generation: metadata.generation });
@@ -1193,6 +1204,13 @@ export function createSurfaceCoordinator({
         mutationQueue = mutationQueue
           .catch(() => undefined)
           .then(async () => {
+            if (requestKey && cancelledRequests.delete(requestKey)) {
+              const cancelled = { ok: false, code: 'MUTATION_CANCELLED', revision };
+              inFlightRequests.delete(requestKey);
+              rememberApplied(requestKey, cancelled);
+              channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...cancelled });
+              return;
+            }
             let serialized = message.serialized;
             try {
               const incoming = JSON.parse(message.serialized);
@@ -1237,6 +1255,7 @@ export function createSurfaceCoordinator({
               authoritativeEpoch += 1;
               publish(serialized, revision, message.requestId);
               if (requestKey) {
+                cancelledRequests.delete(requestKey);
                 const committed = { ok: true, revision };
                 inFlightRequests.delete(requestKey);
                 rememberApplied(requestKey, committed);
@@ -1254,6 +1273,35 @@ export function createSurfaceCoordinator({
           });
         return true;
       }
+      if (message.type === MUTATION_CANCEL_MESSAGE) {
+        if (typeof message.requestId !== 'string') return false;
+        const requestKey = `${message.clientId}:${message.requestId}`;
+        const prior = appliedRequests.get(requestKey);
+        if (prior) {
+          channel.postMessage({
+            type: MUTATION_ACK_MESSAGE,
+            clientId,
+            ackClientId: message.clientId,
+            requestId: message.requestId,
+            ...prior,
+          });
+          return true;
+        }
+        cancelledRequests.add(requestKey);
+        if (!inFlightRequests.has(requestKey)) {
+          const cancelled = { ok: false, code: 'MUTATION_CANCELLED', revision };
+          cancelledRequests.delete(requestKey);
+          rememberApplied(requestKey, cancelled);
+          channel.postMessage({
+            type: MUTATION_ACK_MESSAGE,
+            clientId,
+            ackClientId: message.clientId,
+            requestId: message.requestId,
+            ...cancelled,
+          });
+        }
+        return true;
+      }
       if (message.type === MUTATION_ACK_MESSAGE) {
         if (message.ackClientId !== clientId || typeof message.requestId !== 'string') return false;
         const pending = pendingRequests.get(message.requestId);
@@ -1265,6 +1313,10 @@ export function createSurfaceCoordinator({
           ...(message.ok === true ? {} : { code: message.code ?? 'REMOTE_MUTATION_FAILED' }),
         };
         if (outcome.ok) settlePendingRequest(message.requestId, pending, outcome);
+        else if (outcome.code === 'MUTATION_CANCELLED') {
+          markForwardFailure(pending);
+          settlePendingRequest(message.requestId, pending, outcome);
+        }
         else {
           removePendingOverlay(pending.localPending);
           void reloadAuthoritativeAfterFailedMutation(outcome.code)
