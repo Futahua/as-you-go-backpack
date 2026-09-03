@@ -645,12 +645,26 @@ export function createSurfaceCoordinator({
   function freezeFollowerFailure(pending) {
     frozenSnapshot = pending?.serialized ?? frozenSnapshot;
     conflictGeneration = pending?.generation ?? null;
-    conflictNeedsLock = true;
+    // Promotion replay may fail after this surface has already acquired the
+    // lock. Only an actual follower failure needs lock reacquisition.
+    conflictNeedsLock = !held;
     setRole(SURFACE_ROLE.CONFLICT, { revision });
   }
   function settleFailedForward(requestId, pending, outcome, recovery) {
     const finish = () => {
       if (!pendingRequests.has(requestId) || pending.settled) return;
+      const authoritativeMatch = recovery.ok && recovery.loaded
+        && (() => {
+          try { return sameJson(JSON.parse(pending.serialized), recovery.loaded.state); } catch { return false; }
+        })();
+      if (authoritativeMatch) {
+        settlePendingRequest(requestId, pending, {
+          ok: true,
+          revision: recovery.loaded.revision,
+          via: 'recovery-authoritative',
+        });
+        return;
+      }
       if (!recovery.ok) freezeFollowerFailure(pending);
       markForwardFailure(pending);
       settlePendingRequest(requestId, pending, outcome);
@@ -1100,12 +1114,13 @@ export function createSurfaceCoordinator({
           revision = result.revision;
           lastSerialized = serialized;
           authoritativeEpoch += 1;
+          try { installDocument(JSON.parse(serialized), serialized); } catch { /* host bytes are already committed */ }
           frozenSnapshot = null;
           conflictGeneration = null;
           publish(serialized, revision);
           return { ok: true, revision };
         }
-        conflictNeedsLock = true;
+        conflictNeedsLock = !held;
         setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
         return { ok: false, code: 'STALE_REVISION' };
       }
@@ -1116,6 +1131,7 @@ export function createSurfaceCoordinator({
         revision = result.revision;
         lastSerialized = serialized;
         authoritativeEpoch += 1;
+        try { installDocument(JSON.parse(serialized), serialized); } catch { /* host bytes are already committed */ }
         frozenSnapshot = null;
         conflictGeneration = null;
         publish(serialized, revision);

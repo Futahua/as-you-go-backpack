@@ -58,7 +58,11 @@ scope by themselves. Recovery is fenced by the latest authoritative-generation
 epoch, keeps the request correlation alive through timeout recovery so a late
 committed broadcast can win, and enters CONFLICT if the authoritative reload
 itself cannot complete rather than silently presenting the speculative state as
-reconciled.
+reconciled. If the reload finds the forwarded bytes already durable, the
+request resolves as a successful recovery rather than invalidating dependent
+edits. A follower conflict never becomes a writer without first acquiring the
+same Web Lock; successful Keep my version also reinstalls its own committed
+bytes through the store before publishing them.
 
 The merge is three-way and stable-id aware for entities, item sets, prompt
 library trees, and per-context graph/rest/toolbar position keys. Local surface

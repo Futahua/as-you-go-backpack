@@ -182,6 +182,18 @@ test('a forwarded ACK timeout reloads the authoritative document', async () => {
   assert.equal(b.coordinator.revision, disk.revision);
 });
 
+test('timeout recovery recognizes a commit already durable on disk', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'base' }], shortcuts: [] });
+  const b = surface(lock, disk, 'B', { ackTimeoutMs: 5 });
+  const committed = { schemaVersion: 1, groups: [{ id: 'committed-before-ack' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(committed));
+  await disk.saveChecked(ser(committed), 'r0');
+  const outcome = await forwarded.acknowledgement;
+  assert.deepEqual(outcome, { ok: true, revision: 'r1', via: 'recovery-authoritative' });
+  assert.deepEqual(b.installed.at(-1), committed);
+});
+
 test('recovery ignores an older load that loses to a newer committed broadcast', async () => {
   const lock = fakeLock();
   const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'r10' }], shortcuts: [] });
