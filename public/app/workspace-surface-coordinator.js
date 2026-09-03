@@ -77,16 +77,33 @@ function mergePositionMap(baseValue, localValue, currentValue, nested) {
 }
 
 /** Merge the recursive prompt/folder library by stable node id. */
-function mergePromptTree(baseValue, localValue, currentValue) {
+function flattenPromptTree(nodes, map = new Map()) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (!node?.id) continue;
+    map.set(node.id, node);
+    if (node.type === 'folder') flattenPromptTree(node.children, map);
+  }
+  return map;
+}
+
+function mergePromptTree(baseValue, localValue, currentValue, global = null) {
   const base = Array.isArray(baseValue) ? baseValue : [];
   const local = Array.isArray(localValue) ? localValue : [];
   const current = Array.isArray(currentValue) ? currentValue : [];
+  const baseGlobal = global?.base ?? flattenPromptTree(base);
+  const localGlobal = global?.local ?? flattenPromptTree(local);
+  const currentGlobal = global?.current ?? flattenPromptTree(current);
   const baseById = new Map(base.map((node) => [node?.id, node]));
   const localById = new Map(local.map((node) => [node?.id, node]));
   const currentById = new Map(current.map((node) => [node?.id, node]));
   const mergeNode = (baseNode, localNode, currentNode) => {
     if (!localNode) return null;
-    if (!baseNode) return currentNode ?? localNode;
+    if (!baseNode) {
+      const historicalBase = baseGlobal.get(localNode.id);
+      const historicalCurrent = currentGlobal.get(localNode.id);
+      if (historicalBase && historicalCurrent) return mergeNode(historicalBase, localNode, historicalCurrent);
+      return historicalCurrent ?? localNode;
+    }
     if (sameJson(localNode, baseNode)) return currentNode ?? localNode;
     if (localNode.type === 'folder' && currentNode?.type === 'folder') {
       const scalarChanges = Object.fromEntries(Object.keys(localNode)
@@ -95,7 +112,7 @@ function mergePromptTree(baseValue, localValue, currentValue) {
       return {
         ...currentNode,
         ...scalarChanges,
-        children: mergePromptTree(baseNode.children, localNode.children, currentNode.children),
+        children: mergePromptTree(baseNode.children, localNode.children, currentNode.children, { base: baseGlobal, local: localGlobal, current: currentGlobal }),
       };
     }
     const fieldChanges = Object.fromEntries(Object.keys(localNode)
@@ -106,14 +123,28 @@ function mergePromptTree(baseValue, localValue, currentValue) {
   const result = [];
   for (const currentNode of current) {
     const id = currentNode?.id;
-    if (!localById.has(id) && baseById.has(id)) continue;
+    if (!localById.has(id) && (baseById.has(id) || localGlobal.has(id))) continue;
     const merged = mergeNode(baseById.get(id), localById.get(id), currentNode);
     if (merged) result.push(merged);
   }
   for (const localNode of local) {
     const id = localNode?.id;
     if (id == null || currentById.has(id) || baseById.has(id)) continue;
-    result.push(localNode);
+    result.push(mergeNode(baseGlobal.get(id), localNode, currentGlobal.get(id)) ?? localNode);
+  }
+  // If this sibling collection is only reordered (the same stable IDs remain
+  // on both sides), keep the local order while retaining merged node content.
+  // This prevents an unrelated concurrent text edit from undoing a deliberate
+  // drag reorder.
+  const resultById = new Map(result.map((node) => [node?.id, node]));
+  const resultIds = result.map((node) => node?.id);
+  const localIds = local.map((node) => node?.id);
+  const baseIds = base.map((node) => node?.id);
+  if (localIds.length === resultIds.length
+    && localIds.every((id) => resultById.has(id))
+    && localIds.length === baseIds.length
+    && localIds.some((id, index) => id !== baseIds[index])) {
+    return localIds.map((id) => resultById.get(id));
   }
   return result;
 }
