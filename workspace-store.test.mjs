@@ -71,6 +71,21 @@ test('commit reports failure and status when persist rejects', async () => {
   assert.match(statuses[statuses.length - 1], /disk full/);
 });
 
+test('commit reports failure when persistence resolves an explicit refusal', async () => {
+  let state = { items: ['root'] };
+  const statuses = [];
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => ({ ok: false, code: 'STALE_REVISION' }),
+    normalizeState: (s) => s,
+    setStatus: (text) => statuses.push(text),
+  });
+  const ok = await store.commit({ items: ['x'] }, {});
+  assert.equal(ok, false);
+  assert.match(statuses.at(-1), /STALE_REVISION/);
+});
+
 test('replace installs without touching history or persisting', () => {
   const h = createHarness();
   const result = h.store.replace({ items: ['z'] });

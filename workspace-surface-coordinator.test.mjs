@@ -202,6 +202,55 @@ test('stale set updates merge independent item-set IDs', () => {
   ]);
 });
 
+test('same entity fields and shortcut placements merge independently', () => {
+  const base = {
+    schemaVersion: 1,
+    groups: [{ id: 'g1', name: 'old', icon: 'a' }],
+    shortcuts: [{ id: 's1', name: 'shortcut', placements: [
+      { id: 'p1', parentId: 'root', order: 0 },
+      { id: 'p2', parentId: 'root', order: 1 },
+    ] }],
+  };
+  const local = structuredClone(base);
+  local.groups[0].name = 'local';
+  local.shortcuts[0].placements[0].order = 4;
+  const current = structuredClone(base);
+  current.groups[0].icon = 'b';
+  current.shortcuts[0].placements[1].order = 5;
+  const merged = mergeSurfaceSnapshots(base, local, current);
+  assert.equal(merged.groups[0].name, 'local');
+  assert.equal(merged.groups[0].icon, 'b');
+  assert.equal(merged.shortcuts[0].placements[0].order, 4);
+  assert.equal(merged.shortcuts[0].placements[1].order, 5);
+});
+
+test('prompt reorder and cross-folder move preserve concurrent prompt edits', () => {
+  const base = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'p1', type: 'prompt', text: 'one' }, { id: 'p2', type: 'prompt', text: 'two' }] },
+    { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const local = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'p2', type: 'prompt', text: 'two' }] },
+    { id: 'b', type: 'folder', children: [{ id: 'p1', type: 'prompt', text: 'one' }] },
+  ] } };
+  const current = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'p1', type: 'prompt', text: 'edited' }, { id: 'p2', type: 'prompt', text: 'two' }] },
+    { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const moved = mergeSurfaceSnapshots(base, local, current).view.promptLibrary;
+  assert.deepEqual(moved[0].children.map((node) => node.id), ['p2']);
+  assert.equal(moved[1].children[0].id, 'p1');
+  assert.equal(moved[1].children[0].text, 'edited');
+
+  const reordered = mergeSurfaceSnapshots(
+    base,
+    { view: { promptLibrary: [{ ...base.view.promptLibrary[0], children: [base.view.promptLibrary[0].children[1], base.view.promptLibrary[0].children[0]] }, base.view.promptLibrary[1]] } },
+    current,
+  ).view.promptLibrary[0].children;
+  assert.deepEqual(reordered.map((node) => node.id), ['p2', 'p1']);
+  assert.equal(reordered[1].text, 'edited');
+});
+
 test('a multi-item delete removes every requested entity without index drift', () => {
   const base = { schemaVersion: 1, groups: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], shortcuts: [] };
   const local = { ...base, groups: [{ id: 'c' }] };
