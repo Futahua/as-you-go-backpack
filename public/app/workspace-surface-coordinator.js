@@ -86,6 +86,86 @@ function flattenPromptTree(nodes, map = new Map()) {
   return map;
 }
 
+/** Combine sibling ordering constraints without letting one stale reorder
+ * erase a compatible reorder or positioned insertion from the other lane.
+ * Relations changed from the shared base are the structural intent; when both
+ * lanes change the same pair, the current writer is the deterministic winner.
+ * Local-only and current-only nodes contribute all of their lane relations. */
+function mergePromptOrder(baseIds, localIds, currentIds, resultIds) {
+  const baseIndex = new Map(baseIds.map((id, index) => [id, index]));
+  const pairKey = (a, b) => [String(a), String(b)].sort().join('\u0000');
+  const relation = (ids, a, b) => {
+    const ai = ids.indexOf(a);
+    const bi = ids.indexOf(b);
+    if (ai < 0 || bi < 0 || ai === bi) return 0;
+    return ai < bi ? -1 : 1;
+  };
+  const changedPairs = (ids) => {
+    const changed = new Set();
+    for (let i = 0; i < ids.length; i += 1) {
+      for (let j = i + 1; j < ids.length; j += 1) {
+        const a = ids[i];
+        const b = ids[j];
+        if (!baseIndex.has(a) || !baseIndex.has(b)) continue;
+        const baseRelation = baseIndex.get(a) < baseIndex.get(b) ? -1 : 1;
+        if (relation(ids, a, b) !== baseRelation) changed.add(pairKey(a, b));
+      }
+    }
+    return changed;
+  };
+  const localChanged = changedPairs(localIds);
+  const currentChanged = changedPairs(currentIds);
+  const baseSet = new Set(baseIds);
+  const adjacency = new Map(resultIds.map((id) => [id, new Set()]));
+  const addEdge = (from, to) => {
+    if (from !== to && adjacency.has(from) && adjacency.has(to)) adjacency.get(from).add(to);
+  };
+  for (let i = 0; i < resultIds.length; i += 1) {
+    for (let j = i + 1; j < resultIds.length; j += 1) {
+      const a = resultIds[i];
+      const b = resultIds[j];
+      const baseRelation = baseSet.has(a) && baseSet.has(b)
+        ? (baseIndex.get(a) < baseIndex.get(b) ? -1 : 1) : 0;
+      const localRelation = relation(localIds, a, b);
+      const currentRelation = relation(currentIds, a, b);
+      const key = pairKey(a, b);
+      const localIntent = localRelation && (baseRelation === 0 || localChanged.has(key));
+      const currentIntent = currentRelation && (baseRelation === 0 || currentChanged.has(key));
+      const winner = currentIntent ? currentRelation : localIntent ? localRelation : baseRelation;
+      if (winner < 0) addEdge(a, b);
+      else if (winner > 0) addEdge(b, a);
+    }
+  }
+  const rank = (id) => {
+    const local = localIds.indexOf(id);
+    if (local >= 0) return local;
+    const current = currentIds.indexOf(id);
+    if (current >= 0) return localIds.length + current;
+    return localIds.length + currentIds.length + (baseIndex.get(id) ?? resultIds.length);
+  };
+  const remaining = new Set(resultIds);
+  const indegree = new Map(resultIds.map((id) => [id, 0]));
+  for (const [from, targets] of adjacency) for (const to of targets) indegree.set(to, indegree.get(to) + 1);
+  const ordered = [];
+  while (remaining.size) {
+    let next = [...remaining].filter((id) => indegree.get(id) === 0).sort((a, b) => rank(a) - rank(b))[0];
+    if (next == null) {
+      // Conflicting same-node moves can form a cycle. Drop the lowest-priority
+      // incoming constraints for the stable lane winner rather than dropping
+      // an entire sibling collection.
+      next = [...remaining].sort((a, b) => rank(a) - rank(b))[0];
+      for (const [from, targets] of adjacency) {
+        if (!remaining.has(from)) continue;
+        if (targets.delete(next)) indegree.set(next, indegree.get(next) - 1);
+      }
+    }
+    remaining.delete(next);
+    ordered.push(next);
+    for (const to of adjacency.get(next)) indegree.set(to, indegree.get(to) - 1);
+  }
+  return ordered;
+}
+
 function mergePromptTree(baseValue, localValue, currentValue, global = null) {
   const base = Array.isArray(baseValue) ? baseValue : [];
   const local = Array.isArray(localValue) ? localValue : [];
@@ -106,7 +186,9 @@ function mergePromptTree(baseValue, localValue, currentValue, global = null) {
       if (historicalBase && !historicalCurrent) return null;
       return historicalCurrent ?? localNode;
     }
-    if (sameJson(localNode, baseNode)) return currentNode ?? localNode;
+    if (sameJson(localNode, baseNode)
+      && !(localNode.type === 'folder' && currentNode?.type === 'folder'
+        && !sameJson(localNode.children, currentNode.children))) return currentNode ?? localNode;
     if (localNode.type === 'folder' && currentNode?.type === 'folder') {
       const scalarChanges = Object.fromEntries(Object.keys(localNode)
         .filter((key) => key !== 'children' && !sameJson(localNode[key], baseNode[key]))
@@ -142,24 +224,15 @@ function mergePromptTree(baseValue, localValue, currentValue, global = null) {
     const mergedLocal = mergeNode(baseGlobal.get(id), localNode, currentGlobal.get(id));
     if (mergedLocal) result.push(mergedLocal);
   }
-  // If this sibling collection is only reordered (the same stable IDs remain
-  // on both sides), keep the local order while retaining merged node content.
-  // This prevents an unrelated concurrent text edit from undoing a deliberate
-  // drag reorder.
+  // Merge stable ordering constraints from both lanes. This preserves local
+  // positioned inserts/reorders alongside compatible current moves/inserts,
+  // while resolving a conflicting same-pair move deterministically.
   const resultById = new Map(result.map((node) => [node?.id, node]));
   const resultIds = result.map((node) => node?.id);
   const localIds = local.map((node) => node?.id);
   const baseIds = base.map((node) => node?.id);
-  const localCommonOrder = localIds.filter((id) => baseIds.includes(id));
-  const baseCommonOrder = baseIds.filter((id) => localIds.includes(id));
-  const localStructureChanged = localIds.length !== baseIds.length
-    || localCommonOrder.some((id, index) => id !== baseCommonOrder[index]);
-  if (localStructureChanged) {
-    const localOrder = localIds.filter((id) => resultById.has(id));
-    const currentOnly = resultIds.filter((id) => !localById.has(id));
-    return [...localOrder, ...currentOnly].map((id) => resultById.get(id));
-  }
-  return result;
+  const currentIds = current.map((node) => node?.id);
+  return mergePromptOrder(baseIds, localIds, currentIds, resultIds).map((id) => resultById.get(id));
 }
 
 function mergeKeyedArray(baseValue, localValue, currentValue) {
@@ -455,6 +528,7 @@ export function createSurfaceCoordinator({
   let lastSerialized = null;
   let baselineReady = false;
   let baselinePromise = null;
+  let conflictGeneration = null;
   // BroadcastChannel can deliver mutations from several views back-to-back.
   // Serialize them at the elected writer so each request rebases on the
   // revision committed immediately before it instead of racing two CAS calls
@@ -499,6 +573,16 @@ export function createSurfaceCoordinator({
         pendingLocalSnapshots.push({ ...hint, queuedHint: true });
       }
     }
+  }
+  function clearPendingGeneration(generation) {
+    if (generation == null) return;
+    for (let index = pendingLocalSnapshots.length - 1; index >= 0; index -= 1) {
+      if (pendingLocalSnapshots[index].generation === generation) pendingLocalSnapshots.splice(index, 1);
+    }
+  }
+  function removePendingOverlay(pending) {
+    const index = pendingLocalSnapshots.indexOf(pending);
+    if (index >= 0) pendingLocalSnapshots.splice(index, 1);
   }
 
   function setRole(next, detail = {}) {
@@ -600,7 +684,8 @@ export function createSurfaceCoordinator({
             pending.resolve({ ok: false, code: 'PROMOTION_REPLAY_REFUSED' });
             return;
           }
-          installDocument(decoded);
+          removePendingOverlay(pending.localPending);
+          installDocument(decoded, payload);
           revision = result.revision;
           lastSerialized = payload;
           publish(payload, revision);
@@ -608,6 +693,7 @@ export function createSurfaceCoordinator({
         } catch {
           pending.resolve({ ok: false, code: 'PROMOTION_REPLAY_FAILED' });
         } finally {
+          removePendingOverlay(pending.localPending);
           clearTimeout(pending.timer);
           pendingRequests.delete(requestId);
         }
@@ -683,7 +769,7 @@ export function createSurfaceCoordinator({
         let acknowledgement = null;
         if (requestId) {
           acknowledgement = new Promise((resolve) => {
-          const localPending = { serialized, baseSerialized };
+          const localPending = { serialized, baseSerialized, generation: metadata.generation };
           const hintIndex = pendingLocalSnapshots.findIndex((pending) => pending.queuedHint
             && pending.serialized === serialized && pending.baseSerialized === baseSerialized);
           if (hintIndex >= 0) pendingLocalSnapshots.splice(hintIndex, 1);
@@ -722,7 +808,7 @@ export function createSurfaceCoordinator({
       if (lastSerialized && sameJson(serialized, lastSerialized)) {
         return { ok: true, revision, unchanged: true };
       }
-      const localPending = { serialized, baseSerialized };
+      const localPending = { serialized, baseSerialized, generation: metadata.generation };
       const hintIndex = pendingLocalSnapshots.findIndex((pending) => pending.queuedHint
         && pending.serialized === serialized && pending.baseSerialized === baseSerialized);
       if (hintIndex >= 0) pendingLocalSnapshots.splice(hintIndex, 1);
@@ -756,6 +842,8 @@ export function createSurfaceCoordinator({
           // is accepted: the role changes before this returns. Queued saves from
           // the same generation are abandoned without ever reaching persistence,
           // and the newest of them becomes the version the creator is offered.
+          conflictGeneration = metadata.generation;
+          clearPendingGeneration(conflictGeneration);
           const latestLocal = invalidatePendingSaves();
           frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : payload;
           setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
@@ -771,6 +859,7 @@ export function createSurfaceCoordinator({
     /** Conflict recovery: abandon this surface's unsaved version. */
     async useLatest() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
+      clearPendingGeneration(conflictGeneration);
       let loaded;
       try {
         loaded = await host.loadVersioned();
@@ -788,6 +877,7 @@ export function createSurfaceCoordinator({
       lastSerialized = JSON.stringify(loaded.state);
       baselineReady = true;
       frozenSnapshot = null;
+      conflictGeneration = null;
       onHydrated(loaded.state, revision);
       setRole(SURFACE_ROLE.WRITER, { revision });
       return loaded;
@@ -802,6 +892,7 @@ export function createSurfaceCoordinator({
      */
     async keepMine() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
+      clearPendingGeneration(conflictGeneration);
       const loaded = await host.loadVersioned();
       const serialized = stripLocalViewFields(frozenSnapshot, JSON.stringify(loaded.state));
       const result = await host.saveChecked(serialized, loaded.revision);
@@ -809,6 +900,7 @@ export function createSurfaceCoordinator({
         revision = result.revision;
         lastSerialized = serialized;
         frozenSnapshot = null;
+        conflictGeneration = null;
         publish(serialized, revision);
         setRole(SURFACE_ROLE.WRITER, { revision });
         return { ok: true, revision };

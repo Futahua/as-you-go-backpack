@@ -86,6 +86,30 @@ test('commit reports failure when persistence resolves an explicit refusal', asy
   assert.match(statuses.at(-1), /STALE_REVISION/);
 });
 
+test('a failed follower acknowledgement invalidates dependent queued edits', async () => {
+  let state = { items: ['root'] };
+  let rejectAck;
+  const statuses = [];
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => ({
+      ok: true,
+      forwarded: true,
+      acknowledgement: new Promise((resolve) => { rejectAck = resolve; }),
+    }),
+    normalizeState: (s) => s,
+    setStatus: (text) => statuses.push(text),
+  });
+  const first = store.commit({ items: ['A'] }, {});
+  const second = store.commit({ items: ['A', 'B'] }, {});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  rejectAck({ ok: false, code: 'WRITER_ACK_TIMEOUT' });
+  assert.equal(await first, false);
+  assert.equal(await second, false, 'a dependent queued edit must not report success after its base fails');
+  assert.match(statuses.at(-1), /superseded|WRITER_ACK_TIMEOUT/);
+});
+
 test('replace installs without touching history or persisting', () => {
   const h = createHarness();
   const result = h.store.replace({ items: ['z'] });

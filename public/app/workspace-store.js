@@ -91,15 +91,16 @@ export function createWorkspaceStore({
         if (generation !== saveGeneration) return SUPERSEDED_SAVE;
         const queuedPending = queuedSaves
           .filter((candidate) => candidate !== entry && candidate.generation === generation)
-          .map((candidate) => ({ serialized: candidate.snapshot, baseSerialized: candidate.baseSerialized }));
+          .map((candidate) => ({ serialized: candidate.snapshot, baseSerialized: candidate.baseSerialized, generation: candidate.generation }));
         const persistMetadata = metadata && typeof metadata === 'object'
           ? {
             ...metadata,
+            generation,
             baseSerialized: metadata.baseSerialized ?? baseSerialized,
             pendingSnapshots: [...(metadata.pendingSnapshots ?? []), ...queuedPending],
           }
           : metadata === undefined
-            ? { baseSerialized, pendingSnapshots: queuedPending }
+            ? { generation, baseSerialized, pendingSnapshots: queuedPending }
             : metadata;
         let result = await persist(snapshot, persistMetadata);
         // A coordinated follower returns an optimistic envelope plus a
@@ -109,11 +110,22 @@ export function createWorkspaceStore({
         if (result?.acknowledgement && typeof result.acknowledgement.then === 'function') {
           const acknowledgement = await result.acknowledgement;
           if (!acknowledgement?.ok) {
+            // A follower ACK failure invalidates this whole dependent queue:
+            // later snapshots were based on the failed optimistic document and
+            // must not be reported successful while silently dropping it.
+            if (result?.forwarded && generation === saveGeneration) {
+              saveGeneration += 1;
+              latestQueuedSnapshot = null;
+            }
             throw new Error(acknowledgement?.code ?? 'Writer did not commit the mutation.');
           }
           result = { ...result, ...acknowledgement };
         }
         if (result?.ok === false) {
+          if (result?.forwarded && generation === saveGeneration) {
+            saveGeneration += 1;
+            latestQueuedSnapshot = null;
+          }
           throw new Error(result.code ?? 'The document was not committed.');
         }
         // Forwarded view saves are only optimistic; their committed broadcast
@@ -161,7 +173,8 @@ export function createWorkspaceStore({
     setState(final);
     afterCommit?.();
     return save(final)
-      .then(() => {
+      .then((result) => {
+        if (result?.superseded) throw new Error('The document save was superseded by a failed queued mutation.');
         setStatus?.('');
         return true;
       })

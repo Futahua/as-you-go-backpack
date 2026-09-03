@@ -294,6 +294,69 @@ test('a moved prompt does not resurrect after the other surface deletes it', () 
   assert.deepEqual(folders.flatMap((folder) => folder.children), []);
 });
 
+test('compatible moves of different prompts retain both ordering constraints', () => {
+  const base = { view: { promptLibrary: [
+    { id: 'root', type: 'folder', children: [
+      { id: 'a', type: 'prompt' }, { id: 'b', type: 'prompt' },
+      { id: 'c', type: 'prompt' }, { id: 'd', type: 'prompt' },
+    ] },
+  ] } };
+  const local = { view: { promptLibrary: [
+    { id: 'root', type: 'folder', children: [
+      { id: 'a', type: 'prompt' }, { id: 'c', type: 'prompt' },
+      { id: 'b', type: 'prompt' }, { id: 'd', type: 'prompt' },
+    ] },
+  ] } };
+  const current = { view: { promptLibrary: [
+    { id: 'root', type: 'folder', children: [
+      { id: 'd', type: 'prompt' }, { id: 'a', type: 'prompt' },
+      { id: 'b', type: 'prompt' }, { id: 'c', type: 'prompt' },
+    ] },
+  ] } };
+  const ids = mergeSurfaceSnapshots(base, local, current).view.promptLibrary[0].children.map((node) => node.id);
+  assert.deepEqual(ids, ['d', 'a', 'c', 'b']);
+});
+
+test('same-prompt move conflict uses the local lane as the deterministic winner', () => {
+  const base = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'base' }] },
+    { id: 'b', type: 'folder', children: [] },
+    { id: 'c', type: 'folder', children: [] },
+  ] } };
+  const local = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [] },
+    { id: 'b', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'local move' }] },
+    { id: 'c', type: 'folder', children: [] },
+  ] } };
+  const current = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [] },
+    { id: 'b', type: 'folder', children: [] },
+    { id: 'c', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'remote move' }] },
+  ] } };
+  const folders = mergeSurfaceSnapshots(base, local, current).view.promptLibrary;
+  assert.deepEqual(folders.map((folder) => folder.children.map((node) => node.id)), [[], ['p'], []]);
+});
+
+test('Use latest retires invalidated pending overlays before the next save', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [], shortcuts: [] });
+  const a = surface(lock, disk, 'A');
+  await a.coordinator.start();
+  const first = ser({ schemaVersion: 1, groups: [{ id: 'first' }], shortcuts: [] });
+  const pending = ser({ schemaVersion: 1, groups: [{ id: 'pending' }], shortcuts: [] });
+  // Advance the host behind the coordinator so its first write is refused.
+  await disk.saveChecked(ser({ schemaVersion: 1, groups: [{ id: 'remote' }], shortcuts: [] }), 'r0');
+  const refused = await a.coordinator.saveSerialized(first, {
+    generation: 7,
+    pendingSnapshots: [{ serialized: pending, baseSerialized: first, generation: 7 }],
+  });
+  assert.equal(refused.ok, false);
+  await a.coordinator.useLatest();
+  const next = ser({ schemaVersion: 1, groups: [{ id: 'remote' }, { id: 'next' }], shortcuts: [] });
+  await a.coordinator.saveSerialized(next, { generation: 8 });
+  assert.deepEqual(disk.state.groups.map((group) => group.id), ['remote', 'next']);
+});
+
 test('a multi-item delete removes every requested entity without index drift', () => {
   const base = { schemaVersion: 1, groups: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], shortcuts: [] };
   const local = { ...base, groups: [{ id: 'c' }] };
