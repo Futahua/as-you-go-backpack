@@ -349,9 +349,16 @@ export function webLockAdapter(navigatorRef) {
     available: Boolean(navigatorRef && navigatorRef.locks),
     request(name) {
       let release = () => {};
-      const held = new Promise((resolveHeld) => {
+      const held = new Promise((resolveHeld, rejectHeld) => {
         const parked = new Promise((resolveParked) => { release = resolveParked; });
-        navigatorRef.locks.request(name, () => { resolveHeld({ release }); return parked; });
+        let requestPromise;
+        try {
+          requestPromise = navigatorRef.locks.request(name, () => { resolveHeld({ release }); return parked; });
+        } catch (error) {
+          rejectHeld(error);
+          return;
+        }
+        Promise.resolve(requestPromise).catch(rejectHeld);
       });
       return held;
     },
@@ -413,6 +420,7 @@ export function createSurfaceCoordinator({
   let requestSequence = 0;
   const pendingRequests = new Map();
   const appliedRequests = new Map();
+  const inFlightRequests = new Set();
   const rememberApplied = (key, result) => {
     if (!key) return;
     appliedRequests.set(key, result);
@@ -464,13 +472,14 @@ export function createSurfaceCoordinator({
   /** Broadcast the exact bytes that were committed. Views decode these; a
    * second representation built alongside the save could differ from what is
    * actually on disk. */
-  function publish(serialized, atRevision) {
+  function publish(serialized, atRevision, requestId = null) {
     lastSerialized = serialized;
     channel.postMessage({
       type: SNAPSHOT_MESSAGE,
       clientId,
       revision: atRevision,
       serialized,
+      ...(requestId ? { requestId } : {}),
     });
   }
 
@@ -503,6 +512,10 @@ export function createSurfaceCoordinator({
     for (const [requestId, pending] of pendingRequests) {
       mutationQueue = mutationQueue.then(async () => {
         try {
+          if (pending.revision !== revision) {
+            pending.resolve({ ok: false, code: 'PROMOTION_REPLAY_AMBIGUOUS' });
+            return;
+          }
           const current = lastSerialized ? JSON.parse(lastSerialized) : loaded.state;
           const incoming = JSON.parse(pending.serialized);
           const base = pending.baseSerialized ? JSON.parse(pending.baseSerialized) : current;
@@ -601,7 +614,7 @@ export function createSurfaceCoordinator({
             resolve({ ok: false, code: 'WRITER_ACK_TIMEOUT' });
           }, 30000);
           timer.unref?.();
-          pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized });
+          pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision });
           });
         }
         const message = {
@@ -696,8 +709,8 @@ export function createSurfaceCoordinator({
      */
     async keepMine() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
-      const serialized = frozenSnapshot;
       const loaded = await host.loadVersioned();
+      const serialized = stripLocalViewFields(frozenSnapshot, JSON.stringify(loaded.state));
       const result = await host.saveChecked(serialized, loaded.revision);
       if (result && result.ok === true) {
         revision = result.revision;
@@ -719,6 +732,7 @@ export function createSurfaceCoordinator({
         if (role !== SURFACE_ROLE.WRITER || typeof message.serialized !== 'string') return false;
         const requestKey = typeof message.requestId === 'string'
           ? `${message.clientId}:${message.requestId}` : null;
+        if (requestKey && inFlightRequests.has(requestKey)) return true;
         const hasPrior = requestKey ? appliedRequests.has(requestKey) : false;
         const prior = requestKey ? appliedRequests.get(requestKey) : null;
         if (hasPrior) {
@@ -736,7 +750,7 @@ export function createSurfaceCoordinator({
         // Mark before queueing so duplicate delivery while this request is
         // still in flight cannot schedule a second durable save. The first
         // execution will emit the one correlated acknowledgement.
-        if (requestKey) rememberApplied(requestKey, null);
+        if (requestKey) inFlightRequests.add(requestKey);
         mutationQueue = mutationQueue
           .catch(() => undefined)
           .then(async () => {
@@ -772,6 +786,7 @@ export function createSurfaceCoordinator({
                 onHydrationFailed('mutation', 'remote-save-stale', revision ?? undefined);
                 if (requestKey) {
                   const failed = { ok: false, code: 'STALE_REVISION', revision };
+                  inFlightRequests.delete(requestKey);
                   rememberApplied(requestKey, failed);
                   channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...failed });
                 }
@@ -780,9 +795,10 @@ export function createSurfaceCoordinator({
               installExternalDocument(decoded);
               revision = result.revision;
               lastSerialized = serialized;
-              publish(serialized, revision);
+              publish(serialized, revision, message.requestId);
               if (requestKey) {
                 const committed = { ok: true, revision };
+                inFlightRequests.delete(requestKey);
                 rememberApplied(requestKey, committed);
                 channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...committed });
               }
@@ -790,6 +806,7 @@ export function createSurfaceCoordinator({
               onHydrationFailed('mutation', 'remote-save-failed', revision ?? undefined);
               if (requestKey) {
                 const failed = { ok: false, code: 'REMOTE_SAVE_FAILED', revision };
+                inFlightRequests.delete(requestKey);
                 rememberApplied(requestKey, failed);
                 channel.postMessage({ type: MUTATION_ACK_MESSAGE, clientId, ackClientId: message.clientId, requestId: message.requestId, ...failed });
               }
@@ -831,6 +848,14 @@ export function createSurfaceCoordinator({
       } catch {
         onHydrationFailed('install', 'model-install-failed', message.revision);
         return false;
+      }
+      if (typeof message.requestId === 'string') {
+        const pending = pendingRequests.get(message.requestId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingRequests.delete(message.requestId);
+          pending.resolve({ ok: true, revision: message.revision, via: 'committed-broadcast' });
+        }
       }
       revision = message.revision;
       lastSerialized = message.serialized;

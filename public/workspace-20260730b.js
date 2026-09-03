@@ -425,18 +425,10 @@ function restoreWorkspaceView() {
 
 function saveWorkspaceView() {
   if (detachSaveGate.isReadOnly()) return;
-  // 0B: a view's navigation is deliberately local and ephemeral. Checked
-  // explicitly here rather than inferred from replace()'s return value, so an
-  // ordinary view never reaches store.save at all -- `state.view` is a
-  // fallback for a fresh surface, not a channel between live ones.
-  if (!hasDocumentWriteAuthority()) return;
+  // Navigation, selection, expansion, trail expansion and Bin mode belong to
+  // the live surface. Update the in-memory fallback for this window only; no
+  // store save or coordinator mutation request is generated.
   state = store.replace(captureWorkspaceView());
-  void store.save(state).catch((error) => {
-    // 018X6: a delayed persistence error must not paint status over the
-    // handoff if read-only began before this catch ran.
-    if (detachSaveGate.isReadOnly()) return;
-    setStatus(error instanceof Error ? error.message : String(error));
-  });
 }
 
 /** 018A1/018X1 handoff flush: capture the current view into state and await the
@@ -5899,6 +5891,25 @@ if (WIDGET_SURFACE) {
         confirmLabel: 'Keep my version',
       }),
     });
+    const installPeerDocument = (document_) => {
+      // Peer generations carry shared document data, not this surface's live
+      // navigation/session. Overlay the local session and trail map before
+      // installing so an unrelated edit cannot move or collapse this window.
+      const localView = state.view ?? {};
+      const preserved = {
+        currentGroupId: session.currentId,
+        graphExpandedGroupIds: [...session.graphExpanded],
+        selectedItemIds: [...session.selected],
+        binMode: session.binMode,
+        trailExpandedByContext: localView.trailExpandedByContext,
+      };
+      const next = {
+        ...document_,
+        view: { ...(document_.view ?? {}), ...preserved },
+      };
+      state = store.installExternal(next);
+      render();
+    };
     surfaceCoordinator = createSurfaceCoordinator({
       lock: webLockAdapter(navigator),
       channel,
@@ -5912,7 +5923,7 @@ if (WIDGET_SURFACE) {
       // A peer commit is a new document generation. Drop this surface's local
       // snapshot undo chain rather than allowing Undo to resurrect stale work
       // from before the external install.
-      installExternalDocument: (document_) => { state = store.installExternal(document_); render(); },
+      installExternalDocument: installPeerDocument,
       onHydrated: (source, revision) => {
         if (hydrationSummaryDisagrees(source, state)) {
           visualObservability.hydrationFailed('normalize', 'nonempty-source-empty-model', revision);
