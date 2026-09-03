@@ -973,6 +973,111 @@ test('a delayed former-writer frame cannot regress a view after a cross-writer c
   assert.equal(b.coordinator.revision, 'r2');
 });
 
+test('overlapping parent validations keep the newest authority when the older read wins first', async () => {
+  const disk = fakeDisk();
+  const pendingLoads = [];
+  disk.loadVersioned = () => new Promise((resolve) => pendingLoads.push(resolve));
+  const b = surface(fakeLock(), disk, 'B');
+  const r1 = { schemaVersion: 1, groups: [{ id: 'r1' }], shortcuts: [] };
+  const r2 = { schemaVersion: 1, groups: [{ id: 'r2' }], shortcuts: [] };
+
+  b.coordinator.receive({
+    type: 'committed', clientId: 'A', revision: 'r1', parentRevision: 'r0', serialized: ser(r1),
+  });
+  b.coordinator.receive({
+    type: 'committed', clientId: 'C', revision: 'r2', parentRevision: 'r1', serialized: ser(r2),
+  });
+  assert.equal(pendingLoads.length, 2);
+
+  pendingLoads[0]({ state: r1, revision: 'r1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  pendingLoads[1]({ state: r2, revision: 'r2' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(b.installed.at(-1), r2);
+  assert.equal(b.coordinator.revision, 'r2');
+});
+
+test('unrelated validation failure preserves a settled follower conflict snapshot', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'durable' }], shortcuts: [] });
+  let loads = 0;
+  const originalLoad = disk.loadVersioned.bind(disk);
+  disk.loadVersioned = async () => {
+    loads += 1;
+    if (loads === 2 || loads === 3) throw new Error('validation unavailable');
+    return originalLoad();
+  };
+  const b = surface(fakeLock(), disk, 'B');
+  const mine = { schemaVersion: 1, groups: [{ id: 'mine' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(mine), { generation: 8 });
+  const request = b.channel.sent.at(-1);
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: false, code: 'REMOTE_MUTATION_FAILED', revision: disk.revision,
+  });
+  const outcome = await forwarded.acknowledgement;
+  assert.equal(outcome.ok, false);
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+  assert.equal(b.coordinator.frozen, ser(mine));
+
+  b.coordinator.receive({
+    type: 'committed', clientId: 'A', revision: 'r1', parentRevision: 'r0',
+    serialized: ser({ schemaVersion: 1, groups: [{ id: 'other' }], shortcuts: [] }),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+  assert.equal(b.coordinator.frozen, ser(mine));
+  const keep = await b.coordinator.keepMine();
+  assert.equal(keep.ok, true);
+  assert.deepEqual(disk.state, mine);
+});
+
+test('follower Keep my version restores Mine after a post-lock CAS race', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'durable' }], shortcuts: [] });
+  let loads = 0;
+  const originalLoad = disk.loadVersioned.bind(disk);
+  disk.loadVersioned = async () => {
+    loads += 1;
+    if (loads === 4) throw new Error('recovery unavailable');
+    return originalLoad();
+  };
+  const a = surface(lock, disk, 'A');
+  await a.coordinator.start();
+  const b = surface(lock, disk, 'B');
+  const mine = { schemaVersion: 1, groups: [{ id: 'mine' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(mine), { generation: 9 });
+  const request = b.channel.sent.at(-1);
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: false, code: 'REMOTE_MUTATION_FAILED', revision: disk.revision,
+  });
+  await forwarded.acknowledgement;
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+  assert.equal(b.coordinator.frozen, ser(mine));
+
+  const originalSave = disk.saveChecked.bind(disk);
+  let injected = false;
+  disk.saveChecked = async (serialized, expected) => {
+    if (!injected && JSON.parse(serialized).groups?.[0]?.id === 'mine') {
+      injected = true;
+      await originalSave(ser({ schemaVersion: 1, groups: [{ id: 'external' }], shortcuts: [] }), disk.revision);
+    }
+    return originalSave(serialized, expected);
+  };
+  const keepPromise = b.coordinator.keepMine();
+  await new Promise((resolve) => setImmediate(resolve));
+  a.coordinator.release();
+  const first = await keepPromise;
+  assert.deepEqual(first, { ok: false, code: 'STALE_REVISION' });
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+  assert.equal(b.coordinator.frozen, ser(mine));
+
+  const retry = await b.coordinator.keepMine();
+  assert.equal(retry.ok, true);
+  assert.deepEqual(disk.state, mine);
+});
+
 test('a save refused as stale freezes the surface and keeps the unsaved snapshot', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();

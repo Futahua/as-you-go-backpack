@@ -1240,6 +1240,7 @@ export function createSurfaceCoordinator({
     async keepMine() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
       if (hasUnresolvedCancellation()) return { ok: false, code: 'MUTATION_CANCELLATION_PENDING' };
+      const mineGeneration = conflictGeneration;
       clearPendingGeneration(conflictGeneration);
       if (conflictNeedsLock) {
         // Follower conflict recovery must acquire the same Web Lock before it
@@ -1272,6 +1273,12 @@ export function createSurfaceCoordinator({
           return { ok: true, revision };
         }
         conflictNeedsLock = !held;
+        // becomeWriter() clears conflict metadata while it hydrates the
+        // latest authority. If the checked replacement then loses a race,
+        // restore the creator's exact Mine snapshot so a retry cannot erase
+        // the only copy of their work.
+        frozenSnapshot = mine;
+        conflictGeneration = mineGeneration;
         setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
         return { ok: false, code: 'STALE_REVISION' };
       }
@@ -1479,7 +1486,9 @@ export function createSurfaceCoordinator({
       // cannot establish lineage. Validate the frame against host authority
       // and fence the asynchronous result against any newer install.
       if (typeof message.parentRevision === 'string') {
-        const validationEpoch = authoritativeEpoch;
+        // Invalidate every older validation as soon as a newer frame enters
+        // the pipeline, not only after that frame's asynchronous load wins.
+        const validationEpoch = ++authoritativeEpoch;
         void host.loadVersioned().then((loaded) => {
           if (authoritativeEpoch !== validationEpoch || !loaded) return;
           const pending = typeof message.requestId === 'string'
@@ -1512,6 +1521,10 @@ export function createSurfaceCoordinator({
           onHydrationFailed('recovery', 'committed-order-validation-failed', revision ?? undefined);
           const pending = typeof message.requestId === 'string'
             ? pendingRequests.get(message.requestId) : null;
+          // A settled follower conflict already owns the only protected
+          // creator snapshot. An unrelated validation failure must report
+          // the fault without replacing that frozen Mine version.
+          if (role === SURFACE_ROLE.CONFLICT && conflictNeedsLock && !pending) return;
           freezeAuthorityValidationFailure(pending);
         });
         return true;
