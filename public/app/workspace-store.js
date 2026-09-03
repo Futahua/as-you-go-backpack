@@ -35,6 +35,8 @@ export function createWorkspaceStore({
   let redoStack = [];
   let saveQueue = Promise.resolve();
   let lastPersistedSnapshot = null;
+  let lastQueuedSnapshot = null;
+  const queuedSaves = [];
   /**
    * 0B: persistence generation.
    *
@@ -76,6 +78,10 @@ export function createWorkspaceStore({
   function save(nextState = getState(), metadata) {
     const snapshot = JSON.stringify(nextState);
     const generation = saveGeneration;
+    const baseSerialized = lastQueuedSnapshot ?? lastPersistedSnapshot;
+    const entry = { snapshot, generation, baseSerialized };
+    queuedSaves.push(entry);
+    lastQueuedSnapshot = snapshot;
     latestQueuedSnapshot = snapshot;
     const operation = saveQueue
       .catch(() => undefined)
@@ -83,10 +89,17 @@ export function createWorkspaceStore({
         // Checked when the job actually runs, not when it was queued: the
         // generation may have been invalidated while it waited.
         if (generation !== saveGeneration) return SUPERSEDED_SAVE;
+        const queuedPending = queuedSaves
+          .filter((candidate) => candidate !== entry && candidate.generation === generation)
+          .map((candidate) => ({ serialized: candidate.snapshot, baseSerialized: candidate.baseSerialized }));
         const persistMetadata = metadata && typeof metadata === 'object'
-          ? { ...metadata, baseSerialized: metadata.baseSerialized ?? lastPersistedSnapshot }
+          ? {
+            ...metadata,
+            baseSerialized: metadata.baseSerialized ?? baseSerialized,
+            pendingSnapshots: [...(metadata.pendingSnapshots ?? []), ...queuedPending],
+          }
           : metadata === undefined
-            ? { baseSerialized: lastPersistedSnapshot }
+            ? { baseSerialized, pendingSnapshots: queuedPending }
             : metadata;
         let result = await persist(snapshot, persistMetadata);
         // A coordinated follower returns an optimistic envelope plus a
@@ -106,10 +119,20 @@ export function createWorkspaceStore({
         // Forwarded view saves are only optimistic; their committed broadcast
         // (installExternal) is the durable acknowledgement. A writer save is
         // authoritative and advances the store's queue base here.
-        if (!result?.forwarded && result?.ok !== false) lastPersistedSnapshot = snapshot;
+        if (!result?.forwarded && result?.ok !== false) {
+          lastPersistedSnapshot = typeof result?.serialized === 'string' ? result.serialized : snapshot;
+        }
         return result;
       });
-    saveQueue = operation;
+    const cleanup = () => {
+        const index = queuedSaves.indexOf(entry);
+        if (index >= 0) queuedSaves.splice(index, 1);
+        if (lastQueuedSnapshot === snapshot) lastQueuedSnapshot = queuedSaves.at(-1)?.snapshot ?? lastPersistedSnapshot;
+    };
+    // Keep the queue alive after a failed save, while returning the original
+    // operation directly so callers observe failure without an extra finally
+    // microtask delaying UI error reporting.
+    saveQueue = operation.then(cleanup, (error) => { cleanup(); return undefined; });
     return operation;
   }
 
@@ -189,19 +212,21 @@ export function createWorkspaceStore({
     setClipboard: (clipboard) => { session.clipboard = clipboard; },
     canUndo: () => undoStack.length > 0,
     canRedo: () => redoStack.length > 0,
-    install(nextState) {
+    install(nextState, metadata = {}) {
       setState(normalizeState(nextState));
-      lastPersistedSnapshot = JSON.stringify(getState());
+      lastPersistedSnapshot = typeof metadata.authoritativeSerialized === 'string'
+        ? metadata.authoritativeSerialized : JSON.stringify(getState());
       return getState();
     },
     /** Install a peer/host document generation and invalidate snapshot history
      * that was based on the previous generation. Session navigation remains
      * untouched, but Undo/Redo must not replay an obsolete whole-board image. */
-    installExternal(nextState) {
+    installExternal(nextState, metadata = {}) {
       undoStack = [];
       redoStack = [];
       setState(normalizeState(nextState));
-      lastPersistedSnapshot = JSON.stringify(getState());
+      lastPersistedSnapshot = typeof metadata.authoritativeSerialized === 'string'
+        ? metadata.authoritativeSerialized : JSON.stringify(getState());
       return getState();
     },
     replace(nextState) {

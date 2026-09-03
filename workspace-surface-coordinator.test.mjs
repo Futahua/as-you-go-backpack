@@ -251,6 +251,49 @@ test('prompt reorder and cross-folder move preserve concurrent prompt edits', ()
   assert.equal(reordered[1].text, 'edited');
 });
 
+test('prompt reorder and insertion retain both sides without index-based loss', () => {
+  const base = { view: { promptLibrary: [
+    { id: 'root', type: 'folder', children: [
+      { id: 'a', type: 'prompt', text: 'a' },
+      { id: 'b', type: 'prompt', text: 'b' },
+    ] },
+  ] } };
+  const local = { view: { promptLibrary: [
+    { id: 'root', type: 'folder', children: [
+      { id: 'b', type: 'prompt', text: 'b' },
+      { id: 'x', type: 'prompt', text: 'local insert' },
+      { id: 'a', type: 'prompt', text: 'a' },
+    ] },
+  ] } };
+  const current = { view: { promptLibrary: [
+    { id: 'root', type: 'folder', children: [
+      { id: 'a', type: 'prompt', text: 'edited elsewhere' },
+      { id: 'b', type: 'prompt', text: 'b' },
+      { id: 'y', type: 'prompt', text: 'remote insert' },
+    ] },
+  ] } };
+  const children = mergeSurfaceSnapshots(base, local, current).view.promptLibrary[0].children;
+  assert.deepEqual(children.map((node) => node.id), ['b', 'x', 'a', 'y']);
+  assert.equal(children.find((node) => node.id === 'a').text, 'edited elsewhere');
+});
+
+test('a moved prompt does not resurrect after the other surface deletes it', () => {
+  const base = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'keep?' }] },
+    { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const local = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [] },
+    { id: 'b', type: 'folder', children: [{ id: 'p', type: 'prompt', text: 'keep?' }] },
+  ] } };
+  const current = { view: { promptLibrary: [
+    { id: 'a', type: 'folder', children: [] },
+    { id: 'b', type: 'folder', children: [] },
+  ] } };
+  const folders = mergeSurfaceSnapshots(base, local, current).view.promptLibrary;
+  assert.deepEqual(folders.flatMap((folder) => folder.children), []);
+});
+
 test('a multi-item delete removes every requested entity without index drift', () => {
   const base = { schemaVersion: 1, groups: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], shortcuts: [] };
   const local = { ...base, groups: [{ id: 'c' }] };

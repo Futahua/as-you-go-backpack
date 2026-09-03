@@ -5891,7 +5891,7 @@ if (WIDGET_SURFACE) {
         confirmLabel: 'Keep my version',
       }),
     });
-    const installPeerDocument = (document_) => {
+    const installPeerDocument = (document_, authoritativeSerialized) => {
       // Peer generations carry shared document data, not this surface's live
       // navigation/session. Overlay the local session and trail map before
       // installing so an unrelated edit cannot move or collapse this window.
@@ -5907,7 +5907,7 @@ if (WIDGET_SURFACE) {
         ...document_,
         view: { ...(document_.view ?? {}), ...preserved },
       };
-      state = store.installExternal(next);
+      state = store.installExternal(next, { authoritativeSerialized });
       render();
     };
     surfaceCoordinator = createSurfaceCoordinator({
@@ -5919,7 +5919,10 @@ if (WIDGET_SURFACE) {
       },
       // Installs the document only. This surface's navigation is deliberately
       // preserved, so two windows keep showing different places.
-      installDocument: (document_) => { state = store.install(document_); render(); },
+      installDocument: (document_, authoritativeSerialized) => {
+        state = store.install(document_, { authoritativeSerialized });
+        render();
+      },
       // A peer commit is a new document generation. Drop this surface's local
       // snapshot undo chain rather than allowing Undo to resurrect stale work
       // from before the external install.

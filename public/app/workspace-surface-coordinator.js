@@ -98,10 +98,12 @@ function mergePromptTree(baseValue, localValue, currentValue, global = null) {
   const currentById = new Map(current.map((node) => [node?.id, node]));
   const mergeNode = (baseNode, localNode, currentNode) => {
     if (!localNode) return null;
+    if (baseNode && !currentNode && !currentGlobal.has(baseNode.id)) return null;
     if (!baseNode) {
       const historicalBase = baseGlobal.get(localNode.id);
       const historicalCurrent = currentGlobal.get(localNode.id);
       if (historicalBase && historicalCurrent) return mergeNode(historicalBase, localNode, historicalCurrent);
+      if (historicalBase && !historicalCurrent) return null;
       return historicalCurrent ?? localNode;
     }
     if (sameJson(localNode, baseNode)) return currentNode ?? localNode;
@@ -123,14 +125,22 @@ function mergePromptTree(baseValue, localValue, currentValue, global = null) {
   const result = [];
   for (const currentNode of current) {
     const id = currentNode?.id;
-    if (!localById.has(id) && (baseById.has(id) || localGlobal.has(id))) continue;
+    if (!localById.has(id)) {
+      // A node created only by the current writer must survive a concurrent
+      // reorder/insert. Nodes that the local snapshot moved away or deleted
+      // are handled from their destination/source collection instead.
+      if (baseById.has(id) || localGlobal.has(id)) continue;
+      result.push(currentNode);
+      continue;
+    }
     const merged = mergeNode(baseById.get(id), localById.get(id), currentNode);
     if (merged) result.push(merged);
   }
   for (const localNode of local) {
     const id = localNode?.id;
     if (id == null || currentById.has(id) || baseById.has(id)) continue;
-    result.push(mergeNode(baseGlobal.get(id), localNode, currentGlobal.get(id)) ?? localNode);
+    const mergedLocal = mergeNode(baseGlobal.get(id), localNode, currentGlobal.get(id));
+    if (mergedLocal) result.push(mergedLocal);
   }
   // If this sibling collection is only reordered (the same stable IDs remain
   // on both sides), keep the local order while retaining merged node content.
@@ -140,11 +150,14 @@ function mergePromptTree(baseValue, localValue, currentValue, global = null) {
   const resultIds = result.map((node) => node?.id);
   const localIds = local.map((node) => node?.id);
   const baseIds = base.map((node) => node?.id);
-  if (localIds.length === resultIds.length
-    && localIds.every((id) => resultById.has(id))
-    && localIds.length === baseIds.length
-    && localIds.some((id, index) => id !== baseIds[index])) {
-    return localIds.map((id) => resultById.get(id));
+  const localCommonOrder = localIds.filter((id) => baseIds.includes(id));
+  const baseCommonOrder = baseIds.filter((id) => localIds.includes(id));
+  const localStructureChanged = localIds.length !== baseIds.length
+    || localCommonOrder.some((id, index) => id !== baseCommonOrder[index]);
+  if (localStructureChanged) {
+    const localOrder = localIds.filter((id) => resultById.has(id));
+    const currentOnly = resultIds.filter((id) => !localById.has(id));
+    return [...localOrder, ...currentOnly].map((id) => resultById.get(id));
   }
   return result;
 }
@@ -476,7 +489,16 @@ export function createSurfaceCoordinator({
   }
   function installExternalPreservingPending(decoded) {
     const preserved = JSON.parse(overlayPendingSnapshots(JSON.stringify(decoded)));
-    installExternalDocument(preserved);
+    installExternalDocument(preserved, JSON.stringify(decoded));
+  }
+  function registerQueuedHints(metadata) {
+    for (const hint of Array.isArray(metadata?.pendingSnapshots) ? metadata.pendingSnapshots : []) {
+      if (typeof hint?.serialized !== 'string') continue;
+      if (!pendingLocalSnapshots.some((pending) => pending.serialized === hint.serialized
+        && pending.baseSerialized === hint.baseSerialized)) {
+        pendingLocalSnapshots.push({ ...hint, queuedHint: true });
+      }
+    }
   }
 
   function setRole(next, detail = {}) {
@@ -547,7 +569,7 @@ export function createSurfaceCoordinator({
     // is read BEFORE this surface is allowed to write. Never inherit a
     // revision observed before waiting.
     try {
-      installExternalDocument(loaded.state);
+      installExternalPreservingPending(loaded.state);
     } catch (error) {
       onHydrationFailed('install', 'model-install-failed', loaded.revision);
       throw error;
@@ -644,6 +666,7 @@ export function createSurfaceCoordinator({
      * race to resolve.
      */
     async saveSerialized(serialized, metadata = {}) {
+      registerQueuedHints(metadata);
       if (role === SURFACE_ROLE.VIEW) {
         // Views may edit optimistically. The elected writer serializes their
         // request and broadcasts the committed result back to every surface.
@@ -661,6 +684,9 @@ export function createSurfaceCoordinator({
         if (requestId) {
           acknowledgement = new Promise((resolve) => {
           const localPending = { serialized, baseSerialized };
+          const hintIndex = pendingLocalSnapshots.findIndex((pending) => pending.queuedHint
+            && pending.serialized === serialized && pending.baseSerialized === baseSerialized);
+          if (hintIndex >= 0) pendingLocalSnapshots.splice(hintIndex, 1);
           pendingLocalSnapshots.push(localPending);
           const timer = setTimeout(() => {
             if (!pendingRequests.delete(requestId)) return;
@@ -697,6 +723,9 @@ export function createSurfaceCoordinator({
         return { ok: true, revision, unchanged: true };
       }
       const localPending = { serialized, baseSerialized };
+      const hintIndex = pendingLocalSnapshots.findIndex((pending) => pending.queuedHint
+        && pending.serialized === serialized && pending.baseSerialized === baseSerialized);
+      if (hintIndex >= 0) pendingLocalSnapshots.splice(hintIndex, 1);
       pendingLocalSnapshots.push(localPending);
       mutationQueue = mutationQueue
         .catch(() => undefined)
@@ -719,9 +748,9 @@ export function createSurfaceCoordinator({
             lastSerialized = payload;
             const pendingIndex = pendingLocalSnapshots.indexOf(localPending);
             if (pendingIndex >= 0) pendingLocalSnapshots.splice(pendingIndex, 1);
-            try { installDocument(JSON.parse(overlayPendingSnapshots(payload))); } catch { /* host bytes are already committed */ }
+            try { installDocument(JSON.parse(overlayPendingSnapshots(payload)), payload); } catch { /* host bytes are already committed */ }
             publish(payload, revision);
-            return { ok: true, revision };
+            return { ok: true, revision, serialized: payload };
           }
           // Fail closed, synchronously enough that no further durable mutation
           // is accepted: the role changes before this returns. Queued saves from
