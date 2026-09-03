@@ -236,6 +236,50 @@ test('a late correlated commit wins over ACK-timeout recovery', async () => {
   assert.equal(b.coordinator.revision, 'r1');
 });
 
+test('retiring a failed generation removes dependent optimistic overlays', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'durable' }], shortcuts: [] });
+  const b = surface(lock, disk, 'B');
+  const r1 = await b.coordinator.saveSerialized(ser({ schemaVersion: 1, groups: [{ id: 'r1' }], shortcuts: [] }), { generation: 7, sequence: 1 });
+  const r2Local = ser({ schemaVersion: 1, groups: [{ id: 'r1' }, { id: 'r2' }], shortcuts: [] });
+  const r2 = await b.coordinator.saveSerialized(r2Local, { generation: 7, sequence: 2 });
+  const request1 = b.channel.sent.at(-2);
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request1.requestId,
+    ok: false, code: 'REMOTE_MUTATION_FAILED', revision: disk.revision,
+  });
+  await r1.acknowledgement;
+  // This is the store's synchronous onSaveGenerationInvalidated callback.
+  b.coordinator.retirePendingGeneration(7, r2Local);
+  assert.deepEqual(b.installed.at(-1), disk.state);
+});
+
+test('follower recovery conflict cannot promote itself through Use latest', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'durable' }], shortcuts: [] });
+  const originalLoad = disk.loadVersioned.bind(disk);
+  let loads = 0;
+  disk.loadVersioned = async () => {
+    loads += 1;
+    if (loads === 4) throw new Error('recovery unavailable');
+    return originalLoad();
+  };
+  const a = surface(lock, disk, 'A');
+  await a.coordinator.start();
+  const b = surface(lock, disk, 'B');
+  const forwarded = await b.coordinator.saveSerialized(ser({ schemaVersion: 1, groups: [{ id: 'lost' }], shortcuts: [] }), { generation: 3 });
+  const request = b.channel.sent.at(-1);
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: false, code: 'REMOTE_MUTATION_FAILED', revision: disk.revision,
+  });
+  await forwarded.acknowledgement;
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+  await b.coordinator.useLatest();
+  assert.equal(b.coordinator.role, SURFACE_ROLE.VIEW);
+  assert.equal(a.coordinator.role, SURFACE_ROLE.WRITER);
+});
+
 test('stale action snapshots merge entities while the incoming position wins', () => {
   const base = {
     schemaVersion: 1,

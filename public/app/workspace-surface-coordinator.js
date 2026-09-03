@@ -563,6 +563,7 @@ export function createSurfaceCoordinator({
   let baselineReady = false;
   let baselinePromise = null;
   let conflictGeneration = null;
+  let conflictNeedsLock = false;
   let recoveryPromise = null;
   let authoritativeEpoch = 0;
   // BroadcastChannel can deliver mutations from several views back-to-back.
@@ -573,6 +574,7 @@ export function createSurfaceCoordinator({
   const ackEnabled = typeof channel?.addEventListener === 'function';
   let requestSequence = 0;
   const pendingRequests = new Map();
+  const generationsNeedingRestore = new Set();
   const pendingLocalSnapshots = [];
   const appliedRequests = new Map();
   const inFlightRequests = new Set();
@@ -636,6 +638,27 @@ export function createSurfaceCoordinator({
     removePendingOverlay(pending.localPending);
     pending.resolve(outcome);
     return true;
+  }
+  function markForwardFailure(pending) {
+    if (pending?.generation != null) generationsNeedingRestore.add(pending.generation);
+  }
+  function freezeFollowerFailure(pending) {
+    frozenSnapshot = pending?.serialized ?? frozenSnapshot;
+    conflictGeneration = pending?.generation ?? null;
+    conflictNeedsLock = true;
+    setRole(SURFACE_ROLE.CONFLICT, { revision });
+  }
+  function settleFailedForward(requestId, pending, outcome, recovery) {
+    const finish = () => {
+      if (!pendingRequests.has(requestId) || pending.settled) return;
+      if (!recovery.ok) freezeFollowerFailure(pending);
+      markForwardFailure(pending);
+      settlePendingRequest(requestId, pending, outcome);
+    };
+    // Promotion replay and timeout recovery share one terminal transaction:
+    // never report failure while a replay that may commit is still queued.
+    if (pending.replayPromise) void pending.replayPromise.then(finish, finish);
+    else finish();
   }
   function retireQueuedHint(sequence, serialized, baseSerialized) {
     for (let index = pendingLocalSnapshots.length - 1; index >= 0; index -= 1) {
@@ -772,10 +795,13 @@ export function createSurfaceCoordinator({
     // freshly hydrated authoritative base instead of silently discarding the
     // optimistic work on the promotion install.
     for (const [requestId, pending] of pendingRequests) {
-      mutationQueue = mutationQueue.then(async () => {
+      const replayTask = mutationQueue.then(async () => {
         try {
+          if (!pendingRequests.has(requestId) || pending.settled) return;
           if (pending.revision !== revision) {
-            settlePendingRequest(requestId, pending, { ok: false, code: 'PROMOTION_REPLAY_AMBIGUOUS' });
+            const outcome = { ok: false, code: 'PROMOTION_REPLAY_AMBIGUOUS' };
+            markForwardFailure(pending);
+            settlePendingRequest(requestId, pending, outcome);
             return;
           }
           const current = lastSerialized ? JSON.parse(lastSerialized) : loaded.state;
@@ -788,10 +814,9 @@ export function createSurfaceCoordinator({
             const outcome = { ok: false, code: 'PROMOTION_REPLAY_REFUSED' };
             const recovery = await reloadAuthoritativeAfterFailedMutation(outcome.code);
             if (!recovery.ok && pendingRequests.has(requestId)) {
-              frozenSnapshot = pending.serialized;
-              conflictGeneration = pending.generation ?? null;
-              setRole(SURFACE_ROLE.CONFLICT, { revision });
+              freezeFollowerFailure(pending);
             }
+            markForwardFailure(pending);
             settlePendingRequest(requestId, pending, outcome);
             return;
           }
@@ -807,15 +832,16 @@ export function createSurfaceCoordinator({
           const outcome = { ok: false, code: 'PROMOTION_REPLAY_FAILED' };
           const recovery = await reloadAuthoritativeAfterFailedMutation(outcome.code);
           if (!recovery.ok && pendingRequests.has(requestId)) {
-            frozenSnapshot = pending.serialized;
-            conflictGeneration = pending.generation ?? null;
-            setRole(SURFACE_ROLE.CONFLICT, { revision });
+            freezeFollowerFailure(pending);
           }
+          markForwardFailure(pending);
           settlePendingRequest(requestId, pending, outcome);
         } finally {
           removePendingOverlay(pending.localPending);
         }
       });
+      pending.replayPromise = replayTask;
+      mutationQueue = replayTask;
     }
     return loaded;
   }
@@ -827,7 +853,22 @@ export function createSurfaceCoordinator({
     get baselineReady() { return baselineReady; },
     get frozen() { return frozenSnapshot; },
     get transferSuspended() { return transferSuspended; },
-    retirePendingGeneration(generation) { clearPendingGeneration(generation); },
+    retirePendingGeneration(generation, latestLocal = null) {
+      clearPendingGeneration(generation);
+      if (!generationsNeedingRestore.delete(generation) || !lastSerialized) return;
+      // Store invalidation retires queued dependent overlays after the failed
+      // request settles. Reinstall the exact authoritative bytes so R2 cannot
+      // remain painted after it has been superseded.
+      try {
+        installExternalDocument(JSON.parse(lastSerialized), lastSerialized);
+      } catch {
+        onHydrationFailed('recovery', 'model-install-failed', revision ?? undefined);
+      }
+      // A follower conflict must offer the newest queued generation if the
+      // authoritative reload itself failed; the store supplies it before
+      // removing the queue entries.
+      if (conflictNeedsLock && typeof latestLocal === 'string') frozenSnapshot = latestLocal;
+    },
 
     /**
      * Queue for write ownership. Resolves when this surface becomes the
@@ -902,15 +943,8 @@ export function createSurfaceCoordinator({
             pending.timedOut = true;
             removePendingOverlay(localPending);
             onHydrationFailed('mutation', 'writer-ack-timeout', revision ?? undefined);
-            void reloadAuthoritativeAfterFailedMutation('writer-ack-timeout').then((recovery) => {
-              if (!pendingRequests.has(requestId) || pending.settled) return;
-              if (!recovery.ok) {
-                frozenSnapshot = pending.serialized;
-                conflictGeneration = pending.generation ?? null;
-                setRole(SURFACE_ROLE.CONFLICT, { revision });
-              }
-              settlePendingRequest(requestId, pending, { ok: false, code: 'WRITER_ACK_TIMEOUT' });
-            });
+            void reloadAuthoritativeAfterFailedMutation('writer-ack-timeout')
+              .then((recovery) => settleFailedForward(requestId, pending, { ok: false, code: 'WRITER_ACK_TIMEOUT' }, recovery));
           }, ackTimeoutMs);
           timer.unref?.();
           pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision, localPending, generation: metadata.generation });
@@ -995,6 +1029,7 @@ export function createSurfaceCoordinator({
     async useLatest() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
       clearPendingGeneration(conflictGeneration);
+      const startedEpoch = authoritativeEpoch;
       let loaded;
       try {
         loaded = await host.loadVersioned();
@@ -1002,11 +1037,16 @@ export function createSurfaceCoordinator({
         onHydrationFailed('load', 'versioned-load-failed');
         throw error;
       }
-      try {
-        installExternalDocument(loaded.state);
-      } catch (error) {
-        onHydrationFailed('install', 'model-install-failed', loaded.revision);
-        throw error;
+      let shouldInstall = true;
+      if (conflictNeedsLock && authoritativeEpoch !== startedEpoch && lastSerialized) {
+        loaded = { state: JSON.parse(lastSerialized), revision };
+        shouldInstall = false;
+      }
+      if (shouldInstall) {
+        try { installExternalDocument(loaded.state); } catch (error) {
+          onHydrationFailed('install', 'model-install-failed', loaded.revision);
+          throw error;
+        }
       }
       revision = loaded.revision;
       lastSerialized = JSON.stringify(loaded.state);
@@ -1015,7 +1055,15 @@ export function createSurfaceCoordinator({
       frozenSnapshot = null;
       conflictGeneration = null;
       onHydrated(loaded.state, revision);
-      setRole(SURFACE_ROLE.WRITER, { revision });
+      if (conflictNeedsLock) {
+        // A follower that failed recovery never held the Web Lock. Use latest
+        // is therefore a view recovery and must not manufacture write
+        // authority while the existing writer remains active.
+        conflictNeedsLock = false;
+        setRole(SURFACE_ROLE.VIEW, { revision });
+      } else {
+        setRole(SURFACE_ROLE.WRITER, { revision });
+      }
       return loaded;
     },
 
@@ -1029,6 +1077,38 @@ export function createSurfaceCoordinator({
     async keepMine() {
       if (role !== SURFACE_ROLE.CONFLICT) throw new Error('There is no conflict to resolve.');
       clearPendingGeneration(conflictGeneration);
+      if (conflictNeedsLock) {
+        // Follower conflict recovery must acquire the same Web Lock before it
+        // can perform the destructive Keep my version CAS. A successful CAS
+        // alone does not grant write authority.
+        const mine = frozenSnapshot;
+        if (typeof mine !== 'string') return { ok: false, code: 'NO_FROZEN_SNAPSHOT' };
+        try {
+          await ensureBaseline();
+          held = await lock.request(SURFACE_DOCUMENT_LOCK);
+          await becomeWriter();
+        } catch {
+          held?.release?.();
+          held = null;
+          return { ok: false, code: 'WRITER_LOCK_UNAVAILABLE' };
+        }
+        if (role !== SURFACE_ROLE.WRITER) return { ok: false, code: 'WRITER_LOCK_UNAVAILABLE' };
+        conflictNeedsLock = false;
+        const serialized = stripLocalViewFields(mine, lastSerialized);
+        const result = await host.saveChecked(serialized, revision);
+        if (result && result.ok === true) {
+          revision = result.revision;
+          lastSerialized = serialized;
+          authoritativeEpoch += 1;
+          frozenSnapshot = null;
+          conflictGeneration = null;
+          publish(serialized, revision);
+          return { ok: true, revision };
+        }
+        conflictNeedsLock = true;
+        setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
+        return { ok: false, code: 'STALE_REVISION' };
+      }
       const loaded = await host.loadVersioned();
       const serialized = stripLocalViewFields(frozenSnapshot, JSON.stringify(loaded.state));
       const result = await host.saveChecked(serialized, loaded.revision);
@@ -1150,20 +1230,13 @@ export function createSurfaceCoordinator({
         if (outcome.ok) settlePendingRequest(message.requestId, pending, outcome);
         else {
           removePendingOverlay(pending.localPending);
-          void reloadAuthoritativeAfterFailedMutation(outcome.code).then((recovery) => {
-            if (!pendingRequests.has(message.requestId) || pending.settled) return;
-            if (!recovery.ok) {
-              frozenSnapshot = pending.serialized;
-              conflictGeneration = pending.generation ?? null;
-              setRole(SURFACE_ROLE.CONFLICT, { revision });
-            }
-            settlePendingRequest(message.requestId, pending, outcome);
-          });
+          void reloadAuthoritativeAfterFailedMutation(outcome.code)
+            .then((recovery) => settleFailedForward(message.requestId, pending, outcome, recovery));
         }
         return true;
       }
       if (message.type !== SNAPSHOT_MESSAGE) return false;
-      if (role !== SURFACE_ROLE.VIEW) return false;
+      if (role !== SURFACE_ROLE.VIEW && !(role === SURFACE_ROLE.CONFLICT && conflictNeedsLock)) return false;
       if (typeof message.revision !== 'string' || typeof message.serialized !== 'string') return false;
       let decoded;
       try {

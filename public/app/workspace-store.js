@@ -40,7 +40,9 @@ export function createWorkspaceStore({
   const queuedSaves = [];
   let saveSequence = 0;
   function invalidateGeneration(generation) {
-    onSaveGenerationInvalidated(generation);
+    // Let coordination preserve the newest dependent local generation (R1 +
+    // queued R2) before queue cleanup discards its entries.
+    onSaveGenerationInvalidated(generation, latestQueuedSnapshot);
     for (let index = queuedSaves.length - 1; index >= 0; index -= 1) {
       if (queuedSaves[index].generation === generation) queuedSaves.splice(index, 1);
     }
