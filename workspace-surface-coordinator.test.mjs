@@ -998,6 +998,109 @@ test('overlapping parent validations keep the newest authority when the older re
   assert.equal(b.coordinator.revision, 'r2');
 });
 
+test('Use latest keeps the host result when a parent validation is still pending', async () => {
+  const lock = fakeLock();
+  const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'durable' }], shortcuts: [] });
+  let loads = 0;
+  const originalLoad = disk.loadVersioned.bind(disk);
+  disk.loadVersioned = async () => {
+    loads += 1;
+    if (loads === 4) throw new Error('recovery unavailable');
+    return originalLoad();
+  };
+  const a = surface(lock, disk, 'A');
+  await a.coordinator.start();
+  const b = surface(lock, disk, 'B');
+  const mine = { schemaVersion: 1, groups: [{ id: 'mine' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(mine));
+  const request = b.channel.sent.at(-1);
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: false, code: 'REMOTE_MUTATION_FAILED', revision: disk.revision,
+  });
+  await forwarded.acknowledgement;
+  assert.equal(b.coordinator.role, SURFACE_ROLE.CONFLICT);
+
+  const pendingLoads = [];
+  disk.loadVersioned = () => new Promise((resolve) => pendingLoads.push(resolve));
+  const newest = { schemaVersion: 1, groups: [{ id: 'newest' }], shortcuts: [] };
+  const useLatest = b.coordinator.useLatest();
+  await new Promise((resolve) => setImmediate(resolve));
+  b.coordinator.receive({
+    type: 'committed', clientId: 'A', revision: 'r2', parentRevision: 'r1',
+    serialized: ser(newest),
+  });
+  assert.equal(pendingLoads.length, 2);
+  pendingLoads[0]({ state: newest, revision: 'r2' });
+  await useLatest;
+  pendingLoads[1]({ state: newest, revision: 'r2' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(b.coordinator.role, SURFACE_ROLE.VIEW);
+  assert.equal(b.coordinator.revision, 'r2');
+  assert.deepEqual(b.installed.at(-1), newest);
+});
+
+test('timeout recovery proves durable intent while parent validation is pending', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [], shortcuts: [] });
+  let loads = 0;
+  const pendingLoads = [];
+  const initialLoad = disk.loadVersioned.bind(disk);
+  disk.loadVersioned = () => {
+    loads += 1;
+    if (loads === 1) return initialLoad();
+    return new Promise((resolve) => pendingLoads.push(resolve));
+  };
+  const b = surface(fakeLock(), disk, 'B', { ackTimeoutMs: 5 });
+  const committed = { schemaVersion: 1, groups: [{ id: 'committed' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(committed), { generation: 10 });
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(pendingLoads.length, 1, 'timeout recovery load is held');
+  b.coordinator.receive({
+    type: 'committed', clientId: 'A', revision: 'r1', parentRevision: 'r0',
+    serialized: ser(committed), requestId: b.channel.sent.find((m) => m.type === 'mutation-request').requestId,
+  });
+  assert.equal(pendingLoads.length, 2, 'parent validation load is held');
+  pendingLoads[0]({ state: committed, revision: 'r1' });
+  const outcome = await forwarded.acknowledgement;
+  assert.equal(outcome.ok, true);
+  pendingLoads[1]({ state: committed, revision: 'r1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(b.coordinator.revision, 'r1');
+});
+
+test('success proof remains authoritative while a parent validation is pending', async () => {
+  const disk = fakeDisk({ schemaVersion: 1, groups: [], shortcuts: [] });
+  let loads = 0;
+  const pendingLoads = [];
+  const initialLoad = disk.loadVersioned.bind(disk);
+  disk.loadVersioned = () => {
+    loads += 1;
+    if (loads === 1) return initialLoad();
+    return new Promise((resolve) => pendingLoads.push(resolve));
+  };
+  const b = surface(fakeLock(), disk, 'B');
+  const committed = { schemaVersion: 1, groups: [{ id: 'committed' }], shortcuts: [] };
+  const forwarded = await b.coordinator.saveSerialized(ser(committed));
+  const request = b.channel.sent.at(-1);
+  b.coordinator.receive({
+    type: 'mutation-ack', clientId: 'A', ackClientId: 'B', requestId: request.requestId,
+    ok: true, revision: 'r1',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pendingLoads.length, 1, 'success proof load is held');
+  b.coordinator.receive({
+    type: 'committed', clientId: 'C', revision: 'r2', parentRevision: 'r1', serialized: ser(committed),
+  });
+  assert.equal(pendingLoads.length, 2, 'parent validation load is held');
+  pendingLoads[0]({ state: committed, revision: 'r1' });
+  const outcome = await forwarded.acknowledgement;
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.revision, 'r1');
+  pendingLoads[1]({ state: committed, revision: 'r1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(b.coordinator.revision, 'r1');
+});
+
 test('unrelated validation failure preserves a settled follower conflict snapshot', async () => {
   const disk = fakeDisk({ schemaVersion: 1, groups: [{ id: 'durable' }], shortcuts: [] });
   let loads = 0;

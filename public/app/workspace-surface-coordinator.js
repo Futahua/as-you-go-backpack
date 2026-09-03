@@ -569,6 +569,11 @@ export function createSurfaceCoordinator({
   let conflictGeneration = null;
   let conflictNeedsLock = false;
   let recoveryPromise = null;
+  // Validation sequencing is deliberately separate from authoritative
+  // installation sequencing. Merely receiving a parent-aware frame starts a
+  // validation read, but must not look like a newer authority to recovery or
+  // conflict-resolution code that is already reading the host.
+  let validationSequence = 0;
   let authoritativeEpoch = 0;
   // BroadcastChannel can deliver mutations from several views back-to-back.
   // Serialize them at the elected writer so each request rebases on the
@@ -1488,15 +1493,17 @@ export function createSurfaceCoordinator({
       if (typeof message.parentRevision === 'string') {
         // Invalidate every older validation as soon as a newer frame enters
         // the pipeline, not only after that frame's asynchronous load wins.
-        const validationEpoch = ++authoritativeEpoch;
+        const validationEpoch = ++validationSequence;
+        const authorityEpoch = authoritativeEpoch;
         void host.loadVersioned().then((loaded) => {
-          if (authoritativeEpoch !== validationEpoch || !loaded) return;
+          if (validationSequence !== validationEpoch || authoritativeEpoch !== authorityEpoch || !loaded) return;
           const pending = typeof message.requestId === 'string'
             ? pendingRequests.get(message.requestId) : null;
           if (loaded.revision !== message.revision && loaded.revision === revision) return;
           try { installExternalPreservingPending(loaded.state); } catch {
             onHydrationFailed('install', 'model-install-failed', loaded.revision);
-            if (authoritativeEpoch === validationEpoch && (role === SURFACE_ROLE.VIEW || pending)) {
+            if (validationSequence === validationEpoch && authoritativeEpoch === authorityEpoch
+              && (role === SURFACE_ROLE.VIEW || pending)) {
               freezeAuthorityValidationFailure(pending);
             }
             return;
@@ -1517,7 +1524,8 @@ export function createSurfaceCoordinator({
             }
           }
         }).catch(() => {
-          if (authoritativeEpoch !== validationEpoch || (role !== SURFACE_ROLE.VIEW && role !== SURFACE_ROLE.CONFLICT)) return;
+          if (validationSequence !== validationEpoch || authoritativeEpoch !== authorityEpoch
+            || (role !== SURFACE_ROLE.VIEW && role !== SURFACE_ROLE.CONFLICT)) return;
           onHydrationFailed('recovery', 'committed-order-validation-failed', revision ?? undefined);
           const pending = typeof message.requestId === 'string'
             ? pendingRequests.get(message.requestId) : null;
