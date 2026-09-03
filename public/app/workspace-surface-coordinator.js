@@ -46,6 +46,35 @@ function sameJson(a, b) {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
 }
 
+function mergeChangedMap(baseValue, localValue, currentValue) {
+  const base = isPlainObject(baseValue) ? baseValue : {};
+  const local = isPlainObject(localValue) ? localValue : {};
+  const result = isPlainObject(currentValue) ? { ...currentValue } : {};
+  const keys = new Set([...Object.keys(base), ...Object.keys(local)]);
+  for (const key of keys) {
+    const baseHas = Object.prototype.hasOwnProperty.call(base, key);
+    const localHas = Object.prototype.hasOwnProperty.call(local, key);
+    if (!baseHas && localHas) result[key] = local[key];
+    else if (baseHas && !localHas) delete result[key];
+    else if (localHas && !sameJson(local[key], base[key])) result[key] = local[key];
+  }
+  return result;
+}
+
+function mergePositionMap(baseValue, localValue, currentValue, nested) {
+  if (!nested) return mergeChangedMap(baseValue, localValue, currentValue);
+  const base = isPlainObject(baseValue) ? baseValue : {};
+  const local = isPlainObject(localValue) ? localValue : {};
+  const current = isPlainObject(currentValue) ? currentValue : {};
+  const result = {};
+  const contexts = new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(current)]);
+  for (const context of contexts) {
+    const merged = mergeChangedMap(base[context], local[context], current[context]);
+    if (Object.keys(merged).length > 0) result[context] = merged;
+  }
+  return result;
+}
+
 /** Merge a view's action snapshot onto the writer's current snapshot. Entity
  * collections are merged by stable id so two windows cannot erase unrelated
  * edits. View/position maps intentionally use last-writer-wins: a later drag
@@ -82,7 +111,34 @@ export function mergeSurfaceSnapshots(base, local, current) {
   const view = { ...currentView };
   for (const [key, value] of Object.entries(localView)) {
     if (key === 'graphPositions' || key === 'graphRestPositions' || key === 'toolbarPositions') {
-      if (!sameJson(value, baseView[key])) view[key] = value;
+      if (!sameJson(value, baseView[key])) {
+        view[key] = mergePositionMap(
+          baseView[key],
+          value,
+          currentView[key],
+          key !== 'toolbarPositions',
+        );
+      }
+    } else if (key === 'itemSets' && Array.isArray(value) && Array.isArray(currentView[key])) {
+      // Sets are document semantics stored under view; merge independent set
+      // IDs instead of replacing the whole collection on a stale snapshot.
+      const baseSets = Array.isArray(baseView[key]) ? baseView[key] : [];
+      const baseById = new Map(baseSets.map((item) => [item?.id, item]));
+      const localById = new Map(value.map((item) => [item?.id, item]));
+      const currentById = new Map(currentView[key].map((item) => [item?.id, item]));
+      const mergedSets = [...currentView[key]];
+      const indexes = new Map(mergedSets.map((item, index) => [item?.id, index]));
+      for (const [id, item] of localById) {
+        if (id == null) continue;
+        if (!baseById.has(id)) {
+          if (!currentById.has(id)) { indexes.set(id, mergedSets.length); mergedSets.push(item); }
+        } else if (!sameJson(item, baseById.get(id))) {
+          if (currentById.has(id)) mergedSets[indexes.get(id)] = item;
+          else { indexes.set(id, mergedSets.length); mergedSets.push(item); }
+        }
+      }
+      const deletedSetIds = new Set([...baseById.keys()].filter((id) => !localById.has(id)));
+      view[key] = mergedSets.filter((item) => !deletedSetIds.has(item?.id));
     } else if (!sameJson(value, baseView[key])) {
       view[key] = value;
     }

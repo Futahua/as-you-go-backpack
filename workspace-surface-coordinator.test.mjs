@@ -140,6 +140,46 @@ test('stale action snapshots merge entities while the incoming position wins', (
   assert.equal(merged.view.iconSize, 40);
 });
 
+test('stale position updates merge per item and preserve an unrelated later drag', () => {
+  const base = {
+    schemaVersion: 1,
+    groups: [],
+    shortcuts: [],
+    view: { graphPositions: { root: { a: { x: 1, y: 1 }, b: { x: 2, y: 2 } } } },
+  };
+  const local = {
+    ...base,
+    view: { graphPositions: { root: { a: { x: 90, y: 90 }, b: { x: 2, y: 2 } } } },
+  };
+  const current = {
+    ...base,
+    view: { graphPositions: { root: { a: { x: 4, y: 4 }, b: { x: 80, y: 80 } } } },
+  };
+  assert.deepEqual(
+    mergeSurfaceSnapshots(base, local, current).view.graphPositions,
+    { root: { a: { x: 90, y: 90 }, b: { x: 80, y: 80 } } },
+  );
+});
+
+test('stale set updates merge independent item-set IDs', () => {
+  const base = {
+    schemaVersion: 1, groups: [], shortcuts: [],
+    view: { itemSets: [{ id: 's1', title: 'one' }, { id: 's2', title: 'two' }] },
+  };
+  const local = {
+    ...base,
+    view: { itemSets: [{ id: 's1', title: 'ONE' }, { id: 's2', title: 'two' }] },
+  };
+  const current = {
+    ...base,
+    view: { itemSets: [{ id: 's1', title: 'one' }, { id: 's2', title: 'TWO' }] },
+  };
+  assert.deepEqual(mergeSurfaceSnapshots(base, local, current).view.itemSets, [
+    { id: 's1', title: 'ONE' },
+    { id: 's2', title: 'TWO' },
+  ]);
+});
+
 test('a multi-item delete removes every requested entity without index drift', () => {
   const base = { schemaVersion: 1, groups: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], shortcuts: [] };
   const local = { ...base, groups: [{ id: 'c' }] };
