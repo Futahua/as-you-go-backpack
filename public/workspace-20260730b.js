@@ -2500,6 +2500,11 @@ function createGraphController() {
   // context changes; ordinary same-folder actions still reheat as needed.
   let lastGraphContextKey = null;
   let lastGraphStructureKey = null;
+  // A complete rest map belongs to the topology that produced it. A later
+  // same-shape document edit must not mistake a pre-edit map for a settled
+  // result until the changed topology has emitted a fresh rest snapshot.
+  let restPositionsStructureKey = null;
+  let activeGraphStructureKey = null;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
   // Folder hues retain their position solver state; set hues retain a seeded,
@@ -2610,6 +2615,11 @@ function createGraphController() {
 
   function destroyGraphView() {
     onDragCancel?.();
+    // The throttled timer is deliberately not allowed to outrun a real
+    // navigation/window close. Capture the latest coordinates synchronously
+    // while the nodes still exist, then cancel the old-context timer.
+    saveRestPositions();
+    if (restSaveTimer) { clearTimeout(restSaveTimer); restSaveTimer = null; }
     if (simulation) { simulation.stop(); simulation = null; }
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; pendingFrame = false; }
     nodes.forEach((node) => {
@@ -2631,6 +2641,8 @@ function createGraphController() {
     dragTrail.clear();
     lastGraphContextKey = null;
     lastGraphStructureKey = null;
+    restPositionsStructureKey = null;
+    activeGraphStructureKey = null;
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
@@ -3754,6 +3766,12 @@ function createGraphController() {
     }
     if (!changed) return;
     for (const [id, pos] of Object.entries(updates)) lastSavedRest.set(id, pos);
+    // Once every ordinary node has been sampled for the active topology, its
+    // map is safe to use as the settled-entry baseline for later renders.
+    const ordinary = [...nodes.values()].filter((node) => !node.exiting && !node.ring && !isTrailNode(node.id));
+    if (ordinary.length > 0 && ordinary.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y))) {
+      restPositionsStructureKey = activeGraphStructureKey;
+    }
     onRestPositions(updates);
   }
   function syncSimulation() {
@@ -3896,7 +3914,7 @@ function createGraphController() {
       lastGraphContextKey = contextKey;
       return;
     }
-    const settledOnDisk = hasSettledGraphPositions(
+    const hasCompleteRest = hasSettledGraphPositions(
       visible,
       (id) => getGraphPosition(state, contextKey, id) ?? getGraphRestPosition(state, contextKey, id),
     );
@@ -3905,6 +3923,14 @@ function createGraphController() {
       state.view?.itemSets ?? [],
     ]);
     const structureChanged = structureKey !== lastGraphStructureKey;
+    if (structureChanged) {
+      // Force the next throttled save to describe this topology, even when the
+      // surviving nodes happen to be within the old 4px churn threshold.
+      lastSavedRest.clear();
+    }
+    const settledOnDisk = hasCompleteRest
+      && (restPositionsStructureKey === structureKey || enteringContext);
+    activeGraphStructureKey = structureKey;
     const originEdges = session.binMode ? binOriginEdges(visible) : [];
     const ghostIds = new Set(originEdges.filter((e) => e.ghost).map((e) => e.ghostGroupId));
     const ghostItems = [...ghostIds].map((groupId, index) => ({
@@ -3932,6 +3958,7 @@ function createGraphController() {
     }
     lastGraphContextKey = contextKey;
     lastGraphStructureKey = structureKey;
+    if (enteringContext && hasCompleteRest) restPositionsStructureKey = structureKey;
     if (initialFit && !initialized) {
       fitPending = true;
       setTimeout(() => {
@@ -5004,6 +5031,10 @@ graph._setOnRestPositions((positions) => {
     setStatus(error instanceof Error ? error.message : String(error));
   });
 });
+// Native surface close/pagehide can bypass a folder-navigation destroy path.
+// Flush the current graph before the renderer disappears so the latest settled
+// coordinates are recoverable on the next real renderer.
+window.addEventListener('pagehide', () => graph._saveRestPositionsNow());
 
 const editorDialog = createEditorDialog({
   elements,
