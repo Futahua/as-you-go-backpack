@@ -90,13 +90,22 @@ from forwarded document snapshots; they remain owned by the live surface.
 
 Graph, resting, and toolbar position maps are deliberately last-writer-wins;
 the most recently committed drag is the visible placement everywhere.
-When a graph context has complete remembered coordinates, entering or reopening
-it stops the physics simulation and renders those coordinates in place. A
-context with a new or unremembered body still reheats so the new layout can
-settle; same-context actions also reheat deliberately. A
+Creator correction (2026-09-04): restore the positioning behavior from before
+the settled-entry request. Remembered coordinates seed unpinned items, and the
+physics simulation resumes on entry and updates, as before `f10c6df`. Saved
+positions no longer freeze the graph. Coordinated writes, last-writer-wins
+placement, and close-time save draining remain in place. A
 surface opening a folder with the context-menu action or middle mouse button
 requests a new generic Papers surface on its own authenticated project URL;
 the host does not interpret As you Go's folder id.
+
+The creator confirmed working multi-window interactions before requesting this correction.
+Validation: all 1,114 unit tests pass, including three production-function
+graph-entry regressions (two fail against the freeze implementation). The
+packaged visual acceptance reaches rendering and report capture but fails its
+saved PNG hash comparison on both this change and an isolated checkout of
+pre-change `f4e2c42`; that existing pixel-baseline gate remains open. No visual
+baseline was updated by this correction.
 
 ## Prompt library (copy button)
 
