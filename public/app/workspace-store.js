@@ -35,6 +35,7 @@ export function createWorkspaceStore({
   let undoStack = [];
   let redoStack = [];
   let saveQueue = Promise.resolve();
+  let lastSaveError = null;
   let lastPersistedSnapshot = null;
   let lastQueuedSnapshot = null;
   const queuedSaves = [];
@@ -159,7 +160,15 @@ export function createWorkspaceStore({
     // Keep the queue alive after a failed save, while returning the original
     // operation directly so callers observe failure without an extra finally
     // microtask delaying UI error reporting.
-    saveQueue = operation.then(cleanup, (error) => { cleanup(); return undefined; });
+    saveQueue = operation.then((result) => {
+      lastSaveError = null;
+      cleanup();
+      return result;
+    }, (error) => {
+      lastSaveError = error;
+      cleanup();
+      return undefined;
+    });
     return operation;
   }
 
@@ -215,6 +224,13 @@ export function createWorkspaceStore({
 
   return {
     getSnapshot: getState,
+    // Resolve only after every save queued before the call is terminal. The
+    // queue deliberately remains usable after a rejection, while this
+    // barrier still reports that rejection to a close-time caller.
+    flush: () => saveQueue.then(() => {
+      if (lastSaveError) throw lastSaveError;
+      return undefined;
+    }),
     getSession: () => session,
     setSelection: (ids) => { session.selected = new Set(ids); },
     addToSelection: (id) => { session.selected.add(id); },

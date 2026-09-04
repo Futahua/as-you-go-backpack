@@ -5039,9 +5039,11 @@ graph._setOnRestPositions((positions) => {
 // Flush the current graph before the renderer disappears so the latest settled
 // coordinates are recoverable on the next real renderer.
 window.addEventListener('pagehide', () => graph._saveRestPositionsNow());
-window.__papersFlushBeforeClose = () => {
+window.__papersFlushBeforeClose = async () => {
   graph._saveRestPositionsNow();
-  return pendingRestSave;
+  await pendingRestSave;
+  await store.flush();
+  return { ok: true };
 };
 
 const editorDialog = createEditorDialog({

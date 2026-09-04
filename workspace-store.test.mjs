@@ -322,6 +322,32 @@ test('save queue runs a queued save even after the previous save rejects', async
   assert.deepEqual(order, ['b']);
 });
 
+test('flush waits for queued saves and reports the latest persistence failure', async () => {
+  let release;
+  let fail = false;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const store = createWorkspaceStore({
+    getState: () => ({}),
+    setState: () => {},
+    persist: async () => {
+      await gate;
+      if (fail) throw new Error('close disk failure');
+    },
+    normalizeState: (s) => s,
+    setStatus: () => {},
+  });
+  const queued = store.save({ tag: 'queued' });
+  const pending = store.flush();
+  let settled = false;
+  pending.then(() => { settled = true; }, () => { settled = true; });
+  await Promise.resolve();
+  assert.equal(settled, false, 'flush must wait behind an in-flight save');
+  fail = true;
+  release();
+  await assert.rejects(queued, /close disk failure/);
+  await assert.rejects(pending, /close disk failure/);
+});
+
 test('set selection is independent of item selection', () => {
   let state = {};
   const store = createWorkspaceStore({
