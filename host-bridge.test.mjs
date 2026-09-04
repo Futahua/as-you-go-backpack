@@ -324,6 +324,19 @@ test('host bridge preserves the versioned state envelope and decodes its documen
   });
 });
 
+test('host bridge preserves the checked-save result envelope', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const promise = host.saveWorkspaceChecked(JSON.stringify({ schemaVersion: 1, groups: [], shortcuts: [] }), 'a'.repeat(64));
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:state-save-checked');
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sent.requestId, ok: true,
+    stateSave: { ok: true, revision: 'b'.repeat(64) },
+  });
+  assert.deepEqual(await promise, { ok: true, revision: 'b'.repeat(64) });
+});
+
 test('host bridge can request a new Papers surface without naming a project id', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);

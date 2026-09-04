@@ -72,6 +72,10 @@ export function createHostBridge(window) {
       });
       return;
     }
+    if (task.type === 'papers:project:state-save-checked') {
+      task.resolve({ stateSave: event.data.stateSave });
+      return;
+    }
     if (task.type === 'papers:project:window-thumbnail') {
       // 019GR: the compact hover preview consumes ONLY the exact shared result.
       // Success is exactly { outcome, imageUrl, width, height }; a fallback is

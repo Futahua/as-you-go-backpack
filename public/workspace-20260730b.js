@@ -2499,6 +2499,7 @@ function createGraphController() {
   // learned. This key lets us apply the settled-entry rule only when the graph
   // context changes; ordinary same-folder actions still reheat as needed.
   let lastGraphContextKey = null;
+  let lastGraphStructureKey = null;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
   // Folder hues retain their position solver state; set hues retain a seeded,
@@ -2629,6 +2630,7 @@ function createGraphController() {
     setEffects.clear();
     dragTrail.clear();
     lastGraphContextKey = null;
+    lastGraphStructureKey = null;
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
@@ -3898,6 +3900,11 @@ function createGraphController() {
       visible,
       (id) => getGraphPosition(state, contextKey, id) ?? getGraphRestPosition(state, contextKey, id),
     );
+    const structureKey = JSON.stringify([
+      visible.map((candidate) => [candidate.id, candidate.kind, candidate.parentId, candidate.parentIds]),
+      state.view?.itemSets ?? [],
+    ]);
+    const structureChanged = structureKey !== lastGraphStructureKey;
     const originEdges = session.binMode ? binOriginEdges(visible) : [];
     const ghostIds = new Set(originEdges.filter((e) => e.ghost).map((e) => e.ghostGroupId));
     const ghostItems = [...ghostIds].map((groupId, index) => ({
@@ -3913,7 +3920,7 @@ function createGraphController() {
     syncEdges(visible);
     syncOriginEdges(originEdges);
     syncSimulation();
-    if (enteringContext && settledOnDisk) {
+    if (settledOnDisk && (enteringContext || !structureChanged)) {
       // The nodes were seeded from their remembered resting coordinates above.
       // Stopping here prevents forceSimulation's initial/reheat pass from
       // moving every item on entry. A later same-context action deliberately
@@ -3924,6 +3931,7 @@ function createGraphController() {
       reheat(initialFit ? 0.7 : 0.35);
     }
     lastGraphContextKey = contextKey;
+    lastGraphStructureKey = structureKey;
     if (initialFit && !initialized) {
       fitPending = true;
       setTimeout(() => {
@@ -4988,6 +4996,13 @@ graph._setOnRestPositions((positions) => {
     setGraphRestPositions(state, graphContextId(session.currentId, session.binMode), positions),
   );
   saveWorkspaceView();
+  // Resting coordinates are shared board geometry, not a surface-local view
+  // preference. Persist them without adding an Undo history entry so reopening
+  // starts at the settled layout, and let the coordinator broadcast the same
+  // last-writer-wins positions to every open surface.
+  void store.save(state).catch((error) => {
+    setStatus(error instanceof Error ? error.message : String(error));
+  });
 });
 
 const editorDialog = createEditorDialog({
