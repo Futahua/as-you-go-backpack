@@ -2499,6 +2499,9 @@ function createGraphController() {
   let attached = false;
   let updatePending = false;
   let pendingInitialFit = false;
+  // Position commits and role/status updates also render. They must not reset
+  // cooling: only entry or changed physical layout inputs start another pass.
+  let lastGraphLayoutKey = null;
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
   // Folder hues retain their position solver state; set hues retain a seeded,
@@ -2633,6 +2636,7 @@ function createGraphController() {
     setRings.clear();
     setEffects.clear();
     dragTrail.clear();
+    lastGraphLayoutKey = null;
     if (viewport) { viewport.remove(); viewport = null; }
     camera = null;
     edgeLayer = null;
@@ -3887,6 +3891,7 @@ function createGraphController() {
       },
     );
     if (visible.length === 0) {
+      lastGraphLayoutKey = null;
       nodes.forEach((_, id) => removeNode(id));
       syncEdges([]);
       syncOriginEdges([]);
@@ -3910,7 +3915,21 @@ function createGraphController() {
     syncEdges(visible);
     syncOriginEdges(originEdges);
     syncSimulation();
-    reheat(initialFit ? 0.7 : 0.35);
+    const contextId = graphContextId(session.currentId, session.binMode);
+    const layoutKey = JSON.stringify([
+      contextId, session.binMode ? session.binCurrentId : null, w, h,
+      visible.map((item) => {
+        const node = nodes.get(item.id);
+        return [item.id, item.kind, item.parentId, item.parentIds, item.depth,
+          item.trailScale, node?.width, node?.height,
+          getGraphPosition(state, contextId, item.id)];
+      }),
+      state.view?.itemSets ?? [],
+    ]);
+    if (layoutKey !== lastGraphLayoutKey) {
+      reheat(initialFit ? 0.7 : 0.35);
+      lastGraphLayoutKey = layoutKey;
+    }
     if (initialFit && !initialized) {
       fitPending = true;
       setTimeout(() => {

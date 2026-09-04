@@ -90,21 +90,27 @@ from forwarded document snapshots; they remain owned by the live surface.
 
 Graph, resting, and toolbar position maps are deliberately last-writer-wins;
 the most recently committed drag is the visible placement everywhere.
-Creator correction (2026-09-04): restore the positioning behavior from before
-the settled-entry request. Remembered coordinates seed unpinned items, and the
-physics simulation resumes on entry and updates, as before `f10c6df`. Saved
-positions no longer freeze the graph. Coordinated writes, last-writer-wins
+Creator correction (2026-09-04): restore natural positioning on entry, followed
+by cooling and rest. Remembered coordinates seed unpinned items; saved positions
+do not freeze the graph. Entry, topology, set membership, pin, node-size and
+viewport changes reheat the simulation. Rest-position commits and unchanged
+renders do not reheat it: doing so fed every periodic save back into another
+physics pass and prevented settling. Coordinated writes, last-writer-wins
 placement, and close-time save draining remain in place. A
 surface opening a folder with the context-menu action or middle mouse button
 requests a new generic Papers surface on its own authenticated project URL;
 the host does not interpret As you Go's folder id.
 
 The creator confirmed working multi-window interactions before requesting this correction.
-Validation: all 1,114 unit tests pass, including three production-function
-graph-entry regressions (two fail against the freeze implementation). The
-packaged visual acceptance reaches rendering and report capture but fails its
-saved PNG hash comparison on both this change and an isolated checkout of
-pre-change `f4e2c42`; that existing pixel-baseline gate remains open. No visual
+Validation of the cooling correction: 1,116 unit tests and 8 visual pretests
+pass. Five production-function entry tests include a two-simulation reproduction
+with periodic position commits; it fails against `d15f717` and passes with the
+correction. `npm run test:graph:settling` (with `PAPERS_PACKAGED_EXE`) opens two
+native Papers windows on a disposable synthetic profile containing six folders
+and overlapping sets. After 12 seconds, both views must remain still over a
+further 3 seconds, with all six positions durably saved. This test fails on
+`d15f717` and passes with the correction against the installed Papers executable.
+The earlier saved-PNG hash mismatch remains a separate baseline issue; no
 baseline was updated by this correction.
 
 ## Prompt library (copy button)
