@@ -70,6 +70,11 @@ function createHarness(savedPositions = {}) {
   function makeElement(key) {
     const elementListeners = [];
     const classSet = new Set();
+    const handle = {
+      closest(selector) {
+        return selector === '[data-toolbar-drag-handle]' ? handle : null;
+      },
+    };
     const element = {
       dataset: { toolbarKey: key },
       style: {},
@@ -95,6 +100,7 @@ function createHarness(savedPositions = {}) {
         }
       },
       _listeners: elementListeners,
+      _handle: handle,
       _dispatch(type, event) {
         for (const entry of [...elementListeners]) {
           if (entry.type === type) entry.handler(event);
@@ -161,8 +167,16 @@ function createHarness(savedPositions = {}) {
   };
 }
 
-function pointerEvent(pointerId, x, y, element) {
-  return { button: 0, pointerId, clientX: x, clientY: y, target: element };
+function pointerEvent(pointerId, x, y, element, target = element) {
+  return {
+    button: 0,
+    pointerId,
+    clientX: x,
+    clientY: y,
+    target,
+    preventDefault() {},
+    stopPropagation() {},
+  };
 }
 
 /** Horizontal offsets are percentages; the vertical one is deliberately not.
@@ -204,7 +218,7 @@ test('toolbar drag clamps within the workspace and persists the new position', a
   const el = h.makeElement('bin-button');
   h.controller.mount();
 
-  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el));
+  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el, el._handle));
   // Move well past the 4px threshold to a near-right-edge position.
   el._dispatch('pointermove', pointerEvent(1, 950, 150, el));
   el._dispatch('pointerup', pointerEvent(1, 950, 150, el));
@@ -222,10 +236,45 @@ test('toolbar drag below the threshold does not persist a position', () => {
   const el = h.makeElement('bin-button');
   h.controller.mount();
 
-  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el));
-  el._dispatch('pointermove', pointerEvent(1, 152, 152, el));
-  el._dispatch('pointerup', pointerEvent(1, 152, 152, el));
+  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el, el._handle));
+  el._dispatch('pointermove', pointerEvent(1, 152, 152, el, el._handle));
+  el._dispatch('pointerup', pointerEvent(1, 152, 152, el, el._handle));
 
+  assert.equal(h.persists.length, 0);
+  assert.equal(h.stateWrites.length, 0);
+});
+
+test('toolbar action surfaces do not begin a drag without the explicit handle', () => {
+  const h = createHarness({});
+  const el = h.makeElement('bin-button');
+  h.controller.mount();
+
+  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el));
+  el._dispatch('pointermove', pointerEvent(1, 950, 150, el));
+  el._dispatch('pointerup', pointerEvent(1, 950, 150, el));
+
+  assert.equal(h.persists.length, 0);
+  assert.equal(h.stateWrites.length, 0);
+});
+
+test('toolbar pointer cancellation restores the pre-drag position without persisting', () => {
+  const h = createHarness({});
+  const el = h.makeElement('bin-button');
+  el.style.left = '25px';
+  el.style.right = 'auto';
+  el.style.top = '30px';
+  el.style.bottom = 'auto';
+  h.controller.mount();
+
+  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el, el._handle));
+  el._dispatch('pointermove', pointerEvent(1, 400, 350, el, el._handle));
+  assert.notEqual(el.style.left, '25px');
+  el._dispatch('pointercancel', pointerEvent(1, 400, 350, el, el._handle));
+
+  assert.equal(el.style.left, '25px');
+  assert.equal(el.style.right, 'auto');
+  assert.equal(el.style.top, '30px');
+  assert.equal(el.style.bottom, 'auto');
   assert.equal(h.persists.length, 0);
   assert.equal(h.stateWrites.length, 0);
 });

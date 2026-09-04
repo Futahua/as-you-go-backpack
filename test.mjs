@@ -63,6 +63,8 @@ test('the local project owns its exact interface, pickup prompt and prepared act
   assert.match(html, /id="link-edit-layer"/);
   assert.match(html, /id="confirm-restore"/);
   assert.match(html, /toolbar-float/);
+  assert.match(html, /data-toolbar-drag-handle/);
+  assert.doesNotMatch(html, /<button[^>]+data-toolbar-key=/);
   assert.match(html, /icon-button/);
 
   // Required host protocol names must be present in the shipped JS — they

@@ -12,29 +12,45 @@
     <main class="workspace" data-papers-visual-key="document.root">
       <div class="workspace-backdrop" id="workspace-backdrop" aria-hidden="true"></div>
       <section class="navigation" aria-label="Folder navigation">
-        <div class="backdrop-slider toolbar-float" id="backdrop-slider" data-toolbar-key="backdrop-slider">
+        <div class="backdrop-slider toolbar-float toolbar-shell" id="backdrop-slider" data-toolbar-key="backdrop-slider">
+          <span class="toolbar-drag-handle" data-toolbar-drag-handle aria-hidden="true" title="Drag to move"></span>
           <label class="sr-only" for="backdrop-opacity-slider">Background opacity</label>
           <input id="backdrop-opacity-slider" type="range" min="0" max="1" step="0.05" value="1" />
           <output id="backdrop-opacity-value" class="sr-only" for="backdrop-opacity-slider">100%</output>
         </div>
-        <nav class="breadcrumbs toolbar-float" id="breadcrumbs" data-toolbar-key="breadcrumbs" aria-label="Current group path"></nav>
-        <button class="quiet-button icon-button toolbar-float" id="restore-all-bin" data-toolbar-key="restore-all-bin" type="button" title="Restore all" hidden>
+        <div class="toolbar-float toolbar-shell" data-toolbar-key="breadcrumbs">
+          <span class="toolbar-drag-handle" data-toolbar-drag-handle aria-hidden="true" title="Drag to move"></span>
+          <nav class="breadcrumbs" id="breadcrumbs" aria-label="Current group path"></nav>
+        </div>
+        <div class="toolbar-float toolbar-shell" data-toolbar-key="restore-all-bin">
+          <span class="toolbar-drag-handle" data-toolbar-drag-handle aria-hidden="true" title="Drag to move"></span>
+          <button class="quiet-button icon-button" id="restore-all-bin" type="button" title="Restore all" hidden>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10a6 6 0 1 0 1.76-4.24M4 10V5m0 5h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span class="sr-only">Restore all</span>
-        </button>
-        <button class="quiet-button icon-button danger-text toolbar-float" id="delete-all-bin" data-toolbar-key="delete-all-bin" type="button" title="Delete all" hidden>
+          </button>
+        </div>
+        <div class="toolbar-float toolbar-shell" data-toolbar-key="delete-all-bin">
+          <span class="toolbar-drag-handle" data-toolbar-drag-handle aria-hidden="true" title="Drag to move"></span>
+          <button class="quiet-button icon-button danger-text" id="delete-all-bin" type="button" title="Delete all" hidden>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M8 6V4.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V6M6 6v9.5A1.5 1.5 0 0 0 7.5 17h5a1.5 1.5 0 0 0 1.5-1.5V6M8.5 9v5M11.5 9v5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span class="sr-only">Delete all</span>
-        </button>
-        <button class="quiet-button icon-button pickup-copy toolbar-float" id="copy-prompt" data-toolbar-key="copy-prompt" type="button" title="Copy agent pickup prompt">
+          </button>
+        </div>
+        <div class="toolbar-float toolbar-shell" data-toolbar-key="copy-prompt">
+          <span class="toolbar-drag-handle" data-toolbar-drag-handle aria-hidden="true" title="Drag to move"></span>
+          <button class="quiet-button icon-button pickup-copy" id="copy-prompt" type="button" title="Copy agent pickup prompt">
           <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M13 7V4.5A1.5 1.5 0 0 0 11.5 3h-7A1.5 1.5 0 0 0 3 4.5v7A1.5 1.5 0 0 0 4.5 13H7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span class="sr-only copy-label">Copy agent pickup prompt</span>
-        </button>
-        <button class="quiet-button icon-button bin-button toolbar-float" id="bin-button" data-bin-view data-toolbar-key="bin-button" type="button" aria-pressed="false" title="Bin">
+          </button>
+        </div>
+        <div class="toolbar-float toolbar-shell" data-toolbar-key="bin-button">
+          <span class="toolbar-drag-handle" data-toolbar-drag-handle aria-hidden="true" title="Drag to move"></span>
+          <button class="quiet-button icon-button bin-button" id="bin-button" data-bin-view type="button" aria-pressed="false" title="Bin">
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M8 6V4.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V6M6 6v9.5A1.5 1.5 0 0 0 7.5 17h5a1.5 1.5 0 0 0 1.5-1.5V6M8.5 9v5M11.5 9v5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span class="sr-only" id="bin-label">Bin</span>
           <span class="bin-count" id="bin-count" hidden></span>
-        </button>
+          </button>
+        </div>
       </section>
 
       <p class="status" id="status" role="status" aria-live="polite"></p>

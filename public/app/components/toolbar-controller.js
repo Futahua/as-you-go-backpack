@@ -115,13 +115,13 @@ export function createToolbarController({
       const signal = abortController.signal;
       element.addEventListener('pointerdown', (event) => {
         if (event.button !== 0) return;
-        // The breadcrumb pill's visible surface is almost entirely its own
-        // navigation buttons, so unlike the other toolbar-float elements it
-        // must allow starting a drag from those buttons too — the 4px move
-        // threshold below (and the click-suppression on release) is what
-        // still lets a plain click navigate normally.
-        const interactiveAncestor = event.target.closest('button, a, input');
-        if (interactiveAncestor && interactiveAncestor !== element && !element.classList.contains('breadcrumbs')) return;
+        // Toolbar actions are ordinary buttons. Only the explicit handle is a
+        // drag surface, so pointer jitter over Copy/Bin/Restore/Delete can
+        // never turn a click into an accidental move.
+        const handle = event.target?.closest?.('[data-toolbar-drag-handle]');
+        if (!handle) return;
+        event.preventDefault();
+        suppressClickFor = null;
         const rect = element.getBoundingClientRect();
         drag = {
           element,
@@ -132,6 +132,12 @@ export function createToolbarController({
           offsetX: event.clientX - rect.left,
           offsetY: event.clientY - rect.top,
           moved: false,
+          initialStyle: {
+            left: element.style.left ?? '',
+            right: element.style.right ?? '',
+            top: element.style.top ?? '',
+            bottom: element.style.bottom ?? '',
+          },
         };
         // Pointer capture is deferred until the drag threshold is actually
         // crossed (below), not taken on every pointerdown — capturing
@@ -166,17 +172,21 @@ export function createToolbarController({
         drag.element.style.bottom = 'auto';
       }, { signal });
 
-      const finishDrag = (event) => {
-        if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
-        if (element.hasPointerCapture(event.pointerId)) {
-          element.releasePointerCapture(event.pointerId);
-        }
-        const { key, moved } = drag;
-        drag.element.classList.remove('toolbar-dragging');
+      const finishDrag = (event, expectedElement = null) => {
+        if (!drag || drag.pointerId !== event.pointerId || (expectedElement && drag.element !== expectedElement)) return;
+        const active = drag;
+        // Clear the shared slot before releasing capture. Browsers may emit
+        // lostpointercapture synchronously; it must not reinterpret a
+        // successful release as a cancellation/rollback.
         drag = null;
+        if (active.element.hasPointerCapture(event.pointerId)) {
+          active.element.releasePointerCapture(event.pointerId);
+        }
+        const { key, moved } = active;
+        active.element.classList.remove('toolbar-dragging');
         if (!moved) return;
-        suppressClickFor = element;
-        const rect = element.getBoundingClientRect();
+        suppressClickFor = active.element;
+        const rect = active.element.getBoundingClientRect();
         const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
         const nextState = setToolbarPosition(
           getState(),
@@ -187,9 +197,28 @@ export function createToolbarController({
         void persist(nextState).catch((error) =>
           setStatus(error instanceof Error ? error.message : String(error)));
       };
-      element.addEventListener('pointerup', finishDrag, { signal });
-      element.addEventListener('pointercancel', finishDrag, { signal });
+      const cancelDrag = (event) => {
+        if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
+        const active = drag;
+        drag = null;
+        if (active.element.hasPointerCapture(event.pointerId)) {
+          active.element.releasePointerCapture(event.pointerId);
+        }
+        active.element.classList.remove('toolbar-dragging');
+        for (const [property, value] of Object.entries(active.initialStyle)) {
+          active.element.style[property] = value;
+        }
+        suppressClickFor = null;
+      };
+      element.addEventListener('pointerup', (event) => finishDrag(event, element), { signal });
+      element.addEventListener('pointercancel', cancelDrag, { signal });
+      element.addEventListener('lostpointercapture', cancelDrag, { signal });
       element.addEventListener('click', (event) => {
+        if (event.target?.closest?.('[data-toolbar-drag-handle]')) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (suppressClickFor === element) {
           suppressClickFor = null;
           event.preventDefault();
@@ -197,6 +226,26 @@ export function createToolbarController({
         }
       }, { capture: true, signal });
     });
+
+    // A release can land outside the element before capture is established;
+    // window-level cleanup prevents a stranded grabbing state.
+    window.addEventListener('pointerup', (event) => finishDrag(event), { signal: abortController.signal, capture: true });
+    window.addEventListener('pointercancel', (event) => {
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const active = drag;
+      drag = null;
+      active.element.classList.remove('toolbar-dragging');
+      for (const [property, value] of Object.entries(active.initialStyle)) active.element.style[property] = value;
+      suppressClickFor = null;
+    }, { signal: abortController.signal, capture: true });
+    window.addEventListener('blur', () => {
+      if (!drag) return;
+      const active = drag;
+      drag = null;
+      active.element.classList.remove('toolbar-dragging');
+      for (const [property, value] of Object.entries(active.initialStyle)) active.element.style[property] = value;
+      suppressClickFor = null;
+    }, { signal: abortController.signal });
   }
 
   function handleResize() {

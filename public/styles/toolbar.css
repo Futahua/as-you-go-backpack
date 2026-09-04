@@ -2,19 +2,50 @@
 .toolbar-float {
   position: absolute;
   box-shadow: 0 4px 16px var(--shadow);
-  cursor: grab;
-  touch-action: none;
+  cursor: default;
+  touch-action: auto;
 }
 .toolbar-float.toolbar-dragging {
   z-index: 20;
   cursor: grabbing;
   box-shadow: 0 10px 28px var(--shadow);
 }
-.toolbar-float.icon-button {
+.toolbar-shell {
+  display: inline-flex;
+  align-items: center;
+}
+.toolbar-shell > .icon-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 9px;
+}
+.toolbar-drag-handle {
+  display: inline-flex;
+  flex: 0 0 12px;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  margin: 4px 0 4px 4px;
+  border-radius: 4px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.toolbar-drag-handle::before {
+  width: 3px;
+  height: 18px;
+  border-radius: 3px;
+  background: currentColor;
+  content: "";
+  opacity: 0.35;
+}
+.toolbar-drag-handle:hover::before,
+.toolbar-dragging .toolbar-drag-handle::before { opacity: 0.8; }
+.toolbar-dragging .toolbar-drag-handle { cursor: grabbing; }
+.toolbar-shell:has(> [hidden]) { display: none !important; }
+.toolbar-shell[data-toolbar-key="breadcrumbs"] {
+  box-shadow: none;
 }
 /* Copy confirmation for the icon-only pickup button. Its "Copied" label is
  * sr-only, so without this a sighted user gets no feedback at all. The
