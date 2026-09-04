@@ -161,7 +161,7 @@ export function createWorkspaceStore({
     // operation directly so callers observe failure without an extra finally
     // microtask delaying UI error reporting.
     saveQueue = operation.then((result) => {
-      lastSaveError = null;
+      if (!result?.superseded) lastSaveError = null;
       cleanup();
       return result;
     }, (error) => {

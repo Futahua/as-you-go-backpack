@@ -348,6 +348,28 @@ test('flush waits for queued saves and reports the latest persistence failure', 
   await assert.rejects(pending, /close disk failure/);
 });
 
+test('flush preserves a failed generation behind a superseded later save', async () => {
+  let rejectAck;
+  const store = createWorkspaceStore({
+    getState: () => ({}),
+    setState: () => {},
+    persist: async () => ({
+      forwarded: true,
+      acknowledgement: new Promise((resolve) => { rejectAck = resolve; }),
+    }),
+    normalizeState: (s) => s,
+    setStatus: () => {},
+  });
+  const first = store.save({ tag: 'document' });
+  const later = store.save({ tag: 'rest' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const pendingFlush = store.flush();
+  rejectAck({ ok: false, code: 'WRITER_DIED' });
+  await assert.rejects(first, /WRITER_DIED/);
+  await later;
+  await assert.rejects(pendingFlush, /WRITER_DIED/);
+});
+
 test('set selection is independent of item selection', () => {
   let state = {};
   const store = createWorkspaceStore({
