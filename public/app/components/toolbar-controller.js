@@ -47,7 +47,6 @@ export function createToolbarController({
   setStatus,
 }) {
   let drag = null;
-  let suppressClickFor = null;
   let toolbarResizeTimer = null;
   let abortController = null;
 
@@ -110,6 +109,20 @@ export function createToolbarController({
     }
   }
 
+  function rollbackActiveDrag() {
+    if (!drag) return false;
+    const active = drag;
+    drag = null;
+    if (active.element.hasPointerCapture(active.pointerId)) {
+      active.element.releasePointerCapture(active.pointerId);
+    }
+    active.element.classList.remove('toolbar-dragging');
+    for (const [property, value] of Object.entries(active.initialStyle)) {
+      active.element.style[property] = value;
+    }
+    return true;
+  }
+
   function setupDragging() {
     toolbarElements().forEach((element) => {
       const signal = abortController.signal;
@@ -120,8 +133,8 @@ export function createToolbarController({
         // never turn a click into an accidental move.
         const handle = event.target?.closest?.('[data-toolbar-drag-handle]');
         if (!handle) return;
+        if (drag) return;
         event.preventDefault();
-        suppressClickFor = null;
         const rect = element.getBoundingClientRect();
         drag = {
           element,
@@ -185,7 +198,6 @@ export function createToolbarController({
         const { key, moved } = active;
         active.element.classList.remove('toolbar-dragging');
         if (!moved) return;
-        suppressClickFor = active.element;
         const rect = active.element.getBoundingClientRect();
         const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
         const nextState = setToolbarPosition(
@@ -199,28 +211,13 @@ export function createToolbarController({
       };
       const cancelDrag = (event) => {
         if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
-        const active = drag;
-        drag = null;
-        if (active.element.hasPointerCapture(event.pointerId)) {
-          active.element.releasePointerCapture(event.pointerId);
-        }
-        active.element.classList.remove('toolbar-dragging');
-        for (const [property, value] of Object.entries(active.initialStyle)) {
-          active.element.style[property] = value;
-        }
-        suppressClickFor = null;
+        rollbackActiveDrag();
       };
       element.addEventListener('pointerup', (event) => finishDrag(event, element), { signal });
       element.addEventListener('pointercancel', cancelDrag, { signal });
       element.addEventListener('lostpointercapture', cancelDrag, { signal });
       element.addEventListener('click', (event) => {
         if (event.target?.closest?.('[data-toolbar-drag-handle]')) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        if (suppressClickFor === element) {
-          suppressClickFor = null;
           event.preventDefault();
           event.stopPropagation();
         }
@@ -232,19 +229,10 @@ export function createToolbarController({
     window.addEventListener('pointerup', (event) => finishDrag(event), { signal: abortController.signal, capture: true });
     window.addEventListener('pointercancel', (event) => {
       if (!drag || drag.pointerId !== event.pointerId) return;
-      const active = drag;
-      drag = null;
-      active.element.classList.remove('toolbar-dragging');
-      for (const [property, value] of Object.entries(active.initialStyle)) active.element.style[property] = value;
-      suppressClickFor = null;
+      rollbackActiveDrag();
     }, { signal: abortController.signal, capture: true });
     window.addEventListener('blur', () => {
-      if (!drag) return;
-      const active = drag;
-      drag = null;
-      active.element.classList.remove('toolbar-dragging');
-      for (const [property, value] of Object.entries(active.initialStyle)) active.element.style[property] = value;
-      suppressClickFor = null;
+      rollbackActiveDrag();
     }, { signal: abortController.signal });
   }
 
@@ -262,14 +250,13 @@ export function createToolbarController({
   }
 
   function destroy() {
+    rollbackActiveDrag();
     abortController?.abort();
     abortController = null;
     if (toolbarResizeTimer !== null) {
       clearTimeout(toolbarResizeTimer);
       toolbarResizeTimer = null;
     }
-    drag = null;
-    suppressClickFor = null;
   }
 
   return { mount, restorePositions, destroy };

@@ -279,6 +279,63 @@ test('toolbar pointer cancellation restores the pre-drag position without persis
   assert.equal(h.stateWrites.length, 0);
 });
 
+test('a completed handle drag does not suppress the next real action click', () => {
+  const h = createHarness({});
+  const el = h.makeElement('bin-button');
+  h.controller.mount();
+
+  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el, el._handle));
+  el._dispatch('pointermove', pointerEvent(1, 300, 180, el, el._handle));
+  el._dispatch('pointerup', pointerEvent(1, 300, 180, el, el._handle));
+  let prevented = false;
+  el._dispatch('click', {
+    target: el,
+    preventDefault() { prevented = true; },
+    stopPropagation() {},
+  });
+
+  assert.equal(prevented, false);
+  assert.equal(h.persists.length, 1);
+});
+
+test('a competing pointer cannot replace the active toolbar drag', () => {
+  const h = createHarness({});
+  const first = h.makeElement('bin-button');
+  const second = h.makeElement('copy-prompt');
+  h.controller.mount();
+
+  first._dispatch('pointerdown', pointerEvent(1, 150, 150, first, first._handle));
+  first._dispatch('pointermove', pointerEvent(1, 300, 180, first, first._handle));
+  second._dispatch('pointerdown', pointerEvent(2, 450, 150, second, second._handle));
+  second._dispatch('pointermove', pointerEvent(2, 700, 180, second, second._handle));
+  first._dispatch('pointerup', pointerEvent(1, 300, 180, first, first._handle));
+
+  assert.equal(h.persists.length, 1);
+  assert.ok(h.getState().view.toolbarPositions['bin-button']);
+  assert.equal(h.getState().view.toolbarPositions['copy-prompt'], undefined);
+});
+
+test('blur and destroy roll back an active toolbar drag without persistence', () => {
+  const h = createHarness({});
+  const el = h.makeElement('bin-button');
+  el.style.left = '25px';
+  el.style.top = '30px';
+  h.controller.mount();
+
+  el._dispatch('pointerdown', pointerEvent(1, 150, 150, el, el._handle));
+  el._dispatch('pointermove', pointerEvent(1, 400, 350, el, el._handle));
+  h.dispatchWindow('blur', {});
+  assert.equal(el.style.left, '25px');
+  assert.equal(el.style.top, '30px');
+
+  el._dispatch('pointerdown', pointerEvent(2, 150, 150, el, el._handle));
+  el._dispatch('pointermove', pointerEvent(2, 400, 350, el, el._handle));
+  h.controller.destroy();
+  assert.equal(el.style.left, '25px');
+  assert.equal(el.style.top, '30px');
+  assert.equal(h.persists.length, 0);
+});
+
 test('toolbar resize re-applies saved positions after the debounce', async () => {
   const h = createHarness({ 'bin-button': { x: 0.5, y: 0.25 } });
   const el = h.makeElement('bin-button');

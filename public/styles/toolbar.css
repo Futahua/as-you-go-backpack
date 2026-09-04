@@ -44,9 +44,6 @@
 .toolbar-dragging .toolbar-drag-handle::before { opacity: 0.8; }
 .toolbar-dragging .toolbar-drag-handle { cursor: grabbing; }
 .toolbar-shell:has(> [hidden]) { display: none !important; }
-.toolbar-shell[data-toolbar-key="breadcrumbs"] {
-  box-shadow: none;
-}
 /* Copy confirmation for the icon-only pickup button. Its "Copied" label is
  * sr-only, so without this a sighted user gets no feedback at all. The
  * selector is doubled and written for :hover because the pointer is by
