@@ -193,6 +193,10 @@ const workspaceStoreStatus = createReadOnlyStatusSink({
 // 0B: created after the store, because it needs the store's queue. Until it
 // exists this surface behaves exactly as it always has -- a single writer.
 let surfaceCoordinator = null;
+// The host may ask a project to finish a bounded close-time persistence before
+// destroying its renderer. This remains an optional project hook: Papers does
+// not know the document schema or what the project considers durable.
+let pendingRestSave = Promise.resolve();
 // Coordination is fail-closed while startup is pending and when either
 // primitive cannot be constructed. An uncoordinated surface must never fall
 // back to the legacy unchecked host.saveWorkspace path.
@@ -5027,7 +5031,7 @@ graph._setOnRestPositions((positions) => {
   // preference. Persist them without adding an Undo history entry so reopening
   // starts at the settled layout, and let the coordinator broadcast the same
   // last-writer-wins positions to every open surface.
-  void store.save(state).catch((error) => {
+  pendingRestSave = store.save(state).catch((error) => {
     setStatus(error instanceof Error ? error.message : String(error));
   });
 });
@@ -5035,6 +5039,10 @@ graph._setOnRestPositions((positions) => {
 // Flush the current graph before the renderer disappears so the latest settled
 // coordinates are recoverable on the next real renderer.
 window.addEventListener('pagehide', () => graph._saveRestPositionsNow());
+window.__papersFlushBeforeClose = () => {
+  graph._saveRestPositionsNow();
+  return pendingRestSave;
+};
 
 const editorDialog = createEditorDialog({
   elements,
