@@ -399,3 +399,48 @@ When writer election fails outright, mutation still fails closed — inventing a
 authority would recreate the plural-execution bug — but the widget is now told why instead of
 being left blank, since its retry only ever arms on an explicit `unknown-layout`, never on
 silence.
+
+### F2 root cause — the member click asked the wrong source which layout was active
+
+The authority fix above was real but was NOT the cause of F2. The creator re-tested after
+exiting and re-entering the backpack and building a brand new layout: unchanged. Papers serves
+each backpack open under a fresh URL namespace with no cache policy, so the new code had loaded.
+
+The individual member click gated on the DURABLE `state.activeWindowLayoutId`, while
+`ensureRecording()` decided from the recording controller's own live `activeLayoutId`. Those
+answer different questions and can disagree, because `activeWindowLayoutId` is shared top-level
+document state: `installPeerDocument()` takes it straight from another surface's document —
+including on the elected writer accepting a forwarded mutation — while the runtime's
+`activeLayoutId` is a closure variable no document install can reach. That is the multi-tab
+correlation the creator remembered.
+
+Once diverged the click deadlocked. Durable said "not current", so it called `ensureRecording`
+and returned; `ensureRecording` asked the runtime, which said "already current", so it only
+reconciled — and `reconcileActive` deliberately never writes state. Nothing changed, so every
+later click repeated it, permanently and silently, never reaching a capability call. Group
+actions never consult this gate, which is why they kept working while every icon looked dead —
+and because minimize-all calls `ensureRecording` only *after* it finishes, using the group
+buttons actively kept the individual click broken.
+
+The Papers host was audited end to end for this (preload → windowCapabilityIpc →
+windowCapabilityService → helper → the Win32 calls) and introduces no single-member vs group
+distinction: by the time Papers sees either, both are the same absolute capability mutation.
+The failure happens before Papers is reached. The host's design is still implicated in *why*
+the field was unsafe — Papers gives each project surface its own runtime, so one project-wide
+shared active id was the wrong shape once tabs existed.
+
+Fix: one predicate, `isActiveRecordingContext(layoutId)`, reading the recording controller.
+Applied to all five sites that were asking "is the controller on this layout?" — the click
+gate, the stale-binding reconcile, member removal, retirement and unlink. The sixth reader,
+`bootstrapWindowLayoutRecording()`, deliberately keeps the durable id: "what should we resume
+on load?" is the one question the persisted field is the right answer to.
+
+**Not changed:** the two-step interaction is intentional (explicit comment above the gate, and
+`runSwitch` applies the layout's saved arrangement), so a click on a layout that is genuinely
+not the current context still selects it first and toggles on the next click. No schema change,
+no migration, Papers untouched.
+
+**Deferred, deliberately:** making the active recording context per-surface is the
+architecturally correct shape, since each project surface already has its own runtime. It costs
+a schema migration plus redesign of bootstrap resume, detach/handoff (which retains the id on
+purpose) and widget-to-surface ownership routing. That is a design change, not a bug fix.

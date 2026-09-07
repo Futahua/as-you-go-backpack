@@ -961,6 +961,30 @@ function windowLayoutStatusForOutcome(outcome) {
   return 'Failed';
 }
 
+/** Is the recording controller RIGHT NOW driving this layout?
+ *
+ * Two different questions were being answered by one field. "Which layout
+ * should we resume on load?" is durable (state.activeWindowLayoutId, read by
+ * bootstrapWindowLayoutRecording). "Which layout is the controller actually
+ * observing?" is the controller's own live state, and asking the durable field
+ * instead was the bug: activeWindowLayoutId is shared top-level document state,
+ * so installPeerDocument() overwrites it from another surface's document -
+ * including on the elected writer accepting a forwarded mutation - while the
+ * runtime's activeLayoutId, a closure variable a document install cannot reach,
+ * keeps its old value.
+ *
+ * Once they diverge the member click deadlocked: the durable gate said "not
+ * current" so it called ensureRecording and returned, ensureRecording asked the
+ * runtime which said "already current" so it only reconciled - and reconcile
+ * deliberately never writes state. Nothing changed, so the next click did the
+ * same thing, permanently and silently, never reaching a capability call. Group
+ * actions never consult this at all, which is why they kept working while every
+ * individual icon looked dead.
+ */
+function isActiveRecordingContext(layoutId) {
+  return windowLayoutRuntimeController.getSnapshot().activeLayoutId === layoutId;
+}
+
 async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false, shiftKey = false) {
   if (windowLayoutDetachment.isReadOnly()) return;
   const member = windowLayoutMemberFromState(layoutId, memberId);
@@ -1012,7 +1036,7 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
   // with no active context) applies THIS layout's saved arrangement for every
   // member and selects this layout's recording context. A click in the
   // already-current context toggles minimize/restore.
-  if (state.activeWindowLayoutId !== layoutId) {
+  if (!isActiveRecordingContext(layoutId)) {
     await windowLayoutRecording.ensureRecording(layoutId);
     return;
   }
@@ -1031,7 +1055,7 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
       // controller's capabilities so the observer re-resolves once.
       windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
       windowLayoutRuntimeController.invalidateCapabilities(layoutId);
-      if (state.activeWindowLayoutId === layoutId) {
+      if (isActiveRecordingContext(layoutId)) {
         await windowLayoutRuntimeController.reconcileActive();
         // 018X5: abort immediately after the reconcile await before the status.
         if (windowLayoutDetachment.isReadOnly()) return;
@@ -1222,7 +1246,7 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     noteWindowLayoutCommit(layoutId);
     // Removing a member of the active layout re-syncs the observer; removing
     // from an inactive layout never starts recording there.
-    if (state.activeWindowLayoutId === layoutId) {
+    if (isActiveRecordingContext(layoutId)) {
       await windowLayoutRuntimeController.reconcileActive();
     }
     return;
@@ -2231,7 +2255,7 @@ async function retireClosedWindowEverywhere(descriptor) {
     noteWindowLayoutCommit(changedLayoutId, { reason: 'closed-window-retired' });
   }
   windowLayoutMemberPreview.cancel();
-  if ([...removedByLayout.keys()].includes(state.activeWindowLayoutId)) {
+  if ([...removedByLayout.keys()].some((candidate) => isActiveRecordingContext(candidate))) {
     await windowLayoutRuntimeController.reconcileActive();
   }
   return persisted;
@@ -2458,6 +2482,9 @@ function queueWindowLayoutSave() {
  * follows actual owner start (018X1). A null id means no recording context
  * until the creator touches a layout. */
 function bootstrapWindowLayoutRecording() {
+  // Deliberately the DURABLE id, not isActiveRecordingContext(): this is the
+  // resume seam, and at boot the runtime has no active layout yet. This is the
+  // one question the persisted field is the right answer to.
   if (state.activeWindowLayoutId) {
     return windowLayoutRecording.ensureRecording(state.activeWindowLayoutId);
   }
@@ -2503,7 +2530,7 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
   // Unlinking a member of the active layout re-syncs the observer; unlinking
   // from an inactive layout never starts recording there. Unlinking the last
   // member leaves the id retained with no timer (retry on the next add).
-  if (state.activeWindowLayoutId === layoutId) {
+  if (isActiveRecordingContext(layoutId)) {
     void windowLayoutRuntimeController.reconcileActive();
   }
 }
