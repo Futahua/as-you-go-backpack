@@ -2035,6 +2035,31 @@ elements.grid.addEventListener('auxclick', (event) => {
   windowLayoutMemberPreview.cancel();
   void closeWindowLayoutMember(member.dataset.wlLayout, member.dataset.wlMember);
 });
+// A press on a member is a CONTROL intent, and control must not queue behind
+// cosmetic work. The Papers window helper executes exactly one request at a
+// time - read a line, run it to completion, write the reply - so a hover that
+// is still cold (desktop list, then bind/observe, then a full PrintWindow
+// capture) occupies it, and this click's own observe and minimize/restore wait
+// behind all of that. The creator sees the real application window react late,
+// and only on the first click after moving to another icon: staying on one icon
+// starts no new hover pipeline.
+//
+// Every other member interaction already cancels the preview - Ctrl-drag,
+// context menu, picker start, scroll, resize. The ordinary click was the single
+// path that did not, so pressing an icon let a capture launch AFTER the creator
+// had already asked for the window to move. Capture phase, so it runs ahead of
+// any handler that stops propagation, and covers the attached card and the
+// detached widget through one seam.
+//
+// This cannot cancel a capture already executing inside the helper - nothing
+// can, PowerShell is synchronous inside PrintWindow - but it stops one being
+// started or queued once the creator has committed to a click.
+document.addEventListener('pointerdown', (event) => {
+  if (!event.target?.closest?.('[data-wl-member]')) return;
+  cancelWindowLayoutPreviewDwell();
+  windowLayoutMemberPopover.hide();
+  windowLayoutMemberPreview.cancel();
+}, true);
 document.addEventListener('scroll', () => {
   cancelWindowLayoutPreviewDwell();
   windowLayoutMemberPopover.hide();

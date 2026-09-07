@@ -444,3 +444,44 @@ no migration, Papers untouched.
 architecturally correct shape, since each project surface already has its own runtime. It costs
 a schema migration plus redesign of bootstrap resume, detach/handoff (which retains the id on
 purpose) and widget-to-surface ownership routing. That is a design change, not a bug fix.
+
+### F3 — First click after moving to another icon minimizes/restores late
+
+Creator, after F2 was fixed: "i click one 10 times consecutively, its responsive. then I click
+the second one, click registers noticably slower, then the next consecutive clicks are
+resposive. switch it and the other one sloths." Clarified: the delay is the real window
+minimizing/restoring, not the icon's visual feedback.
+
+The Papers window helper is strictly serial — it reads ONE stdin line, runs the whole request
+synchronously, writes the reply, and only then reads the next. Moving to another icon starts a
+fresh hover pipeline (100 ms dwell, 120 ms debounce), and when that member's capability is cold
+it costs a desktop `list`, a `bind`/`observe`, and then a full `PrintWindow` capture. The
+click's own observe and minimize/restore queue behind all of it, so the window moves late.
+
+It ping-pongs because a successful toggle changes member state, which changes the widget's
+render identity, and `renderWidgetCard()` unconditionally clears the preview-capability cache.
+So every click deliberately re-cools every member: staying on one icon starts no new hover
+pipeline and is fast, while moving is cold again — and toggling that one re-cools the first.
+
+Two fixes, one per repo:
+
+- **As you Go:** an ordinary member press was the only interaction that did not cancel the
+  preview pipeline (Ctrl-drag, context menu, picker, scroll and resize all did). A capture could
+  therefore be launched *after* the creator had already asked for the window to move. One
+  capture-phase `pointerdown` listener now cancels it for both the attached card and the widget.
+- **Papers:** speculative captures are deferred in `windowCapabilityClient` while any control
+  request is outstanding. Control requests still dispatch immediately and independently, so one
+  lost helper reply cannot stall the others — an earlier attempt that serialized *everything*
+  broke exactly that property and was caught by the existing suite.
+
+**Papers was touched for the first time here, on a proven gap:** the helper's serialization is
+real, and no amount of Backpack-side work can stop a capture that has already entered it.
+
+**Known limit:** a capture already executing cannot be preempted — PowerShell is synchronous
+inside `PrintWindow`, so its stdin loop cannot even read a cancel until the capture finishes.
+At most one capture can now be ahead of a click instead of an unbounded run of them. Real
+preemption would need a background runspace or a separate process, which was judged the wrong
+trade for a latency bug: helper restarts intentionally invalidate capability and thumbnail
+state.
+
+Not yet creator-verified.
