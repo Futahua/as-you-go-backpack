@@ -37,8 +37,9 @@ The As you Go workspace behaves like a file explorer:
   visible folder, or inside an As you Go folder when dropped directly onto it; the
   external file or folder is referenced and never copied, moved or changed;
 - Ctrl+mouse-wheel changes the persistent icon size;
-- the current folder, expanded folders, selected items and Bin view are restored after
-  leaving, closing or reopening Papers;
+- each Papers tab restores its own last-opened folder after leaving, closing or
+  reopening Papers; expanded folders, selected items and Bin view remain local
+  to the live tab;
 - the Bin supports restore and separately confirmed permanent deletion.
 
 Shortcut descriptions are optional. Shortcut icons use the target's Windows icon by

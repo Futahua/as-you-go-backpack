@@ -44,6 +44,8 @@ import {
   reorderWindowLayoutMember,
   setActiveWindowLayoutId,
   setWindowLayoutCardSize,
+  setSurfaceLocation,
+  surfaceLocationFor,
   itemsIn,
   binnedItems,
   setItemSets,
@@ -76,6 +78,19 @@ import {
 function soloPlacementId(shortcut) {
   return shortcut.placements[0].id;
 }
+
+test('per-surface locations preserve independent last folders and bound untrusted keys', () => {
+  let state = emptyState();
+  state = setSurfaceLocation(state, 'surface-a', 'folder-a');
+  state = setSurfaceLocation(state, 'surface-b', 'folder-b');
+  assert.deepEqual(surfaceLocationFor(state, 'surface-a'), { currentGroupId: 'folder-a' });
+  assert.deepEqual(surfaceLocationFor(state, 'surface-b'), { currentGroupId: 'folder-b' });
+  assert.equal(surfaceLocationFor(state, 'x'.repeat(129)), null);
+  const normalized = normalizeState({ view: { surfaceLocations: {
+    valid: { currentGroupId: 'folder' }, malformed: { currentGroupId: 1 }, ['x'.repeat(129)]: { currentGroupId: 'nope' },
+  } } });
+  assert.deepEqual(normalized.view.surfaceLocations, { valid: { currentGroupId: 'folder' } });
+});
 
 test('a drag marquee selects every visible item rectangle it crosses', () => {
   const tiles = [

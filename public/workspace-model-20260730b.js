@@ -6,6 +6,7 @@ export const ROOT_ID = 'root';
 export const DEFAULT_ICON_SIZE = 96;
 export const MIN_ICON_SIZE = 56;
 export const MAX_ICON_SIZE = 176;
+const MAX_SURFACE_LOCATIONS = 128;
 
 const id = (kind) => `${kind}-${globalThis.crypto.randomUUID()}`;
 const hasNumber = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -496,6 +497,9 @@ export function normalizeState(raw) {
         typeof raw?.view?.currentGroupId === 'string'
           ? raw.view.currentGroupId
           : ROOT_ID,
+      ...(Object.keys(normalizeSurfaceLocations(raw?.view?.surfaceLocations)).length > 0
+        ? { surfaceLocations: normalizeSurfaceLocations(raw?.view?.surfaceLocations) }
+        : {}),
       expandedGroupIds: stringIds(raw?.view?.expandedGroupIds),
       graphExpandedGroupIds: stringIds(raw?.view?.graphExpandedGroupIds),
       selectedItemIds: stringIds(raw?.view?.selectedItemIds),
@@ -1378,6 +1382,13 @@ export function updateWorkspaceView(state, changes) {
         has('currentGroupId') && typeof changes.currentGroupId === 'string'
           ? changes.currentGroupId
           : (state.view?.currentGroupId ?? ROOT_ID),
+      ...(Object.keys(has('surfaceLocations')
+        ? normalizeSurfaceLocations(changes.surfaceLocations)
+        : normalizeSurfaceLocations(state.view?.surfaceLocations)).length > 0
+        ? { surfaceLocations: has('surfaceLocations')
+          ? normalizeSurfaceLocations(changes.surfaceLocations)
+          : normalizeSurfaceLocations(state.view?.surfaceLocations) }
+        : {}),
       expandedGroupIds: has('expandedGroupIds')
         ? stringIds(changes.expandedGroupIds)
         : (state.view?.expandedGroupIds ?? []),
@@ -1404,6 +1415,32 @@ export function updateWorkspaceView(state, changes) {
         : (state.view?.promptLibrary ?? []),
     },
   };
+}
+
+/** Per-Papers-tab local navigation. The opaque key comes from the host; this
+ * project only stores a folder id and never treats the key as authority. */
+export function normalizeSurfaceLocations(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const entries = Object.entries(raw)
+    .filter(([key, value]) => typeof key === 'string' && key.length > 0 && key.length <= 128
+      && value && typeof value === 'object' && !Array.isArray(value)
+      && typeof value.currentGroupId === 'string')
+    .slice(-MAX_SURFACE_LOCATIONS);
+  return Object.fromEntries(entries.map(([key, value]) => [key, { currentGroupId: value.currentGroupId }]));
+}
+
+export function surfaceLocationFor(state, surfaceKey) {
+  if (typeof surfaceKey !== 'string' || surfaceKey.length === 0 || surfaceKey.length > 128) return null;
+  return state.view?.surfaceLocations?.[surfaceKey] ?? null;
+}
+
+export function setSurfaceLocation(state, surfaceKey, currentGroupId) {
+  if (typeof surfaceKey !== 'string' || surfaceKey.length === 0 || surfaceKey.length > 128
+    || typeof currentGroupId !== 'string') return state;
+  const locations = normalizeSurfaceLocations(state.view?.surfaceLocations);
+  delete locations[surfaceKey];
+  locations[surfaceKey] = { currentGroupId };
+  return updateWorkspaceView(state, { surfaceLocations: locations });
 }
 
 export function setPromptLibrary(state, nodes) {

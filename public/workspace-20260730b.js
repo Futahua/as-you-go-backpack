@@ -48,6 +48,8 @@ import {
   reorderWindowLayoutMember,
   setWindowLayoutCardSize,
   setActiveWindowLayoutId,
+  setSurfaceLocation,
+  surfaceLocationFor,
 } from './workspace-model-20260730b.js';
 
 import {
@@ -125,6 +127,10 @@ import {
 } from './app/components/document-conflict-panel.js';
 
 const host = createHostBridge(window);
+const PROJECT_SURFACE_KEY = (() => {
+  const value = new URLSearchParams(window.location.search).get('papers-surface-key');
+  return value && value.length <= 128 ? value : null;
+})();
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
 
@@ -197,6 +203,7 @@ let surfaceCoordinator = null;
 // destroying its renderer. This remains an optional project hook: Papers does
 // not know the document schema or what the project considers durable.
 let pendingRestSave = Promise.resolve();
+let pendingSurfaceLocationSave = Promise.resolve();
 // Coordination is fail-closed while startup is pending and when either
 // primitive cannot be constructed. An uncoordinated surface must never fall
 // back to the legacy unchecked host.saveWorkspace path.
@@ -391,12 +398,15 @@ function isAvailableItem(itemId) {
 }
 
 function captureWorkspaceViewFrom(currentState, currentSession) {
-  return updateWorkspaceView(currentState, {
+  const captured = updateWorkspaceView(currentState, {
     currentGroupId: currentSession.currentId,
     graphExpandedGroupIds: [...currentSession.graphExpanded],
     selectedItemIds: [...currentSession.selected],
     binMode: currentSession.binMode,
   });
+  return PROJECT_SURFACE_KEY && !currentSession.binMode
+    ? setSurfaceLocation(captured, PROJECT_SURFACE_KEY, currentSession.currentId)
+    : captured;
 }
 
 function captureWorkspaceView() {
@@ -407,7 +417,7 @@ function restoreWorkspaceView() {
   const requestedFromUrl = new URLSearchParams(window.location.search).get('as-you-go-folder');
   const requestedCurrent = requestedFromUrl && group(requestedFromUrl)
     ? requestedFromUrl
-    : state.view.currentGroupId;
+    : (surfaceLocationFor(state, PROJECT_SURFACE_KEY)?.currentGroupId ?? state.view.currentGroupId);
   store.setNavigation({
     currentId:
       requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
@@ -428,12 +438,17 @@ function restoreWorkspaceView() {
   state = store.replace(captureWorkspaceView());
 }
 
-function saveWorkspaceView() {
+function saveWorkspaceView({ persistSurfaceLocation = false } = {}) {
   if (detachSaveGate.isReadOnly()) return;
   // Navigation, selection, expansion, trail expansion and Bin mode belong to
   // the live surface. Update the in-memory fallback for this window only; no
   // store save or coordinator mutation request is generated.
   state = store.replace(captureWorkspaceView());
+  if (persistSurfaceLocation && PROJECT_SURFACE_KEY) {
+    pendingSurfaceLocationSave = store.save(state).catch((error) => {
+      setStatus(error instanceof Error ? error.message : String(error));
+    });
+  }
 }
 
 /** 018A1/018X1 handoff flush: capture the current view into state and await the
@@ -4465,7 +4480,7 @@ elements.grid.addEventListener('click', (event) => {
       graph.destroyGraphView();
       closeMenu();
       render();
-      saveWorkspaceView();
+      saveWorkspaceView({ persistSurfaceLocation: !session.binMode });
       return;
     }
     // While Ctrl+G is open a click picks the set the item belongs to, rather
@@ -4744,7 +4759,7 @@ elements.breadcrumbs.addEventListener('click', (event) => {
   store.clearSelection();
   graph.destroyGraphView();
   render();
-  saveWorkspaceView();
+  saveWorkspaceView({ persistSurfaceLocation: !session.binMode });
 });
 
 const PICKUP_COPY_LABEL = 'Copy agent pickup prompt';
@@ -5008,7 +5023,14 @@ graph._setOnRestPositions((positions) => {
 window.addEventListener('pagehide', () => graph._saveRestPositionsNow());
 window.__papersFlushBeforeClose = async () => {
   graph._saveRestPositionsNow();
+  if (PROJECT_SURFACE_KEY && !detachSaveGate.isReadOnly()) {
+    state = store.replace(captureWorkspaceView());
+    pendingSurfaceLocationSave = store.save(state).catch((error) => {
+      setStatus(error instanceof Error ? error.message : String(error));
+    });
+  }
   await pendingRestSave;
+  await pendingSurfaceLocationSave;
   await store.flush();
   return { ok: true };
 };

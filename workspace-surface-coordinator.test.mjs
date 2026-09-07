@@ -7,6 +7,15 @@ import {
   mergeSurfaceSnapshots,
 } from './public/app/workspace-surface-coordinator.js';
 
+test('per-tab folder locations merge independently instead of replacing a peer tab', () => {
+  const base = { view: { surfaceLocations: { a: { currentGroupId: 'root' }, b: { currentGroupId: 'root' } } } };
+  const local = { view: { surfaceLocations: { a: { currentGroupId: 'folder-a' }, b: { currentGroupId: 'root' } } } };
+  const current = { view: { surfaceLocations: { a: { currentGroupId: 'root' }, b: { currentGroupId: 'folder-b' } } } };
+  assert.deepEqual(mergeSurfaceSnapshots(base, local, current).view.surfaceLocations, {
+    a: { currentGroupId: 'folder-a' }, b: { currentGroupId: 'folder-b' },
+  });
+});
+
 /** A lock that hands ownership to one holder at a time, in request order —
  * the property the real Web Lock gives us and the only one under test. */
 function fakeLock() {

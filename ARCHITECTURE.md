@@ -101,6 +101,11 @@ surface opening a folder with the context-menu action or middle mouse button
 requests a new generic Papers surface on its own authenticated project URL;
 the host does not interpret As you Go's folder id.
 
+Papers also supplies each project tab an opaque stable surface key. As you Go
+uses that key only to store a bounded `{ currentGroupId }` entry, so each tab
+can restore its own last-opened folder after runtime surface ids are recreated
+at startup. These entries merge by key; they never make a peer tab navigate.
+
 The creator confirmed working multi-window interactions before requesting this correction.
 Validation of the cooling correction: 1,116 unit tests and 8 visual pretests
 pass. Five production-function entry tests include a two-simulation reproduction

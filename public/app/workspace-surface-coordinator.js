@@ -452,6 +452,15 @@ export function mergeSurfaceSnapshots(base, local, current) {
           key !== 'toolbarPositions',
         );
       }
+    } else if (key === 'surfaceLocations' && isPlainObject(value)) {
+      // Each Papers tab updates only its own opaque key. Merge by key so a
+      // concurrent navigation in another tab cannot erase it.
+      const nextLocations = { ...(isPlainObject(currentView[key]) ? currentView[key] : {}) };
+      const baseLocations = isPlainObject(baseView[key]) ? baseView[key] : {};
+      for (const [surfaceKey, location] of Object.entries(value)) {
+        if (!sameJson(location, baseLocations[surfaceKey])) nextLocations[surfaceKey] = location;
+      }
+      view[key] = nextLocations;
     } else if (key === 'itemSets' && Array.isArray(value) && Array.isArray(currentView[key])) {
       // Sets are document semantics stored under view; merge independent set
       // IDs instead of replacing the whole collection on a stale snapshot.

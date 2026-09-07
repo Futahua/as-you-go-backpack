@@ -253,7 +253,7 @@ export function createWorkspaceCommands({
     graph.destroyGraphView();
     closeMenu();
     render();
-    saveWorkspaceView();
+    saveWorkspaceView({ persistSurfaceLocation: !session.binMode });
   }
 
   async function launchShortcut(itemId) {
