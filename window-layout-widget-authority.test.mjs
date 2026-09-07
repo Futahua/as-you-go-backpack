@@ -173,6 +173,84 @@ test('authority is re-read per message, so a handover takes effect without recon
   assert.deepEqual(applied.map((entry) => entry.surface), ['A', 'B'], 'after resync the new writer applies');
 });
 
+test('widget open/close presence reaches EVERY surface, not just the authority', async () => {
+  // The attached card is greyed to a placeholder while the widget is the sole
+  // live card, and that flag is per-surface in-memory state. Gating it would
+  // leave a non-writer tab showing a live card for a layout whose widget is
+  // open, and would strand that flag if the surface were demoted in between.
+  const bus = fakeBus();
+  const presence = { A: [], B: [] };
+  for (const label of ['A', 'B']) {
+    createWindowLayoutWidgetChannelWorkspace({
+      channel: bus.makeChannel(),
+      getLayout: (id) => (id === LAYOUT.id ? LAYOUT : null),
+      onWidgetOpen: (id) => presence[label].push(`open:${id}`),
+      onWidgetDispose: (id) => presence[label].push(`close:${id}`),
+      isAuthoritative: () => label === 'A',
+    });
+  }
+  const client = createWindowLayoutWidgetChannelClient({
+    channel: bus.makeChannel(),
+    layoutId: LAYOUT.id,
+    onMessage: () => {},
+  });
+  client.ready();
+  await settle();
+  client.dispose();
+  await settle();
+  assert.deepEqual(presence.A, [`open:${LAYOUT.id}`, `close:${LAYOUT.id}`]);
+  assert.deepEqual(presence.B, [`open:${LAYOUT.id}`, `close:${LAYOUT.id}`], 'the non-writer tracked presence too');
+});
+
+test('only the authority hydrates icons and persists card size', async () => {
+  const bus = fakeBus();
+  const hydrated = [];
+  const sized = [];
+  for (const label of ['A', 'B']) {
+    createWindowLayoutWidgetChannelWorkspace({
+      channel: bus.makeChannel(),
+      getLayout: (id) => (id === LAYOUT.id ? LAYOUT : null),
+      onAuthoritativeWidgetOpen: (id) => hydrated.push(`${label}:${id}`),
+      onCardSize: (id, width, height) => sized.push(`${label}:${width}x${height}`),
+      isAuthoritative: () => label === 'A',
+    });
+  }
+  const client = createWindowLayoutWidgetChannelClient({
+    channel: bus.makeChannel(),
+    layoutId: LAYOUT.id,
+    onMessage: () => {},
+  });
+  client.ready();
+  client.sendCardSize(200, 120);
+  await settle();
+  assert.deepEqual(hydrated, [`A:${LAYOUT.id}`], 'the writer hydrates its own icons; a view does not publish');
+  assert.deepEqual(sized, ['A:200x120'], 'card size is a durable write, so writer only');
+});
+
+test('a widget is told when coordination leaves nobody authoritative', async () => {
+  // Fail closed is right - inventing a fallback authority would recreate the
+  // plural-execution bug - but failing SILENTLY leaves the widget blank forever,
+  // because its retry only arms on an explicit unknown-layout, never on silence.
+  const bus = fakeBus();
+  const seen = [];
+  const responder = createWindowLayoutWidgetChannelWorkspace({
+    channel: bus.makeChannel(),
+    getLayout: (id) => (id === LAYOUT.id ? LAYOUT : null),
+    isAuthoritative: () => false,
+  });
+  createWindowLayoutWidgetChannelClient({
+    channel: bus.makeChannel(),
+    layoutId: LAYOUT.id,
+    onMessage: (message) => seen.push(message),
+  });
+  responder.announceUnavailable(LAYOUT.id, 'Workspace coordination unavailable');
+  await settle();
+  const errors = seen.filter((message) => message.type === 'error');
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, 'coordination-unavailable');
+  assert.notEqual(errors[0].code, 'unknown-layout', 'must not arm the cold-open retry loop');
+});
+
 test('a non-authoritative surface neither bumps a revision nor broadcasts', () => {
   const bus = fakeBus();
   const heard = [];

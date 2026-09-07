@@ -2282,6 +2282,16 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
     if (!detachedWidgets.delete(layoutId)) return;
     render();
   },
+  // Member icons are resolved into each surface's own in-memory cache and the
+  // snapshot reads the responder's copy, so the authority must hydrate the ones
+  // it lacks. Another surface resolving them can no longer publish, and the
+  // writer may not even be displaying this layout - without this the widget
+  // sits on placeholder icons forever.
+  onAuthoritativeWidgetOpen: (layoutId) => {
+    for (const member of windowLayoutFromState(layoutId)?.arrangement?.members ?? []) {
+      queueWindowLayoutIconRefresh(layoutId, member.id);
+    }
+  },
   // 035: the live widget reports its window content size; the workspace persists
   // it to the shared card geometry (replace + save, no history/selection churn)
   // so reattach mirrors it.
@@ -2412,6 +2422,26 @@ function handleWindowLayoutRetireMember(intent) {
 /** 019C: after any OTHER durable window-layout commit the workspace broadcasts
  * the fresh snapshot/revision so open widgets re-sync (the channel workspace
  * also answers command intents itself). */
+/** Per-layout signature of the DURABLE fields a widget snapshot is built from,
+ * used to detect that an installed document changed a layout. Deliberately not
+ * the widget render identity: that one carries locally-resolved member icons,
+ * which are per-surface cache state and would report spurious changes. */
+function windowLayoutDurableSignatures(source) {
+  const signatures = new Map();
+  for (const layout of source?.windowLayouts ?? []) {
+    signatures.set(layout.id, JSON.stringify([
+      layout.name ?? '',
+      (layout.arrangement?.members ?? []).map((member) => [
+        member.id,
+        member.state,
+        member.descriptor?.title ?? '',
+        member.descriptor?.executableFingerprint ?? '',
+      ]),
+    ]));
+  }
+  return signatures;
+}
+
 function noteWindowLayoutCommit(layoutId, options) {
   windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId, options);
 }
@@ -5965,10 +5995,20 @@ if (WIDGET_SURFACE) {
    * conflict; the store keeps the document, history, serialization and save
    * ordering; the panel only follows the role.
    */
+  /** Coordination failed, so no surface will ever be authoritative for a widget.
+   * Fail closed on every mutation, but say so rather than leaving an open
+   * widget blank and waiting forever. */
+  function reportCoordinationUnavailableToWidgets(reason) {
+    for (const layout of state.windowLayouts ?? []) {
+      windowLayoutWidgetChannelWorkspace.announceUnavailable(layout.id, reason);
+    }
+  }
+
   function startSurfaceCoordination() {
     if (typeof navigator === 'undefined' || !navigator.locks || typeof BroadcastChannel !== 'function') {
       coordinationState = 'unavailable';
       statusToast.show('Shared document coordination is unavailable; durable editing is disabled.', { tone: 'error' });
+      reportCoordinationUnavailableToWidgets('Workspace coordination unavailable');
       return;
     }
     let channel;
@@ -5977,6 +6017,7 @@ if (WIDGET_SURFACE) {
     } catch {
       coordinationState = 'unavailable';
       statusToast.show('Shared document coordination failed to start; durable editing is disabled.', { tone: 'error' });
+      reportCoordinationUnavailableToWidgets('Workspace coordination unavailable');
       return;
     }
     const conflictPanel = createDocumentConflictPanel({
@@ -6025,7 +6066,19 @@ if (WIDGET_SURFACE) {
         const next = trailExpandedByContext === undefined
           ? document_
           : { ...document_, view: { ...(document_.view ?? {}), trailExpandedByContext } };
+        // Any ordinary surface may originate a layout edit; it forwards the
+        // document to the writer, and only the writer may tell widgets. So the
+        // notification has to happen where the writer INSTALLS the accepted
+        // document, not where the edit was made - otherwise a change made in a
+        // non-writer tab leaves the detached widget on a stale layout. Diffing
+        // here also means the widget is told after the writer really holds the
+        // state, never speculatively ahead of it.
+        const before = windowLayoutDurableSignatures(state);
         state = store.install(next, { authoritativeSerialized });
+        const after = windowLayoutDurableSignatures(state);
+        for (const [layoutId, signature] of after) {
+          if (before.get(layoutId) !== signature) windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
+        }
         render();
       },
       // A peer commit is a new document generation. Drop this surface's local
@@ -6061,6 +6114,7 @@ if (WIDGET_SURFACE) {
     void surfaceCoordinator.start().catch(() => {
       coordinationState = 'unavailable';
       statusToast.show('Shared document coordination failed to elect a writer; durable editing is disabled.', { tone: 'error' });
+      reportCoordinationUnavailableToWidgets('Workspace coordination unavailable');
     });
   }
 

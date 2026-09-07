@@ -371,3 +371,31 @@ existing document-WRITER election, re-read per message so a handover needs no re
 after a writer handover is refused as `stale`; the widget resyncs and the next one lands. One
 command is dropped per handover. Closing that needs durable revision authority, or correlated
 ACK/retry with de-duplication — a plain retry would UNDO a toggle the dead writer had applied.
+
+### F2 follow-up — dividing the authority boundary correctly
+
+The first authority cut gated every inbound channel message at once, which was too broad and
+introduced three regressions of its own. Two kinds of effect arrive on that channel and they
+need opposite policies:
+
+- **Authoritative** (WRITER only): native commands, revision ownership, snapshot replies and
+  durable card-size persistence.
+- **Local presence** (every ordinary workspace surface): "a widget for this layout is
+  open/closed". That drives whether *this* surface shows the greyed placeholder, so gating it
+  let a non-writer tab keep displaying a live attached card, and could strand the flag on a
+  surface demoted between a widget's open and its close.
+
+Two further consequences of the over-gate, both fixed:
+
+- Any surface may originate a layout edit and forward it to the writer, but its `noteCommitted`
+  was suppressed and the writer never re-issued it — a change made in a non-writer tab left the
+  widget on a **stale layout**. The writer now diffs durable layout state where it *installs*
+  an accepted document, so the widget is told after the writer really holds the state.
+- Member icons resolved in a non-writer tab could no longer be published, and the writer may
+  not even be displaying that layout, so the widget could sit on placeholders. The authority
+  now hydrates its own missing icons when it answers a widget.
+
+When writer election fails outright, mutation still fails closed — inventing a fallback
+authority would recreate the plural-execution bug — but the widget is now told why instead of
+being left blank, since its retry only ever arms on an explicit `unknown-layout`, never on
+silence.

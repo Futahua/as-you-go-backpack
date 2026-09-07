@@ -328,6 +328,11 @@ export function createWindowLayoutWidgetChannelWorkspace({
   onWidgetOpen,
   onWidgetDispose,
   onCardSize,
+  /** Fires on the AUTHORITATIVE surface only, after it answers a widget. Member
+   * icons live in each surface's own in-memory cache, so the writer has to
+   * hydrate the ones it is missing itself: another surface resolving them can
+   * no longer publish, and the writer may not even be displaying that layout. */
+  onAuthoritativeWidgetOpen,
   // Answered fresh on every protocol effect: is THIS surface the one authority
   // for the layout right now? A project may be open in several workspace
   // surfaces (the multi-tab feature), and every one of them constructs a
@@ -362,23 +367,40 @@ export function createWindowLayoutWidgetChannelWorkspace({
   async function reply(event) {
     const message = event.data;
     if (!isPlainObject(message) || typeof message.type !== 'string') return;
-    // Gate EVERY inbound protocol effect, not just commands: a non-authoritative
-    // responder answering widget-ready/snapshot-request is what fed the widget
-    // competing revision streams, and card-size/dispose are durable writes.
-    if (!isAuthoritative()) return;
+    // Authority is decided PER BRANCH, never once at the top. Two different
+    // kinds of effect arrive on this channel and they need opposite policies:
+    //
+    //   authoritative - native commands, revision ownership, snapshot replies
+    //                   and durable card-size. Exactly the WRITER, or two
+    //                   surfaces execute one toggle and cancel it out.
+    //   local presence - "a widget for this layout is open/closed". That is
+    //                   in-memory per-surface state driving whether THIS
+    //                   surface shows the greyed placeholder, so every ordinary
+    //                   workspace surface must see it. Gating it would let a
+    //                   non-writer tab keep displaying a live attached card
+    //                   while the widget is the sole live card, and would leak
+    //                   placeholder state on a surface demoted between a
+    //                   widget's open and its close.
+    //
+    // Validation runs BEFORE either, so a malformed message has no effect on
+    // any surface regardless of who is writer.
     if (message.type === 'widget-ready' || message.type === 'snapshot-request') {
       if (!exactKeys(message, ['type', 'layoutId', 'clientId'])) return;
       if (!boundedString(message.layoutId, 'layoutId') || !boundedString(message.clientId, 'clientId')) return;
       const { layoutId, clientId } = message;
+      // 035: a widget announcing itself marks this layout's attached card as a
+      // greyed placeholder (the widget is the sole live card). Local, unGated.
+      // A snapshot-request counts as presence too: it only comes from a live
+      // widget, so a surface that missed widget-ready still converges.
+      onWidgetOpen?.(layoutId);
+      if (!isAuthoritative()) return;
       const layout = getLayout(layoutId);
       if (!layout) {
         post({ type: 'error', layoutId, clientId, code: 'unknown-layout' });
         return;
       }
       post({ type: 'snapshot', layoutId, clientId, revision: revisionOf(layoutId), snapshot: buildSnapshot(layout) });
-      // 035: a widget announcing itself marks this layout's attached card as a
-      // greyed placeholder (the widget is the sole live card).
-      onWidgetOpen?.(layoutId);
+      onAuthoritativeWidgetOpen?.(layoutId);
       return;
     }
     // 035: a live widget reports its window content size so the workspace
@@ -390,6 +412,8 @@ export function createWindowLayoutWidgetChannelWorkspace({
       const height = message.height;
       if (typeof width !== 'number' || typeof height !== 'number' || !Number.isFinite(width)
         || !Number.isFinite(height) || width < 1 || width > 2000 || height < 1 || height > 2000) return;
+      // Durable: the callback replaces and saves workspace state.
+      if (!isAuthoritative()) return;
       onCardSize?.(message.layoutId, Math.round(width), Math.round(height));
       return;
     }
@@ -398,6 +422,8 @@ export function createWindowLayoutWidgetChannelWorkspace({
     if (message.type === 'dispose') {
       if (!exactKeys(message, ['type', 'layoutId', 'clientId'])) return;
       if (!boundedString(message.layoutId, 'layoutId') || !boundedString(message.clientId, 'clientId')) return;
+      // Local presence, NOT a durable write: every ordinary workspace surface
+      // must restore its own attached card, whoever the writer happens to be.
       onWidgetDispose?.(message.layoutId);
       return;
     }
@@ -406,6 +432,9 @@ export function createWindowLayoutWidgetChannelWorkspace({
       if (!boundedString(message.layoutId, 'layoutId') || !boundedString(message.clientId, 'clientId')
         || !boundedString(message.commandId, 'commandId')
         || typeof message.baseRevision !== 'number' || !Number.isFinite(message.baseRevision)) return;
+      // Native window mutation and revision ownership: WRITER only. Dropped
+      // before parsing, since a non-writer produces neither effect nor reply.
+      if (!isAuthoritative()) return;
       const command = windowLayoutWidgetParseCommand(message.command);
       if (!command) return;
       const { layoutId, clientId, commandId, baseRevision } = message;
@@ -468,6 +497,17 @@ export function createWindowLayoutWidgetChannelWorkspace({
       const layout = getLayout(layoutId);
       if (layout) post({ type: 'snapshot', layoutId, revision: revisionOf(layoutId), snapshot: buildSnapshot(layout) });
       return revisionOf(layoutId);
+    },
+    /** Tell an open widget that NO surface can act for it, so it shows a reason
+     * instead of an empty card. Deliberately ungated: when writer election has
+     * failed there is by definition no authority to send it, and the widget's
+     * own retry only ever arms on an explicit `unknown-layout`, never on
+     * silence. Refusing to act stays correct - inventing a fallback authority
+     * would recreate exactly the plural-execution bug - but refusing silently
+     * is not. Idempotent: duplicate notices set the same status. */
+    announceUnavailable(layoutId, reason) {
+      if (!boundedString(layoutId, 'layoutId')) return;
+      post({ type: 'error', layoutId, code: 'coordination-unavailable', message: reason });
     },
     close() {
       channel.removeEventListener('message', listener);
