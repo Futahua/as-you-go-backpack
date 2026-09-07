@@ -89,7 +89,7 @@ import { createHostBridge } from './app/host/host-bridge.js';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
-import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
+import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, windowLayoutWidgetRenderIdentity, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
 import { createWindowLayoutPickApplier, createWindowLayoutRetirementWriter } from './app/window-layout-workspace.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup } from './app/window-layout-control-icons.js';
 import { createWindowLayoutIsolateMode } from './app/window-layout-isolate-mode.js';
@@ -164,14 +164,16 @@ function windowLayoutWidgetSurfaceParams(locationRef) {
 }
 const WIDGET_SURFACE = windowLayoutWidgetSurfaceParams(window.location);
 if (WIDGET_SURFACE) document.documentElement.dataset.widgetSurface = 'true';
+/** A channel stand-in that never listens and never posts. */
+function createInertBroadcastChannel(name) {
+  return { name, postMessage() {}, addEventListener() {}, removeEventListener() {}, close() {} };
+}
 function createSafeBroadcastChannel(name) {
-  if (typeof BroadcastChannel !== 'function') {
-    return { name, postMessage() {}, addEventListener() {}, removeEventListener() {}, close() {} };
-  }
+  if (typeof BroadcastChannel !== 'function') return createInertBroadcastChannel(name);
   try {
     return new BroadcastChannel(name);
   } catch {
-    return { name, postMessage() {}, addEventListener() {}, removeEventListener() {}, close() {} };
+    return createInertBroadcastChannel(name);
   }
 }
 const windowLayoutWidgetSelectionChannel = createSafeBroadcastChannel('ayg-window-layout-widget-selection');
@@ -2235,8 +2237,18 @@ async function retireClosedWindowEverywhere(descriptor) {
   return persisted;
 }
 
+// The compact widget loads this same bundle, so this workspace-side responder
+// is constructed on the widget surface too - but the widget deliberately skips
+// bootstrapWorkspace(), so its `state` never holds a layout. On a live channel
+// it would therefore answer the widget's OWN snapshot-request with
+// `unknown-layout`, which re-arms the widget's bounded retry, which requests
+// again: an endless request loop whose replies rebuild the card. Only a real
+// workspace surface is an authoritative responder, so the widget gets an inert
+// channel and answers nothing.
 const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorkspace({
-  channel: createSafeBroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL),
+  channel: WIDGET_SURFACE
+    ? createInertBroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL)
+    : createSafeBroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL),
   getLayout: windowLayoutFromState,
   snapshot: (layout, memberIcon) => ({
     ...windowLayoutWidgetSnapshot(layout, memberIcon),
@@ -5158,6 +5170,9 @@ function bootstrapWindowLayoutWidget() {
     candidates: null,
     pickUnsubscribe: null,
     lastRevision: -1,
+    // What the currently mounted card DOM was built from. Protocol revision is
+    // NOT that identity: see windowLayoutWidgetRenderIdentity.
+    lastRenderIdentity: null,
     // 035: true once a real workspace snapshot has been received (the restore
     // below must never run against the empty initial default snapshot).
     snapshotReceived: false,
@@ -5167,10 +5182,12 @@ function bootstrapWindowLayoutWidget() {
   let windowRestoredOnce = false;
   // 019G/021: bounded snapshot re-request for a transient unknown-layout.
   let snapshotRetry = null;
+  const MAX_SNAPSHOT_RETRY_ARMINGS = 3;
+  let snapshotRetryArmings = 0;
 
   function handleWidgetMessage(message) {
     if (message.type === 'snapshot' || message.type === 'committed' || message.type === 'stale') {
-      if (typeof message.revision !== 'number' || message.revision === widgetState.lastRevision) return;
+      if (typeof message.revision !== 'number') return;
       widgetState.lastRevision = message.revision;
       if (message.snapshot && typeof message.snapshot === 'object' && message.snapshot.id === layoutId) {
         widgetState.snapshot = message.snapshot;
@@ -5183,7 +5200,15 @@ function bootstrapWindowLayoutWidget() {
         for (const memberId of [...widgetState.selection]) {
           if (!memberIds.has(memberId)) widgetState.selection.delete(memberId);
         }
-         renderWidgetCard({ skipHostResize: message.reason === 'reorder' || message.commandKind === 'reorder' });
+        // renderWidgetCard replaces elements.grid.innerHTML wholesale, which
+        // destroys every member button and the pointer's hover target with it.
+        // A duplicate message must therefore leave the live DOM alone: the
+        // creator saw every icon flicker at once, and clicks fall through,
+        // when repeated snapshots rebuild a card whose content never changed.
+        const renderIdentity = windowLayoutWidgetRenderIdentity(message.snapshot);
+        if (renderIdentity === widgetState.lastRenderIdentity) return;
+        widgetState.lastRenderIdentity = renderIdentity;
+        renderWidgetCard({ skipHostResize: message.reason === 'reorder' || message.commandKind === 'reorder' });
       }
       return;
     }
@@ -5191,7 +5216,14 @@ function bootstrapWindowLayoutWidget() {
       if (message.code === 'unknown-layout') {
         // 019G/021: the workspace may still be loading durable state. Bounded
         // re-request so the first open is never stuck on the empty card.
+        // The retry does not await a reply, so `onResult` clears it as soon as
+        // the third request is SENT: a late unknown-layout then arms a fresh
+        // three, forever. The cold-open stall this recovers from is finite, so
+        // cap the number of re-arms rather than letting a persistently absent
+        // layout drive an unbounded request loop.
+        if (snapshotRetryArmings >= MAX_SNAPSHOT_RETRY_ARMINGS) return;
         if (!snapshotRetry) {
+          snapshotRetryArmings += 1;
           snapshotRetry = createBoundedRetry({
             attempts: 3,
             delayMs: 250,

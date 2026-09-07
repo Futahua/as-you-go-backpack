@@ -188,6 +188,33 @@ function parsePickerCommitAdd(add) {
   return { descriptor, capability, candidate };
 }
 
+/** The snapshot fields the widget's card DOM is actually built from: layout
+ * identity, name, and the ORDERED members with the descriptor/state/icon the
+ * markup reads. Protocol revision, appearance and cardSize are deliberately
+ * ABSENT - they are applied without replacing the interactive DOM.
+ *
+ * Revision equality is not a sound render-identity rule in either direction.
+ * It is too permissive: each workspace responder owns a private revision map
+ * that starts at 0, so two live workspace surfaces answering the same request
+ * produce r=3, r=0, r=3, r=0 for identical content, and an equality-only guard
+ * accepts every one. It is also too restrictive: `broadcast()` re-sends a
+ * changed member icon WITHOUT bumping the revision, so equal revisions can
+ * carry genuinely new content. Compare what the DOM is made of instead. */
+export function windowLayoutWidgetRenderIdentity(snapshot) {
+  return JSON.stringify([
+    snapshot?.id ?? '',
+    snapshot?.name ?? '',
+    (snapshot?.members ?? []).map((member) => [
+      member?.id ?? '',
+      member?.state === 'minimized' ? 'minimized' : 'normal',
+      member?.icon ?? '',
+      member?.descriptor?.title ?? '',
+      member?.descriptor?.version ?? '',
+      member?.descriptor?.executableFingerprint ?? '',
+    ]),
+  ]);
+}
+
 /** 019DR2: the bounded persisted member descriptor identity required by the
  * Papers direct-pick begin validation (exact keys version/title/
  * executableFingerprint), validated/copied field-by-field. Returns NULL for an
