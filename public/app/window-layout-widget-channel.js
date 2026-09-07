@@ -188,10 +188,14 @@ function parsePickerCommitAdd(add) {
   return { descriptor, capability, candidate };
 }
 
-/** The snapshot fields the widget's card DOM is actually built from: layout
- * identity, name, and the ORDERED members with the descriptor/state/icon the
- * markup reads. Protocol revision, appearance and cardSize are deliberately
- * ABSENT - they are applied without replacing the interactive DOM.
+/** The interactive card's SEMANTIC identity - deliberately a little wider than
+ * literal DOM-markup identity. The markup itself reads only the layout id and
+ * the ordered members' id/state/icon/descriptor.title, but renderWidgetCard()
+ * is also where windowLayoutWidgetPreviewSnapshot is replaced and the preview
+ * capability cache cleared, so descriptor.version/executableFingerprint must
+ * cross this boundary too or a re-identified window would keep resolving its
+ * preview through a stale capability. Protocol revision, appearance and
+ * cardSize are ABSENT - they are applied without replacing the DOM.
  *
  * Revision equality is not a sound render-identity rule in either direction.
  * It is too permissive: each workspace responder owns a private revision map
@@ -201,9 +205,9 @@ function parsePickerCommitAdd(add) {
  * changed member icon WITHOUT bumping the revision, so equal revisions can
  * carry genuinely new content. Compare what the DOM is made of instead. */
 export function windowLayoutWidgetRenderIdentity(snapshot) {
+  // The layout name is NOT here: the widget card body never renders it.
   return JSON.stringify([
     snapshot?.id ?? '',
-    snapshot?.name ?? '',
     (snapshot?.members ?? []).map((member) => [
       member?.id ?? '',
       member?.state === 'minimized' ? 'minimized' : 'normal',
@@ -324,6 +328,25 @@ export function createWindowLayoutWidgetChannelWorkspace({
   onWidgetOpen,
   onWidgetDispose,
   onCardSize,
+  // Answered fresh on every protocol effect: is THIS surface the one authority
+  // for the layout right now? A project may be open in several workspace
+  // surfaces (the multi-tab feature), and every one of them constructs a
+  // responder, so without this gate all of them answer one widget.
+  //
+  // That is not merely noisy, it is incorrect. Each responder owns a PRIVATE
+  // revision map starting at 0, so responder A's bump cannot make responder B
+  // stale: both pass their own baseRevision check and both execute the command.
+  // A `member-toggle` reads the window's LIVE state and inverts it, so running
+  // it twice minimizes and then restores - the creator clicks a member icon,
+  // sees it press, and the window never moves. Absolute group actions survive
+  // duplication because they are idempotent, which is exactly the asymmetry the
+  // creator reported.
+  //
+  // The predicate is dynamic rather than a construction-time flag because the
+  // writer role moves: when the electing surface dies the Web Lock is reclaimed
+  // by another, whose already-installed listener simply starts answering. No
+  // listener lifecycle race, no reconnection on the widget side.
+  isAuthoritative = () => true,
 }) {
   const revisions = new Map();
   const revisionOf = (layoutId) => revisions.get(layoutId) ?? 0;
@@ -339,6 +362,10 @@ export function createWindowLayoutWidgetChannelWorkspace({
   async function reply(event) {
     const message = event.data;
     if (!isPlainObject(message) || typeof message.type !== 'string') return;
+    // Gate EVERY inbound protocol effect, not just commands: a non-authoritative
+    // responder answering widget-ready/snapshot-request is what fed the widget
+    // competing revision streams, and card-size/dispose are durable writes.
+    if (!isAuthoritative()) return;
     if (message.type === 'widget-ready' || message.type === 'snapshot-request') {
       if (!exactKeys(message, ['type', 'layoutId', 'clientId'])) return;
       if (!boundedString(message.layoutId, 'layoutId') || !boundedString(message.clientId, 'clientId')) return;
@@ -424,6 +451,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
     revisionOf,
     noteCommitted(layoutId, { reason } = {}) {
       if (!boundedString(layoutId, 'layoutId')) return revisionOf(layoutId);
+      if (!isAuthoritative()) return revisionOf(layoutId);
       const revision = bump(layoutId);
       const layout = getLayout(layoutId);
       if (layout) post({ type: 'snapshot', layoutId, revision, ...(reason ? { reason } : {}), snapshot: buildSnapshot(layout) });
@@ -436,6 +464,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
      * for a widget that already holds that snapshot. */
     broadcast(layoutId) {
       if (!boundedString(layoutId, 'layoutId')) return revisionOf(layoutId);
+      if (!isAuthoritative()) return revisionOf(layoutId);
       const layout = getLayout(layoutId);
       if (layout) post({ type: 'snapshot', layoutId, revision: revisionOf(layoutId), snapshot: buildSnapshot(layout) });
       return revisionOf(layoutId);

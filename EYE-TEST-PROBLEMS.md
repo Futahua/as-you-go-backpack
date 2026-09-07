@@ -326,3 +326,48 @@ the previous wave's acceptance mapping. Correct C1-C5, exercise the repeated lif
 and verify attached/detached visual identity at representative member counts above four. The
 next eye-check request is earned only after those specific creator-observed failures have no
 known implementation or production-path contradiction.
+
+## 2026-09-07 — Detached widget: hover flicker and dead member icons
+
+Both defects trace to one root: the multiple-tab feature made the number of workspace
+surfaces plural, but widget-channel authority stayed singular in intent only. The creator
+independently noted this "breaks sometimes after multiple tab feature was added", and the
+persisted topology confirms the project was open in **two** surfaces at once.
+
+### F1 — Hovering the member icons made every icon flicker at once — FIXED (creator-confirmed)
+
+Creator: "as I hover over the icons something repeatedly triggers the hover action that makes
+the highlight flickers and I cant perform actions on the icons"; later "all of them flickers",
+the widget window itself stayed put, and the attached card was never tried.
+
+Simultaneous whole-strip flicker is a wholesale card rebuild, not a per-element hover
+transition. Hover was never the trigger — it only made an already-running loop visible.
+
+- The compact widget loads the workspace bundle, so it also constructed the WORKSPACE-side
+  responder. The widget skips `bootstrapWorkspace()`, so that responder held no layout and
+  answered the widget's OWN `snapshot-request` with `unknown-layout`, re-arming the widget's
+  bounded retry, which requested again — endlessly.
+- Each responder owns a private revision map starting at 0, so two workspace surfaces answered
+  with `r=3, r=0, r=3, r=0` for identical content. The widget guarded on
+  `revision === lastRevision` only, so every one passed and rebuilt the card.
+
+Fixed by an inert channel on the widget surface and a render-identity guard keyed on what the
+card DOM is actually built from. Creator verdict: "flicker stopped".
+
+### F2 — Member icons acknowledge the click but the window never moves — fix pending eye test
+
+Creator: "It reacts visually but the window doesn't respond", while minimize-all, restore-all
+and the list glyph all work.
+
+A member click sends `member-toggle`, which reads the window's LIVE state and inverts it. Group
+actions send absolute `group-action` commands. With two responders both passing their own
+`baseRevision` check, the toggle is applied twice — minimize then restore, net nothing — while
+absolute operations are idempotent under duplication. That asymmetry is the whole symptom.
+
+Fixed by electing exactly one authority: the responder now gates every protocol effect on the
+existing document-WRITER election, re-read per message so a handover needs no reconnection.
+
+**Known limitation, not hidden:** revision counters remain per-responder, so the first command
+after a writer handover is refused as `stale`; the widget resyncs and the next one lands. One
+command is dropped per handover. Closing that needs durable revision authority, or correlated
+ACK/retry with de-duplication — a plain retry would UNDO a toggle the dead writer had applied.

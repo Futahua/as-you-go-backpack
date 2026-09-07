@@ -83,14 +83,29 @@ test('member order IS render identity', () => {
   assert.notEqual(windowLayoutWidgetRenderIdentity(before), windowLayoutWidgetRenderIdentity(after));
 });
 
-test('membership and layout name are render identity', () => {
+test('membership IS render identity', () => {
   const before = windowLayoutWidgetSnapshot(BASE);
   const added = windowLayoutWidgetSnapshot(
     layout([['m1', 'Alpha', 'normal'], ['m2', 'Beta', 'normal'], ['m3', 'Gamma', 'normal']]));
   assert.notEqual(windowLayoutWidgetRenderIdentity(before), windowLayoutWidgetRenderIdentity(added));
+});
 
+test('the layout name is NOT render identity: the widget card body never renders it', () => {
+  const before = windowLayoutWidgetSnapshot(BASE);
   const renamed = windowLayoutWidgetSnapshot({ ...BASE, name: 'Layout Two' });
-  assert.notEqual(windowLayoutWidgetRenderIdentity(before), windowLayoutWidgetRenderIdentity(renamed));
+  assert.notEqual(before.name, renamed.name);
+  assert.equal(windowLayoutWidgetRenderIdentity(before), windowLayoutWidgetRenderIdentity(renamed));
+});
+
+test('a re-identified window IS render identity, so the preview capability cache is cleared', () => {
+  // renderWidgetCard() is also where windowLayoutWidgetPreviewSnapshot is
+  // replaced and the capability cache dropped. If a member's descriptor changed
+  // identity without crossing that boundary, its hover preview would keep
+  // resolving through a capability belonging to the previous window.
+  const before = windowLayoutWidgetSnapshot(BASE);
+  const reidentified = windowLayoutWidgetSnapshot(
+    layout([['m1', 'Alpha2', 'normal'], ['m2', 'Beta', 'normal']]));
+  assert.notEqual(windowLayoutWidgetRenderIdentity(before), windowLayoutWidgetRenderIdentity(reidentified));
 });
 
 test('a newly hydrated icon IS render identity even at an equal revision', () => {

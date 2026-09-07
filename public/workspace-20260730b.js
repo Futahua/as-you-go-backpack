@@ -2249,6 +2249,12 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
   channel: WIDGET_SURFACE
     ? createInertBroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL)
     : createSafeBroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL),
+  // Exactly one surface answers a widget. Reuse the document-writer election
+  // rather than inventing a second one: the Web Lock already names a single
+  // WRITER per project and hands it on when that surface dies.
+  isAuthoritative: () => !WIDGET_SURFACE
+    && coordinationState === 'ready'
+    && surfaceCoordinator?.role === SURFACE_ROLE.WRITER,
   getLayout: windowLayoutFromState,
   snapshot: (layout, memberIcon) => ({
     ...windowLayoutWidgetSnapshot(layout, memberIcon),
@@ -5184,6 +5190,14 @@ function bootstrapWindowLayoutWidget() {
   let snapshotRetry = null;
   const MAX_SNAPSHOT_RETRY_ARMINGS = 3;
   let snapshotRetryArmings = 0;
+  /** A resolved open ends the cold-open episode: stop any running retry and let
+   * a LATER unresolved open arm a fresh budget rather than inheriting a spent
+   * one from this widget's whole lifetime. */
+  function cancelSnapshotRetry() {
+    snapshotRetry?.cancel?.();
+    snapshotRetry = null;
+    snapshotRetryArmings = 0;
+  }
 
   function handleWidgetMessage(message) {
     if (message.type === 'snapshot' || message.type === 'committed' || message.type === 'stale') {
@@ -5205,10 +5219,16 @@ function bootstrapWindowLayoutWidget() {
         // A duplicate message must therefore leave the live DOM alone: the
         // creator saw every icon flicker at once, and clicks fall through,
         // when repeated snapshots rebuild a card whose content never changed.
+        // A real snapshot arrived, so any in-flight cold-open retry has served
+        // its purpose; leaving it running would emit redundant requests.
+        cancelSnapshotRetry();
         const renderIdentity = windowLayoutWidgetRenderIdentity(message.snapshot);
         if (renderIdentity === widgetState.lastRenderIdentity) return;
-        widgetState.lastRenderIdentity = renderIdentity;
+        // Recorded only AFTER a successful render: were the render to throw,
+        // latching the identity first would suppress every identical retry and
+        // strand the card on stale DOM.
         renderWidgetCard({ skipHostResize: message.reason === 'reorder' || message.commandKind === 'reorder' });
+        widgetState.lastRenderIdentity = renderIdentity;
       }
       return;
     }
@@ -6023,6 +6043,14 @@ if (WIDGET_SURFACE) {
       invalidatePendingSaves: () => store.invalidatePendingSaves(),
       onRoleChange: (role) => {
         conflictPanel.syncToRole(role, elements.explorer);
+        // On takeover, hand every open widget an authoritative snapshot at once
+        // instead of leaving it on the dead writer's last revision until it
+        // happens to ask again.
+        if (role === SURFACE_ROLE.WRITER) {
+          for (const layout of state.windowLayouts ?? []) {
+            windowLayoutWidgetChannelWorkspace.broadcast(layout.id);
+          }
+        }
         render();
       },
     });
