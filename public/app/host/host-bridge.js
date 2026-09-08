@@ -207,6 +207,12 @@ export function createHostBridge(window) {
       request('papers:project:window-observe-capability', { capability }),
     minimizeWindowCapability: (capability) =>
       request('papers:project:window-minimize-capability', { capability }),
+    /** One request: the helper reads the live state and minimizes or restores
+     * accordingly, answering with the direction taken plus the PRE-mutation
+     * observation. Replaces observe -> decide here -> mutate, which put a full
+     * renderer round trip between the decision and the act. */
+    toggleWindowCapability: (capability) =>
+      request('papers:project:window-toggle-capability', { capability }),
     restoreWindowCapability: (capability) =>
       request('papers:project:window-restore-capability', { capability }),
     closeWindowCapability: (capability) =>

@@ -1045,12 +1045,17 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
   // entered during that microtask must abort before observe.
   if (windowLayoutDetachment.isReadOnly()) return;
   if (!capability) return;
-  const observed = await host.observeWindowCapability(capability);
-  // 018X4: abort immediately after the observe await, before success OR failure
-  // handling.
+  // ONE host request. This used to observe, carry the answer back across IPC to
+  // this renderer, decide the direction here, and then go back to mutate - a
+  // full round trip between deciding and acting, on a helper that runs one
+  // request at a time. It also raced: two fast clicks could both read the same
+  // pre-mutation state and issue the same absolute action. The helper now reads
+  // the live state and acts on it, and tells us which way it went.
+  const result = await host.toggleWindowCapability(capability);
+  // 018X4: abort immediately after the await, before success OR failure handling.
   if (windowLayoutDetachment.isReadOnly()) return;
-  if (observed.outcome !== 'success' || !observed.observation) {
-    if (observed.outcome === 'missing') {
+  if (result.outcome !== 'success' || !result.observation || !result.action) {
+    if (result.outcome === 'missing') {
       // Stale binding after a helper restart: drop it and re-sync the
       // controller's capabilities so the observer re-resolves once.
       windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
@@ -1061,28 +1066,17 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
         if (windowLayoutDetachment.isReadOnly()) return;
       }
     }
-    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(observed.outcome));
-    return;
-  }
-  // 018X2: a handoff begun during the observe must abort before any side effect.
-  if (windowLayoutDetachment.isReadOnly()) return;
-  const liveState = observed.observation.state === 'minimized' ? 'minimized' : 'normal';
-  const targetState = liveState === 'minimized' ? 'restore' : 'minimize';
-  const result = targetState === 'restore'
-    ? await host.restoreWindowCapability(capability)
-    : await host.minimizeWindowCapability(capability);
-  // 018X4: abort immediately after the mutation await, before failure status.
-  if (windowLayoutDetachment.isReadOnly()) return;
-  if (result.outcome !== 'success') {
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
     return;
   }
-  // 018X2: re-check after the minimize/restore await too.
+  // 018X2: a handoff begun during the toggle must abort before any side effect.
   if (windowLayoutDetachment.isReadOnly()) return;
-  const nextState = targetState === 'restore' ? 'normal' : 'minimized';
+  const nextState = result.action === 'restore' ? 'normal' : 'minimized';
+  // The PRE-mutation bounds, exactly as before: they are this window's restore
+  // rectangle, and a window that has just been minimized has none to give.
   store.replace(updateWindowLayoutMember(state, layoutId, memberId, {
     state: nextState,
-    bounds: observed.observation.bounds,
+    bounds: result.observation.bounds,
   }));
   patchWindowLayoutMember(layoutId, memberId, nextState);
   noteWindowLayoutCommit(layoutId);
