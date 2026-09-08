@@ -1787,6 +1787,52 @@ function scheduleWindowLayoutPreviewDwell(member) {
 // is never placed in snapshot/channel/durable state. The cache is cleared on
 // missing/removal, snapshot replacement (renderWidgetCard) and pagehide.
 const windowLayoutWidgetPreviewCapabilities = new Map();
+
+/** The window a cached preview capability belongs to. State is deliberately
+ * absent: minimizing a window does not make it a different window. */
+function widgetPreviewIdentity(member) {
+  return JSON.stringify([
+    member?.descriptor?.version ?? '',
+    member?.descriptor?.title ?? '',
+    member?.descriptor?.executableFingerprint ?? '',
+  ]);
+}
+
+/** Drop only the cached preview capabilities whose WINDOW IDENTITY changed, so a
+ * state-only re-render keeps its warm capabilities. A capability names a window;
+ * a member's minimize/restore does not rename it.
+ *
+ * The blanket clear this replaces had one accidental virtue: it guaranteed
+ * eventual recovery after a helper restart replaced the underlying tokens.
+ * Retaining capabilities longer means a stale one must be evicted explicitly,
+ * which `forgetWidgetPreviewCapability` does when Papers reports it missing. */
+function evictStaleWidgetPreviewCapabilities(snapshot) {
+  const identities = new Map();
+  for (const member of snapshot?.members ?? []) {
+    identities.set(
+      windowLayoutMemberKey(snapshot?.id ?? '', member.id),
+      widgetPreviewIdentity(member),
+    );
+  }
+  for (const key of [...windowLayoutWidgetPreviewCapabilities.keys()]) {
+    const identity = identities.get(key);
+    if (identity === undefined || identity !== windowLayoutWidgetPreviewIdentities.get(key)) {
+      windowLayoutWidgetPreviewCapabilities.delete(key);
+      windowLayoutWidgetPreviewIdentities.delete(key);
+    }
+  }
+}
+
+/** Window identity each cached preview capability was resolved for. */
+const windowLayoutWidgetPreviewIdentities = new Map();
+
+/** A capability Papers no longer recognises (helper restart, window gone) must
+ * not be retried forever now that the card no longer clears the cache. */
+function forgetWidgetPreviewCapability(layoutId, memberId) {
+  const key = windowLayoutMemberKey(layoutId, memberId);
+  windowLayoutWidgetPreviewCapabilities.delete(key);
+  windowLayoutWidgetPreviewIdentities.delete(key);
+}
 let windowLayoutWidgetPreviewSnapshot = null;
 
 function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
@@ -1808,6 +1854,7 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
       return null;
     }
     windowLayoutWidgetPreviewCapabilities.set(key, resolved.capability);
+    windowLayoutWidgetPreviewIdentities.set(key, widgetPreviewIdentity(member));
     return resolved.capability;
   });
 }
@@ -1824,6 +1871,13 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
 const windowLayoutMemberPreview = createWindowLayoutMemberPreview({
   resolveCapability: resolveWindowLayoutPreviewCapability,
   requestThumbnail: (capability, options) => host.windowThumbnailCapability(capability, options),
+  // Capabilities now survive a state-only re-render, so a token Papers has
+  // stopped recognising (helper restart, window gone) has to be dropped here
+  // instead of relying on the card's old blanket clear to eventually do it.
+  onCapabilityMissing: (layoutId, memberId) => {
+    forgetWidgetPreviewCapability(layoutId, memberId);
+    windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
+  },
   setPreviewImage: (imageUrl, width, height) => {
     windowLayoutMemberPopover.updatePreview(null,
       `<img class="window-layout-member-preview-image" src="${escapeHtml(imageUrl)}" alt="" width="${width}" height="${height}">`);
@@ -5342,13 +5396,19 @@ function bootstrapWindowLayoutWidget() {
   }
 
   function renderWidgetCard({ skipHostResize = false } = {}) {
-    // 019GR: replacing the card must cancel the hover preview, hide the popover
-    // and clear the ephemeral widget capability cache so a late reply cannot
-    // paint a removed/replaced card. The snapshot ref feeds the surface-aware
-    // preview resolver.
+    // 019GR: replacing the card must cancel the hover preview and hide the
+    // popover so a late reply cannot paint a removed/replaced card. The
+    // snapshot ref feeds the surface-aware preview resolver.
     windowLayoutMemberPreview.cancel();
     windowLayoutMemberPopover.hide();
-    windowLayoutWidgetPreviewCapabilities.clear();
+    // A capability identifies a WINDOW. A member going normal -> minimized does
+    // not change which window it is, yet member state is part of the widget's
+    // render identity, so the old blanket clear threw away every warm
+    // capability on every successful toggle. That is what made ping-ponging
+    // between two icons uniquely slow: each click re-cooled BOTH members, so
+    // the next hover paid a fresh desktop list plus a bind/observe on the same
+    // serial helper the click needs. Evict by descriptor identity instead.
+    evictStaleWidgetPreviewCapabilities(widgetState.snapshot);
     windowLayoutWidgetPreviewSnapshot = widgetState.snapshot;
     // 019G/021: seed the shared icon cache from the snapshot's bounded icons so
     // the SAME member markup renders REAL member icons (prune stale ones).

@@ -115,6 +115,11 @@ export function createWindowLayoutMemberPreview({
   debounceMs = WINDOW_LAYOUT_PREVIEW_DEBOUNCE_MS,
   setPreviewImage = () => undefined,
   clearPreview = () => undefined,
+  /** Papers no longer recognises the capability we resolved - the helper
+   * restarted, or the window is gone. The caller caches capabilities across
+   * renders now, so a stale one must be dropped explicitly or every later
+   * preview for that member retries the same dead token. */
+  onCapabilityMissing = () => undefined,
   setTimeoutFn = globalThis.setTimeout,
   clearTimeoutFn = globalThis.clearTimeout,
 }) {
@@ -139,6 +144,7 @@ export function createWindowLayoutMemberPreview({
       result = { outcome: 'failed' };
     }
     if (gen !== generation) return; // late response discarded (rapid A->B / leave)
+    if (result?.outcome === 'missing') onCapabilityMissing(layoutId, memberId);
     if (isValidThumbnailSuccess(result)) {
       setPreviewImage(result.imageUrl, result.width, result.height);
     }
