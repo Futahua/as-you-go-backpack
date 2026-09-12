@@ -26,6 +26,28 @@ clear responsibility lives in a module.
 | Quick Run layout-item resolution (the fail-closed decision that names one window or refuses, and the ephemeral availability the surface shows) | `public/app/quick-run/quick-run-resolution.js`, `quick-run-presentation.js` |
 | Quick Run workspace binding (what Enter, Shift+Enter and Ctrl+Enter execute against the workspace, and the close-on-success rule) | `public/app/quick-run/quick-run-workspace.js` |
 
+## Quick Run's paint cap
+
+One keystroke can rank thousands of matches — the fuzzy subsequence tier in `quick-run-index.js` matches a
+single letter against a large slice of a 20,000-occurrence corpus — and the surface paints every row it is
+handed, so a keystroke's cost tracks the size of the ranked result set rather than the query. The session
+therefore holds at most `QUICK_RUN_MAX_PAINTED_ROWS` (200) rows, a measured number rather than a taste: in
+`quick-run-integrated-perf.mjs` the bucket at or below 200 painted rows measured p95 6.1 ms against the
+contract's 16 ms gate, while 201–1,000 is already at 10.8 ms and 1,001–3,000 misses outright.
+
+The rule lives in `quick-run-session.js` because `rows` is the single list three consumers share: what the
+surface paints, what `quickRunSessionAfterArrow` walks, and what the highlight is chosen from. Bounding it
+there bounds all three together, so the highlight can never land on a row that is not on screen; a cap in
+the DOM layer would leave navigation and highlight pointing at unpainted rows.
+
+Nothing else is capped. `chipsFor` and the filter-fallback rule still read every match, the session carries
+`totalRows` and `capped` so the surface can say what it is not showing (`quickRunCapNotice` in
+`quick-run-presentation.js`, painted into `#quick-run-cap` only while the cap actually bites), and Enter
+still revalidates the row by stable result key against the current workspace (`quick-run-activation.js`), so
+a match past the cap is exactly as actionable as one on screen. `quick-run-paint-cap.test.mjs` holds each of
+those rules individually, and `npm run test:quick-run:integrated-perf` is the acceptance instrument for the
+number itself.
+
 ## Multi-window document behavior
 
 Every open As you Go surface accepts document actions. One surface remains the

@@ -18,8 +18,8 @@ import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createWorkspaceCommands } from './public/app/workspace-commands.js';
 import { bindQuickRunWorkspace } from './public/app/quick-run/quick-run-workspace.js';
 
-/** The five elements the production markup declares and the binding paints. */
-const MARKUP_IDS = ['quick-run-layer', 'quick-run-input', 'quick-run-chips', 'quick-run-results', 'quick-run-notice'];
+/** The six elements the production markup declares and the binding paints. */
+const MARKUP_IDS = ['quick-run-layer', 'quick-run-input', 'quick-run-chips', 'quick-run-results', 'quick-run-notice', 'quick-run-cap'];
 
 function fakeElement(tag = 'div') {
   return {
@@ -43,7 +43,7 @@ function fakeElement(tag = 'div') {
 async function productionElements() {
   const markup = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
   const ids = [...markup.matchAll(/id="(quick-run-[a-z-]+)"/g)].map((match) => match[1]).sort();
-  assert.deepEqual(ids, [...MARKUP_IDS].sort(), 'the markup declares exactly the five Quick Run elements');
+  assert.deepEqual(ids, [...MARKUP_IDS].sort(), 'the markup declares exactly the six Quick Run elements');
   // Built from the markup's own ids rather than from a second list here: a renamed element has to make the
   // binding fail, not make this harness quietly agree with itself.
   const byId = new Map(ids.map((id) => [id, fakeElement()]));
@@ -58,6 +58,7 @@ async function productionElements() {
     chips: take('quick-run-chips'),
     results: take('quick-run-results'),
     notice: take('quick-run-notice'),
+    cap: take('quick-run-cap'),
   };
 }
 

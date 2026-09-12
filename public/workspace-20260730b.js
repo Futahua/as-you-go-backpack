@@ -5253,8 +5253,8 @@ const setMembershipMode = createSetMembershipMode({
 // Quick Run (STAGE 5). The composition seam lives in its own module so the wiring can be exercised
 // without booting the app: quick-run-workspace.test.mjs drives these same keys on the production markup
 // with a real store and the real command object. What is left here is the element adapter - the registry
-// in dom.js namespaces its keys (quickRunLayer, quickRunInput, ...) while the surface takes the five
-// handles it paints - and the collaborators this file owns, so a mismatch in the adapter is still the
+// in dom.js namespaces its keys (quickRunLayer, quickRunInput, ...) while the surface takes the handles it
+// paints - and the collaborators this file owns, so a mismatch in the adapter is still the
 // one thing quick-run-entry.test.mjs checks against both files.
 const quickRun = bindQuickRunWorkspace({
   document,
@@ -5262,6 +5262,7 @@ const quickRun = bindQuickRunWorkspace({
     layer: elements.quickRunLayer,
     input: elements.quickRunInput,
     chips: elements.quickRunChips,
+    cap: elements.quickRunCap,
     results: elements.quickRunResults,
     notice: elements.quickRunNotice,
   },

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  QUICK_RUN_MAX_PAINTED_ROWS,
   closeQuickRunSession,
   openQuickRunSession,
   quickRunSessionAfterArrow,
@@ -38,6 +39,9 @@ test('opening shows one empty session: no rows, no chips, All, no highlight', ()
   assert.deepEqual(session.rows, []);
   assert.deepEqual(session.chips, []);
   assert.equal(session.highlightKey, null);
+  // Nothing is hidden behind a cap either: an empty query matched nothing, so there is no total to report.
+  assert.equal(session.totalRows, 0);
+  assert.equal(session.capped, false);
   // The universe is there to search, it just is not shown: no empty-query home screen.
   assert.ok(session.allRows.length > 0);
 });
@@ -93,7 +97,8 @@ test('closing clears the query, the rows, the filter and the highlight, and prod
   );
   const closed = closeQuickRunSession(typed);
   assert.deepEqual(closed, {
-    open: false, query: '', filter: 'All', rows: [], chips: [], highlightKey: null, fellBack: false,
+    open: false, query: '', filter: 'All', rows: [], totalRows: 0, capped: false,
+    chips: [], highlightKey: null, fellBack: false,
   });
   // Escape does not create, move, launch, select, navigate or persist anything: the close returns a
   // session and no other value at all.
@@ -110,4 +115,105 @@ test('a keystroke into a closed session changes nothing', () => {
   assert.deepEqual(quickRunSessionWithQuery(closed, 'docs'), closed);
   assert.deepEqual(quickRunSessionWithFilter(closed, 'Links'), closed);
   assert.deepEqual(quickRunSessionAfterArrow(closed, 1), closed);
+});
+
+/**
+ * A workspace whose one-word query matches as many rows as the caller asks for.
+ *
+ * It exists because the cap is only observable above it: `extraGroups` are additional root folders, which
+ * rank below the prefix-matching shortcuts (quick-run-index.js's tier 2 versus tier 1) and therefore land
+ * past the cap even though they matched.
+ */
+function crowdedState(shortcutCount, extraGroups = []) {
+  const shortcuts = [];
+  for (let index = 0; index < shortcutCount; index += 1) {
+    shortcuts.push({
+      id: `s-${index}`,
+      name: `Kestrel ${index}`,
+      target: `C:/corpus/kestrel-${index}.md`,
+      placements: [{ id: `p-${index}`, parentId: 'g-root', order: index + extraGroups.length }],
+    });
+  }
+  return {
+    groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }, ...extraGroups],
+    shortcuts,
+    windowLayouts: [],
+  };
+}
+
+const typedCrowd = (shortcutCount, extraGroups = []) => (
+  quickRunSessionWithQuery(openQuickRunSession(crowdedState(shortcutCount, extraGroups)), 'kestrel')
+);
+
+test('the cap is 200, and a query past it paints the first 200 while reporting the honest total', () => {
+  // The number is the measured one (QUICK_RUN_MAX_PAINTED_ROWS carries its basis): the bucket at or below
+  // 200 rows measured p95 6.1 ms against the contract's 16 ms gate, and the next bucket already misses.
+  assert.equal(QUICK_RUN_MAX_PAINTED_ROWS, 200);
+  const session = typedCrowd(500);
+  assert.equal(session.rows.length, QUICK_RUN_MAX_PAINTED_ROWS);
+  assert.equal(session.totalRows, 500, 'the full match count survives the cap');
+  assert.equal(session.capped, true);
+  assert.equal(session.highlightKey, session.rows[0].resultKey);
+  // The painted rows are the head of the ranked set, not a sample of it.
+  assert.deepEqual(
+    session.rows.map((row) => row.resultKey),
+    Array.from({ length: QUICK_RUN_MAX_PAINTED_ROWS }, (_, index) => `shortcut:p-${index}`),
+  );
+});
+
+test('a query under the cap paints every match and reports no cap at all', () => {
+  const session = typedCrowd(7);
+  assert.equal(session.rows.length, 7);
+  assert.equal(session.totalRows, 7);
+  assert.equal(session.capped, false, 'nothing is hidden, so nothing is claimed to be hidden');
+});
+
+test('exactly the cap is not capped: the line is for a list that is short of the match set', () => {
+  const session = typedCrowd(QUICK_RUN_MAX_PAINTED_ROWS);
+  assert.equal(session.rows.length, QUICK_RUN_MAX_PAINTED_ROWS);
+  assert.equal(session.totalRows, QUICK_RUN_MAX_PAINTED_ROWS);
+  assert.equal(session.capped, false);
+});
+
+test('the chips describe every match, including a type that only matches past the cap', () => {
+  const session = typedCrowd(300, [{ id: 'g-docs', parentId: 'g-root', name: 'Docs Kestrel' }]);
+  assert.equal(session.capped, true);
+  assert.equal(session.totalRows, 301);
+  assert.deepEqual(session.chips, ['All', 'Folders', 'Shortcuts'], 'the Folders chip is offered from the match set, not from the painted rows');
+  assert.equal(session.rows.some((row) => row.type === 'folder'), false, 'and that folder really is not painted');
+});
+
+test('the filter still runs over every match before the cap, so it neither falls back nor caps early', () => {
+  const session = typedCrowd(300, [{ id: 'g-docs', parentId: 'g-root', name: 'Docs Kestrel' }]);
+  const folders = quickRunSessionWithFilter(session, 'Folders');
+  assert.equal(folders.filter, 'Folders', 'a filter whose only match sits past the cap is not "unavailable"');
+  assert.equal(folders.fellBack, false, 'the fallback rule still reads the whole match set');
+  assert.equal(folders.totalRows, 1);
+  assert.equal(folders.capped, false, 'the filter narrows first, so there is nothing left to cap');
+  assert.deepEqual(folders.rows.map((row) => row.resultKey), ['folder:g-docs']);
+});
+
+test('the arrows stay inside the painted rows and the highlight is always one of them', () => {
+  const session = typedCrowd(500);
+  const up = quickRunSessionAfterArrow(session, -1);
+  assert.equal(up.highlightKey, session.rows[0].resultKey, 'ArrowUp clamps at the first painted row');
+  let cursor = session;
+  for (let step = 0; step < QUICK_RUN_MAX_PAINTED_ROWS + 50; step += 1) {
+    cursor = quickRunSessionAfterArrow(cursor, 1);
+  }
+  assert.equal(cursor.rows.length, QUICK_RUN_MAX_PAINTED_ROWS);
+  assert.equal(
+    cursor.highlightKey,
+    session.rows[QUICK_RUN_MAX_PAINTED_ROWS - 1].resultKey,
+    'ArrowDown clamps at the last painted row instead of stepping into the unpainted tail',
+  );
+  assert.equal(cursor.rows.some((row) => row.resultKey === cursor.highlightKey), true);
+});
+
+test('closing a capped session forgets the total and the cap along with the rows', () => {
+  const closed = closeQuickRunSession(typedCrowd(500));
+  assert.deepEqual(closed, {
+    open: false, query: '', filter: 'All', rows: [], totalRows: 0, capped: false,
+    chips: [], highlightKey: null, fellBack: false,
+  });
 });

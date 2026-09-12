@@ -11,6 +11,9 @@
  *   and nothing else, so no create/move/launch/select/navigate/persist can ride along with it;
  * - closing clears the query, the highlight, the rows and the filter — a reopened session starts empty
  *   rather than resuming a previous search.
+ * - the rows it holds are **at most QUICK_RUN_MAX_PAINTED_ROWS of the matches**, because one keystroke can
+ *   rank thousands of them and the surface paints every row it is handed. `totalRows` keeps the honest match
+ *   count and `capped` says the list on screen is a prefix of it.
  *
  * The rows it narrows are the ones quick-run-search.js builds, ranked by quick-run-index.js, filtered by
  * quick-run-types.js: this module owns only the session around them.
@@ -19,27 +22,84 @@ import { quickRunRows } from './quick-run-search.js';
 import { quickRunResults } from './quick-run-index.js';
 import { chipsFor, nextAvailableFilter, normaliseFilter, resolveFilter } from './quick-run-types.js';
 
+/**
+ * How many matches one session may hold — and therefore how many rows the surface may paint at once.
+ *
+ * This is a measured number, not a taste. `quick-run-integrated-perf.mjs` (STAGE 14.1/14.2's acceptance
+ * instrument) measures keystroke-to-results-DOM-commit latency in the real renderer on a synthetic
+ * 20,000-occurrence workspace, and groups the samples by how many rows that commit painted:
+ *
+ * ```
+ *   1-200         p95  2.6-6.1 ms    0 samples over one frame
+ *   201-1,000     p95 10.8 ms        0 over
+ *   1,001-3,000   p95 23.7 ms        8 over
+ *   3,001-12,000  p95 58.2 ms       30 of 30 over
+ *   12,001+       p95 47.8 ms        6 over
+ * ```
+ *
+ * The contract's gate is p95 <= 16 ms, and the surface paints every row `quickRunRowViews` maps, so the
+ * cost of a keystroke is set by the size of the ranked result set rather than by the query. One keystroke
+ * really does reach four figures: the fuzzy subsequence tier (quick-run-index.js) matches a single letter
+ * against a large slice of a 20k corpus — "a" for the query "archive d" is 12,213 rows. 200 is the largest
+ * bucket that is honestly inside the budget: it measured p95 6.1 ms, leaving roughly 2.6x margin for a busy
+ * machine, where 201-1,000 is already at 10.8 ms and 1,001-3,000 misses outright.
+ *
+ * The cap is applied at the session rather than in the DOM layer because `rows` is the single thing three
+ * consumers share: what the surface paints, what `quickRunSessionAfterArrow` walks, and what the highlight
+ * is chosen from. Bounding it here bounds all three together, so navigation cannot step past the painted
+ * list and a highlight can never land on a row that is not on screen. Nothing else is capped: `chipsFor`
+ * still sees every match, the filter-fallback rule still sees every match, and activation still revalidates
+ * by stable result key against the current workspace state (quick-run-activation.js).
+ */
+export const QUICK_RUN_MAX_PAINTED_ROWS = 200;
+
 /** A closed session: the state a surface draws nothing for. */
 export function closedQuickRunSession() {
-  return { open: false, query: '', filter: 'All', rows: [], chips: [], highlightKey: null, fellBack: false };
+  return {
+    open: false,
+    query: '',
+    filter: 'All',
+    rows: [],
+    totalRows: 0,
+    capped: false,
+    chips: [],
+    highlightKey: null,
+    fellBack: false,
+  };
 }
 
 function withResults(base, query, filter) {
   const needle = query.trim();
   if (needle === '') {
     // No empty-query home screen: an empty query shows nothing, and no chips either.
-    return { ...base, query, filter: normaliseFilter(filter), rows: [], chips: [], highlightKey: null, fellBack: false };
+    return {
+      ...base,
+      query,
+      filter: normaliseFilter(filter),
+      rows: [],
+      totalRows: 0,
+      capped: false,
+      chips: [],
+      highlightKey: null,
+      fellBack: false,
+    };
   }
   const matched = quickRunResults(base.allRows, needle);
   const resolved = resolveFilter(matched, filter);
+  // The cap, and the only cap: everything above this line still sees every match, so the chips the reader is
+  // offered and the filter's fallback decision describe the whole result set, while what is held here - and
+  // therefore painted, walked by the arrows and highlighted - is at most QUICK_RUN_MAX_PAINTED_ROWS of it.
+  const painted = resolved.rows.slice(0, QUICK_RUN_MAX_PAINTED_ROWS);
   return {
     ...base,
     query,
     filter: resolved.filter,
     fellBack: resolved.fellBack,
-    rows: resolved.rows,
+    rows: painted,
+    totalRows: resolved.rows.length,
+    capped: resolved.rows.length > painted.length,
     chips: chipsFor(matched),
-    highlightKey: resolved.rows.length === 0 ? null : resolved.rows[0].resultKey,
+    highlightKey: painted.length === 0 ? null : painted[0].resultKey,
   };
 }
 

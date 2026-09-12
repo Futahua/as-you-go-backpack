@@ -1,10 +1,10 @@
 /**
- * Quick Run — the surface: the layer, the line, the chips and the flat result list.
+ * Quick Run — the surface: the layer, the line, the chips, the flat result list and the cap line.
  *
- * The module owns the four elements the page declares (#quick-run-layer, -input, -chips, -results) and
- * paints them from a session. It draws nothing the contract has not decided: section 1.2's row content
- * (icon kind, primary name, faint trailing breadcrumb, one flat list) and section 1.4's chips come from
- * quick-run-presentation.js as data, and this module only turns that data into nodes.
+ * The module owns the elements the page declares (#quick-run-layer, -input, -chips, -results, and the two
+ * lines -cap and -notice) and paints them from a session. It draws nothing the contract has not decided:
+ * section 1.2's row content (icon kind, primary name, faint trailing breadcrumb, one flat list) and section
+ * 1.4's chips come from quick-run-presentation.js as data, and this module only turns that data into nodes.
  *
  * Two rules it does not invent:
  *
@@ -13,9 +13,10 @@
  *   overwrote what someone was typing would be the surface fighting the person using it.
  * - **Keys are stable and semantic**, so a later acceptance test can name a row without depending on
  *   order: data-quick-run-key carries the row's resultKey, data-quick-run-highlighted marks the one row
- *   the session highlighted, and data-quick-run-chip marks an active chip.
+ *   the session highlighted, data-quick-run-chip marks an active chip, and data-quick-run-cap is `true`
+ *   exactly while the cap line is on screen.
  */
-import { quickRunChipViews, quickRunRowViews } from './quick-run-presentation.js';
+import { quickRunCapNotice, quickRunChipViews, quickRunRowViews } from './quick-run-presentation.js';
 import {
   closeQuickRunSession,
   closedQuickRunSession,
@@ -66,12 +67,24 @@ function chipNode(document, view) {
  * `notice` is section 1.6's visible half: one line, painted with the row it describes, so a key that is
  * disabled for that row says why before it is pressed instead of looking like a key that does nothing.
  * It is optional because a caller may mount without that element, exactly as the other four are required.
+ *
+ * The cap line is the same shape and its own element (`data-quick-run-cap`), because the two say different
+ * things: the notice is about the highlighted row, the cap line is about the list. It is painted from
+ * `quickRunCapNotice(session)` — the sentence comes from the presentation layer as data — and the surface
+ * only decides that `null` means hidden and empty. No cap line ever appears for an uncapped session, so a
+ * query that matches fewer rows than the cap says nothing about a cap at all.
  */
 export function paintQuickRunSurface({ document, elements, session, onRowClick, notice = '' }) {
   elements.layer.hidden = !session.open;
   if (elements.notice) {
     elements.notice.textContent = notice;
     elements.notice.hidden = notice === '';
+  }
+  if (elements.cap) {
+    const cap = quickRunCapNotice(session);
+    elements.cap.textContent = cap ? cap.text : '';
+    elements.cap.dataset.quickRunCap = cap ? 'true' : 'false';
+    elements.cap.hidden = !cap;
   }
   if (!session.open) {
     elements.input.value = '';

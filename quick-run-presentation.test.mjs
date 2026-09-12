@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openQuickRunSession, quickRunSessionWithQuery } from './public/app/quick-run/quick-run-session.js';
-import { quickRunChipViews, quickRunRowViews } from './public/app/quick-run/quick-run-presentation.js';
+import { quickRunCapNotice, quickRunChipViews, quickRunRowViews } from './public/app/quick-run/quick-run-presentation.js';
 
 const state = {
   groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
@@ -63,6 +63,41 @@ test('the chips mark exactly one active filter and start with All', () => {
   const chips = quickRunChipViews(session);
   assert.equal(chips[0].label, 'All');
   assert.deepEqual(chips.map((chip) => chip.active), [true, false]);
+});
+
+/** The same workspace shape the session's own cap tests use: one word matches every shortcut. */
+function crowdedState(count) {
+  const shortcuts = [];
+  for (let index = 0; index < count; index += 1) {
+    shortcuts.push({
+      id: `s-${index}`,
+      name: `Kestrel ${index}`,
+      target: `C:/corpus/kestrel-${index}.md`,
+      placements: [{ id: `p-${index}`, parentId: 'g-root', order: index }],
+    });
+  }
+  return { groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }], shortcuts, windowLayouts: [] };
+}
+
+const typedCrowd = (count) => quickRunSessionWithQuery(openQuickRunSession(crowdedState(count)), 'kestrel');
+
+test('the cap line exists only while the painted list is short of the match set', () => {
+  // null, not an empty string: there is no sentence to draw, and the surface draws nothing for it.
+  assert.equal(quickRunCapNotice(openQuickRunSession(state)), null, 'an empty query is not capped');
+  assert.equal(quickRunCapNotice(typed()), null, 'a query that fits under the cap is not capped');
+  assert.equal(quickRunCapNotice(typedCrowd(7)), null, 'seven matches, seven painted, no cap line');
+  assert.equal(quickRunCapNotice(typedCrowd(200)), null, 'exactly the cap is still everything');
+  const capped = quickRunCapNotice(typedCrowd(500));
+  assert.notEqual(capped, null);
+  assert.equal(capped.text, 'Showing the first 200 of 500 matches — keep typing to narrow.');
+});
+
+test('the cap line counts what is on screen and groups the total it is not showing', () => {
+  const notice = quickRunCapNotice(typedCrowd(12213));
+  assert.equal(notice.text, 'Showing the first 200 of 12,213 matches — keep typing to narrow.');
+  // The first number is the painted list itself rather than a copy of the cap constant, so the sentence
+  // cannot survive a change to the cap while still claiming the old count.
+  assert.equal(notice.text.includes('first 12213'), false);
 });
 
 test('a layout item starts at availability unknown, and nothing guesses otherwise (section 5)', () => {

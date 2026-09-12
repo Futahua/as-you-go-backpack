@@ -129,6 +129,9 @@
   <label class="sr-only" for="quick-run-input">Quick Run</label>
   <input class="quick-run-input" id="quick-run-input" type="text" autocomplete="off" spellcheck="false">
   <ul class="quick-run-chips" id="quick-run-chips"></ul>
+  <!-- The cap line: painted only while the list below is shorter than the match set, so it never appears
+       for a query that fits (public/app/quick-run/quick-run-session.js, QUICK_RUN_MAX_PAINTED_ROWS). -->
+  <p class="quick-run-cap" id="quick-run-cap" data-quick-run-cap="false" hidden></p>
   <ul class="quick-run-results" id="quick-run-results"></ul>
   <!-- Section 1.6's visible half: the line that says why Shift+Enter is unavailable for this row. -->
   <p class="quick-run-notice" id="quick-run-notice" hidden></p>

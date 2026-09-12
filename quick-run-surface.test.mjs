@@ -32,8 +32,25 @@ function fakeElement() {
 
 function harness() {
   const document = { createElement: (tag) => ({ tag, ...fakeElement() }) };
-  const elements = { layer: fakeElement(), input: fakeElement(), chips: fakeElement(), results: fakeElement() };
+  const elements = {
+    layer: fakeElement(), input: fakeElement(), chips: fakeElement(), results: fakeElement(),
+    cap: fakeElement(), notice: fakeElement(),
+  };
   return { document, elements };
+}
+
+/** A workspace whose query matches more rows than one session may paint (the cap is observable there). */
+function crowdedState(count) {
+  const shortcuts = [];
+  for (let index = 0; index < count; index += 1) {
+    shortcuts.push({
+      id: `s-${index}`,
+      name: `Kestrel ${index}`,
+      target: `C:/corpus/kestrel-${index}.md`,
+      placements: [{ id: `p-${index}`, parentId: 'g-root', order: index }],
+    });
+  }
+  return { groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }], shortcuts, windowLayouts: [] };
 }
 
 test('a closed session draws nothing and hides the layer', () => {
@@ -44,6 +61,7 @@ test('a closed session draws nothing and hides the layer', () => {
   assert.deepEqual(h.elements.chips.children, []);
   assert.deepEqual(h.elements.results.children, []);
   assert.equal(h.elements.input.value, '');
+  assert.equal(h.elements.cap.hidden, true);
 });
 
 test('an open session shows the line, and an empty query draws no rows and no chips', () => {
@@ -53,6 +71,7 @@ test('an open session shows the line, and an empty query draws no rows and no ch
   assert.equal(h.elements.input.value, '');
   assert.deepEqual(h.elements.results.children, []);
   assert.deepEqual(h.elements.chips.children, []);
+  assert.equal(h.elements.cap.hidden, true, 'nothing matched, so there is no cap to report');
 });
 
 test('a typed query draws one flat row per occurrence, with stable keys and one highlight', () => {
@@ -94,6 +113,67 @@ test('closing clears the line, the chips and the rows', () => {
   assert.equal(h.elements.input.value, '');
   assert.deepEqual(h.elements.chips.children, []);
   assert.deepEqual(h.elements.results.children, []);
+  assert.equal(h.elements.cap.hidden, true);
+});
+
+test('a capped session paints the first 200 rows and says what it is not showing', () => {
+  const h = harness();
+  const session = quickRunSessionWithQuery(openQuickRunSession(crowdedState(500)), 'kestrel');
+  const drawn = paintQuickRunSurface({ ...h, session });
+  assert.equal(drawn, 200, 'the paint is bounded, which is the whole point of the cap');
+  assert.equal(h.elements.results.children.length, 200);
+  assert.equal(h.elements.cap.hidden, false);
+  assert.equal(h.elements.cap.dataset.quickRunCap, 'true', 'the line is findable, and only while it is true');
+  assert.equal(h.elements.cap.textContent, 'Showing the first 200 of 500 matches — keep typing to narrow.');
+});
+
+test('an uncapped session paints every match and draws no cap line at all', () => {
+  const h = harness();
+  paintQuickRunSurface({ ...h, session: quickRunSessionWithQuery(openQuickRunSession(crowdedState(7)), 'kestrel') });
+  assert.equal(h.elements.results.children.length, 7);
+  assert.equal(h.elements.cap.hidden, true);
+  assert.equal(h.elements.cap.dataset.quickRunCap, 'false');
+  assert.equal(h.elements.cap.textContent, '');
+});
+
+test('a caller that mounts without the cap element still paints a capped session', () => {
+  // The line is optional in exactly the way the notice already is: a caller with four elements paints rows.
+  const h = harness();
+  delete h.elements.cap;
+  const drawn = paintQuickRunSurface({
+    ...h,
+    session: quickRunSessionWithQuery(openQuickRunSession(crowdedState(500)), 'kestrel'),
+  });
+  assert.equal(drawn, 200);
+});
+
+test('the cap line follows the query, appearing only while the match set is larger than the cap', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = {
+    layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement(),
+    cap: liveElement(), notice: liveElement(),
+  };
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(300) });
+  quickRun.open();
+  assert.equal(elements.cap.hidden, true, 'an empty query shows nothing, so it cannot be capped');
+
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+  assert.equal(quickRun.session().capped, true);
+  assert.equal(elements.cap.hidden, false);
+  assert.equal(elements.cap.textContent, 'Showing the first 200 of 300 matches — keep typing to narrow.');
+  assert.equal(elements.results.children.length, 200, 'the painted list and the sentence agree');
+
+  elements.input.value = 'kestrel 2';
+  elements.input.fire('input', {});
+  assert.equal(quickRun.session().capped, false, 'this query matches fewer rows than the cap');
+  assert.equal(elements.cap.hidden, true, 'so the line goes away rather than reporting an old number');
+  assert.equal(elements.cap.textContent, '');
+  assert.equal(elements.cap.dataset.quickRunCap, 'false');
+
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+  assert.equal(elements.cap.hidden, false, 'and it returns with the wider query');
 });
 
 /* The mounting test builds its own elements rather than reusing the painter's helper: the wiring is only

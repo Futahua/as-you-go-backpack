@@ -7,7 +7,9 @@
  * - every visible row carries an icon kind, a primary name and a faint trailing breadcrumb;
  * - **one flat list only**, no grouped sections;
  * - duplicate names are allowed and expected when breadcrumbs differ, so nothing here de-duplicates: two
- *   placements of one shortcut are two rows that happen to share a primary name.
+ *   placements of one shortcut are two rows that happen to share a primary name;
+ * - the **cap line** (below) is a sentence this module owns, so the surface paints a string it was handed
+ *   rather than composing copy of its own.
  *
  * The icon is a *kind* rather than a glyph: the contract says a row has an icon, and glyph choice is
  * presentation, so the surface picks the picture from the kind it is given.
@@ -59,4 +61,28 @@ export function quickRunRowViews(session, noted) {
 /** The type chips to draw, with the active one marked. All is first whenever there is a result. */
 export function quickRunChipViews(session) {
   return session.chips.map((label) => ({ label, active: label === session.filter }));
+}
+
+/**
+ * The cap line, as data: what the surface says when the list it painted is a prefix of the match set.
+ *
+ * `null` — not an empty sentence — when nothing is capped, because the line exists only while it is true:
+ * a query that matches fewer rows than the cap paints all of them and says nothing about a cap.
+ *
+ * The count is all that is said, and it is said honestly in both directions: the first number is what is
+ * actually on screen (`session.rows`, never the cap constant, which a future change to the cap would
+ * otherwise make this sentence lie about), and `totalRows` is the whole match set the chips were built
+ * from. The digits are grouped here rather than through the reader's locale so the sentence reads the same
+ * on every machine and a test can hold it exactly.
+ */
+export function quickRunCapNotice(session) {
+  if (session?.capped !== true) return null;
+  return {
+    text: `Showing the first ${session.rows.length} of ${groupDigits(session.totalRows)} matches — keep typing to narrow.`,
+  };
+}
+
+/** 12213 -> "12,213", with no locale to vary and no Intl object to construct. */
+function groupDigits(value) {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
