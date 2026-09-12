@@ -14,12 +14,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 
-const KNOWN_UNWIRED = new Map([
-  [
-    'compact-card-parity.test.mjs',
-    'fails at 034/035/036 (compact row wrapping) and 024 (no per-button outlines) as of 2026-09-12; whether the test is stale or the surface regressed is a creator eye-check',
-  ],
-]);
+// Empty, and that is the point: both files this guard was written for are now wired in and passing. An
+// entry here is a debt, so the map should stay empty unless a real reason appears.
+const KNOWN_UNWIRED = new Map();
 
 test('every test file is run by some test script, and the exceptions are named and justified', async () => {
   const pkg = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
