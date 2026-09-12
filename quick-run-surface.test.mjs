@@ -137,3 +137,38 @@ test('mounting wires the keys the contract binds, and opens on the current state
   assert.deepEqual(elements.results.children, []);
   assert.equal(quickRun.session().open, false);
 });
+
+test('the highlight is always a row of the displayed set, whatever was typed before it', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+  quickRun.open();
+  for (const query of ['d', 'do', 'doc', 'docs', 'zzz', 'do']) {
+    elements.input.value = query;
+    elements.input.fire('input', {});
+    const session = quickRun.session();
+    const keys = session.rows.map((row) => row.resultKey);
+    if (session.rows.length === 0) {
+      assert.equal(session.highlightKey, null, 'no rows, no highlight');
+    } else {
+      assert.ok(keys.includes(session.highlightKey), 'the highlight is a row of the set it was given');
+    }
+    // And the painted rows agree with the session: what is highlighted is on screen exactly once.
+    const painted = elements.results.children.map((row) => row.dataset.quickRunKey);
+    assert.deepEqual(painted, keys);
+  }
+});
+
+test('scrolling is left to the list: no wheel handler moves the highlight (section 6.3)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+  quickRun.open();
+  elements.input.value = 'docs';
+  elements.input.fire('input', {});
+  const before = quickRun.session().highlightKey;
+
+  assert.equal((elements.layer.listeners.wheel ?? []).length, 0, 'no wheel handler is registered');
+  elements.layer.fire('wheel', { deltaY: 120, preventDefault() {} });
+  assert.equal(quickRun.session().highlightKey, before, 'scrolling does not choose a row');
+});
