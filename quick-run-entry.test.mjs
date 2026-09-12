@@ -62,6 +62,34 @@ test('Quick Run cannot render the workspace or reheat the graph: it holds no ref
   assert.equal(region.includes('reheat'), false);
 });
 
+test('the four Quick Run elements meet their handles by name, checked across all three files', async () => {
+  // A mismatch here does not fail a test anywhere else: the surface is driven by a harness that already
+  // uses the short names, so only the real entry file can be wrong, and only the running app would show
+  // it. This is the lockstep check for that seam - markup id, registry key, and the handle the surface
+  // is handed.
+  const [markup, registry] = await Promise.all([
+    readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8'),
+    readFile(new URL('./public/app/dom.js', import.meta.url), 'utf8'),
+  ]);
+  const ids = [...markup.matchAll(/id="(quick-run-[a-z-]+)"/g)].map((match) => match[1]).sort();
+  const registered = [...registry.matchAll(/(\w+): requiredElement\(document, '#(quick-run-[a-z-]+)'\)/g)]
+    .map((match) => ({ key: match[1], id: match[2] }));
+  assert.deepEqual(
+    registered.map((entry) => entry.id).sort(),
+    ids,
+    'every quick-run element in the markup is registered, and the registry invents none',
+  );
+  const mapped = region.match(/elements: \{([\s\S]*?)\},/);
+  assert.notEqual(mapped, null, 'the entry file adapts the registry to the handles the surface takes');
+  for (const { key } of registered) {
+    assert.match(
+      mapped[1],
+      new RegExp(`${key.replace('quickRun', '').toLowerCase()}: elements\\.${key},`),
+      `${key} is handed over as the handle the surface reads`,
+    );
+  }
+});
+
 test('Quick Run activation adds no second launcher and no reveal path (sections 1.6 and 6.4)', () => {
   for (const forbidden of [
     'revealShortcut',

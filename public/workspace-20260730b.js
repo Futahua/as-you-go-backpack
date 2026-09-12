@@ -5255,7 +5255,15 @@ const setMembershipMode = createSetMembershipMode({
 // surface module owns everything else.
 const quickRun = mountQuickRun({
   document,
-  elements,
+  // The registry in dom.js namespaces its keys (quickRunLayer, quickRunInput, ...); the surface takes
+  // the four handles it paints. This adapter is the one place the two names meet, and quick-run-entry
+  // .test.mjs checks it against both files, because a mismatch here is invisible until the app boots.
+  elements: {
+    layer: elements.quickRunLayer,
+    input: elements.quickRunInput,
+    chips: elements.quickRunChips,
+    results: elements.quickRunResults,
+  },
   getState: () => state,
   // STAGE 5's last step: what Enter does. The row is re-read from the current tree by its stable key
   // before anything happens (section 5), then the plan is executed by naming the workspace's own
