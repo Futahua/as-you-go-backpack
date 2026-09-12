@@ -115,3 +115,107 @@ test('Link Enter opens its web URL (section 1.5)', async () => {
   assert.deepEqual(harness.effects.openWeb, ['https://example.com/docs']);
   assert.deepEqual(harness.effects.launch, [], 'a link is opened, not launched as a program');
 });
+
+// The races: the row was indexed, the workspace moved on before Enter arrived. The rule is the same in
+// every case - the indexed payload is never executed - and what differs is the outcome: a rename is
+// answered with the *current* row, while a deletion, a binning or a change that moves the stable key is
+// answered with a reason and no action at all.
+function pressEnterWith(harness, query, nextState) {
+  const session = quickRunSessionWithQuery(openQuickRunSession(state), query);
+  const indexedKey = session.highlightKey;
+  const current = revalidateQuickRunRow(nextState, indexedKey);
+  if (!current.ok) return { stale: true, reason: current.reason, indexedKey };
+  const plan = planQuickRunActivation(current.row);
+  return {
+    stale: false,
+    indexedKey,
+    row: current.row,
+    plan,
+    done: harness.commands.activateItem(quickRunWorkspaceItemId(plan)),
+  };
+}
+
+test('rename-before-Enter executes the current row, never the indexed one (stale-index execution)', () => {
+  const harness = createHarness(state);
+  const renamed = {
+    ...state,
+    shortcuts: state.shortcuts.map((shortcut) => (
+      shortcut.id === 's-2' ? { ...shortcut, name: 'Renamed editor' } : shortcut
+    )),
+  };
+  const { stale, row, indexedKey } = pressEnterWith(harness, 'editor', renamed);
+  assert.equal(stale, false);
+  assert.equal(row.name, 'Renamed editor', 'the current name, not the one the index carried');
+  assert.equal(row.resultKey, indexedKey, 'the occurrence identity is unchanged, which is why a rename is safe');
+});
+
+test('delete-before-Enter does nothing and says why (stale-index execution)', () => {
+  const harness = createHarness(state);
+  const deleted = { ...state, shortcuts: state.shortcuts.filter((shortcut) => shortcut.id !== 's-2') };
+  const { stale, reason } = pressEnterWith(harness, 'editor', deleted);
+  assert.equal(stale, true);
+  assert.equal(reason, 'the-result-is-no-longer-in-the-workspace');
+  assert.deepEqual(harness.effects.launch, [], 'nothing was launched from the stale payload');
+});
+
+test('bin-before-Enter does nothing and says why (stale-index execution)', () => {
+  const harness = createHarness(state);
+  const binned = {
+    ...state,
+    shortcuts: state.shortcuts.map((shortcut) => (
+      shortcut.id === 's-2'
+        ? {
+          ...shortcut,
+          placements: shortcut.placements.map((placement) => (
+            { ...placement, bin: { at: '2026-09-12T08:00:00+07:00' } }
+          )),
+        }
+        : shortcut
+    )),
+  };
+  const { stale } = pressEnterWith(harness, 'editor', binned);
+  assert.equal(stale, true);
+  assert.deepEqual(harness.effects.launch, []);
+});
+
+test('layout-member-remove-before-Enter does nothing and says why (stale-index execution)', () => {
+  const withLayout = {
+    groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
+    shortcuts: [],
+    windowLayouts: [
+      {
+        id: 'l-1',
+        parentId: 'g-root',
+        name: 'Focus',
+        arrangement: { members: [{ id: 'm-1', descriptor: { title: 'Chrome' } }] },
+      },
+    ],
+  };
+  const withoutMember = {
+    ...withLayout,
+    windowLayouts: withLayout.windowLayouts.map((layout) => ({ ...layout, arrangement: { members: [] } })),
+  };
+  const harness = createHarness(withLayout);
+  const session = quickRunSessionWithQuery(openQuickRunSession(withLayout), 'chrome');
+  const indexedKey = session.highlightKey;
+  assert.equal(indexedKey, 'layout-member:l-1:m-1');
+  const current = revalidateQuickRunRow(withoutMember, indexedKey);
+  assert.deepEqual(current, { ok: false, reason: 'the-result-is-no-longer-in-the-workspace' });
+  assert.deepEqual(harness.effects.launch, [], 'and the deferred activation is not even planned');
+});
+
+test('a target edit that changes the classification cannot run the stale payload (stale-index execution)', () => {
+  const harness = createHarness(state);
+  // The row was indexed as a Link; by the time Enter arrives the record is a filesystem shortcut, so the
+  // stable key itself has moved and the stale URL must not be opened.
+  const retargeted = {
+    ...state,
+    shortcuts: state.shortcuts.map((shortcut) => (
+      shortcut.id === 's-1' ? { ...shortcut, target: 'C:/Program Files/Docs/docs.exe' } : shortcut
+    )),
+  };
+  const { stale, indexedKey } = pressEnterWith(harness, 'docs', retargeted);
+  assert.equal(indexedKey, 'link:p-1', 'the index knew it as a Link');
+  assert.equal(stale, true, 'and the current state has no such key any more');
+  assert.deepEqual(harness.effects.openWeb, [], 'the stale URL was not opened');
+});
