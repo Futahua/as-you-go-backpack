@@ -231,3 +231,24 @@ test('hover marks the row under the pointer and never becomes the keyboard selec
   elements.layer.fire('keydown', { key: 'Enter', preventDefault() {} });
   assert.deepEqual(activated, ['link:p-1'], 'Enter runs the keyboard highlight, not the hovered row');
 });
+
+test('typing never re-reads the world: the snapshot is taken at open and ranked in memory (section 5)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  let reads = 0;
+  const quickRun = mountQuickRun({
+    document,
+    elements,
+    getState: () => { reads += 1; return state; },
+    onActivate: () => {},
+  });
+  quickRun.open();
+  assert.equal(reads, 1, 'opening reads the workspace once');
+  for (const query of ['d', 'do', 'doc', 'docs', 'doc', 'zzz']) {
+    elements.input.value = query;
+    elements.input.fire('input', {});
+    elements.layer.fire('keydown', { key: 'ArrowDown', preventDefault() {} });
+    elements.layer.fire('keydown', { key: 'Tab', shiftKey: false, preventDefault() {} });
+  }
+  assert.equal(reads, 1, 'and nothing a keystroke does reads it again');
+});
