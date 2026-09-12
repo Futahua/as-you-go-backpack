@@ -14,11 +14,11 @@ import {
   resolveQuickRunMember,
 } from './public/app/quick-run/quick-run-resolution.js';
 
-const chrome = { id: 'w-1', title: 'Chrome', executable: 'chrome.exe', fingerprint: 'sha256:aaa' };
+const chrome = { id: 'w-1', title: 'Chrome', executableFingerprint: 'sha256:aaa' };
 const member = (descriptor) => ({ id: 'm-1', descriptor });
 
 test('an exact single match resolves uniquely and is the only outcome that may activate', () => {
-  const plan = planQuickRunResolution(member({ title: 'Chrome', executable: 'chrome.exe' }), [chrome]);
+  const plan = planQuickRunResolution(member({ title: 'Chrome' }), [chrome]);
   assert.equal(plan.outcome, QUICK_RUN_RESOLUTION_UNIQUE);
   assert.equal(plan.window, chrome, 'the window itself, not a copy and not an identity the module invented');
   assert.equal(plan.activate, true);
@@ -34,8 +34,8 @@ test('no match is missing, and nothing is activated', () => {
 });
 
 test('two matches are ambiguous, the candidates are reported, and nothing is chosen', () => {
-  const second = { id: 'w-2', title: 'Chrome', executable: 'chrome.exe', fingerprint: 'sha256:bbb' };
-  const plan = planQuickRunResolution(member({ title: 'Chrome', executable: 'chrome.exe' }), [chrome, second]);
+  const second = { id: 'w-2', title: 'Chrome', executableFingerprint: 'sha256:bbb' };
+  const plan = planQuickRunResolution(member({ title: 'Chrome' }), [chrome, second]);
   assert.equal(plan.outcome, QUICK_RUN_RESOLUTION_AMBIGUOUS);
   assert.deepEqual(plan.candidates, ['w-1', 'w-2']);
   assert.equal(plan.window, undefined, 'no window is picked, which is what "never substitutes" means here');
@@ -49,15 +49,15 @@ test('a near miss is a miss: resolution never substitutes a window that merely l
     { id: 'w-4', title: 'Chrome', executable: 'chrome.exe', fingerprint: 'sha256:zzz' },
     // Not a near miss at all, and deliberately here: a field the descriptor does not declare is ignored,
     // so this one matches and the test would be wrong to call it a miss.
-    { id: 'w-5', title: 'Chrome', executable: 'chrome.exe', fingerprint: 'sha256:aaa', extra: 'different' },
+    { id: 'w-5', title: 'Chrome', executableFingerprint: 'sha256:aaa', extra: 'different' },
   ];
-  const plan = planQuickRunResolution(member({ title: 'Chrome', executable: 'chrome.exe', fingerprint: 'sha256:aaa' }), plausible);
+  const plan = planQuickRunResolution(member({ title: 'Chrome', executableFingerprint: 'sha256:aaa' }), plausible);
   assert.equal(plan.outcome, QUICK_RUN_RESOLUTION_UNIQUE, 'only the window that agrees on every declared field matches');
   assert.deepEqual(plan.candidates, ['w-5'], 'and the single candidate is the one that agreed');
   assert.equal(plan.activate, true);
 
   const misses = planQuickRunResolution(
-    member({ title: 'Chrome', executable: 'chrome.exe', fingerprint: 'sha256:aaa' }),
+    member({ title: 'Chrome', executableFingerprint: 'sha256:aaa' }),
     plausible.filter((window) => window.id !== 'w-5'),
   );
   assert.equal(misses.outcome, QUICK_RUN_RESOLUTION_MISSING, 'a longer title and a differing fingerprint are both misses');
