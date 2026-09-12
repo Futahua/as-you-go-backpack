@@ -164,3 +164,112 @@ for (const [label, mutate] of mutations) {
     );
   });
 }
+
+// The other half of the Invalidation list: these changes *are* index inputs, so a reopen has to show
+// them. Each case names what the index is supposed to do about it, which is what makes the "does not
+// rebuild" cases above meaningful rather than a description of a dead index.
+const reopened = (state) => openQuickRunSession(state).allRows;
+const rowFor = (state, key) => reopened(state).find((row) => row.resultKey === key) ?? null;
+
+test('folder rename rebuilds (Invalidation)', () => {
+  const renamed = {
+    ...base,
+    groups: base.groups.map((group) => (group.id === 'g-1' ? { ...group, name: 'Renamed alpha' } : group)),
+  };
+  assert.equal(rowFor(renamed, 'folder:g-1').name, 'Renamed alpha');
+  assert.equal(rowFor(renamed, 'shortcut:p-1').breadcrumb, 'Workspace › Renamed alpha', 'and its children follow');
+});
+
+test('folder move rebuilds, breadcrumbs and all (Invalidation)', () => {
+  const moved = {
+    ...base,
+    groups: [
+      { id: 'root', parentId: null, name: 'Workspace' },
+      { id: 'g-2', parentId: 'root', name: 'Beta' },
+      { id: 'g-1', parentId: 'g-2', name: 'Alpha' },
+    ],
+  };
+  assert.equal(rowFor(moved, 'folder:g-1').breadcrumb, 'Workspace › Beta');
+  assert.equal(rowFor(moved, 'shortcut:p-1').breadcrumb, 'Workspace › Beta › Alpha');
+});
+
+test('shortcut rename rebuilds', () => {
+  const renamed = {
+    ...base,
+    shortcuts: base.shortcuts.map((shortcut) => ({ ...shortcut, name: 'Renamed editor' })),
+  };
+  assert.equal(rowFor(renamed, 'shortcut:p-1').name, 'Renamed editor');
+});
+
+test('shortcut target classification change rebuilds, including the stable key', () => {
+  const reclassified = {
+    ...base,
+    shortcuts: base.shortcuts.map((shortcut) => ({ ...shortcut, target: 'https://example.com/editor' })),
+  };
+  assert.equal(rowFor(reclassified, 'shortcut:p-1'), null, 'the prefix is the type, so the key moves with it');
+  assert.equal(rowFor(reclassified, 'link:p-1').type, 'link');
+  assert.equal(rowFor(reclassified, 'link:p-1').name, 'Editor', 'the occurrence is the same one');
+});
+
+test('placement move rebuilds its breadcrumb and nobody else', () => {
+  const moved = {
+    ...base,
+    groups: [...base.groups, { id: 'g-2', parentId: 'root', name: 'Beta' }],
+    shortcuts: base.shortcuts.map((shortcut) => ({
+      ...shortcut,
+      placements: shortcut.placements.map((placement) => ({ ...placement, parentId: 'g-2' })),
+    })),
+  };
+  assert.equal(rowFor(moved, 'shortcut:p-1').breadcrumb, 'Workspace › Beta');
+  assert.equal(rowFor(moved, 'folder:g-1').breadcrumb, 'Workspace', 'the folder it left is untouched');
+});
+
+test('layout member add and remove rebuild the member rows (Invalidation)', () => {
+  const withExtra = {
+    ...base,
+    windowLayouts: base.windowLayouts.map((layout) => ({
+      ...layout,
+      arrangement: {
+        members: [...layout.arrangement.members, { id: 'm-3', descriptor: { title: 'Terminal' } }],
+      },
+    })),
+  };
+  assert.deepEqual(
+    reopened(withExtra).map((row) => row.resultKey).sort(),
+    ['folder:g-1', 'layout-member:l-1:m-1', 'layout-member:l-1:m-2', 'layout-member:l-1:m-3', 'shortcut:p-1'],
+  );
+  const withoutOne = {
+    ...base,
+    windowLayouts: base.windowLayouts.map((layout) => ({
+      ...layout,
+      arrangement: { members: layout.arrangement.members.filter((member) => member.id !== 'm-1') },
+    })),
+  };
+  assert.equal(rowFor(withoutOne, 'layout-member:l-1:m-1'), null, 'a removed member leaves the universe');
+});
+
+test('descriptor change rebuilds the member name (Invalidation)', () => {
+  const renamed = {
+    ...base,
+    windowLayouts: base.windowLayouts.map((layout) => ({
+      ...layout,
+      arrangement: {
+        members: layout.arrangement.members.map((member) => (
+          member.id === 'm-1' ? { ...member, descriptor: { title: 'Chrome Canary' } } : member
+        )),
+      },
+    })),
+  };
+  assert.equal(rowFor(renamed, 'layout-member:l-1:m-1').name, 'Chrome Canary');
+  assert.equal(rowFor(renamed, 'layout-member:l-1:m-2').name, 'Notes', 'and only the changed member moves');
+});
+
+test('layout name change rebuilds member breadcrumbs (Invalidation)', () => {
+  const renamed = {
+    ...base,
+    windowLayouts: base.windowLayouts.map((layout) => ({ ...layout, name: 'Deep focus' })),
+  };
+  for (const key of ['layout-member:l-1:m-1', 'layout-member:l-1:m-2']) {
+    assert.equal(rowFor(renamed, key).breadcrumb, 'Workspace › Alpha › Deep focus');
+  }
+});
