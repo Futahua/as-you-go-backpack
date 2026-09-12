@@ -113,6 +113,7 @@ import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { resolveContextTarget } from './app/context-target-model.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 import { mountQuickRun } from './app/quick-run/quick-run-surface.js';
+import { planQuickRunActivation, quickRunWorkspaceItemId, revalidateQuickRunRow } from './app/quick-run/quick-run-activation.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
 import { createPointerController } from './app/interactions/pointer-controller.js';
@@ -5252,7 +5253,34 @@ const setMembershipMode = createSetMembershipMode({
 
 // Quick Run (STAGE 5). Mounted here because the entry file owns the elements and the tree state; the
 // surface module owns everything else.
-const quickRun = mountQuickRun({ document, elements, getState: () => state });
+const quickRun = mountQuickRun({
+  document,
+  elements,
+  getState: () => state,
+  // STAGE 5's last step: what Enter does. The row is re-read from the current tree by its stable key
+  // before anything happens (section 5), then the plan is executed by naming the workspace's own
+  // open-selection path - activateItem, the same call workspace Enter makes - instead of growing a
+  // second launcher (sections 1.5 and 6.4). A row that cannot run yet says so in the status line
+  // rather than appearing to do nothing (section 1.6).
+  onActivate: (resultKey) => {
+    const current = revalidateQuickRunRow(state, resultKey);
+    if (!current.ok) {
+      setStatus('Quick Run: that result is no longer in the workspace.');
+      return;
+    }
+    const plan = planQuickRunActivation(current.row);
+    if (plan?.deferred) {
+      setStatus('Quick Run: activating a live application window is not wired up yet.');
+      return;
+    }
+    const itemId = plan ? quickRunWorkspaceItemId(plan) : null;
+    if (!itemId) {
+      setStatus('Quick Run: that result has no workspace action.');
+      return;
+    }
+    void commands.activateItem(itemId);
+  },
+});
 
 const keyboard = createKeyboardController({
   document,

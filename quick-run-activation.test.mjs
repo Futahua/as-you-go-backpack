@@ -6,6 +6,7 @@ import {
   planQuickRunShiftEnter,
   QUICK_RUN_TARGET_GONE,
   revalidateQuickRunRow,
+  quickRunWorkspaceItemId,
   QUICK_RUN_ADD_ALREADY_PRESENT,
   QUICK_RUN_ADD_NO_ACTIVE_LAYOUT,
   QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS,
@@ -106,4 +107,18 @@ test('a target is re-read from the current state by stable key, not trusted from
   assert.deepEqual(revalidateQuickRunRow(removed, row.resultKey), { ok: false, reason: QUICK_RUN_TARGET_GONE });
   assert.deepEqual(revalidateQuickRunRow(state, ''), { ok: false, reason: QUICK_RUN_TARGET_GONE });
   assert.deepEqual(revalidateQuickRunRow(state, 'link:p-999'), { ok: false, reason: QUICK_RUN_TARGET_GONE });
+});
+
+test('a plan names the workspace item the existing open-selection command takes (section 6.4)', () => {
+  const folder = planQuickRunActivation({ type: 'folder', groupId: 'g-2' });
+  const shortcut = planQuickRunActivation({ type: 'shortcut', shortcutId: 's-1', placementId: 'p-1' });
+  const link = planQuickRunActivation({ type: 'link', shortcutId: 's-1', placementId: 'p-2', target: 'https://example.com' });
+  const layoutItem = planQuickRunActivation({ type: 'layout-item', layoutId: 'l-1', memberId: 'm-1' });
+
+  assert.equal(quickRunWorkspaceItemId(folder), 'g-2', 'a folder is opened by its group id');
+  assert.equal(quickRunWorkspaceItemId(shortcut), 's-1', 'a shortcut is launched by its record, not by the placement');
+  assert.equal(quickRunWorkspaceItemId(link), 's-1', 'a link is the same record with a web target');
+  assert.equal(quickRunWorkspaceItemId(layoutItem), null, 'a deferred Layout Item has no workspace id to hand over');
+  assert.equal(quickRunWorkspaceItemId(null), null);
+  assert.equal(quickRunWorkspaceItemId({ action: 'launch-shortcut', target: {} }), null);
 });

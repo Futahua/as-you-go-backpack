@@ -55,6 +55,18 @@ export function planQuickRunActivation(row) {
 }
 
 
+/**
+ * The workspace item id a plan's default action belongs to, in the id space the workspace's own
+ * open-selection command already uses: a group id for a folder, a shortcut id for a shortcut or a link.
+ * The entry file hands this to the same activateItem the workspace's Enter calls, so Quick Run names the
+ * existing execution path rather than growing a second one (section 6.4). A plan with no such id - a
+ * Layout Item, whose activation waits on live window control - answers null instead of an id that would
+ * launch the wrong thing.
+ */
+export function quickRunWorkspaceItemId(plan) {
+  if (!plan || typeof plan !== 'object' || !plan.target) return null;
+  return plan.target.groupId ?? plan.target.shortcutId ?? null;
+}
 /** The reasons Shift+Enter may be unavailable, so a caller can show one rather than ignore the key. */
 export const QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS = 'only-layout-items';
 export const QUICK_RUN_ADD_NO_ACTIVE_LAYOUT = 'no-active-window-layout';
