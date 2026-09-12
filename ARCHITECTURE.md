@@ -23,6 +23,7 @@ clear responsibility lives in a module.
 | Styling | the matching file under `public/styles/` |
 | Compatibility composition | `public/workspace-20260730b.js` |
 | Quick Run search (filter vocabulary and cycle, the searchable universe, the index, the session, what the surface draws) | `public/app/quick-run/quick-run-types.js`, `quick-run-search.js`, `quick-run-index.js`, `quick-run-session.js`, `quick-run-presentation.js`, `quick-run-surface.js`, `quick-run-activation.js` |
+| Quick Run layout-item resolution (the fail-closed decision that names one window or refuses, and the ephemeral availability the surface shows) | `public/app/quick-run/quick-run-resolution.js`, `quick-run-presentation.js` |
 
 ## Multi-window document behavior
 

@@ -42,6 +42,22 @@ test('every source this file scans is real and non-empty', () => {
   }
 });
 
+test('the architecture map names every Quick Run module, so the map cannot drift silently', async () => {
+  // The repository's own rule is that ARCHITECTURE.md maps each change type to the module that owns it.
+  // Nothing enforced it: quick-run-resolution.js was added to the tree and the map was not updated, and no
+  // test noticed. This is that test, and it fails on a new module rather than on a reader's disappointment.
+  const map = await readFile(new URL('./ARCHITECTURE.md', import.meta.url), 'utf8');
+  const quickRunRow = map.split('\n').filter((line) => line.includes('public/app/quick-run/')).join('\n');
+  assert.notEqual(quickRunRow, '', 'the map has a Quick Run row');
+  for (const name of moduleNames) {
+    assert.equal(
+      quickRunRow.includes(name),
+      true,
+      `ARCHITECTURE.md must name ${name}`,
+    );
+  }
+});
+
 test('the forbidden facilities of section 6 are absent from Quick Run (scanned, not assumed)', () => {
   const forbidden = [
     // A network: search through fetched page titles, URL lookups, anything remote.
