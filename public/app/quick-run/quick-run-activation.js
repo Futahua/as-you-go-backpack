@@ -110,6 +110,35 @@ export function planQuickRunReveal(row) {
       return null;
   }
 }
+/**
+ * Section 1.6's duplicate rule, as the AUTHOR ruled it on 2026-09-12.
+ *
+ * The persisted descriptor **is** the durable native identity — `title` plus `executableFingerprint` when
+ * present, the two fields `normalizeWindowLayoutMember` writes — while `memberId` and the source layout are
+ * occurrence and provenance rather than identity. So a window is already in the layout when a member there
+ * agrees on every field this descriptor declares, and only the declared ones: a descriptor that names a
+ * fingerprint is not the same window as one that differs in it, and a descriptor that names only a title is
+ * the same window as any member with that title.
+ *
+ * Returns the id of the member that already represents this window, or null when the add may proceed. A
+ * descriptor that declares nothing matches nothing, because there is no identity to compare.
+ */
+export function quickRunDuplicateMemberId(descriptor, members) {
+  if (!descriptor || typeof descriptor !== 'object') return null;
+  const declared = DESCRIPTOR_IDENTITY_FIELDS.filter((field) => (
+    typeof descriptor[field] === 'string' && descriptor[field].trim() !== ''
+  ));
+  if (declared.length === 0) return null;
+  const match = (Array.isArray(members) ? members : []).find((member) => (
+    member && typeof member === 'object' && member.descriptor
+    && declared.every((field) => member.descriptor[field] === descriptor[field])
+  ));
+  return match ? match.id : null;
+}
+
+/** The fields that carry a persisted window's identity, in the order the model writes them. */
+export const DESCRIPTOR_IDENTITY_FIELDS = Object.freeze(['title', 'executableFingerprint']);
+
 /** The reasons Shift+Enter may be unavailable, so a caller can show one rather than ignore the key. */
 export const QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS = 'only-layout-items';
 export const QUICK_RUN_ADD_NO_ACTIVE_LAYOUT = 'no-active-window-layout';

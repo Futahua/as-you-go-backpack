@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openQuickRunSession, quickRunSessionWithQuery } from './public/app/quick-run/quick-run-session.js';
 import {
+  DESCRIPTOR_IDENTITY_FIELDS,
   planQuickRunActivation,
   planQuickRunReveal,
   planQuickRunShiftEnter,
   QUICK_RUN_TARGET_GONE,
   revalidateQuickRunRow,
+  quickRunDuplicateMemberId,
   quickRunWorkspaceItemId,
   QUICK_RUN_ADD_ALREADY_PRESENT,
   QUICK_RUN_ADD_NO_ACTIVE_LAYOUT,
@@ -147,6 +149,37 @@ test('Ctrl+Enter reveals the occurrence inside the workspace and never through t
     null,
     'a row with no persisted ancestry has nowhere to navigate to, and says so rather than guessing',
   );
+});
+
+test('the duplicate rule compares the identity a member declares, and only that (AUTHOR ruling, 2026-09-12)', () => {
+  const active = { arrangement: { members: [
+    { id: 'm-1', descriptor: { version: 1, title: 'Chrome', executableFingerprint: 'sha256:aaa' } },
+    { id: 'm-2', descriptor: { version: 1, title: 'Chrome', executableFingerprint: 'sha256:bbb' } },
+  ] } };
+
+  // Both fields declared and both agreeing: the same window is already there.
+  assert.equal(
+    quickRunDuplicateMemberId({ title: 'Chrome', executableFingerprint: 'sha256:bbb' }, active.arrangement.members),
+    'm-2',
+    'and it names the member that represents it, so a caller can say which one',
+  );
+  // A declared fingerprint that differs is a different window, even with the same title.
+  assert.equal(
+    quickRunDuplicateMemberId({ title: 'Chrome', executableFingerprint: 'sha256:ccc' }, active.arrangement.members),
+    null,
+  );
+  // Title alone declares less, so it matches the first member with that title.
+  assert.equal(quickRunDuplicateMemberId({ title: 'Chrome' }, active.arrangement.members), 'm-1');
+  assert.equal(quickRunDuplicateMemberId({ title: 'Firefox' }, active.arrangement.members), null);
+  // Nothing declared is nothing to compare - not a duplicate, and not a match either.
+  assert.equal(quickRunDuplicateMemberId({}, active.arrangement.members), null);
+  assert.equal(quickRunDuplicateMemberId({ title: '   ' }, active.arrangement.members), null);
+  assert.equal(quickRunDuplicateMemberId(null, active.arrangement.members), null);
+  assert.equal(quickRunDuplicateMemberId({ title: 'Chrome' }, []), null);
+  assert.equal(quickRunDuplicateMemberId({ title: 'Chrome' }, undefined), null);
+  // The fields are the ones the model writes, in that order, and they are frozen.
+  assert.deepEqual([...DESCRIPTOR_IDENTITY_FIELDS], ['title', 'executableFingerprint']);
+  assert.equal(Object.isFrozen(DESCRIPTOR_IDENTITY_FIELDS), true);
 });
 
 test('a plan names the workspace item the existing open-selection command takes (section 6.4)', () => {

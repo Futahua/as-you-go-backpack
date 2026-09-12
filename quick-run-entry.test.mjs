@@ -47,6 +47,22 @@ test('the entry file hands Quick Run an activation path (STAGE 5, step 4)', () =
   }
 });
 
+test('Shift+Enter copies the member into the active layout, refusing a duplicate first (sections 1.6 and 10)', () => {
+  assert.match(region, /onShiftEnter: \(resultKey\) =>/, 'the key has a handler rather than a placeholder');
+  assert.match(region, /planQuickRunShiftEnter\(current\.row, \{ activeLayoutId: state\.activeWindowLayoutId/, 'the plan decides whether it is available');
+  assert.match(
+    region,
+    /quickRunDuplicateMemberId\(member\.descriptor, target\.arrangement\?\.members\)/,
+    'the duplicate check is on the persisted descriptor, before the write rather than after it',
+  );
+  assert.match(region, /store\.replace\(addWindowLayoutMember\(state, plan\.target\.layoutId, member\)\)/, 'and the write is the model own add, not a second implementation of it');
+  assert.match(region, /already in the active layout/, 'a duplicate is reported rather than silently ignored');
+  assert.match(
+    source,
+    /quickRunDuplicateMemberId,/,
+    'the helper is imported rather than assumed to be in scope',
+  );
+});
 test('Ctrl+Enter reveals the occurrence inside the workspace (section 1.6)', () => {
   assert.match(region, /onReveal: \(resultKey\) =>/, 'the mount has somewhere to hand the key');
   assert.match(
@@ -100,7 +116,16 @@ test('Quick Run cannot render the workspace or reheat the graph: it holds no ref
       );
     }
   }
-  assert.equal(region.includes('render('), false, 'the entry wiring does not render on a keystroke either');
+  // The typing guarantee is the module scan above: none of the seven modules contains `render(`, so a
+  // keystroke cannot repaint the workspace. The entry region is allowed exactly one render call, and it
+  // must sit in the state-mutation callback: adding a member to a layout changes persisted state, and
+  // refusing to repaint after that would be the bug, not the rule.
+  const renderCalls = region.split('render(').length - 1;
+  assert.equal(renderCalls, 1, 'the Quick Run region renders in exactly one place');
+  assert.ok(
+    region.indexOf('render(') > region.indexOf('onShiftEnter'),
+    'and that place is the Shift+Enter mutation, not a keystroke path',
+  );
   assert.equal(region.includes('reheat'), false);
 });
 

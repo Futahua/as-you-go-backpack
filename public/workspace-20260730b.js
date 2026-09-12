@@ -117,6 +117,7 @@ import {
   planQuickRunActivation,
   planQuickRunReveal,
   planQuickRunShiftEnter,
+  quickRunDuplicateMemberId,
   quickRunWorkspaceItemId,
   revalidateQuickRunRow,
   QUICK_RUN_ADD_NO_ACTIVE_LAYOUT,
@@ -5309,8 +5310,40 @@ const quickRun = mountQuickRun({
     if (plan.disabled === QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS) return { text: 'Shift+Enter: only Layout Items can join a layout.' };
     return { text: 'Shift+Enter: not available for this result.' };
   },
-  onShiftEnter: () => {
-    setStatus('Quick Run: adding a window to a layout is not wired up yet.');
+  // Shift+Enter, the action itself (sections 1.6 and 10): copy the member into the active layout, unless a
+  // member there already represents the same window. The comparison is on the persisted descriptor, which
+  // the AUTHOR ruled is the durable native identity rather than an approximation of one, and it happens
+  // before the write rather than being left to the model's same-id guard, because two different members can
+  // describe one window.
+  onShiftEnter: (resultKey) => {
+    const current = revalidateQuickRunRow(state, resultKey);
+    if (!current.ok) {
+      setStatus('Quick Run: that result is no longer in the workspace.');
+      return;
+    }
+    const plan = planQuickRunShiftEnter(current.row, { activeLayoutId: state.activeWindowLayoutId ?? null });
+    if (plan.disabled) {
+      setStatus('Quick Run: that window cannot join the active layout.');
+      return;
+    }
+    const source = windowLayout(plan.target.sourceLayoutId);
+    const member = source?.arrangement?.members?.find((candidate) => candidate.id === plan.target.memberId) ?? null;
+    const target = windowLayout(plan.target.layoutId);
+    if (!member || !target) {
+      setStatus('Quick Run: that window layout is no longer in the workspace.');
+      return;
+    }
+    if (quickRunDuplicateMemberId(member.descriptor, target.arrangement?.members)) {
+      setStatus('Quick Run: that window is already in the active layout.');
+      return;
+    }
+    try {
+      store.replace(addWindowLayoutMember(state, plan.target.layoutId, member));
+      setStatus('Quick Run: added that window to the active layout.');
+      render();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
   },
   // Ctrl+Enter (section 1.6): reveal the exact occurrence inside the workspace. It navigates to the folder
   // the occurrence lives in and selects the occurrence itself, and it never delegates to the file manager
