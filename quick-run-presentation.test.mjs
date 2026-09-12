@@ -64,3 +64,37 @@ test('the chips mark exactly one active filter and start with All', () => {
   assert.equal(chips[0].label, 'All');
   assert.deepEqual(chips.map((chip) => chip.active), [true, false]);
 });
+
+test('a layout item starts at availability unknown, and nothing guesses otherwise (section 5)', () => {
+  const state = {
+    groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
+    shortcuts: [
+      { id: 's-1', name: 'Docs', target: 'https://example.com/docs', placements: [{ id: 'p-1', parentId: 'g-root', order: 1 }] },
+    ],
+    windowLayouts: [
+      {
+        id: 'l-1',
+        parentId: 'g-root',
+        name: 'Focus',
+        arrangement: {
+          members: [
+            { id: 'm-1', descriptor: { title: 'Chrome' } },
+            { id: 'm-2', descriptor: { title: 'Mystery' } },
+          ],
+        },
+      },
+    ],
+  };
+  // A query per member, because an empty query shows nothing at all (section 1.1) - the rows being asked
+  // about are the ones a query produced.
+  const chrome = quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(state), 'chrome'));
+  const mystery = quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(state), 'mystery'));
+  const docs = quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(state), 'docs'));
+  assert.deepEqual(chrome.map((view) => view.iconKind), ['layout-item']);
+  assert.deepEqual(mystery.map((view) => view.iconKind), ['layout-item'], 'a member whose descriptor names no executable is still searchable');
+  for (const view of [...chrome, ...mystery]) {
+    assert.equal(view.availability, 'unknown');
+    assert.notEqual(view.availability, 'not-running');
+  }
+  assert.deepEqual(docs.map((view) => view.availability), [null], 'only a layout item has availability at all');
+});

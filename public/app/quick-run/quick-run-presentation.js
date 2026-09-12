@@ -27,6 +27,10 @@ export function quickRunRowViews(session) {
     primary: row.name,
     breadcrumb: row.breadcrumb,
     highlighted: row.resultKey === session.highlightKey,
+    // Section 5: a layout item's actionability is never guessed from persisted state, and an untouched one
+    // starts at 'unknown' rather than 'Not running'. Only a live native resolution could answer otherwise,
+    // and that is deliberately not built here, so this says unknown and keeps saying it.
+    availability: row.type === 'layout-item' ? 'unknown' : null,
   }));
 }
 
