@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { openQuickRunSession, quickRunSessionWithQuery } from './public/app/quick-run/quick-run-session.js';
 import {
   planQuickRunActivation,
+  planQuickRunReveal,
   planQuickRunShiftEnter,
   QUICK_RUN_TARGET_GONE,
   revalidateQuickRunRow,
@@ -107,6 +108,45 @@ test('a target is re-read from the current state by stable key, not trusted from
   assert.deepEqual(revalidateQuickRunRow(removed, row.resultKey), { ok: false, reason: QUICK_RUN_TARGET_GONE });
   assert.deepEqual(revalidateQuickRunRow(state, ''), { ok: false, reason: QUICK_RUN_TARGET_GONE });
   assert.deepEqual(revalidateQuickRunRow(state, 'link:p-999'), { ok: false, reason: QUICK_RUN_TARGET_GONE });
+});
+
+test('Ctrl+Enter reveals the occurrence inside the workspace and never through the host (section 1.6)', () => {
+  const folder = planQuickRunReveal({
+    type: 'folder', resultKey: 'folder:g-2', groupId: 'g-2', breadcrumbIds: ['root', 'g-1'],
+  });
+  assert.deepEqual(folder, {
+    action: 'reveal-folder', navigateTo: 'g-1', select: 'g-2', hostReveal: false,
+  });
+
+  const link = planQuickRunReveal({
+    type: 'link', resultKey: 'link:p-2', shortcutId: 's-1', placementId: 'p-2', breadcrumbIds: ['root'],
+  });
+  assert.equal(link.action, 'reveal-placement');
+  assert.equal(link.select, 's-1', 'the shared record is what gets selected');
+  assert.equal(link.placementId, 'p-2', 'and the occurrence travels with it, so the reader sees which one');
+  assert.equal(link.navigateTo, 'root');
+
+  const member = planQuickRunReveal({
+    type: 'layout-item', resultKey: 'layout-member:l-1:m-1', layoutId: 'l-1', memberId: 'm-1',
+    breadcrumbIds: ['root', 'g-1'],
+  });
+  assert.equal(member.action, 'reveal-layout-member');
+  assert.equal(member.select, 'l-1', 'the containing layout');
+  assert.equal(member.memberId, 'm-1', 'and the member inside it');
+  assert.equal(member.navigateTo, 'g-1');
+
+  // The boundary, asserted on every branch rather than once: a caller following this plan cannot reach the
+  // host file manager, which is what section 1.6 forbids.
+  for (const plan of [folder, link, member]) {
+    assert.equal(plan.hostReveal, false);
+  }
+  assert.equal(planQuickRunReveal({ type: 'unknown-thing' }), null, 'an unknown type reveals nothing');
+  assert.equal(planQuickRunReveal(null), null);
+  assert.equal(
+    planQuickRunReveal({ type: 'folder', groupId: 'g-9' }).navigateTo,
+    null,
+    'a row with no persisted ancestry has nowhere to navigate to, and says so rather than guessing',
+  );
 });
 
 test('a plan names the workspace item the existing open-selection command takes (section 6.4)', () => {

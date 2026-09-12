@@ -103,7 +103,7 @@ export function paintQuickRunSurface({ document, elements, session, onRowClick, 
  * here, where a test can drive it with element mocks instead of by launching the app.
  */
 export function mountQuickRun(input) {
-  const { document, elements, getState, onActivate, onShiftEnter, shiftEnterNotice } = input ?? {};
+  const { document, elements, getState, onActivate, onShiftEnter, shiftEnterNotice, onReveal } = input ?? {};
   if (!document || !elements || typeof getState !== 'function') {
     throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
   }
@@ -143,6 +143,13 @@ export function mountQuickRun(input) {
       if (event.preventDefault) event.preventDefault();
       session = quickRunSessionAfterArrow(session, event.key === 'ArrowDown' ? 1 : -1);
       paint();
+      return;
+    }
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      // Section 1.6: Ctrl+Enter reveals the occurrence inside the workspace. The mount does not know what
+      // revealing means; it hands the key to the caller, which is where section 1.6's boundary lives.
+      if (event.preventDefault) event.preventDefault();
+      if (typeof onReveal === 'function') onReveal(session.highlightKey);
       return;
     }
     if (event.key === 'Enter' && event.shiftKey) {

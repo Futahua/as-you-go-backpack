@@ -36,6 +36,7 @@ test('the entry file hands Quick Run an activation path (STAGE 5, step 4)', () =
   );
   for (const imported of [
     'planQuickRunActivation',
+    'planQuickRunReveal',
     'planQuickRunShiftEnter',
     'quickRunWorkspaceItemId',
     'revalidateQuickRunRow',
@@ -44,6 +45,23 @@ test('the entry file hands Quick Run an activation path (STAGE 5, step 4)', () =
   ]) {
     assert.match(source, new RegExp(`${imported},`), `${imported} is imported from the activation module`);
   }
+});
+
+test('Ctrl+Enter reveals the occurrence inside the workspace (section 1.6)', () => {
+  assert.match(region, /onReveal: \(resultKey\) =>/, 'the mount has somewhere to hand the key');
+  assert.match(
+    region,
+    /const reveal = planQuickRunReveal\(current\.row\)/,
+    'the plan is what decides where the reveal goes, from the row re-read out of the current tree',
+  );
+  assert.match(region, /commands\.activateItem\(reveal\.navigateTo\)/, 'it navigates to the folder the occurrence lives in');
+  assert.match(region, /commands\.selectItem\(reveal\.select,/, 'and selects the occurrence itself');
+  assert.match(
+    region,
+    /visibleItemIds: visibleItemIds\(\)/,
+    'the workspace own selection command takes the visible ids, supplied here rather than reinvented',
+  );
+  assert.match(region, /if \(!reveal\)/, 'a row with no occurrence to reveal says so instead of selecting nothing');
 });
 
 test('Shift+Enter is visibly disabled with a reason, and never silently ignored (section 1.6)', () => {

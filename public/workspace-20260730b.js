@@ -115,6 +115,7 @@ import { createKeyboardController } from './app/interactions/keyboard-controller
 import { mountQuickRun } from './app/quick-run/quick-run-surface.js';
 import {
   planQuickRunActivation,
+  planQuickRunReveal,
   planQuickRunShiftEnter,
   quickRunWorkspaceItemId,
   revalidateQuickRunRow,
@@ -5310,6 +5311,30 @@ const quickRun = mountQuickRun({
   },
   onShiftEnter: () => {
     setStatus('Quick Run: adding a window to a layout is not wired up yet.');
+  },
+  // Ctrl+Enter (section 1.6): reveal the exact occurrence inside the workspace. It navigates to the folder
+  // the occurrence lives in and selects the occurrence itself, and it never delegates to the file manager
+  // the way the ordinary reveal command does - which is why `planQuickRunReveal` answers hostReveal: false
+  // on every branch and this callback follows the plan rather than any other command.
+  onReveal: (resultKey) => {
+    const current = revalidateQuickRunRow(state, resultKey);
+    if (!current.ok) {
+      setStatus('Quick Run: that result is no longer in the workspace.');
+      return;
+    }
+    const reveal = planQuickRunReveal(current.row);
+    if (!reveal) {
+      setStatus('Quick Run: that result cannot be revealed.');
+      return;
+    }
+    if (reveal.navigateTo) void commands.activateItem(reveal.navigateTo);
+    if (reveal.select) {
+      commands.selectItem(reveal.select, {
+        shiftKey: false,
+        ctrlKey: false,
+        visibleItemIds: visibleItemIds(),
+      });
+    }
   },
 });
 

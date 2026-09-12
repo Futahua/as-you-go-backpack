@@ -67,6 +67,49 @@ export function quickRunWorkspaceItemId(plan) {
   if (!plan || typeof plan !== 'object' || !plan.target) return null;
   return plan.target.groupId ?? plan.target.shortcutId ?? null;
 }
+
+/**
+ * What Ctrl+Enter means (section 1.6): reveal this exact occurrence **inside the workspace**.
+ *
+ * The section is explicit about the boundary, and it is the whole reason this is a separate function from
+ * the Enter plan: it must not reuse `workspace.reveal-selection` or `revealShortcut()`, because those
+ * reveal a shortcut's target through the host file manager. So the plan navigates to the folder the
+ * occurrence lives in and selects the occurrence itself, and `hostReveal` is false on every branch - a
+ * caller that wanted an OS reveal would have to ignore the plan rather than follow it.
+ *
+ * The folder to navigate to is the last entry of the row's persisted ancestor chain, which the row already
+ * carries as `breadcrumbIds` (section 0.4), so no caller has to re-walk the hierarchy per keystroke.
+ */
+export function planQuickRunReveal(row) {
+  if (!row || typeof row !== 'object') return null;
+  const chain = Array.isArray(row.breadcrumbIds) ? row.breadcrumbIds : [];
+  const navigateTo = chain.length > 0 ? chain[chain.length - 1] : null;
+  switch (row.type) {
+    case 'folder':
+      return { action: 'reveal-folder', navigateTo, select: row.groupId, hostReveal: false };
+    case 'shortcut':
+    case 'link':
+      return {
+        action: 'reveal-placement',
+        navigateTo,
+        select: row.shortcutId,
+        placementId: row.placementId,
+        hostReveal: false,
+      };
+    case 'layout-item':
+      return {
+        action: 'reveal-layout-member',
+        navigateTo,
+        select: row.layoutId,
+        memberId: row.memberId,
+        hostReveal: false,
+      };
+    default:
+      // A row whose type this module does not know has no occurrence to reveal, and guessing one would
+      // select something the reader did not ask for.
+      return null;
+  }
+}
 /** The reasons Shift+Enter may be unavailable, so a caller can show one rather than ignore the key. */
 export const QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS = 'only-layout-items';
 export const QUICK_RUN_ADD_NO_ACTIVE_LAYOUT = 'no-active-window-layout';
