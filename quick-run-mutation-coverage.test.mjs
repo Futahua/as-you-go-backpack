@@ -187,3 +187,64 @@ test('collapse placements: the occurrences that were collapsed leave the univers
   assert.equal(rowFor(collapsed, 'shortcut:p-2'), null);
   assert.deepEqual(keys(collapsed), ['folder:g-1', 'folder:g-2', 'layout-member:l-1:m-1', 'shortcut:p-1']);
 });
+
+// The window-layout half of the same question. A layout contributes its members to the universe under a
+// breadcrumb that includes the layout name, so every layout mutation is a member-row mutation with one
+// extra thing to check: which of the member's identity survives, and which of it is the layout's.
+const layout = (overrides = {}) => ({
+  id: 'l-1',
+  parentId: 'g-1',
+  name: 'Focus',
+  arrangement: { members: [{ id: 'm-1', descriptor: { title: 'Chrome' } }] },
+  ...overrides,
+});
+
+test('create layout: its members become searchable, under the layout name', () => {
+  const created = withLayouts([...base.windowLayouts, layout({ id: 'l-2', name: 'Second' })]);
+  assert.equal(rowFor(created, 'layout-member:l-2:m-1').breadcrumb, 'Workspace › Alpha › Second');
+  assert.equal(rowFor(created, 'layout-member:l-1:m-1').breadcrumb, 'Workspace › Alpha › Focus');
+});
+
+test('delete layout: its members leave, and the other layout is untouched', () => {
+  const two = withLayouts([...base.windowLayouts, layout({ id: 'l-2', name: 'Second' })]);
+  const deleted = withLayouts(two.windowLayouts.filter((entry) => entry.id !== 'l-2'));
+  assert.equal(rowFor(deleted, 'layout-member:l-2:m-1'), null, 'the deleted layout took its member with it');
+  assert.equal(rowFor(deleted, 'layout-member:l-1:m-1').name, 'Chrome', 'and the other layout is untouched');
+});
+
+test('bin and restore layout: members disappear and come back exactly', () => {
+  const binned = withLayouts(base.windowLayouts.map((entry) => (
+    entry.id === 'l-1' ? { ...entry, bin: { at: '2026-09-12T08:00:00+07:00' } } : entry
+  )));
+  assert.equal(rowFor(binned, 'layout-member:l-1:m-1'), null);
+  const restored = withLayouts(binned.windowLayouts.map((entry) => ({ ...entry, bin: undefined })));
+  assert.deepEqual(keys(restored), keys(base));
+});
+
+test('a member descriptor fingerprint change keeps the occurrence identity', () => {
+  const refingerprinted = withLayouts(base.windowLayouts.map((entry) => ({
+    ...entry,
+    arrangement: {
+      members: entry.arrangement.members.map((member) => (
+        member.id === 'm-1'
+          ? { ...member, descriptor: { ...member.descriptor, executable: 'chrome.exe', fingerprint: 'sha256:abc' } }
+          : member
+      )),
+    },
+  })));
+  assert.equal(rowFor(refingerprinted, 'layout-member:l-1:m-1').name, 'Chrome', 'the display name is unchanged');
+  assert.deepEqual(keys(refingerprinted), keys(base), 'and the occurrence is the same one');
+});
+
+test('descriptor replacement keeps the member id and takes the new title', () => {
+  const rebound = withLayouts(base.windowLayouts.map((entry) => ({
+    ...entry,
+    arrangement: {
+      members: entry.arrangement.members.map((member) => (
+        member.id === 'm-1' ? { ...member, descriptor: { title: 'Firefox' } } : member
+      )),
+    },
+  })));
+  assert.equal(rowFor(rebound, 'layout-member:l-1:m-1').name, 'Firefox');
+  assert.equal(rowFor(rebound, 'layout-member:l-1:m-1').resultKey, 'layout-member:l-1:m-1', 'rebinding is not a new occurrence');
+});
