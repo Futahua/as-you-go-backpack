@@ -16,7 +16,7 @@
  * layout-member:<layoutId>:<memberId>. Breadcrumbs come from persisted folder ancestry and use the
  * contract's separator, with the ancestor ids carried alongside so a caller need not re-walk the tree.
  */
-import { isWebLink, itemsIn } from '../../workspace-model-20260730b.js';
+import { activeItem, isWebLink, itemsIn } from '../../workspace-model-20260730b.js';
 import { normaliseQueryText } from './quick-run-types.js';
 
 /** The contract's breadcrumb separator (section 0.4). */
@@ -82,7 +82,12 @@ function folderRows(state, parentId, seen, rows) {
 }
 
 function layoutMemberRows(state, rows) {
+  // The same rule the folders and placements already get from itemsIn: a binned layout, or one under a
+  // binned group, is not in the searchable universe (section 2.1's "active", section 6's bin rules). The
+  // members are reached through their layout here rather than through itemsIn, which is exactly why this
+  // loop has to ask the model instead of assuming.
   for (const layout of state.windowLayouts ?? []) {
+    if (!activeItem(state, layout)) continue;
     const layoutName = labelOf(layout);
     const ancestry = ancestryFor(state, layout.parentId);
     const breadcrumb = ancestry.breadcrumb === ''

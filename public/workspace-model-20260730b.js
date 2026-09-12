@@ -181,7 +181,10 @@ function isUnderBinnedGroup(state, candidate) {
   return isUnderBinnedGroupId(state, candidate.parentId);
 }
 
-function activeItem(state, candidate) {
+/** Whether an item is in the active tree at all: not binned itself, and not under a binned ancestor.
+ * Exported because callers that reach a record by a route other than itemsIn — the Quick Run universe
+ * reaches layout members through their layout — must ask the model rather than re-derive the rule. */
+export function activeItem(state, candidate) {
   return !candidate.bin && !isUnderBinnedGroup(state, candidate);
 }
 
