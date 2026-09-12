@@ -61,9 +61,19 @@ function chipNode(document, view) {
   return chip;
 }
 
-/** Paint a session into the four elements. Returns the number of rows drawn, for a caller that cares. */
-export function paintQuickRunSurface({ document, elements, session, onRowClick }) {
+/**
+ * Paint a session into the elements. Returns the number of rows drawn, for a caller that cares.
+ *
+ * `notice` is section 1.6's visible half: one line, painted with the row it describes, so a key that is
+ * disabled for that row says why before it is pressed instead of looking like a key that does nothing.
+ * It is optional because a caller may mount without that element, exactly as the other four are required.
+ */
+export function paintQuickRunSurface({ document, elements, session, onRowClick, notice = '' }) {
   elements.layer.hidden = !session.open;
+  if (elements.notice) {
+    elements.notice.textContent = notice;
+    elements.notice.hidden = notice === '';
+  }
   if (!session.open) {
     elements.input.value = '';
     elements.chips.replaceChildren();
@@ -93,14 +103,29 @@ export function paintQuickRunSurface({ document, elements, session, onRowClick }
  * here, where a test can drive it with element mocks instead of by launching the app.
  */
 export function mountQuickRun(input) {
-  const { document, elements, getState, onActivate } = input ?? {};
+  const { document, elements, getState, onActivate, onShiftEnter, shiftEnterNotice } = input ?? {};
   if (!document || !elements || typeof getState !== 'function') {
     throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
   }
   let session = closedQuickRunSession();
   // Section 6.4: one execution implementation, reached from the keyboard and the pointer alike.
   const activate = (key) => { if (key && typeof onActivate === 'function') onActivate(key); };
-  const paint = () => paintQuickRunSurface({ document, elements, session, onRowClick: activate });
+  // The highlighted row comes out of the session, never out of the workspace: asking the tree again on
+  // every keystroke is the re-read section 5 forbids, and the session tests already count those reads.
+  const highlightedRow = () => session.rows.find((row) => row.resultKey === session.highlightKey) ?? null;
+  const shiftState = () => {
+    if (typeof shiftEnterNotice !== 'function') return { text: '', enabled: false };
+    const answer = shiftEnterNotice(highlightedRow());
+    if (!answer || typeof answer.text !== 'string') return { text: '', enabled: false };
+    return { text: answer.text, enabled: answer.enabled === true };
+  };
+  const paint = () => paintQuickRunSurface({
+    document,
+    elements,
+    session,
+    onRowClick: activate,
+    notice: shiftState().text,
+  });
 
   elements.input.addEventListener('input', () => {
     session = quickRunSessionWithQuery(session, elements.input.value);
@@ -118,6 +143,13 @@ export function mountQuickRun(input) {
       if (event.preventDefault) event.preventDefault();
       session = quickRunSessionAfterArrow(session, event.key === 'ArrowDown' ? 1 : -1);
       paint();
+      return;
+    }
+    if (event.key === 'Enter' && event.shiftKey) {
+      if (event.preventDefault) event.preventDefault();
+      // Section 1.6: enabled only for Layout Items, visibly disabled for the other three, and never
+      // silently ignored - the reason is on screen already, and an enabled press goes to the caller.
+      if (shiftState().enabled) onShiftEnter?.(session.highlightKey);
       return;
     }
     if (event.key === 'Enter') {

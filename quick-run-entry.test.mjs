@@ -31,9 +31,33 @@ test('the entry file hands Quick Run an activation path (STAGE 5, step 4)', () =
   assert.match(region, /setStatus\(/, 'a row that cannot run says why instead of doing nothing (section 1.6)');
   assert.match(
     source,
-    /import \{ planQuickRunActivation, quickRunWorkspaceItemId, revalidateQuickRunRow \} from '\.\/app\/quick-run\/quick-run-activation\.js';/,
+    /import \{[\s\S]*?\} from '\.\/app\/quick-run\/quick-run-activation\.js';/,
     'the plan comes from the module that owns it rather than being rebuilt in the entry file',
   );
+  for (const imported of [
+    'planQuickRunActivation',
+    'planQuickRunShiftEnter',
+    'quickRunWorkspaceItemId',
+    'revalidateQuickRunRow',
+    'QUICK_RUN_ADD_NO_ACTIVE_LAYOUT',
+    'QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS',
+  ]) {
+    assert.match(source, new RegExp(`${imported},`), `${imported} is imported from the activation module`);
+  }
+});
+
+test('Shift+Enter is visibly disabled with a reason, and never silently ignored (section 1.6)', () => {
+  assert.match(region, /shiftEnterNotice: \(row\) =>/, 'the affordance is computed per highlighted row');
+  assert.match(
+    region,
+    /planQuickRunShiftEnter\(row, \{ activeLayoutId: state\.activeWindowLayoutId \?\? null \}\)/,
+    'enabled only for Layout Items in an active layout, decided by the plan rather than by the entry file',
+  );
+  assert.match(region, /onShiftEnter:/, 'an enabled press has somewhere to go');
+  for (const reason of ['QUICK_RUN_ADD_NO_ACTIVE_LAYOUT', 'QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS']) {
+    assert.match(region, new RegExp(reason), `${reason} is shown as a sentence rather than left as a code`);
+  }
+  assert.match(region, /notice: elements\.quickRunNotice,/, 'the line the reason is painted into is handed over');
 });
 
 test('Quick Run cannot render the workspace or reheat the graph: it holds no reference to either', async () => {

@@ -54,5 +54,6 @@ export function getWorkspaceElements(document) {
     quickRunInput: requiredElement(document, '#quick-run-input'),
     quickRunChips: requiredElement(document, '#quick-run-chips'),
     quickRunResults: requiredElement(document, '#quick-run-results'),
+    quickRunNotice: requiredElement(document, '#quick-run-notice'),
   };
 }

@@ -113,7 +113,14 @@ import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { resolveContextTarget } from './app/context-target-model.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 import { mountQuickRun } from './app/quick-run/quick-run-surface.js';
-import { planQuickRunActivation, quickRunWorkspaceItemId, revalidateQuickRunRow } from './app/quick-run/quick-run-activation.js';
+import {
+  planQuickRunActivation,
+  planQuickRunShiftEnter,
+  quickRunWorkspaceItemId,
+  revalidateQuickRunRow,
+  QUICK_RUN_ADD_NO_ACTIVE_LAYOUT,
+  QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS,
+} from './app/quick-run/quick-run-activation.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
 import { createPointerController } from './app/interactions/pointer-controller.js';
@@ -5263,6 +5270,7 @@ const quickRun = mountQuickRun({
     input: elements.quickRunInput,
     chips: elements.quickRunChips,
     results: elements.quickRunResults,
+    notice: elements.quickRunNotice,
   },
   getState: () => state,
   // STAGE 5's last step: what Enter does. The row is re-read from the current tree by its stable key
@@ -5287,6 +5295,21 @@ const quickRun = mountQuickRun({
       return;
     }
     void commands.activateItem(itemId);
+  },
+  // Section 1.6's affordance, painted with the highlighted row, so the key is visibly disabled with its
+  // reason rather than silently dead. The active layout is read from the tree this file owns. The
+  // duplicate check the plan also accepts needs native identity, so it is not answered here - claiming
+  // "not present" would be a guess - and the add itself is not wired up yet, which the press reports.
+  shiftEnterNotice: (row) => {
+    if (!row) return { text: '' };
+    const plan = planQuickRunShiftEnter(row, { activeLayoutId: state.activeWindowLayoutId ?? null });
+    if (!plan.disabled) return { text: 'Shift+Enter adds this window to the active layout.', enabled: true };
+    if (plan.disabled === QUICK_RUN_ADD_NO_ACTIVE_LAYOUT) return { text: 'Shift+Enter: no active window layout.' };
+    if (plan.disabled === QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS) return { text: 'Shift+Enter: only Layout Items can join a layout.' };
+    return { text: 'Shift+Enter: not available for this result.' };
+  },
+  onShiftEnter: () => {
+    setStatus('Quick Run: adding a window to a layout is not wired up yet.');
   },
 });
 

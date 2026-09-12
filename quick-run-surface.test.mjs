@@ -232,6 +232,77 @@ test('hover marks the row under the pointer and never becomes the keyboard selec
   assert.deepEqual(activated, ['link:p-1'], 'Enter runs the keyboard highlight, not the hovered row');
 });
 
+test('a disabled Shift+Enter is visibly disabled, with its reason (section 1.6)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement(), notice: liveElement() };
+  const shifted = [];
+  const quickRun = mountQuickRun({
+    document,
+    elements,
+    getState: () => state,
+    onShiftEnter: (key) => shifted.push(key),
+    shiftEnterNotice: (row) => (
+      row ? { text: 'Shift+Enter: only Layout Items can join a layout.' } : { text: '' }
+    ),
+  });
+
+  quickRun.open();
+  assert.equal(elements.notice.hidden, true, 'nothing highlighted yet, so there is nothing to say');
+
+  elements.input.value = 'docs';
+  elements.input.fire('input', {});
+  assert.equal(elements.notice.hidden, false, 'the reason is on screen before the key is pressed');
+  assert.equal(elements.notice.textContent, 'Shift+Enter: only Layout Items can join a layout.');
+
+  let prevented = false;
+  elements.layer.fire('keydown', { key: 'Enter', shiftKey: true, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, 'the key is handled rather than passed to the workspace');
+  assert.deepEqual(shifted, [], 'a disabled key calls nothing');
+  assert.equal(
+    elements.notice.textContent,
+    'Shift+Enter: only Layout Items can join a layout.',
+    'and the reason stays on screen, which is what "never silently ignored" means for this key',
+  );
+});
+
+test('an enabled Shift+Enter reaches the caller with the highlighted row (section 1.6)', () => {
+  const withLayout = {
+    groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
+    shortcuts: [],
+    windowLayouts: [
+      {
+        id: 'l-1',
+        parentId: 'g-root',
+        name: 'Focus',
+        arrangement: { members: [{ id: 'm-1', descriptor: { title: 'Chrome' } }] },
+      },
+    ],
+  };
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement(), notice: liveElement() };
+  const shifted = [];
+  const quickRun = mountQuickRun({
+    document,
+    elements,
+    getState: () => withLayout,
+    onShiftEnter: (key) => shifted.push(key),
+    shiftEnterNotice: (row) => (
+      row?.type === 'layout-item'
+        ? { text: 'Shift+Enter adds this window to the active layout.', enabled: true }
+        : { text: 'Shift+Enter: only Layout Items can join a layout.' }
+    ),
+  });
+
+  quickRun.open();
+  elements.input.value = 'chrome';
+  elements.input.fire('input', {});
+  assert.equal(elements.notice.textContent, 'Shift+Enter adds this window to the active layout.');
+
+  elements.layer.fire('keydown', { key: 'Enter', shiftKey: true, preventDefault() {} });
+  assert.equal(shifted.length, 1, 'an enabled press reaches the caller');
+  assert.equal(shifted[0], elements.results.children[0].dataset.quickRunKey, 'with the highlighted row key');
+});
+
 test('typing never re-reads the world: the snapshot is taken at open and ranked in memory (section 5)', () => {
   const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
   const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
