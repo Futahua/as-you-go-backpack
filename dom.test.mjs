@@ -22,13 +22,14 @@ test('dom registry resolves every required workspace element', () => {
     '#target-actions', '#icon-input', '#icon-preview', '#icon-fallback',
     '#use-target-icon', '#confirm-layer', '#confirm-title', '#confirm-copy',
     '#confirm-delete', '#confirm-restore', '#cancel-confirm', '#link-edit-layer',
-    '#prompt-layer',
+    '#prompt-layer', '#quick-run-layer', '#quick-run-input', '#quick-run-chips', '#quick-run-results',
   ]);
 
   const elements = getWorkspaceElements(document);
   assert.equal(elements.grid.selector, '#icon-grid');
   assert.equal(elements.editor.selector, '#editor');
-  assert.equal(Object.keys(elements).length, 38);
+  assert.equal(elements.quickRunInput.selector, '#quick-run-input');
+  assert.equal(Object.keys(elements).length, 42);
 });
 
 test('dom registry fails fast when an element is missing', () => {

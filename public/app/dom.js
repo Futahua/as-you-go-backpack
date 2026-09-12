@@ -50,5 +50,9 @@ export function getWorkspaceElements(document) {
     cancelConfirm: requiredElement(document, '#cancel-confirm'),
     linkEditLayer: requiredElement(document, '#link-edit-layer'),
     promptLayer: requiredElement(document, '#prompt-layer'),
+    quickRunLayer: requiredElement(document, '#quick-run-layer'),
+    quickRunInput: requiredElement(document, '#quick-run-input'),
+    quickRunChips: requiredElement(document, '#quick-run-chips'),
+    quickRunResults: requiredElement(document, '#quick-run-results'),
   };
 }
