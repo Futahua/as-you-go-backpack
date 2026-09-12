@@ -32,6 +32,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     initialSession: { binMode },
   });
   const called = {
+  quickRun: 0,
     close: 0, permanentDelete: 0, beginPicker: 0, beginRename: 0, pickerOpens: true, status: [],
   };
   const commandSpies = {};
@@ -61,6 +62,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     setMembershipMode: membershipMode,
     setStatus: (text) => { called.status.push(text); },
     beginSetRename: () => { called.beginRename += 1; return true; },
+    openQuickRun: () => { called.quickRun += 1; return true; },
   });
   controller.mount();
   return { controller, store, elements, commandSpies, called, listeners };
@@ -329,4 +331,23 @@ test('Enter confirms the picker while it is open', () => {
   });
   h.listeners[0].handler(key({ key: 'Enter' }));
   assert.equal(confirmed, 1);
+});
+
+test('the Quick Run chord reaches the callback the entry file supplies', () => {
+  const h = createHarness();
+  let prevented = 0;
+  h.listeners[0].handler({
+    key: 'x',
+    code: 'KeyX',
+    altKey: true,
+    shiftKey: true,
+    ctrlKey: false,
+    metaKey: false,
+    preventDefault() { prevented += 1; },
+  });
+  assert.equal(h.called.quickRun, 1, 'the chord must reach the callback');
+  assert.equal(prevented, 1, 'and the key must not also do whatever it otherwise would');
+  // The rest of the workspace is untouched by it.
+  assert.equal(h.commandSpies['clearSelection:calls'], 0);
+  assert.equal(h.called.close, 0);
 });

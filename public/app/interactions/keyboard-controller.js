@@ -17,6 +17,9 @@ export function createKeyboardController({
   setMembershipMode = null,
   setStatus = () => {},
   beginSetRename = () => false,
+  // Quick Run (STAGE 5). The controller reports the chord and nothing more: opening the
+  // surface is the entry file's job, so this stays inert until something passes a callback.
+  openQuickRun = () => false,
 }) {
   let abortController = null;
 
@@ -57,6 +60,11 @@ export function createKeyboardController({
           return;
         }
         commands.clearSelection();
+        return;
+      }
+      if (matches('workspace.quick-run')) {
+        event.preventDefault();
+        openQuickRun();
         return;
       }
       // Plain G groups. No modifier, so it must not fire while the user is
