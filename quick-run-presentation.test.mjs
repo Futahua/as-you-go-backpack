@@ -79,7 +79,8 @@ test('a layout item starts at availability unknown, and nothing guesses otherwis
         arrangement: {
           members: [
             { id: 'm-1', descriptor: { title: 'Chrome' } },
-            { id: 'm-2', descriptor: { title: 'Mystery' } },
+            { id: 'm-2', descriptor: { title: 'Mystery', executable: 'mystery.exe' } },
+            { id: 'm-3', descriptor: { title: 'Minimized', executable: 'chrome.exe' }, state: 'minimized' },
           ],
         },
       },
@@ -89,12 +90,15 @@ test('a layout item starts at availability unknown, and nothing guesses otherwis
   // about are the ones a query produced.
   const chrome = quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(state), 'chrome'));
   const mystery = quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(state), 'mystery'));
+  const minimized = quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(state), 'minimized'));
   const docs = quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(state), 'docs'));
   assert.deepEqual(chrome.map((view) => view.iconKind), ['layout-item']);
-  assert.deepEqual(mystery.map((view) => view.iconKind), ['layout-item'], 'a member whose descriptor names no executable is still searchable');
-  for (const view of [...chrome, ...mystery]) {
+  assert.deepEqual(mystery.map((view) => view.iconKind), ['layout-item'], 'a member whose executable no host reports is still searchable: the persisted member is what is searched');
+  assert.deepEqual(minimized.map((view) => view.iconKind), ['layout-item']);
+  for (const view of [...chrome, ...mystery, ...minimized]) {
     assert.equal(view.availability, 'unknown');
     assert.notEqual(view.availability, 'not-running');
   }
+  assert.equal(minimized[0].availability, 'unknown', 'persisted arrangement state (minimized) is not availability (section 10.1)');
   assert.deepEqual(docs.map((view) => view.availability), [null], 'only a layout item has availability at all');
 });
