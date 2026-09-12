@@ -36,6 +36,32 @@ test('the entry file hands Quick Run an activation path (STAGE 5, step 4)', () =
   );
 });
 
+test('Quick Run cannot render the workspace or reheat the graph: it holds no reference to either', async () => {
+  const modules = [
+    'quick-run-types.js',
+    'quick-run-search.js',
+    'quick-run-index.js',
+    'quick-run-session.js',
+    'quick-run-presentation.js',
+    'quick-run-surface.js',
+    'quick-run-activation.js',
+  ];
+  const sources = await Promise.all(
+    modules.map((name) => readFile(new URL(`./public/app/quick-run/${name}`, import.meta.url), 'utf8')),
+  );
+  for (const [index, text] of sources.entries()) {
+    for (const forbidden of ['render(', 'reheat', 'MutationObserver', 'ResizeObserver', 'setInterval', 'requestAnimationFrame']) {
+      assert.equal(
+        text.includes(forbidden),
+        false,
+        `${modules[index]} must not reference ${forbidden} (sections 6.2 and 6.3): a keystroke cannot rebuild the workspace or restart physics it cannot reach`,
+      );
+    }
+  }
+  assert.equal(region.includes('render('), false, 'the entry wiring does not render on a keystroke either');
+  assert.equal(region.includes('reheat'), false);
+});
+
 test('Quick Run activation adds no second launcher and no reveal path (sections 1.6 and 6.4)', () => {
   for (const forbidden of [
     'revealShortcut',
