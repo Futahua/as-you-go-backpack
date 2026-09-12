@@ -22,6 +22,7 @@ clear responsibility lives in a module.
 | Startup and synchronous mounting | `public/app/bootstrap.js` |
 | Styling | the matching file under `public/styles/` |
 | Compatibility composition | `public/workspace-20260730b.js` |
+| Quick Run search (filter vocabulary and cycle, the searchable universe, the index) | `public/app/quick-run/quick-run-types.js`, `quick-run-search.js`, `quick-run-index.js` |
 
 ## Multi-window document behavior
 
