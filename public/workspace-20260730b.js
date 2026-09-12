@@ -112,17 +112,7 @@ import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { resolveContextTarget } from './app/context-target-model.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
-import { mountQuickRun } from './app/quick-run/quick-run-surface.js';
-import {
-  planQuickRunActivation,
-  planQuickRunReveal,
-  planQuickRunShiftEnter,
-  quickRunDuplicateMemberId,
-  quickRunWorkspaceItemId,
-  revalidateQuickRunRow,
-  QUICK_RUN_ADD_NO_ACTIVE_LAYOUT,
-  QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS,
-} from './app/quick-run/quick-run-activation.js';
+import { bindQuickRunWorkspace } from './app/quick-run/quick-run-workspace.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
 import { createPointerController } from './app/interactions/pointer-controller.js';
@@ -5260,13 +5250,14 @@ const setMembershipMode = createSetMembershipMode({
   setStatus,
 });
 
-// Quick Run (STAGE 5). Mounted here because the entry file owns the elements and the tree state; the
-// surface module owns everything else.
-const quickRun = mountQuickRun({
+// Quick Run (STAGE 5). The composition seam lives in its own module so the wiring can be exercised
+// without booting the app: quick-run-workspace.test.mjs drives these same keys on the production markup
+// with a real store and the real command object. What is left here is the element adapter - the registry
+// in dom.js namespaces its keys (quickRunLayer, quickRunInput, ...) while the surface takes the five
+// handles it paints - and the collaborators this file owns, so a mismatch in the adapter is still the
+// one thing quick-run-entry.test.mjs checks against both files.
+const quickRun = bindQuickRunWorkspace({
   document,
-  // The registry in dom.js namespaces its keys (quickRunLayer, quickRunInput, ...); the surface takes
-  // the four handles it paints. This adapter is the one place the two names meet, and quick-run-entry
-  // .test.mjs checks it against both files, because a mismatch here is invisible until the app boots.
   elements: {
     layer: elements.quickRunLayer,
     input: elements.quickRunInput,
@@ -5274,101 +5265,14 @@ const quickRun = mountQuickRun({
     results: elements.quickRunResults,
     notice: elements.quickRunNotice,
   },
+  store,
+  commands,
   getState: () => state,
-  // STAGE 5's last step: what Enter does. The row is re-read from the current tree by its stable key
-  // before anything happens (section 5), then the plan is executed by naming the workspace's own
-  // open-selection path - activateItem, the same call workspace Enter makes - instead of growing a
-  // second launcher (sections 1.5 and 6.4). A row that cannot run yet says so in the status line
-  // rather than appearing to do nothing (section 1.6).
-  onActivate: (resultKey) => {
-    const current = revalidateQuickRunRow(state, resultKey);
-    if (!current.ok) {
-      setStatus('Quick Run: that result is no longer in the workspace.');
-      return;
-    }
-    const plan = planQuickRunActivation(current.row);
-    if (plan?.deferred) {
-      setStatus('Quick Run: activating a live application window is not wired up yet.');
-      return;
-    }
-    const itemId = plan ? quickRunWorkspaceItemId(plan) : null;
-    if (!itemId) {
-      setStatus('Quick Run: that result has no workspace action.');
-      return;
-    }
-    void commands.activateItem(itemId);
-  },
-  // Section 1.6's affordance, painted with the highlighted row, so the key is visibly disabled with its
-  // reason rather than silently dead. The active layout is read from the tree this file owns. The
-  // duplicate check the plan also accepts needs native identity, so it is not answered here - claiming
-  // "not present" would be a guess - and the add itself is not wired up yet, which the press reports.
-  shiftEnterNotice: (row) => {
-    if (!row) return { text: '' };
-    const plan = planQuickRunShiftEnter(row, { activeLayoutId: state.activeWindowLayoutId ?? null });
-    if (!plan.disabled) return { text: 'Shift+Enter adds this window to the active layout.', enabled: true };
-    if (plan.disabled === QUICK_RUN_ADD_NO_ACTIVE_LAYOUT) return { text: 'Shift+Enter: no active window layout.' };
-    if (plan.disabled === QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS) return { text: 'Shift+Enter: only Layout Items can join a layout.' };
-    return { text: 'Shift+Enter: not available for this result.' };
-  },
-  // Shift+Enter, the action itself (sections 1.6 and 10): copy the member into the active layout, unless a
-  // member there already represents the same window. The comparison is on the persisted descriptor, which
-  // the AUTHOR ruled is the durable native identity rather than an approximation of one, and it happens
-  // before the write rather than being left to the model's same-id guard, because two different members can
-  // describe one window.
-  onShiftEnter: (resultKey) => {
-    const current = revalidateQuickRunRow(state, resultKey);
-    if (!current.ok) {
-      setStatus('Quick Run: that result is no longer in the workspace.');
-      return;
-    }
-    const plan = planQuickRunShiftEnter(current.row, { activeLayoutId: state.activeWindowLayoutId ?? null });
-    if (plan.disabled) {
-      setStatus('Quick Run: that window cannot join the active layout.');
-      return;
-    }
-    const source = windowLayout(plan.target.sourceLayoutId);
-    const member = source?.arrangement?.members?.find((candidate) => candidate.id === plan.target.memberId) ?? null;
-    const target = windowLayout(plan.target.layoutId);
-    if (!member || !target) {
-      setStatus('Quick Run: that window layout is no longer in the workspace.');
-      return;
-    }
-    if (quickRunDuplicateMemberId(member.descriptor, target.arrangement?.members)) {
-      setStatus('Quick Run: that window is already in the active layout.');
-      return;
-    }
-    try {
-      store.replace(addWindowLayoutMember(state, plan.target.layoutId, member));
-      setStatus('Quick Run: added that window to the active layout.');
-      render();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    }
-  },
-  // Ctrl+Enter (section 1.6): reveal the exact occurrence inside the workspace. It navigates to the folder
-  // the occurrence lives in and selects the occurrence itself, and it never delegates to the file manager
-  // the way the ordinary reveal command does - which is why `planQuickRunReveal` answers hostReveal: false
-  // on every branch and this callback follows the plan rather than any other command.
-  onReveal: (resultKey) => {
-    const current = revalidateQuickRunRow(state, resultKey);
-    if (!current.ok) {
-      setStatus('Quick Run: that result is no longer in the workspace.');
-      return;
-    }
-    const reveal = planQuickRunReveal(current.row);
-    if (!reveal) {
-      setStatus('Quick Run: that result cannot be revealed.');
-      return;
-    }
-    if (reveal.navigateTo) void commands.activateItem(reveal.navigateTo);
-    if (reveal.select) {
-      commands.selectItem(reveal.select, {
-        shiftKey: false,
-        ctrlKey: false,
-        visibleItemIds: visibleItemIds(),
-      });
-    }
-  },
+  getVisibleItemIds: visibleItemIds,
+  setStatus,
+  render: () => render(),
+  windowLayout,
+  addWindowLayoutMember,
 });
 
 const keyboard = createKeyboardController({

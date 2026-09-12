@@ -1,38 +1,42 @@
-// STAGE 5's last step lives in the entry file, which cannot be imported here: it reads the document at
-// load time and boots the whole workspace. So the wiring is asserted by halves, the way this repository
-// already asserts entry-file wiring elsewhere — the region that mounts Quick Run is read as source and
-// checked for the calls the contract requires, and each of those calls has its own behavioural test in
-// quick-run-activation.test.mjs. What this file can prove is the shape: that Enter goes somewhere, that
-// the somewhere is the workspace's existing execution path, and that no second launcher or reveal path
-// was smuggled in beside it.
+// What Quick Run's keys are wired to, asserted where each half now lives.
+//
+// This file used to assert the wiring as source shape because the entry file cannot be imported here: it
+// reads the document at load time and boots the whole workspace. That is still true of the entry, but the
+// wiring has moved out of it - `public/app/quick-run/quick-run-workspace.js` is the composition seam, and
+// `quick-run-workspace.test.mjs` drives it for real: production markup, a real store, the real command
+// object, a typed query and a keypress. So the shape assertions here are about the seam's internals (which
+// keys exist, which plan decides, that no second launcher was smuggled in) and about the one thing that is
+// still entry-only: the element adapter that maps dom.js's registry keys onto the handles the surface takes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+const binding = await readFile(new URL('./public/app/quick-run/quick-run-workspace.js', import.meta.url), 'utf8');
 
 const regionStart = source.indexOf('// Quick Run (STAGE 5)');
 const regionEnd = source.indexOf('const keyboard = createKeyboardController({');
 const region = regionStart >= 0 && regionEnd > regionStart ? source.slice(regionStart, regionEnd) : '';
 
-test('the entry file hands Quick Run an activation path (STAGE 5, step 4)', () => {
-  assert.notEqual(region, '', 'the Quick Run region is where the surface is mounted');
-  assert.match(region, /onActivate:/, 'Enter has somewhere to go');
+test('the workspace binding hands Quick Run an activation path (STAGE 5, step 4)', () => {
+  assert.notEqual(region, '', 'the Quick Run region is where the seam is composed');
+  assert.match(region, /bindQuickRunWorkspace\(\{/, 'the entry composes the binding rather than the wiring');
+  assert.match(binding, /onActivate:/, 'Enter has somewhere to go');
   assert.match(
-    region,
-    /revalidateQuickRunRow\(state, resultKey\)/,
-    'the row is re-read by its stable key before anything happens (section 5)',
+    binding,
+    /revalidateQuickRunRow\(getState\(\), resultKey\)/,
+    'the row is re-read from the current state by its stable key before anything happens (section 5)',
   );
   assert.match(
-    region,
+    binding,
     /commands\.activateItem\(itemId\)/,
     'execution names the workspace command Enter already uses (sections 1.5 and 6.4)',
   );
-  assert.match(region, /setStatus\(/, 'a row that cannot run says why instead of doing nothing (section 1.6)');
+  assert.match(binding, /setStatus\(/, 'a row that cannot run says why instead of doing nothing (section 1.6)');
   assert.match(
-    source,
-    /import \{[\s\S]*?\} from '\.\/app\/quick-run\/quick-run-activation\.js';/,
-    'the plan comes from the module that owns it rather than being rebuilt in the entry file',
+    binding,
+    /import \{[\s\S]*?\} from '\.\/quick-run-activation\.js';/,
+    'the plan comes from the module that owns it rather than being rebuilt in the binding',
   );
   for (const imported of [
     'planQuickRunActivation',
@@ -43,53 +47,58 @@ test('the entry file hands Quick Run an activation path (STAGE 5, step 4)', () =
     'QUICK_RUN_ADD_NO_ACTIVE_LAYOUT',
     'QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS',
   ]) {
-    assert.match(source, new RegExp(`${imported},`), `${imported} is imported from the activation module`);
+    assert.match(binding, new RegExp(`${imported},`), `${imported} is imported from the activation module`);
+  }
+  // The entry keeps the adapter and the collaborators, and nothing else: a second plan or a second key
+  // handler there would be the copy the seam exists to remove.
+  for (const moved of ['onActivate', 'onShiftEnter', 'onReveal', 'planQuickRun']) {
+    assert.equal(region.includes(moved), false, `${moved} lives in the binding, not in the entry`);
   }
 });
 
 test('Shift+Enter copies the member into the active layout, refusing a duplicate first (sections 1.6 and 10)', () => {
-  assert.match(region, /onShiftEnter: \(resultKey\) =>/, 'the key has a handler rather than a placeholder');
-  assert.match(region, /planQuickRunShiftEnter\(current\.row, \{ activeLayoutId: state\.activeWindowLayoutId/, 'the plan decides whether it is available');
+  assert.match(binding, /onShiftEnter: \(resultKey\) =>/, 'the key has a handler rather than a placeholder');
+  assert.match(binding, /planQuickRunShiftEnter\(current\.row, \{ activeLayoutId: state\.activeWindowLayoutId \?\? null \}/, 'the plan decides whether it is available');
   assert.match(
-    region,
+    binding,
     /quickRunDuplicateMemberId\(member\.descriptor, target\.arrangement\?\.members\)/,
     'the duplicate check is on the persisted descriptor, before the write rather than after it',
   );
-  assert.match(region, /store\.replace\(addWindowLayoutMember\(state, plan\.target\.layoutId, member\)\)/, 'and the write is the model own add, not a second implementation of it');
-  assert.match(region, /already in the active layout/, 'a duplicate is reported rather than silently ignored');
+  assert.match(binding, /store\.replace\(addWindowLayoutMember\(state, plan\.target\.layoutId, member\)\)/, 'and the write is the model own add, not a second implementation of it');
+  assert.match(binding, /already in the active layout/, 'a duplicate is reported rather than silently ignored');
   assert.match(
-    source,
+    binding,
     /quickRunDuplicateMemberId,/,
     'the helper is imported rather than assumed to be in scope',
   );
 });
 test('Ctrl+Enter reveals the occurrence inside the workspace (section 1.6)', () => {
-  assert.match(region, /onReveal: \(resultKey\) =>/, 'the mount has somewhere to hand the key');
+  assert.match(binding, /onReveal: \(resultKey\) =>/, 'the mount has somewhere to hand the key');
   assert.match(
-    region,
+    binding,
     /const reveal = planQuickRunReveal\(current\.row\)/,
     'the plan is what decides where the reveal goes, from the row re-read out of the current tree',
   );
-  assert.match(region, /commands\.activateItem\(reveal\.navigateTo\)/, 'it navigates to the folder the occurrence lives in');
-  assert.match(region, /commands\.selectItem\(reveal\.select,/, 'and selects the occurrence itself');
+  assert.match(binding, /commands\.activateItem\(reveal\.navigateTo\)/, 'it navigates to the folder the occurrence lives in');
+  assert.match(binding, /commands\.selectItem\(reveal\.select,/, 'and selects the occurrence itself');
   assert.match(
-    region,
-    /visibleItemIds: visibleItemIds\(\)/,
-    'the workspace own selection command takes the visible ids, supplied here rather than reinvented',
+    binding,
+    /visibleItemIds: getVisibleItemIds\(\)/,
+    'the workspace own selection command takes the visible ids, supplied by the entry rather than reinvented',
   );
-  assert.match(region, /if \(!reveal\)/, 'a row with no occurrence to reveal says so instead of selecting nothing');
+  assert.match(binding, /if \(!reveal\)/, 'a row with no occurrence to reveal says so instead of selecting nothing');
 });
 
 test('Shift+Enter is visibly disabled with a reason, and never silently ignored (section 1.6)', () => {
-  assert.match(region, /shiftEnterNotice: \(row\) =>/, 'the affordance is computed per highlighted row');
+  assert.match(binding, /shiftEnterNotice: \(row\) =>/, 'the affordance is computed per highlighted row');
   assert.match(
-    region,
-    /planQuickRunShiftEnter\(row, \{ activeLayoutId: state\.activeWindowLayoutId \?\? null \}\)/,
-    'enabled only for Layout Items in an active layout, decided by the plan rather than by the entry file',
+    binding,
+    /planQuickRunShiftEnter\(row, \{ activeLayoutId: getState\(\)\.activeWindowLayoutId \?\? null \}\)/,
+    'enabled only for Layout Items in an active layout, decided by the plan rather than by the binding',
   );
-  assert.match(region, /onShiftEnter:/, 'an enabled press has somewhere to go');
+  assert.match(binding, /onShiftEnter:/, 'an enabled press has somewhere to go');
   for (const reason of ['QUICK_RUN_ADD_NO_ACTIVE_LAYOUT', 'QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS']) {
-    assert.match(region, new RegExp(reason), `${reason} is shown as a sentence rather than left as a code`);
+    assert.match(binding, new RegExp(reason), `${reason} is shown as a sentence rather than left as a code`);
   }
   assert.match(region, /notice: elements\.quickRunNotice,/, 'the line the reason is painted into is handed over');
 });
@@ -117,15 +126,17 @@ test('Quick Run cannot render the workspace or reheat the graph: it holds no ref
     }
   }
   // The typing guarantee is the module scan above: none of the seven modules contains `render(`, so a
-  // keystroke cannot repaint the workspace. The entry region is allowed exactly one render call, and it
-  // must sit in the state-mutation callback: adding a member to a layout changes persisted state, and
-  // refusing to repaint after that would be the bug, not the rule.
-  const renderCalls = region.split('render(').length - 1;
-  assert.equal(renderCalls, 1, 'the Quick Run region renders in exactly one place');
+  // keystroke cannot repaint the workspace. The binding is not one of them — it is the composition seam and
+  // it is allowed exactly one render call, in the state-mutation callback: adding a member to a layout
+  // changes persisted state, and refusing to repaint after that would be the bug, not the rule. The entry's
+  // region does not call render at all; it hands the workspace's own render to the binding.
+  assert.equal(binding.split('render(').length - 1, 1, 'the binding renders in exactly one place');
   assert.ok(
-    region.indexOf('render(') > region.indexOf('onShiftEnter'),
+    binding.indexOf('render(') > binding.indexOf('onShiftEnter'),
     'and that place is the Shift+Enter mutation, not a keystroke path',
   );
+  assert.equal(binding.includes('reheat'), false);
+  assert.match(region, /render: \(\) => render\(\),/, 'the entry hands its own render over rather than calling it');
   assert.equal(region.includes('reheat'), false);
 });
 
@@ -158,19 +169,21 @@ test('the four Quick Run elements meet their handles by name, checked across all
 });
 
 test('Quick Run activation adds no second launcher and no reveal path (sections 1.6 and 6.4)', () => {
-  for (const forbidden of [
-    'revealShortcut',
-    'revealSelection',
-    'launchShortcut',
-    'openWebLink',
-    'host.',
-    'setInterval',
-    'fetch(',
-  ]) {
-    assert.equal(
-      region.includes(forbidden),
-      false,
-      `${forbidden} must not appear in Quick Run's activation wiring`,
-    );
+  for (const text of [region, binding]) {
+    for (const forbidden of [
+      'revealShortcut',
+      'revealSelection',
+      'launchShortcut',
+      'openWebLink',
+      'host.',
+      'setInterval',
+      'fetch(',
+    ]) {
+      assert.equal(
+        text.includes(forbidden),
+        false,
+        `${forbidden} must not appear in Quick Run's activation wiring`,
+      );
+    }
   }
 });

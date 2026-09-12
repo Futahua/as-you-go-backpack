@@ -18,6 +18,9 @@ const moduleNames = [
   'quick-run-presentation.js',
   'quick-run-surface.js',
   'quick-run-activation.js',
+  // The composition seam joined this list when it was extracted from the entry file: it is part of Quick Run,
+  // so the section 6 prohibitions and the ARCHITECTURE.md map have to cover it too.
+  'quick-run-workspace.js',
 ];
 
 const sources = await Promise.all([
