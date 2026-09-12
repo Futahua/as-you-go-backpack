@@ -102,6 +102,7 @@ function liveElement() {
     append(...nodes) { element.children.push(...nodes); },
     replaceChildren(...nodes) { element.children = nodes; },
     addEventListener(type, handler) { (element.listeners[type] ??= []).push(handler); },
+    focus() { element.focused = true; },
     fire(type, event) { for (const handler of element.listeners[type] ?? []) handler(event); },
   };
   return element;
@@ -115,6 +116,7 @@ test('mounting wires the keys the contract binds, and opens on the current state
   assert.equal(elements.layer.hidden, true, 'nothing is shown before it opens');
   assert.equal(quickRun.open(), true, 'the controller callback contract: open reports that it handled it');
   assert.equal(elements.layer.hidden, false);
+  assert.equal(elements.input.focused, true, 'the line takes focus, so the reader types immediately');
 
   elements.input.value = 'docs';
   elements.input.fire('input', {});

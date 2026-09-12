@@ -120,6 +120,9 @@ export function mountQuickRun(input) {
     open() {
       session = openQuickRunSession(getState());
       paint();
+      // One empty *focused* line: the section says the reader types immediately, so the field takes
+      // focus on open. Guarded because a caller may mount without a focusable input.
+      elements.input.focus?.();
       return true;
     },
     close() {

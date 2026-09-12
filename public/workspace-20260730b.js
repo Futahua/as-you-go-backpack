@@ -112,6 +112,7 @@ import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { resolveContextTarget } from './app/context-target-model.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
+import { mountQuickRun } from './app/quick-run/quick-run-surface.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
 import { createPointerController } from './app/interactions/pointer-controller.js';
@@ -5249,6 +5250,10 @@ const setMembershipMode = createSetMembershipMode({
   setStatus,
 });
 
+// Quick Run (STAGE 5). Mounted here because the entry file owns the elements and the tree state; the
+// surface module owns everything else.
+const quickRun = mountQuickRun({ document, elements, getState: () => state });
+
 const keyboard = createKeyboardController({
   document,
   elements,
@@ -5261,6 +5266,9 @@ const keyboard = createKeyboardController({
   setMembershipMode,
   setStatus,
   beginSetRename,
+  // STAGE 5: the chord the catalog declares reaches the surface. The surface reads the workspace tree
+  // this file owns, through the binding rather than a copy, so a later load is what it searches.
+  openQuickRun: () => quickRun.open(),
 });
 
 const promptLibrary = createPromptLibraryDialog({
