@@ -334,10 +334,13 @@ function round(value, digits = 3) {
 /**
  * The same samples, grouped by how many rows the surface actually committed.
  *
- * This is reported because it is the explanatory variable: the surface renders one DOM row per match with no
- * cap (`quickRunRowViews` maps every session row), so the keystrokes that miss the budget are the ones whose
- * ranked result set is in the thousands. Grouping by that — rather than only by query — is what lets a reader
- * see whether a miss is the search path or the DOM path.
+ * This is reported because it is the explanatory variable: the surface renders one DOM row per session row
+ * (`quickRunRowViews` maps every row it is handed), so the keystrokes that miss the budget are the ones whose
+ * session held thousands of them. Grouping by that — rather than only by query — is what lets a reader see
+ * whether a miss is the search path or the DOM path. **Since `299152d` the session itself holds at most
+ * `QUICK_RUN_MAX_PAINTED_ROWS` (200) of the ranked matches, so the buckets above 200 are expected to be empty
+ * and the ones below it are the ones a run can still populate** — a non-empty upper bucket means the cap has
+ * been removed or raised, which is why the buckets stay in the table rather than being narrowed to fit.
  */
 const ROW_BUCKETS = Object.freeze([
   [1, 1], [2, 50], [51, 200], [201, 1000], [1001, 3000], [3001, 12000], [12001, Number.MAX_SAFE_INTEGER],
@@ -796,14 +799,14 @@ async function main() {
       },
       observedBehaviour: [
         {
-          observation: 'the surface renders one DOM row per match with no cap, so latency tracks the size of the ranked result set rather than the query',
-          evidence: 'byResultSetSize above: every bucket at or below 1,000 rows is inside the 16 ms target, and every bucket above it is outside it',
-          kind: 'product characteristic, not fixed here',
+          observation: 'the surface renders one DOM row per session row, and the session now holds at most QUICK_RUN_MAX_PAINTED_ROWS (200) of the ranked matches, so latency tracks the size of what is painted rather than the size of the match set',
+          evidence: 'byResultSetSize above: with the cap in place no bucket above 200 rows is populated at all, and the buckets that remain are inside the 16 ms target with margin',
+          kind: 'product characteristic as fixed at 299152d; a populated bucket above 200 means the cap has been removed or raised',
         },
         {
-          observation: 'the fuzzy subsequence tier (quick-run-index.js, tier 3) makes the first one or two characters of an ordinary query match a large fraction of a 20k corpus, which is what puts the sweep over budget',
-          evidence: 'the widest commits in this run are the 1-2 character prefixes: "a" 12,213 rows and "ar" 8,307 rows for the query "archive d"',
-          kind: 'product characteristic, not fixed here',
+          observation: 'the fuzzy subsequence tier (quick-run-index.js, tier 3) makes the first one or two characters of an ordinary query match a large fraction of a 20k corpus, which is why the match count and the painted count diverge so far at one or two characters',
+          evidence: 'this is what the cap line exists to disclose: at 299152d the session paints 200 of those matches and the surface says how many it is not showing, instead of painting them all',
+          kind: 'product characteristic; the miss it used to cause was fixed at 299152d by capping the paint rather than by narrowing the query',
         },
         {
           observation: 'the browser reports long tasks (>= 50 ms) that begin at a sampled keystroke and outlast the DOM-commit mark, because style and layout for thousands of new rows run after the MutationObserver callback',
