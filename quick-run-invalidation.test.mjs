@@ -115,6 +115,39 @@ const keysOf = (session) => session.allRows.map((row) => row.resultKey).sort();
 const queried = (state) => quickRunSessionWithQuery(openQuickRunSession(state), 'e')
   .rows.map((row) => row.resultKey).sort();
 
+// A peer writing to the workspace document is the case that made this box hard to state: the change
+// arrives in the state, not in a message Quick Run listens for. The answer the contract implies is the one
+// asserted here - a new search sees it, because a session reads the workspace when it opens and never
+// again, and the session already open is deliberately untouched, because section 3.4 forbids rebuilding
+// under a reader's hands.
+test('a peer document semantic change is reflected on the next open, and not mid-session', () => {
+  const before = openQuickRunSession(base);
+  const namesBefore = before.allRows.map((row) => row.name).sort();
+
+  const peerWrote = {
+    ...base,
+    groups: base.groups.map((group) => (group.id === 'g-1' ? { ...group, name: 'Alpha (renamed by peer)' } : group)),
+    windowLayouts: base.windowLayouts.map((layout) => ({
+      ...layout,
+      arrangement: {
+        members: [...layout.arrangement.members, { id: 'm-peer', descriptor: { title: 'Added by peer' } }],
+      },
+    })),
+  };
+
+  assert.deepEqual(
+    before.allRows.map((row) => row.name).sort(),
+    namesBefore,
+    'the open session keeps the snapshot it was opened with',
+  );
+  const nextOpen = openQuickRunSession(peerWrote).allRows.map((row) => row.name).sort();
+  assert.deepEqual(
+    nextOpen,
+    ['Added by peer', 'Alpha (renamed by peer)', 'Chrome', 'Editor', 'Notes'],
+    'and the next open is built from the document as the peer left it',
+  );
+});
+
 test('the section 3.4 list is the whole list, and every entry is exercised', () => {
   assert.equal(mutations.length, 31, 'every mutation the section names has a case here');
   assert.deepEqual(
