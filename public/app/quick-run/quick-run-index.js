@@ -76,6 +76,28 @@ export function quickRunResults(rows, query) {
   return ranked.map((entry) => ({ ...entry.row, tier: entry.tier }));
 }
 
+/**
+ * Which row stays highlighted when the result set changes (section 1.3).
+ *
+ * The contract's rule, verbatim: preserve the highlighted result by **stable result key** if it still
+ * exists, otherwise select the first result. A key that is gone from the new set is not preserved.
+ */
+export function highlightAfterResults(previousKey, rows) {
+  if (rows.length === 0) return null;
+  if (typeof previousKey === 'string' && rows.some((row) => row.key === previousKey)) return previousKey;
+  return rows[0].key;
+}
+
+/** ArrowDown (delta 1) and ArrowUp (delta -1), clamped at both ends rather than wrapping. */
+export function moveHighlight(rows, currentKey, delta) {
+  if (rows.length === 0) return null;
+  const index = rows.findIndex((row) => row.key === currentKey);
+  if (index === -1) return rows[0].key;
+  const next = index + (delta < 0 ? -1 : 1);
+  if (next < 0) return rows[0].key;
+  if (next >= rows.length) return rows[rows.length - 1].key;
+  return rows[next].key;
+}
 /** The whole query path over a workspace state: rows from the universe, then the ranked match. */
 export function quickRunQuery(state, query) {
   return quickRunResults(quickRunRows(state), query);

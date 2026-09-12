@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   QUICK_RUN_TIERS,
   normaliseQueryText,
+  highlightAfterResults,
+  moveHighlight,
   quickRunResults,
   tierForName,
 } from './public/app/quick-run/quick-run-index.js';
@@ -74,6 +76,32 @@ test('an empty query shows nothing, because there is no empty-query home screen'
   assert.deepEqual(quickRunResults(rows, '   '), []);
 });
 
+test('the highlight is preserved by stable key, and falls to the first result when that row is gone', () => {
+  const before = quickRunResults(rows, 'docs');
+  assert.equal(before.length, 5, 'the first set is the five docs matches');
+  // The row to preserve is a real row of the first set...
+  assert.equal(highlightAfterResults(before[3].key, before), before[3].key);
+  // ...and the second set is a genuinely different one, so the key really is absent from it.
+  const after = quickRunResults(rows, 'chrome');
+  assert.deepEqual(after.map((row) => row.key), ['layout:1:1']);
+  assert.ok(!after.some((row) => row.key === before[3].key));
+  assert.equal(highlightAfterResults(before[3].key, after), after[0].key);
+  assert.equal(highlightAfterResults(null, after), after[0].key);
+  assert.equal(highlightAfterResults('anything', []), null);
+});
+
+test('arrow movement steps one row and clamps at both ends instead of wrapping', () => {
+  const results = quickRunResults(rows, 'docs');
+  const first = results[0].key;
+  const second = results[1].key;
+  const last = results.at(-1).key;
+  assert.equal(moveHighlight(results, first, 1), second);
+  assert.equal(moveHighlight(results, second, -1), first);
+  assert.equal(moveHighlight(results, first, -1), first);
+  assert.equal(moveHighlight(results, last, 1), last);
+  assert.equal(moveHighlight(results, 'not-in-the-set', 1), first);
+  assert.equal(moveHighlight([], first, 1), null);
+});
 test('a row keeps the shape the universe gave it, plus its tier', () => {
   const result = quickRunResults(rows, 'chrome')[0];
   assert.equal(result.key, 'layout:1:1');
