@@ -29,7 +29,7 @@ import { nextFilter } from './quick-run-types.js';
 const ROW_CLASS = 'quick-run-result';
 const CHIP_CLASS = 'quick-run-chip';
 
-function rowNode(document, view) {
+function rowNode(document, view, onRowClick) {
   const item = document.createElement('li');
   item.className = ROW_CLASS + (view.highlighted ? ' highlighted' : '');
   item.dataset.quickRunKey = view.key;
@@ -43,6 +43,8 @@ function rowNode(document, view) {
   breadcrumb.className = 'quick-run-breadcrumb';
   breadcrumb.textContent = view.breadcrumb;
   item.append(icon, primary, breadcrumb);
+  // One activation path for both entry points: a click reports the same key a keyboard activation would.
+  if (typeof onRowClick === 'function') item.addEventListener('click', () => onRowClick(view.key));
   return item;
 }
 
@@ -55,7 +57,7 @@ function chipNode(document, view) {
 }
 
 /** Paint a session into the four elements. Returns the number of rows drawn, for a caller that cares. */
-export function paintQuickRunSurface({ document, elements, session }) {
+export function paintQuickRunSurface({ document, elements, session, onRowClick }) {
   elements.layer.hidden = !session.open;
   if (!session.open) {
     elements.input.value = '';
@@ -67,7 +69,7 @@ export function paintQuickRunSurface({ document, elements, session }) {
   if (session.query === '') elements.input.value = '';
   const chips = quickRunChipViews(session).map((view) => chipNode(document, view));
   elements.chips.replaceChildren(...chips);
-  const rows = quickRunRowViews(session).map((view) => rowNode(document, view));
+  const rows = quickRunRowViews(session).map((view) => rowNode(document, view, onRowClick));
   elements.results.replaceChildren(...rows);
   return rows.length;
 }
@@ -81,12 +83,14 @@ export function paintQuickRunSurface({ document, elements, session }) {
  * here, where a test can drive it with element mocks instead of by launching the app.
  */
 export function mountQuickRun(input) {
-  const { document, elements, getState } = input ?? {};
+  const { document, elements, getState, onActivate } = input ?? {};
   if (!document || !elements || typeof getState !== 'function') {
     throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
   }
   let session = closedQuickRunSession();
-  const paint = () => paintQuickRunSurface({ document, elements, session });
+  // Section 6.4: one execution implementation, reached from the keyboard and the pointer alike.
+  const activate = (key) => { if (key && typeof onActivate === 'function') onActivate(key); };
+  const paint = () => paintQuickRunSurface({ document, elements, session, onRowClick: activate });
 
   elements.input.addEventListener('input', () => {
     session = quickRunSessionWithQuery(session, elements.input.value);
@@ -104,6 +108,11 @@ export function mountQuickRun(input) {
       if (event.preventDefault) event.preventDefault();
       session = quickRunSessionAfterArrow(session, event.key === 'ArrowDown' ? 1 : -1);
       paint();
+      return;
+    }
+    if (event.key === 'Enter') {
+      if (event.preventDefault) event.preventDefault();
+      activate(session.highlightKey);
       return;
     }
     if (event.key === 'Tab') {

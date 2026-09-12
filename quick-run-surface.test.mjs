@@ -172,3 +172,36 @@ test('scrolling is left to the list: no wheel handler moves the highlight (secti
   elements.layer.fire('wheel', { deltaY: 120, preventDefault() {} });
   assert.equal(quickRun.session().highlightKey, before, 'scrolling does not choose a row');
 });
+
+test('Enter and a click reach one activation path, and neither invents its own (section 6.4)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const activated = [];
+  const quickRun = mountQuickRun({
+    document,
+    elements,
+    getState: () => state,
+    onActivate: (key) => activated.push(key),
+  });
+  quickRun.open();
+  elements.input.value = 'docs';
+  elements.input.fire('input', {});
+
+  // The keyboard: Enter activates whatever is highlighted.
+  elements.layer.fire('keydown', { key: 'Enter', preventDefault() {} });
+  assert.deepEqual(activated, ['link:p-1']);
+
+  // The pointer: a click on a row reports the same key through the same function.
+  elements.results.children[1].fire('click', {});
+  assert.deepEqual(activated, ['link:p-1', 'link:p-2']);
+});
+
+test('Enter with nothing highlighted activates nothing', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const activated = [];
+  const quickRun = mountQuickRun({ document, elements, getState: () => state, onActivate: (key) => activated.push(key) });
+  quickRun.open();
+  elements.layer.fire('keydown', { key: 'Enter', preventDefault() {} });
+  assert.deepEqual(activated, [], 'an empty query has no row to run');
+});
