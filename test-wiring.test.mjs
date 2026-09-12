@@ -16,12 +16,8 @@ import { readdir, readFile } from 'node:fs/promises';
 
 const KNOWN_UNWIRED = new Map([
   [
-    'card-implementation.test.mjs',
-    'fails at 038 (the compact-widget surface hides all workspace host furniture) as of 2026-09-12',
-  ],
-  [
     'compact-card-parity.test.mjs',
-    'fails at 034/035/036 (compact row wrapping) and 024 (no per-button outlines) as of 2026-09-12',
+    'fails at 034/035/036 (compact row wrapping) and 024 (no per-button outlines) as of 2026-09-12; whether the test is stale or the surface regressed is a creator eye-check',
   ],
 ]);
 

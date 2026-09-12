@@ -258,6 +258,7 @@ body:has(.icon-grid > .window-layout-card) .status,
 body:has(.icon-grid > .window-layout-card) .selection-status,
 body:has(.icon-grid > .window-layout-card) .editor-layer,
 body:has(.icon-grid > .window-layout-card) .confirm-layer,
+body:has(.icon-grid > .window-layout-card) .context-menu,
 body:has(.icon-grid > .window-layout-card) .workspace-backdrop,
 body:has(.icon-grid > .window-layout-card) .toolbar-float {
   display: none !important;
