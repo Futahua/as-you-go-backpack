@@ -22,7 +22,7 @@ clear responsibility lives in a module.
 | Startup and synchronous mounting | `public/app/bootstrap.js` |
 | Styling | the matching file under `public/styles/` |
 | Compatibility composition | `public/workspace-20260730b.js` |
-| Quick Run search (filter vocabulary and cycle, the searchable universe, the index, the session, what the surface draws) | `public/app/quick-run/quick-run-types.js`, `quick-run-search.js`, `quick-run-index.js`, `quick-run-session.js`, `quick-run-presentation.js`, `quick-run-surface.js` |
+| Quick Run search (filter vocabulary and cycle, the searchable universe, the index, the session, what the surface draws) | `public/app/quick-run/quick-run-types.js`, `quick-run-search.js`, `quick-run-index.js`, `quick-run-session.js`, `quick-run-presentation.js`, `quick-run-surface.js`, `quick-run-activation.js` |
 
 ## Multi-window document behavior
 
