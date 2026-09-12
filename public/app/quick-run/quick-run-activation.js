@@ -50,3 +50,33 @@ export function planQuickRunActivation(row) {
       return null;
   }
 }
+
+/** The reasons Shift+Enter may be unavailable, so a caller can show one rather than ignore the key. */
+export const QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS = 'only-layout-items';
+export const QUICK_RUN_ADD_NO_ACTIVE_LAYOUT = 'no-active-window-layout';
+export const QUICK_RUN_ADD_ALREADY_PRESENT = 'already-in-the-active-layout';
+
+/**
+ * What Shift+Enter means (section 1.6): add the highlighted item to the active window layout.
+ *
+ * The section states five rules and this function is all of them: it is enabled **only** for Layout Items,
+ * visibly disabled for the other three, and never silently ignored — every call returns either an action or
+ * a disabled reason, never nothing. The two reasons a caller cannot work out for itself are supplied as
+ * facts: whether an active layout exists, and whether the member is already in it. Reporting the second is
+ * what stops an accidental duplicate, which is the rule the section names.
+ *
+ * Whether a layout member is *supported* by the active layout stays the caller's answer, because the model
+ * owns that: this plan says what the key means, not what the layout accepts.
+ */
+export function planQuickRunShiftEnter(row, facts = {}) {
+  if (!row || typeof row !== 'object') return { disabled: QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS };
+  if (row.type !== 'layout-item') return { disabled: QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS };
+  const activeLayoutId = facts.activeLayoutId ?? null;
+  if (activeLayoutId === null) return { disabled: QUICK_RUN_ADD_NO_ACTIVE_LAYOUT };
+  if (facts.alreadyInActiveLayout === true) return { disabled: QUICK_RUN_ADD_ALREADY_PRESENT };
+  return {
+    action: 'add-to-layout',
+    command: 'window-layout.add-member',
+    target: { layoutId: activeLayoutId, memberId: row.memberId, sourceLayoutId: row.layoutId },
+  };
+}
