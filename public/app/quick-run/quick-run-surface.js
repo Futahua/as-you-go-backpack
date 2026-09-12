@@ -16,6 +16,15 @@
  *   the session highlighted, and data-quick-run-chip marks an active chip.
  */
 import { quickRunChipViews, quickRunRowViews } from './quick-run-presentation.js';
+import {
+  closeQuickRunSession,
+  closedQuickRunSession,
+  openQuickRunSession,
+  quickRunSessionAfterArrow,
+  quickRunSessionWithFilter,
+  quickRunSessionWithQuery,
+} from './quick-run-session.js';
+import { nextFilter } from './quick-run-types.js';
 
 const ROW_CLASS = 'quick-run-result';
 const CHIP_CLASS = 'quick-run-chip';
@@ -61,4 +70,62 @@ export function paintQuickRunSurface({ document, elements, session }) {
   const rows = quickRunRowViews(session).map((view) => rowNode(document, view));
   elements.results.replaceChildren(...rows);
   return rows.length;
+}
+
+/**
+ * Mount Quick Run on the four elements and return the handles the entry file needs.
+ *
+ * This is the whole wiring, kept out of the composition root on purpose: the entry file passes the
+ * elements and a way to read the workspace state, then gives open to the keyboard controller as its
+ * openQuickRun callback. Everything else — the input listener, the arrow keys, Tab and Escape — lives
+ * here, where a test can drive it with element mocks instead of by launching the app.
+ */
+export function mountQuickRun(input) {
+  const { document, elements, getState } = input ?? {};
+  if (!document || !elements || typeof getState !== 'function') {
+    throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
+  }
+  let session = closedQuickRunSession();
+  const paint = () => paintQuickRunSurface({ document, elements, session });
+
+  elements.input.addEventListener('input', () => {
+    session = quickRunSessionWithQuery(session, elements.input.value);
+    paint();
+  });
+
+  elements.layer.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      if (event.preventDefault) event.preventDefault();
+      session = closeQuickRunSession();
+      paint();
+      return;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (event.preventDefault) event.preventDefault();
+      session = quickRunSessionAfterArrow(session, event.key === 'ArrowDown' ? 1 : -1);
+      paint();
+      return;
+    }
+    if (event.key === 'Tab') {
+      if (event.preventDefault) event.preventDefault();
+      session = quickRunSessionWithFilter(session, nextFilter(session.filter, event.shiftKey ? -1 : 1));
+      paint();
+    }
+  });
+
+  paint();
+
+  return {
+    /** The keyboard controller's openQuickRun callback: open on the current state and show the line. */
+    open() {
+      session = openQuickRunSession(getState());
+      paint();
+      return true;
+    },
+    close() {
+      session = closeQuickRunSession();
+      paint();
+    },
+    session: () => session,
+  };
 }

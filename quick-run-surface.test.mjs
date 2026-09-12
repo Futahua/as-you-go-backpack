@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { closeQuickRunSession, openQuickRunSession, quickRunSessionWithQuery } from './public/app/quick-run/quick-run-session.js';
-import { paintQuickRunSurface } from './public/app/quick-run/quick-run-surface.js';
+import { mountQuickRun, paintQuickRunSurface } from './public/app/quick-run/quick-run-surface.js';
 
 const state = {
   groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
@@ -91,4 +91,47 @@ test('closing clears the line, the chips and the rows', () => {
   assert.equal(h.elements.input.value, '');
   assert.deepEqual(h.elements.chips.children, []);
   assert.deepEqual(h.elements.results.children, []);
+});
+
+/* The mounting test builds its own elements rather than reusing the painter's helper: the wiring is only
+   reachable through listeners, so the mock has to record them and be able to fire them. */
+function liveElement() {
+  const element = {
+    hidden: false, value: '', textContent: '', className: '', dataset: {}, children: [],
+    listeners: {},
+    append(...nodes) { element.children.push(...nodes); },
+    replaceChildren(...nodes) { element.children = nodes; },
+    addEventListener(type, handler) { (element.listeners[type] ??= []).push(handler); },
+    fire(type, event) { for (const handler of element.listeners[type] ?? []) handler(event); },
+  };
+  return element;
+}
+
+test('mounting wires the keys the contract binds, and opens on the current state', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+
+  assert.equal(elements.layer.hidden, true, 'nothing is shown before it opens');
+  assert.equal(quickRun.open(), true, 'the controller callback contract: open reports that it handled it');
+  assert.equal(elements.layer.hidden, false);
+
+  elements.input.value = 'docs';
+  elements.input.fire('input', {});
+  assert.equal(elements.results.children.length, 2);
+
+  elements.layer.fire('keydown', { key: 'ArrowDown', shiftKey: false, preventDefault() {} });
+  assert.equal(quickRun.session().highlightKey, 'link:p-2');
+  elements.layer.fire('keydown', { key: 'ArrowUp', shiftKey: false, preventDefault() {} });
+  assert.equal(quickRun.session().highlightKey, 'link:p-1');
+
+  elements.layer.fire('keydown', { key: 'Tab', shiftKey: false, preventDefault() {} });
+  assert.equal(quickRun.session().filter, 'All');
+  assert.equal(quickRun.session().fellBack, true, 'Folders has no matches, so it falls back');
+
+  elements.layer.fire('keydown', { key: 'Escape', shiftKey: false, preventDefault() {} });
+  assert.equal(elements.layer.hidden, true);
+  assert.equal(elements.input.value, '');
+  assert.deepEqual(elements.results.children, []);
+  assert.equal(quickRun.session().open, false);
 });
