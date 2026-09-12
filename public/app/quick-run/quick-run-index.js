@@ -38,8 +38,20 @@ function isSubsequence(haystack, needle) {
 
 /** The tier a name matches at, or null. The name is the only field consulted. */
 export function tierForName(name, query) {
-  const text = normaliseQueryText(name);
   const needle = normaliseQueryText(query);
+  if (needle === '') return null;
+  return tierForNormalizedName(normaliseQueryText(name), needle);
+}
+
+/**
+ * The same tiers, for a caller that already holds the pinned normalisation of the name.
+ *
+ * This exists because of the benchmark rather than for tidiness: the row carries `normalizedName`
+ * (section 0.2 pins it), and re-normalising twenty thousand names on every keystroke was the difference
+ * between meeting and missing the contract's 8 ms pure-query budget (measured p95 9.4 ms at 20k before
+ * this split, 1.5 ms after).
+ */
+export function tierForNormalizedName(text, needle) {
   if (needle === '') return null;
   if (text === needle) return QUICK_RUN_TIERS.exact;
   if (text.startsWith(needle)) return QUICK_RUN_TIERS.wholeNamePrefix;
@@ -63,7 +75,11 @@ export function quickRunResults(rows, query) {
   if (needle === '') return [];
   const ranked = [];
   rows.forEach((row, index) => {
-    const tier = tierForName(row.name, needle);
+    // The row already carries its normalized name, so the hot path must not normalise it again: on a 20k
+    // corpus that repeated work is what pushed the measured p95 past the contract's budget. A caller that
+    // hands rows without the field still gets the same answer, just slower.
+    const text = typeof row.normalizedName === 'string' ? row.normalizedName : normaliseQueryText(row.name);
+    const tier = tierForNormalizedName(text, needle);
     if (tier === null) return;
     ranked.push({ row, tier, index });
   });

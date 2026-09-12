@@ -124,6 +124,35 @@ test('the section 3.4 list is the whole list, and every entry is exercised', () 
   );
 });
 
+// An observation storm rather than a single update: the live window observer reports bounds and
+// minimize/restore continuously, so the rule has to hold for a run of them, not just for one.
+test('a storm of layout bounds and state updates rebuilds nothing (Performance)', () => {
+  const session = openQuickRunSession(base);
+  const opened = keysOf(session);
+  const baseQuery = queried(base);
+
+  let state = base;
+  for (let tick = 0; tick < 200; tick += 1) {
+    state = {
+      ...state,
+      windowLayouts: state.windowLayouts.map((layout) => ({
+        ...layout,
+        arrangement: {
+          members: layout.arrangement.members.map((member) => ({
+            ...member,
+            state: tick % 2 === 0 ? 'minimized' : 'normal',
+            bounds: { ...member.bounds, x: tick, width: 800 + tick },
+          })),
+        },
+      })),
+    };
+  }
+
+  assert.deepEqual(keysOf(session), opened, 'two hundred observations cannot move the open session');
+  assert.deepEqual(keysOf(openQuickRunSession(state)), opened, 'nor the universe a fresh open sees');
+  assert.deepEqual(queried(state), baseQuery, 'nor the rows a query resolves to');
+});
+
 // The control that keeps the thirty-one cases honest: a change that *is* an index input does move the
 // universe, so the assertions above are measuring something rather than always being true.
 test('a source change is not on this list: renaming a folder does change the universe', () => {
