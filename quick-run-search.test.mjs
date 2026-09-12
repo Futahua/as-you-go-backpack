@@ -43,42 +43,42 @@ const state = {
 
 test('the universe is one row per active folder, placement and layout member', () => {
   const rows = quickRunRows(state);
-  const keys = rows.map((row) => row.key);
+  const keys = rows.map((row) => row.resultKey);
   assert.equal(new Set(keys).size, keys.length, 'every row carries a distinct stable key');
   assert.deepEqual(
-    rows.filter((row) => row.kind === 'folder').map((row) => row.name),
+    rows.filter((row) => row.type === 'folder').map((row) => row.name),
     ['Workspace', 'Alpha'],
   );
   // One row per placement, and the binned placement is not in the universe at all.
   const placements = rows.filter((row) => row.placementId).map((row) => row.placementId).sort();
   assert.deepEqual(placements, ['p-1', 'p-2', 'p-4']);
   // One row per member occurrence, named from the persisted descriptor.
-  const members = rows.filter((row) => row.kind === 'layout-item');
+  const members = rows.filter((row) => row.type === 'layout-item');
   assert.deepEqual(members.map((row) => row.name), ['Chrome', 'Obsidian']);
-  assert.deepEqual(members.map((row) => row.key), ['layout:l-1:m-1', 'layout:l-1:m-2']);
+  assert.deepEqual(members.map((row) => row.resultKey), ['layout-member:l-1:m-1', 'layout-member:l-1:m-2']);
 });
 
 test('a link is a shortcut whose target the model classifies, not a second index', () => {
   const rows = quickRunRows(state);
   const docs = rows.filter((row) => row.shortcutId === 's-1');
   assert.ok(docs.length > 0);
-  assert.deepEqual([...new Set(docs.map((row) => row.kind))], ['link']);
+  assert.deepEqual([...new Set(docs.map((row) => row.type))], ['link']);
   const local = rows.filter((row) => row.shortcutId === 's-2');
-  assert.deepEqual([...new Set(local.map((row) => row.kind))], ['shortcut']);
+  assert.deepEqual([...new Set(local.map((row) => row.type))], ['shortcut']);
 });
 
 test('one shared shortcut in two folders is two rows that differ only by breadcrumb and key', () => {
   const rows = quickRunRows(state);
-  const docs = rows.filter((row) => row.shortcutId === 's-1').sort((a, b) => a.key.localeCompare(b.key));
+  const docs = rows.filter((row) => row.shortcutId === 's-1').sort((a, b) => a.resultKey.localeCompare(b.resultKey));
   assert.deepEqual(docs.map((row) => row.name), ['Docs', 'Docs']);
-  assert.deepEqual(docs.map((row) => row.breadcrumb), ['Workspace / Alpha', 'Workspace']);
-  assert.notEqual(docs[0].key, docs[1].key);
+  assert.deepEqual(docs.map((row) => row.breadcrumb), ['Workspace › Alpha', 'Workspace']);
+  assert.notEqual(docs[0].resultKey, docs[1].resultKey);
 });
 
 test('a layout member carries its containing layout in the breadcrumb', () => {
   const rows = quickRunRows(state);
-  const member = rows.find((row) => row.key === 'layout:l-1:m-1');
-  assert.equal(member.breadcrumb, 'Workspace / Alpha / Focus');
+  const member = rows.find((row) => row.resultKey === 'layout-member:l-1:m-1');
+  assert.equal(member.breadcrumb, 'Workspace › Alpha › Focus');
   assert.equal(member.layoutId, 'l-1');
   assert.equal(member.memberId, 'm-1');
 });

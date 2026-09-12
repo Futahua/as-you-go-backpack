@@ -33,6 +33,22 @@ const KIND_BY_FILTER = Object.freeze({
   'Layout Items': 'layout-item',
 });
 
+/**
+ * Section 0.6's pinned normalization, and the only copy of it in the tree.
+ *
+ * It lives here, in the module every other Quick Run module already imports, because both the search
+ * rows (normalizedName) and the query path need it — and a second copy would be exactly the drift the
+ * contract's "pin a single normalization function" forbids. Unicode NFKC, case-fold, trim, collapse
+ * repeated whitespace: the comparison is normalized, never the string shown.
+ */
+export function normaliseQueryText(value) {
+  if (typeof value !== 'string') return '';
+  return value
+    .normalize('NFKC')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
 export function isQuickRunFilter(value) {
   return QUICK_RUN_FILTERS.includes(value);
 }

@@ -16,21 +16,16 @@
  * module does not invent one.
  */
 import { quickRunRows } from './quick-run-search.js';
+import { normaliseQueryText } from './quick-run-types.js';
 
 /** Tier 0 exact, 1 whole-name prefix, 2 word prefix, 3 fuzzy subsequence; null when nothing matches. */
 export const QUICK_RUN_TIERS = Object.freeze({ exact: 0, wholeNamePrefix: 1, wordPrefix: 2, fuzzy: 3 });
 
 const WORD_SPLIT = /[^\p{L}\p{N}]+/u;
 
-/** Section 0.6, pinned here and nowhere else. */
-export function normaliseQueryText(value) {
-  if (typeof value !== 'string') return '';
-  return value
-    .normalize('NFKC')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ' ');
-}
+// Section 0.6's normalization is pinned once, in quick-run-types.js. Re-exported here so a caller
+// that already imports this module keeps working.
+export { normaliseQueryText };
 
 function isSubsequence(haystack, needle) {
   let index = 0;
@@ -84,19 +79,19 @@ export function quickRunResults(rows, query) {
  */
 export function highlightAfterResults(previousKey, rows) {
   if (rows.length === 0) return null;
-  if (typeof previousKey === 'string' && rows.some((row) => row.key === previousKey)) return previousKey;
-  return rows[0].key;
+  if (typeof previousKey === 'string' && rows.some((row) => row.resultKey === previousKey)) return previousKey;
+  return rows[0].resultKey;
 }
 
 /** ArrowDown (delta 1) and ArrowUp (delta -1), clamped at both ends rather than wrapping. */
 export function moveHighlight(rows, currentKey, delta) {
   if (rows.length === 0) return null;
-  const index = rows.findIndex((row) => row.key === currentKey);
-  if (index === -1) return rows[0].key;
+  const index = rows.findIndex((row) => row.resultKey === currentKey);
+  if (index === -1) return rows[0].resultKey;
   const next = index + (delta < 0 ? -1 : 1);
-  if (next < 0) return rows[0].key;
-  if (next >= rows.length) return rows[rows.length - 1].key;
-  return rows[next].key;
+  if (next < 0) return rows[0].resultKey;
+  if (next >= rows.length) return rows[rows.length - 1].resultKey;
+  return rows[next].resultKey;
 }
 /** The whole query path over a workspace state: rows from the universe, then the ranked match. */
 export function quickRunQuery(state, query) {
