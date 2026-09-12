@@ -65,6 +65,25 @@ export function nextFilter(current, direction = 1) {
   return QUICK_RUN_FILTERS[(index + step + QUICK_RUN_FILTERS.length) % QUICK_RUN_FILTERS.length];
 }
 
+/**
+ * Tab and Shift+Tab over the chips the reader can actually see, which is the AUTHOR's ruling of
+ * 2026-09-12 on a box that had been read the other way.
+ *
+ * The five names are the vocabulary and its order; the chips are the subset with a current match. So a
+ * step moves to the next name **that has a chip**, in canonical order, and never lands on a name the
+ * query has emptied - the fallback-to-All rule elsewhere is for a filter that becomes unavailable
+ * because the query changed, not for keyboard traversal. With nothing available the filter does not move.
+ */
+export function nextAvailableFilter(current, direction = 1, available = ['All']) {
+  const offered = QUICK_RUN_FILTERS.filter((label) => available.includes(label));
+  if (offered.length === 0) return normaliseFilter(current);
+  const active = normaliseFilter(current);
+  const index = offered.indexOf(active);
+  const step = direction < 0 ? -1 : 1;
+  if (index === -1) return offered[0];
+  return offered[(index + step + offered.length) % offered.length];
+}
+
 /** The rows a filter shows. All shows everything, in the order the search ranked it. */
 export function rowsForFilter(rows, filter) {
   const active = normaliseFilter(filter);

@@ -132,8 +132,14 @@ test('mounting wires the keys the contract binds, and opens on the current state
   assert.equal(quickRun.session().highlightKey, 'link:p-1');
 
   elements.layer.fire('keydown', { key: 'Tab', shiftKey: false, preventDefault() {} });
-  assert.equal(quickRun.session().filter, 'All');
-  assert.equal(quickRun.session().fellBack, true, 'Folders has no matches, so it falls back');
+  // The AUTHOR ruling of 2026-09-12: the query "docs" offers only All and Links, so one Tab from All
+  // lands on Links rather than stepping onto Folders, which the query has emptied.
+  assert.equal(quickRun.session().filter, 'Links');
+  assert.equal(quickRun.session().fellBack, false, 'nothing fell back, because nothing unavailable was entered');
+  elements.layer.fire('keydown', { key: 'Tab', shiftKey: false, preventDefault() {} });
+  assert.equal(quickRun.session().filter, 'All', 'and the next step wraps back to All');
+  elements.layer.fire('keydown', { key: 'Tab', shiftKey: true, preventDefault() {} });
+  assert.equal(quickRun.session().filter, 'Links', 'Shift+Tab steps the same subset backwards');
 
   elements.layer.fire('keydown', { key: 'Escape', shiftKey: false, preventDefault() {} });
   assert.equal(elements.layer.hidden, true);

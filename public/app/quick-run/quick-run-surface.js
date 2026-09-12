@@ -21,10 +21,9 @@ import {
   closedQuickRunSession,
   openQuickRunSession,
   quickRunSessionAfterArrow,
-  quickRunSessionWithFilter,
+  quickRunSessionAfterTab,
   quickRunSessionWithQuery,
 } from './quick-run-session.js';
-import { nextFilter } from './quick-run-types.js';
 
 const ROW_CLASS = 'quick-run-result';
 const CHIP_CLASS = 'quick-run-chip';
@@ -166,7 +165,9 @@ export function mountQuickRun(input) {
     }
     if (event.key === 'Tab') {
       if (event.preventDefault) event.preventDefault();
-      session = quickRunSessionWithFilter(session, nextFilter(session.filter, event.shiftKey ? -1 : 1));
+      // The AUTHOR ruling of 2026-09-12: Tab steps through the chips on offer, never onto a type the
+      // current query has emptied.
+      session = quickRunSessionAfterTab(session, event.shiftKey ? -1 : 1);
       paint();
     }
   });

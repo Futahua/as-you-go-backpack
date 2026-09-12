@@ -17,7 +17,7 @@
  */
 import { quickRunRows } from './quick-run-search.js';
 import { quickRunResults } from './quick-run-index.js';
-import { chipsFor, normaliseFilter, resolveFilter } from './quick-run-types.js';
+import { chipsFor, nextAvailableFilter, normaliseFilter, resolveFilter } from './quick-run-types.js';
 
 /** A closed session: the state a surface draws nothing for. */
 export function closedQuickRunSession() {
@@ -59,6 +59,18 @@ export function quickRunSessionWithQuery(session, query) {
 export function quickRunSessionWithFilter(session, filter) {
   if (!session.open) return session;
   return withResults(session, session.query, filter);
+}
+
+/**
+ * Tab and Shift+Tab as the AUTHOR ruled: over the chips that are actually offered, skipping the types the
+ * current query has emptied. The session already knows them - `chips` is All plus one per type with a
+ * match - so the traversal needs no second opinion about what is available.
+ */
+export function quickRunSessionAfterTab(session, direction = 1) {
+  if (!session.open) return session;
+  const offered = Array.isArray(session.chips) ? session.chips : [];
+  if (offered.length < 2) return session;
+  return quickRunSessionWithFilter(session, nextAvailableFilter(session.filter, direction, offered));
 }
 
 /** ArrowUp and ArrowDown, which move the highlight without changing the result set. */

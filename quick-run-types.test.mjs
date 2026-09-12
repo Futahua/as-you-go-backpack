@@ -5,11 +5,42 @@ import {
   QUICK_RUN_RESULT_KINDS,
   isQuickRunFilter,
   normaliseFilter,
+  nextAvailableFilter,
   nextFilter,
   rowsForFilter,
   resolveFilter,
   chipsFor,
 } from './public/app/quick-run/quick-run-types.js';
+
+test('Tab steps only through the chips on offer, in canonical order (AUTHOR ruling, 2026-09-12)', () => {
+  const offered = ['All', 'Folders', 'Links'];
+  assert.equal(nextAvailableFilter('All', 1, offered), 'Folders');
+  assert.equal(
+    nextAvailableFilter('Folders', 1, offered),
+    'Links',
+    'Shortcuts and Layout Items are not offered, so they are skipped rather than landed on',
+  );
+  assert.equal(nextAvailableFilter('Links', 1, offered), 'All', 'and the step wraps inside the offered set');
+  assert.equal(nextAvailableFilter('All', -1, offered), 'Links', 'backwards is the same subset, reversed');
+  assert.equal(nextAvailableFilter('Folders', -1, offered), 'All');
+  assert.equal(
+    nextAvailableFilter('Shortcuts', 1, offered),
+    'All',
+    'a filter that is not on offer starts from the first offered one instead of guessing',
+  );
+  assert.equal(nextAvailableFilter('Folders', 1, []), 'Folders', 'nothing on offer means nothing moves');
+  assert.equal(nextAvailableFilter('All', 1, ['All']), 'All', 'All alone is a fixed point');
+  assert.equal(
+    nextAvailableFilter('Folders', 1, ['All']),
+    'All',
+    'and a filter that is not on offer lands on the only chip there is rather than nowhere',
+  );
+  assert.equal(
+    nextAvailableFilter('Links', 1, ['All', 'Folders', 'Links']),
+    'All',
+    'the offered set keeps the canonical order whatever order the caller lists it in',
+  );
+});
 
 const rows = [
   { type: 'folder', name: 'A folder' },
