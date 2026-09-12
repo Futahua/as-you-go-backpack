@@ -48,7 +48,8 @@ import {
 
 test('the explicit catalog contains every current Backpack action exactly once', () => {
   assert.deepEqual(HOTKEY_CATALOG.map(({ id, group, scope, defaults }) => ({ id, group, scope, defaults })), [
-    { id: 'workspace.escape', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['Escape'] },
+    { id: 'workspace.quick-run', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['Alt+Shift+X'] },
+  { id: 'workspace.escape', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['Escape'] },
     { id: 'workspace.group-selection', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['G'] },
     { id: 'workspace.edit-set-membership', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['Ctrl+G'] },
     { id: 'workspace.select-all', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['Ctrl+A'] },

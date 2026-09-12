@@ -54,6 +54,13 @@ const MODIFIER_KEYS = new Set([
 
 const BASE_ACTIONS = [
   {
+    id: 'workspace.quick-run',
+    label: 'Open Quick Run',
+    group: 'Workspace',
+    scope: HOTKEY_SCOPE_WORKSPACE,
+    defaults: ['Alt+Shift+X'],
+  },
+  {
     id: 'workspace.escape',
     label: 'Dismiss or clear current selection',
     group: 'Workspace',
