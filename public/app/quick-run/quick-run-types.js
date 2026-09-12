@@ -70,7 +70,7 @@ export function rowsForFilter(rows, filter) {
   const active = normaliseFilter(filter);
   if (active === 'All') return rows.slice();
   const kind = KIND_BY_FILTER[active];
-  return rows.filter((row) => row.kind === kind);
+  return rows.filter((row) => row.type === kind);
 }
 
 /**
@@ -94,7 +94,7 @@ export function chipsFor(rows) {
   for (const filter of QUICK_RUN_FILTERS) {
     if (filter === 'All') continue;
     const kind = KIND_BY_FILTER[filter];
-    if (rows.some((row) => row.kind === kind)) chips.push(filter);
+    if (rows.some((row) => row.type === kind)) chips.push(filter);
   }
   return chips;
 }
