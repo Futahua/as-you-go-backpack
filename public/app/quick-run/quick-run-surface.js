@@ -29,11 +29,16 @@ import { nextFilter } from './quick-run-types.js';
 const ROW_CLASS = 'quick-run-result';
 const CHIP_CLASS = 'quick-run-chip';
 
-function rowNode(document, view, onRowClick) {
+function rowNode(document, view, onRowClick, clearHover) {
   const item = document.createElement('li');
   item.className = ROW_CLASS + (view.highlighted ? ' highlighted' : '');
   item.dataset.quickRunKey = view.key;
   item.dataset.quickRunHighlighted = view.highlighted ? 'true' : 'false';
+  item.dataset.quickRunHovered = 'false';
+  item.addEventListener('mouseover', () => {
+    if (typeof clearHover === 'function') clearHover();
+    item.dataset.quickRunHovered = 'true';
+  });
   const icon = document.createElement('span');
   icon.className = 'quick-run-icon quick-run-icon-' + view.iconKind;
   const primary = document.createElement('span');
@@ -69,7 +74,12 @@ export function paintQuickRunSurface({ document, elements, session, onRowClick }
   if (session.query === '') elements.input.value = '';
   const chips = quickRunChipViews(session).map((view) => chipNode(document, view));
   elements.chips.replaceChildren(...chips);
-  const rows = quickRunRowViews(session).map((view) => rowNode(document, view, onRowClick));
+  const rows = quickRunRowViews(session).map((view) => rowNode(document, view, onRowClick, clearHover));
+  // Hover is a marker of its own, never the keyboard highlight (sections 6.3 and 6.4): moving the pointer
+  // may show where the pointer is, and Enter still runs whatever the keyboard highlighted.
+  function clearHover() {
+    for (const row of elements.results.children ?? []) row.dataset.quickRunHovered = 'false';
+  }
   elements.results.replaceChildren(...rows);
   return rows.length;
 }

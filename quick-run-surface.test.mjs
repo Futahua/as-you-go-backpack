@@ -22,8 +22,11 @@ const state = {
 function fakeElement() {
   return {
     hidden: false, value: '', textContent: '', className: '', dataset: {}, children: [],
+    listeners: {},
     append(...nodes) { this.children.push(...nodes); },
     replaceChildren(...nodes) { this.children = nodes; },
+    addEventListener(type, handler) { (this.listeners[type] ??= []).push(handler); },
+    fire(type, event) { for (const handler of this.listeners[type] ?? []) handler(event); },
   };
 }
 
@@ -98,6 +101,7 @@ test('closing clears the line, the chips and the rows', () => {
 function liveElement() {
   const element = {
     hidden: false, value: '', textContent: '', className: '', dataset: {}, children: [],
+    listeners: {},
     listeners: {},
     append(...nodes) { element.children.push(...nodes); },
     replaceChildren(...nodes) { element.children = nodes; },
@@ -204,4 +208,26 @@ test('Enter with nothing highlighted activates nothing', () => {
   quickRun.open();
   elements.layer.fire('keydown', { key: 'Enter', preventDefault() {} });
   assert.deepEqual(activated, [], 'an empty query has no row to run');
+});
+
+test('hover marks the row under the pointer and never becomes the keyboard selection', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const activated = [];
+  const quickRun = mountQuickRun({ document, elements, getState: () => state, onActivate: (key) => activated.push(key) });
+  quickRun.open();
+  elements.input.value = 'docs';
+  elements.input.fire('input', {});
+  const highlighted = quickRun.session().highlightKey;
+  assert.equal(highlighted, 'link:p-1');
+
+  // The pointer moves onto the second row.
+  elements.results.children[1].fire('mouseover', {});
+  assert.equal(elements.results.children[1].dataset.quickRunHovered, 'true');
+  assert.equal(elements.results.children[0].dataset.quickRunHovered, 'false');
+  // Marked hovered, still not highlighted, and the keyboard still owns the choice.
+  assert.equal(elements.results.children[1].dataset.quickRunHighlighted, 'false');
+  assert.equal(quickRun.session().highlightKey, highlighted, 'hover does not move the keyboard highlight');
+  elements.layer.fire('keydown', { key: 'Enter', preventDefault() {} });
+  assert.deepEqual(activated, ['link:p-1'], 'Enter runs the keyboard highlight, not the hovered row');
 });
