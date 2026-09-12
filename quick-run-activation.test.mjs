@@ -4,6 +4,8 @@ import { openQuickRunSession, quickRunSessionWithQuery } from './public/app/quic
 import {
   planQuickRunActivation,
   planQuickRunShiftEnter,
+  QUICK_RUN_TARGET_GONE,
+  revalidateQuickRunRow,
   QUICK_RUN_ADD_ALREADY_PRESENT,
   QUICK_RUN_ADD_NO_ACTIVE_LAYOUT,
   QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS,
@@ -78,4 +80,30 @@ test('Shift+Enter is enabled only for layout items and never silently ignored (s
   });
   // And no input at all still answers with a reason rather than nothing.
   assert.deepEqual(planQuickRunShiftEnter(null), { disabled: QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS });
+});
+
+test('a target is re-read from the current state by stable key, not trusted from the index (section 5)', () => {
+  const row = rowsFor('docs')[0];
+  // The state as drawn: the re-read returns the same occurrence, freshly built.
+  const fresh = revalidateQuickRunRow(state, row.resultKey);
+  assert.equal(fresh.ok, true);
+  assert.equal(fresh.row.resultKey, row.resultKey);
+  assert.equal(fresh.row.name, 'Docs');
+
+  // The workspace moves under the index: the shortcut is renamed. The re-read is what an action would
+  // plan from, so it carries the new name while the indexed row still carries the old one.
+  const renamed = {
+    ...state,
+    shortcuts: state.shortcuts.map((entry) => (entry.id === 's-1' ? { ...entry, name: 'Handbook' } : entry)),
+  };
+  const after = revalidateQuickRunRow(renamed, row.resultKey);
+  assert.equal(after.ok, true);
+  assert.equal(after.row.name, 'Handbook', 'the current state wins over the indexed payload');
+  assert.equal(row.name, 'Docs', 'and the indexed row is left as it was, as a snapshot should be');
+
+  // The occurrence is gone: the caller gets a reason rather than an action built on stale data.
+  const removed = { ...state, shortcuts: state.shortcuts.filter((entry) => entry.id !== 's-1') };
+  assert.deepEqual(revalidateQuickRunRow(removed, row.resultKey), { ok: false, reason: QUICK_RUN_TARGET_GONE });
+  assert.deepEqual(revalidateQuickRunRow(state, ''), { ok: false, reason: QUICK_RUN_TARGET_GONE });
+  assert.deepEqual(revalidateQuickRunRow(state, 'link:p-999'), { ok: false, reason: QUICK_RUN_TARGET_GONE });
 });

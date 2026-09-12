@@ -1,3 +1,5 @@
+import { quickRunRows } from './quick-run-search.js';
+
 /**
  * Quick Run — what Enter means, as a plan rather than a launch.
  *
@@ -14,6 +16,7 @@
  * deferred with the reason instead of pretending it is ready. A caller that sees deferred must not
  * silently do nothing; the box that owns it waits for a session with the creator at the machine.
  */
+
 
 /** The workspace command each type's default action belongs to (section 1.5, via the existing keys). */
 export const QUICK_RUN_ENTER_COMMAND = 'workspace.open-selection';
@@ -51,10 +54,12 @@ export function planQuickRunActivation(row) {
   }
 }
 
+
 /** The reasons Shift+Enter may be unavailable, so a caller can show one rather than ignore the key. */
 export const QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS = 'only-layout-items';
 export const QUICK_RUN_ADD_NO_ACTIVE_LAYOUT = 'no-active-window-layout';
 export const QUICK_RUN_ADD_ALREADY_PRESENT = 'already-in-the-active-layout';
+
 
 /**
  * What Shift+Enter means (section 1.6): add the highlighted item to the active window layout.
@@ -79,4 +84,28 @@ export function planQuickRunShiftEnter(row, facts = {}) {
     command: 'window-layout.add-member',
     target: { layoutId: activeLayoutId, memberId: row.memberId, sourceLayoutId: row.layoutId },
   };
+}
+
+/** What a re-read can answer: the row as the state has it now, or that it is no longer there. */
+export const QUICK_RUN_TARGET_GONE = 'the-result-is-no-longer-in-the-workspace';
+
+/**
+ * Re-read the target of a row from the current state, by its stable result key (section 5).
+ *
+ * The invariant is *"Enter re-reads the selected object from the current state by stable IDs before
+ * acting"*, and the companion one is that *"indexed result payloads are never treated as current
+ * authority"*. Both are about the same moment: an index is a snapshot, the workspace moves under it, and
+ * an action must be planned from what is true now rather than from what the row said when it was drawn.
+ *
+ * So this rebuilds the universe from the state it is handed, finds the row by esultKey — the stable key
+ * the contract pins, not a position — and either returns the current row or says the result is gone. A
+ * caller that gets ok: false has a sentence to show instead of an action built on stale data.
+ */
+export function revalidateQuickRunRow(state, resultKey) {
+  if (typeof resultKey !== 'string' || resultKey === '') {
+    return { ok: false, reason: QUICK_RUN_TARGET_GONE };
+  }
+  const current = quickRunRows(state).find((row) => row.resultKey === resultKey);
+  if (!current) return { ok: false, reason: QUICK_RUN_TARGET_GONE };
+  return { ok: true, row: current };
 }
