@@ -19,8 +19,30 @@ const ICON_BY_TYPE = Object.freeze({
   'layout-item': 'layout-item',
 });
 
+/**
+ * What is known about a layout item's availability right now (section 10.1).
+ *
+ * `noted` is ephemeral session knowledge, keyed by the stable result key, and it is never persisted: an
+ * untouched item is `unknown`, and it goes back to `unknown` the moment the thing that was noted no
+ * longer describes the row. That last part is section 10.5's reset rule and it is why an entry carries the
+ * descriptor it was noted against rather than only the state: a member whose descriptor changed is a
+ * different window as far as anything here can tell, so the prior answer must not survive it.
+ */
+export function quickRunAvailabilityFor(noted, row) {
+  if (row?.type !== 'layout-item') return null;
+  const entry = noted ? noted[row.resultKey] : null;
+  if (!entry) return 'unknown';
+  if (entry.descriptor !== quickRunDescriptorFingerprint(row)) return 'unknown';
+  return entry.availability;
+}
+
+/** The part of a row a noted availability belongs to: the occurrence and the descriptor it was seen with. */
+export function quickRunDescriptorFingerprint(row) {
+  return [row?.layoutId ?? null, row?.memberId ?? null, row?.name ?? null].join('\u0000');
+}
+
 /** The rows to draw, in the order the session ranked and highlighted them. */
-export function quickRunRowViews(session) {
+export function quickRunRowViews(session, noted) {
   return session.rows.map((row) => ({
     key: row.resultKey,
     iconKind: ICON_BY_TYPE[row.type] ?? 'item',
@@ -28,9 +50,9 @@ export function quickRunRowViews(session) {
     breadcrumb: row.breadcrumb,
     highlighted: row.resultKey === session.highlightKey,
     // Section 5: a layout item's actionability is never guessed from persisted state, and an untouched one
-    // starts at 'unknown' rather than 'Not running'. Only a live native resolution could answer otherwise,
-    // and that is deliberately not built here, so this says unknown and keeps saying it.
-    availability: row.type === 'layout-item' ? 'unknown' : null,
+    // starts at 'unknown' rather than 'Not running'. A noted resolution may answer otherwise, and only
+    // while the descriptor it was noted against still describes the row.
+    availability: quickRunAvailabilityFor(noted, row),
   }));
 }
 
