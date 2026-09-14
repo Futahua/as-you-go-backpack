@@ -144,21 +144,10 @@ async function boot() {
   const surface = bindQuickRunWorkspace({
     document: { createElement: (tag) => fakeElement(tag) },
     elements,
-    store: harness.store,
     commands: harness.commands,
     getState: harness.state,
     getVisibleItemIds: () => [],
     setStatus: (text) => { harness.effects.status.push(text); },
-    render: () => { harness.effects.renders += 1; },
-    windowLayout: (id) => harness.state().windowLayouts.find((candidate) => candidate.id === id) ?? null,
-    addWindowLayoutMember: (state, layoutId, member) => ({
-      ...state,
-      windowLayouts: state.windowLayouts.map((layout) => (
-        layout.id === layoutId
-          ? { ...layout, arrangement: { members: [...(layout.arrangement?.members ?? []), member] } }
-          : layout
-      )),
-    }),
   });
   const type = (query) => {
     elements.input.value = query;
@@ -254,7 +243,11 @@ test('a row that moved or vanished between render and keypress is re-read, not e
 
   assert.deepEqual(h.effects.launch, [], 'the stale payload was not launched');
   assert.equal(isOpen(h.elements), true, 'section 16.2: a failure does not silently close the layer');
-  assert.deepEqual(h.effects.status, ['Quick Run: that result is no longer in the workspace.']);
+  assert.deepEqual(h.effects.status, ['Quick Run: that result is no longer in the workspace. The list now shows the current matches.']);
+  // And the dead row is replaced rather than left on screen to be hit again: both rows came from the record
+  // that no longer exists, so the refreshed list is empty and says so instead of offering them twice.
+  assert.deepEqual(rowKeys(h.elements), [], 'the vanished rows are gone from the list, not just refused');
+  assert.equal(h.elements.notice.hidden, false, 'and the layer says the query now matches nothing');
 
   // And the same key on a row that is still there runs the *current* row rather than refusing everything:
   // a rename moves the name the index carried and not the occurrence identity.
@@ -269,4 +262,68 @@ test('a row that moved or vanished between render and keypress is re-read, not e
   await Promise.resolve();
   assert.deepEqual(h2.effects.launch, ['s-app'], 'the current row was executed, by its stable key');
   assert.equal(isOpen(h2.elements), false);
+});
+
+test('Ctrl+Enter on a root-level occurrence navigates back to the root (section 1.6)', async () => {
+  // The defect this holds: navigation used to be the last entry of the persisted breadcrumb chain, and a
+  // root-level occurrence has no ancestors - so revealing one from inside another folder navigated nowhere
+  // and the reader stayed where they were, with the occurrence they asked for off screen.
+  const h = await boot();
+  h.mutate((state) => ({
+    ...state,
+    shortcuts: [...state.shortcuts, {
+      id: 's-top',
+      name: 'Rooftop note',
+      target: 'C:/notes/rooftop.md',
+      // Placed at the workspace root itself, which is where a breadcrumb chain is empty: the occurrence has
+      // no ancestor folder to be sent to, and the root has no group record for activateItem to match.
+      placements: [{ id: 'p-top', parentId: 'root', order: 9 }],
+    }],
+  }));
+  h.store.setNavigation({ currentId: 'g-a' });
+  h.surface.open();
+  h.type('rooftop');
+  assert.deepEqual(rowKeys(h.elements), ['shortcut:p-top'], 'the root-level placement is one row');
+
+  h.key('Enter', { ctrlKey: true });
+
+  assert.equal(h.store.getSession().currentId, 'root', 'the reveal goes to the folder the occurrence lives in');
+  assert.equal(h.store.getSession().selected.has('s-top'), true, 'and selects the record that was asked for');
+  assert.equal(isOpen(h.elements), false, 'section 16.1: a successful reveal closes the layer');
+});
+
+test('Ctrl+Enter on a Layout Item goes to the folder holding the layout, not to the layout id (section 1.6)', async () => {
+  // The second half of the same defect: a layout member's breadcrumb chain ends with the layout id, which
+  // the workspace's open-selection command does not understand - it knows groups and shortcuts - so handing
+  // it over navigated nowhere and Quick Run closed as if it had revealed something.
+  const h = await boot();
+  h.mutate((state) => ({
+    ...state,
+    windowLayouts: [{
+      id: 'wl-1',
+      parentId: 'g-b',
+      name: 'Desk',
+      order: 3,
+      arrangement: {
+        version: 2,
+        members: [{
+          id: 'm-console',
+          descriptor: { version: 1, title: 'Console 0', executableFingerprint: 'b7c1'.repeat(16) },
+          bounds: { x: 0, y: 0, width: 800, height: 600 },
+          state: 'normal',
+        }],
+      },
+    }],
+  }));
+  h.store.setNavigation({ currentId: 'g-a' });
+  h.surface.open();
+  h.type('console');
+  assert.deepEqual(rowKeys(h.elements), ['layout-member:wl-1:m-console'], 'the member is one row');
+
+  h.key('Enter', { ctrlKey: true });
+
+  assert.equal(h.store.getSession().currentId, 'g-b', 'the folder that holds the layout, where it can be seen');
+  assert.notEqual(h.store.getSession().currentId, 'wl-1', 'a layout id is not a destination the command knows');
+  assert.equal(h.store.getSession().selected.has('wl-1'), true, 'and the layout record is what gets selected');
+  assert.equal(isOpen(h.elements), false, 'section 16.1: a successful reveal closes the layer');
 });

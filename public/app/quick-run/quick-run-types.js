@@ -49,6 +49,39 @@ export function normaliseQueryText(value) {
     .trim()
     .replace(/\s+/g, ' ');
 }
+/**
+ * The fields a persisted window-layout descriptor declares as the window's durable identity.
+ *
+ * This is the ONE copy of that vocabulary. `normalizeWindowLayoutMember` in the model persists exactly
+ * `title` and `executableFingerprint` and nothing else, so these are the fields anything comparing two
+ * descriptors may read — and the only ones, because a descriptor that names a fingerprint is not the same
+ * window as one that differs in it. The resolution module and the presentation layer both read this list
+ * rather than each keeping a private copy: two copies is how they drifted apart before (resolution compared
+ * `executable`/`fingerprint`, which are never persisted, while availability was keyed on the display name).
+ */
+export const DESCRIPTOR_IDENTITY_FIELDS = Object.freeze(['title', 'executableFingerprint']);
+
+/** The identity fields a descriptor actually declares, in the pinned order. A blank field declares nothing. */
+export function declaredDescriptorFields(descriptor) {
+  if (!descriptor || typeof descriptor !== 'object') return [];
+  return DESCRIPTOR_IDENTITY_FIELDS.filter((field) => (
+    typeof descriptor[field] === 'string' && descriptor[field].trim() !== ''
+  ));
+}
+
+/**
+ * The identity a descriptor declares, as one comparable string, or '' when it declares nothing.
+ *
+ * Availability is noted against this rather than against the row's display name: a member whose
+ * executable fingerprint changed while its title stayed the same is a *different* window, and an answer
+ * noted for the old one must not survive onto it (section 10.5's reset).
+ */
+export function descriptorIdentityKey(descriptor) {
+  const declared = declaredDescriptorFields(descriptor);
+  if (declared.length === 0) return '';
+  return declared.map((field) => descriptor[field]).join('\u0000');
+}
+
 export function isQuickRunFilter(value) {
   return QUICK_RUN_FILTERS.includes(value);
 }

@@ -8,29 +8,16 @@
 //
 // Matching is fail-closed: only the descriptor fields the member declares are compared, every one of them
 // must match exactly, and a descriptor that declares nothing matches nothing. A near-miss is a miss.
+//
+// The field vocabulary is not repeated here. The persisted descriptor's identity fields are pinned once, in
+// quick-run-types.js, and this module reads that list: an earlier version kept a private copy that compared
+// `executable` and `fingerprint`, names that never appear on a persisted member, so a member whose
+// fingerprint differed would have matched on its title alone.
+import { declaredDescriptorFields } from './quick-run-types.js';
 
 export const QUICK_RUN_RESOLUTION_UNIQUE = 'unique';
 export const QUICK_RUN_RESOLUTION_MISSING = 'missing';
 export const QUICK_RUN_RESOLUTION_AMBIGUOUS = 'ambiguous';
-
-/**
- * The fields a descriptor may declare, in the order they are reported when they disagree.
- *
- * These are the names the product actually persists: `normalizeWindowLayoutMember` in
- * `workspace-model-20260730b.js` accepts `descriptor.version === 1` with `title` and
- * `executableFingerprint` (lowercased on write) and nothing else. An earlier version of this module
- * compared `executable` and `fingerprint`, which never appear on a persisted member - so a member whose
- * fingerprint differed would have matched on its title alone. The AUTHOR ruled on 2026-09-12 that this
- * persisted descriptor *is* the durable native identity, not an approximation of one.
- */
-const DESCRIPTOR_FIELDS = ['title', 'executableFingerprint'];
-
-function declaredFields(descriptor) {
-  if (!descriptor || typeof descriptor !== 'object') return [];
-  return DESCRIPTOR_FIELDS.filter((field) => (
-    typeof descriptor[field] === 'string' && descriptor[field].trim() !== ''
-  ));
-}
 
 function matches(window, descriptor, fields) {
   if (!window || typeof window !== 'object') return false;
@@ -52,7 +39,7 @@ function identityOf(window) {
  */
 export function resolveQuickRunMember(member, windows) {
   const descriptor = member?.descriptor;
-  const fields = declaredFields(descriptor);
+  const fields = declaredDescriptorFields(descriptor);
   if (fields.length === 0) {
     return { outcome: QUICK_RUN_RESOLUTION_MISSING, candidates: [], reason: 'descriptor-declares-nothing' };
   }

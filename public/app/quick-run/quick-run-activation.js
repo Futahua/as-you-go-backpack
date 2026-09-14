@@ -3,18 +3,24 @@ import { quickRunRows } from './quick-run-search.js';
 /**
  * Quick Run — what Enter means, as a plan rather than a launch.
  *
- * Section 1.5 fixes the four default actions and this module only decides which one applies and what it
- * needs; nothing here launches, navigates or focuses anything. That split is deliberate: the workspace
- * already owns the execution paths — the keyboard controller handles workspace.open-selection for Enter
- * and workspace.reveal-selection for Ctrl+Enter — and section 1.6's own note says Quick Run must take
- * those keys over only while its input surface is active. So a plan names **the command the workspace
- * already has**, plus the target ids the row already carries, and a caller that has those commands can run
- * it without a second launch implementation.
+ * Section 1.5 fixes the default actions and this module only decides which one applies and what it needs;
+ * nothing here launches, navigates or focuses anything. That split is deliberate: the workspace already
+ * owns the execution paths — the keyboard controller handles workspace.open-selection for Enter — and
+ * section 1.6's own note says Quick Run must take those keys over only while its input surface is active.
+ * So a plan names **the command the workspace already has**, plus the target ids the row already carries,
+ * and a caller that has those commands can run it without a second launch implementation.
  *
  * The layout-item case is the one that is not autonomous work: activating and focusing a live foreign
  * application window (restoring it if minimized) is not reversible by a commit, so the plan reports it as
  * deferred with the reason instead of pretending it is ready. A caller that sees deferred must not
  * silently do nothing; the box that owns it waits for a session with the creator at the machine.
+ *
+ * Shift+Enter (add to the active layout) used to live here and has been CUT, not repaired. Its only write
+ * path was `store.replace()`, which installs state in memory while `commit()`/`save()` is what persists it;
+ * where this surface lacks document-write authority `replace()` can refuse and hand back the old state
+ * without throwing, and the binding would still have said "added" and closed. A false success that loses the
+ * write is worse than a missing gesture, so the gesture is gone: no plan, no notice, no key. See
+ * `papers/quick-run.md` for the cut note.
  */
 
 
@@ -69,6 +75,23 @@ export function quickRunWorkspaceItemId(plan) {
 }
 
 /**
+ * The folder a reveal has to navigate to: the one that directly holds the occurrence.
+ *
+ * `containerId` is stamped by the search walk and is a folder id in every case, including a root-level
+ * occurrence (where it is the root). The breadcrumb chain is only a fallback for a row built by hand, and
+ * it is deliberately not consulted for a Layout Item: that chain ends with the layout id, which is not a
+ * folder, and the workspace's open-selection command understands groups and shortcuts rather than layouts -
+ * so navigating "to" it did nothing at all and the reader was left where they started. A row that carries
+ * neither answers null rather than guessing, and the caller selects without navigating.
+ */
+function revealContainerOf(row) {
+  if (typeof row.containerId === 'string' && row.containerId !== '') return row.containerId;
+  const chain = Array.isArray(row.breadcrumbIds) ? row.breadcrumbIds : [];
+  if (row.type !== 'layout-item' && chain.length > 0) return chain[chain.length - 1];
+  return null;
+}
+
+/**
  * What Ctrl+Enter means (section 1.6): reveal this exact occurrence **inside the workspace**.
  *
  * The section is explicit about the boundary, and it is the whole reason this is a separate function from
@@ -77,13 +100,13 @@ export function quickRunWorkspaceItemId(plan) {
  * occurrence lives in and selects the occurrence itself, and `hostReveal` is false on every branch - a
  * caller that wanted an OS reveal would have to ignore the plan rather than follow it.
  *
- * The folder to navigate to is the last entry of the row's persisted ancestor chain, which the row already
- * carries as `breadcrumbIds` (section 0.4), so no caller has to re-walk the hierarchy per keystroke.
+ * For a Layout Item the containing folder is the one holding the *layout*, and what gets selected is the
+ * layout record itself: a member is not a workspace item the tree can select, so the layout is the thing
+ * the reader is shown inside the folder that owns it.
  */
 export function planQuickRunReveal(row) {
   if (!row || typeof row !== 'object') return null;
-  const chain = Array.isArray(row.breadcrumbIds) ? row.breadcrumbIds : [];
-  const navigateTo = chain.length > 0 ? chain[chain.length - 1] : null;
+  const navigateTo = revealContainerOf(row);
   switch (row.type) {
     case 'folder':
       return { action: 'reveal-folder', navigateTo, select: row.groupId, hostReveal: false };
@@ -110,65 +133,6 @@ export function planQuickRunReveal(row) {
       return null;
   }
 }
-/**
- * Section 1.6's duplicate rule, as the AUTHOR ruled it on 2026-09-12.
- *
- * The persisted descriptor **is** the durable native identity — `title` plus `executableFingerprint` when
- * present, the two fields `normalizeWindowLayoutMember` writes — while `memberId` and the source layout are
- * occurrence and provenance rather than identity. So a window is already in the layout when a member there
- * agrees on every field this descriptor declares, and only the declared ones: a descriptor that names a
- * fingerprint is not the same window as one that differs in it, and a descriptor that names only a title is
- * the same window as any member with that title.
- *
- * Returns the id of the member that already represents this window, or null when the add may proceed. A
- * descriptor that declares nothing matches nothing, because there is no identity to compare.
- */
-export function quickRunDuplicateMemberId(descriptor, members) {
-  if (!descriptor || typeof descriptor !== 'object') return null;
-  const declared = DESCRIPTOR_IDENTITY_FIELDS.filter((field) => (
-    typeof descriptor[field] === 'string' && descriptor[field].trim() !== ''
-  ));
-  if (declared.length === 0) return null;
-  const match = (Array.isArray(members) ? members : []).find((member) => (
-    member && typeof member === 'object' && member.descriptor
-    && declared.every((field) => member.descriptor[field] === descriptor[field])
-  ));
-  return match ? match.id : null;
-}
-
-/** The fields that carry a persisted window's identity, in the order the model writes them. */
-export const DESCRIPTOR_IDENTITY_FIELDS = Object.freeze(['title', 'executableFingerprint']);
-
-/** The reasons Shift+Enter may be unavailable, so a caller can show one rather than ignore the key. */
-export const QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS = 'only-layout-items';
-export const QUICK_RUN_ADD_NO_ACTIVE_LAYOUT = 'no-active-window-layout';
-export const QUICK_RUN_ADD_ALREADY_PRESENT = 'already-in-the-active-layout';
-
-
-/**
- * What Shift+Enter means (section 1.6): add the highlighted item to the active window layout.
- *
- * The section states five rules and this function is all of them: it is enabled **only** for Layout Items,
- * visibly disabled for the other three, and never silently ignored — every call returns either an action or
- * a disabled reason, never nothing. The two reasons a caller cannot work out for itself are supplied as
- * facts: whether an active layout exists, and whether the member is already in it. Reporting the second is
- * what stops an accidental duplicate, which is the rule the section names.
- *
- * Whether a layout member is *supported* by the active layout stays the caller's answer, because the model
- * owns that: this plan says what the key means, not what the layout accepts.
- */
-export function planQuickRunShiftEnter(row, facts = {}) {
-  if (!row || typeof row !== 'object') return { disabled: QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS };
-  if (row.type !== 'layout-item') return { disabled: QUICK_RUN_ADD_ONLY_LAYOUT_ITEMS };
-  const activeLayoutId = facts.activeLayoutId ?? null;
-  if (activeLayoutId === null) return { disabled: QUICK_RUN_ADD_NO_ACTIVE_LAYOUT };
-  if (facts.alreadyInActiveLayout === true) return { disabled: QUICK_RUN_ADD_ALREADY_PRESENT };
-  return {
-    action: 'add-to-layout',
-    command: 'window-layout.add-member',
-    target: { layoutId: activeLayoutId, memberId: row.memberId, sourceLayoutId: row.layoutId },
-  };
-}
 
 /** What a re-read can answer: the row as the state has it now, or that it is no longer there. */
 export const QUICK_RUN_TARGET_GONE = 'the-result-is-no-longer-in-the-workspace';
@@ -181,7 +145,7 @@ export const QUICK_RUN_TARGET_GONE = 'the-result-is-no-longer-in-the-workspace';
  * authority"*. Both are about the same moment: an index is a snapshot, the workspace moves under it, and
  * an action must be planned from what is true now rather than from what the row said when it was drawn.
  *
- * So this rebuilds the universe from the state it is handed, finds the row by esultKey — the stable key
+ * So this rebuilds the universe from the state it is handed, finds the row by resultKey — the stable key
  * the contract pins, not a position — and either returns the current row or says the result is gone. A
  * caller that gets ok: false has a sentence to show instead of an action built on stale data.
  */

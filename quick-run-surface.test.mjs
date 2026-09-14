@@ -182,11 +182,13 @@ function liveElement() {
   const element = {
     hidden: false, value: '', textContent: '', className: '', dataset: {}, children: [],
     listeners: {},
-    listeners: {},
     append(...nodes) { element.children.push(...nodes); },
     replaceChildren(...nodes) { element.children = nodes; },
     addEventListener(type, handler) { (element.listeners[type] ??= []).push(handler); },
     focus() { element.focused = true; },
+    // `this`, not the closed-over object: rows are built by spreading this template, so a row's own
+    // scrollIntoView must record on the row rather than on the template it came from.
+    scrollIntoView(options) { this.scrolledIntoView = options; },
     fire(type, event) { for (const handler of element.listeners[type] ?? []) handler(event); },
   };
   return element;
@@ -249,18 +251,143 @@ test('the highlight is always a row of the displayed set, whatever was typed bef
   }
 });
 
-test('scrolling is left to the list: no wheel handler moves the highlight (section 6.3)', () => {
+test('the wheel moves the highlight with the list, so Enter cannot run a row that scrolled away (section 6.3)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(10) });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-0');
+
+  assert.equal((elements.layer.listeners.wheel ?? []).length, 1, 'the wheel is handled');
+
+  // The list keeps scrolling normally: the wheel is not taken from the reader, and the highlight travels
+  // with the scroll rather than being left behind on a row that is no longer on screen.
+  let prevented = false;
+  elements.layer.fire('wheel', { deltaY: 48, preventDefault() { prevented = true; } });
+  assert.equal(prevented, false, 'scrolling is still the list\'s');
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-2', 'two rows of scroll, two rows of highlight');
+
+  elements.layer.fire('wheel', { deltaY: -24 });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-1', 'scrolling back moves the highlight back');
+
+  elements.layer.fire('wheel', { deltaY: 100000 });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-9', 'a single flick cannot run off the painted list');
+  assert.equal(elements.results.children.filter((row) => row.dataset.quickRunHighlighted === 'true').length, 1);
+});
+
+test('a highlight moved by the keyboard or the wheel is brought into view (section 6.3)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(30) });
+  const scrolled = () => elements.results.children
+    .filter((row) => row.scrolledIntoView)
+    .map((row) => row.dataset.quickRunKey);
+
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+  // Typing starts a new list at its own top, where its first (highlighted) row already is. It must not
+  // touch layout: forcing style-and-layout inside a keystroke is exactly what the paint cap keeps out, and
+  // the integrated harness measures it (p95 4.3 ms without this call, 8.1 ms with it on every repaint).
+  assert.deepEqual(scrolled(), [], 'typing does not force a scroll on the keystroke path');
+
+  elements.layer.fire('keydown', { key: 'ArrowDown', preventDefault() {} });
+  assert.deepEqual(scrolled(), ['shortcut:p-1'], 'an arrow brings the new highlight into view, not merely marks it');
+
+  elements.layer.fire('wheel', { deltaY: 48 });
+  assert.deepEqual(scrolled(), ['shortcut:p-3'], 'the wheel brings its row into view too');
+});
+
+test('a keystroke touches no scroll box, and the list resets to its top once the reader has scrolled', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  elements.results.scrollTop = 90;
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(30) });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+  // The keystroke path is the one the integrated harness measures, so it must not read or write the scroll
+  // box: doing so forces style-and-layout for 200 fresh rows inside the measured window.
+  assert.equal(elements.results.scrollTop, 90, 'typing leaves the scroll box completely alone');
+
+  // Once a movement has scrolled the list, the next query starts its own list at the top, so the row the
+  // highlight moved to is not left above the fold.
+  elements.layer.fire('wheel', { deltaY: 48 });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-2');
+  assert.equal(elements.results.scrollTop, 90, 'the movement keeps the reader where they were');
+  elements.input.value = 'kestrel 2';
+  elements.input.fire('input', {});
+  assert.equal(elements.results.scrollTop, 0, 'and the new query starts at its own top');
+});
+
+test('a non-empty query with no matches says so instead of drawing a blank layer', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement(), notice: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(3) });
+  quickRun.open();
+  assert.equal(elements.notice.hidden, true, 'an empty query is not a failed search, so it says nothing');
+
+  elements.input.value = 'zzzz';
+  elements.input.fire('input', {});
+  assert.equal(elements.results.children.length, 0, 'no matches means no rows');
+  assert.equal(elements.chips.children.length, 0, 'and no chips');
+  assert.equal(elements.notice.hidden, false, 'but the layer is not left blank: a stall and an answer differ');
+  assert.equal(elements.notice.textContent, 'No matches for “zzzz”.');
+
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+  assert.equal(elements.notice.hidden, true, 'and the line goes away once there is something to show');
+  assert.equal(elements.notice.textContent, '');
+});
+
+test('a result that turns out to be gone is replaced by the current matches, not left to be hit again (section 5)', () => {
+  let state = crowdedState(6);
   const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
   const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
   const quickRun = mountQuickRun({ document, elements, getState: () => state });
   quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+  elements.layer.fire('keydown', { key: 'ArrowDown', preventDefault() {} });
+  elements.layer.fire('keydown', { key: 'ArrowDown', preventDefault() {} });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-2', 'the reader asked for the third row');
+
+  // The workspace moves under the open surface: the highlighted occurrence, and one before it, are gone.
+  state = {
+    ...state,
+    shortcuts: state.shortcuts.filter((shortcut) => shortcut.id !== 's-0' && shortcut.id !== 's-2'),
+  };
+  const refreshed = quickRun.refresh();
+
+  assert.equal(quickRun.session().query, 'kestrel', 'the query the reader typed is kept');
+  assert.deepEqual(
+    refreshed.rows.map((row) => row.resultKey),
+    ['shortcut:p-1', 'shortcut:p-3', 'shortcut:p-4', 'shortcut:p-5'],
+    'the list is the current state rather than the snapshot the dead row came from',
+  );
+  assert.equal(refreshed.highlightKey, 'shortcut:p-4', 'and the highlight lands on the survivor nearest the row that vanished');
+  assert.equal(elements.results.children.length, 4, 'what is on screen is the refreshed list');
+  assert.equal(elements.results.children[2].dataset.quickRunHighlighted, 'true', 'with exactly one highlight on it');
+});
+
+test('Shift+Enter is inert: the cut gesture does not become a second Enter (CUT 2026-09-13)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement(), notice: liveElement() };
+  const activated = [];
+  const quickRun = mountQuickRun({ document, elements, getState: () => state, onActivate: (key) => activated.push(key) });
+  quickRun.open();
   elements.input.value = 'docs';
   elements.input.fire('input', {});
-  const before = quickRun.session().highlightKey;
+  const before = quickRun.session();
 
-  assert.equal((elements.layer.listeners.wheel ?? []).length, 0, 'no wheel handler is registered');
-  elements.layer.fire('wheel', { deltaY: 120, preventDefault() {} });
-  assert.equal(quickRun.session().highlightKey, before, 'scrolling does not choose a row');
+  let prevented = false;
+  elements.layer.fire('keydown', { key: 'Enter', shiftKey: true, preventDefault() { prevented = true; } });
+  assert.equal(prevented, false, 'the mount does not claim a chord it no longer implements');
+  assert.deepEqual(activated, [], 'and it runs nothing at all');
+  assert.equal(quickRun.session(), before, 'the session is untouched');
+  assert.equal(elements.notice.hidden, true, 'and no notice claims the gesture exists');
 });
 
 test('Enter and a click reach one activation path, and neither invents its own (section 6.4)', () => {
@@ -316,77 +443,6 @@ test('hover marks the row under the pointer and never becomes the keyboard selec
   assert.equal(quickRun.session().highlightKey, highlighted, 'hover does not move the keyboard highlight');
   elements.layer.fire('keydown', { key: 'Enter', preventDefault() {} });
   assert.deepEqual(activated, ['link:p-1'], 'Enter runs the keyboard highlight, not the hovered row');
-});
-
-test('a disabled Shift+Enter is visibly disabled, with its reason (section 1.6)', () => {
-  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
-  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement(), notice: liveElement() };
-  const shifted = [];
-  const quickRun = mountQuickRun({
-    document,
-    elements,
-    getState: () => state,
-    onShiftEnter: (key) => shifted.push(key),
-    shiftEnterNotice: (row) => (
-      row ? { text: 'Shift+Enter: only Layout Items can join a layout.' } : { text: '' }
-    ),
-  });
-
-  quickRun.open();
-  assert.equal(elements.notice.hidden, true, 'nothing highlighted yet, so there is nothing to say');
-
-  elements.input.value = 'docs';
-  elements.input.fire('input', {});
-  assert.equal(elements.notice.hidden, false, 'the reason is on screen before the key is pressed');
-  assert.equal(elements.notice.textContent, 'Shift+Enter: only Layout Items can join a layout.');
-
-  let prevented = false;
-  elements.layer.fire('keydown', { key: 'Enter', shiftKey: true, preventDefault() { prevented = true; } });
-  assert.equal(prevented, true, 'the key is handled rather than passed to the workspace');
-  assert.deepEqual(shifted, [], 'a disabled key calls nothing');
-  assert.equal(
-    elements.notice.textContent,
-    'Shift+Enter: only Layout Items can join a layout.',
-    'and the reason stays on screen, which is what "never silently ignored" means for this key',
-  );
-});
-
-test('an enabled Shift+Enter reaches the caller with the highlighted row (section 1.6)', () => {
-  const withLayout = {
-    groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
-    shortcuts: [],
-    windowLayouts: [
-      {
-        id: 'l-1',
-        parentId: 'g-root',
-        name: 'Focus',
-        arrangement: { members: [{ id: 'm-1', descriptor: { title: 'Chrome' } }] },
-      },
-    ],
-  };
-  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
-  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement(), notice: liveElement() };
-  const shifted = [];
-  const quickRun = mountQuickRun({
-    document,
-    elements,
-    getState: () => withLayout,
-    onShiftEnter: (key) => shifted.push(key),
-    shiftEnterNotice: (row) => (
-      row?.type === 'layout-item'
-        ? { text: 'Shift+Enter adds this window to the active layout.', enabled: true }
-        : { text: 'Shift+Enter: only Layout Items can join a layout.' }
-    ),
-  });
-
-  quickRun.open();
-  elements.input.value = 'chrome';
-  elements.input.fire('input', {});
-  assert.equal(elements.notice.textContent, 'Shift+Enter adds this window to the active layout.');
-
-  elements.layer.fire('keydown', { key: 'Enter', shiftKey: true, preventDefault() {} });
-  assert.equal(shifted.length, 1, 'an enabled press reaches the caller');
-  assert.equal(shifted[0], elements.results.children[0].dataset.quickRunKey, 'with the highlighted row key');
 });
 
 test('typing never re-reads the world: the snapshot is taken at open and ranked in memory (section 5)', () => {

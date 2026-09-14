@@ -10,14 +10,16 @@
  *   second index;
  * - the row carries resultKey, type, name, normalizedName, breadcrumb, breadcrumbIds and actionRef, plus
  *   its type-specific authority ids (folder: groupId; shortcut/link: shortcutId and placementId;
- *   layout-item: layoutId and memberId). actionRef stays a reference, never a copy of a mutable object.
+ *   layout-item: layoutId, memberId and the descriptorKey the member's identity is noted against), and
+ *   `containerId`: the folder that directly holds the occurrence, which is the only field a reveal may
+ *   navigate to. actionRef stays a reference, never a copy of a mutable object.
  *
  * Result keys are the pinned scheme: folder:<groupId>, shortcut:<placementId>, link:<placementId>,
  * layout-member:<layoutId>:<memberId>. Breadcrumbs come from persisted folder ancestry and use the
  * contract's separator, with the ancestor ids carried alongside so a caller need not re-walk the tree.
  */
-import { activeItem, isWebLink, itemsIn } from '../../workspace-model-20260730b.js';
-import { normaliseQueryText } from './quick-run-types.js';
+import { ROOT_ID, activeItem, isWebLink, itemsIn } from '../../workspace-model-20260730b.js';
+import { descriptorIdentityKey, normaliseQueryText } from './quick-run-types.js';
 
 /** The contract's breadcrumb separator (section 0.4). */
 export const QUICK_RUN_BREADCRUMB_SEPARATOR = ' › ';
@@ -53,6 +55,12 @@ function baseRow(state, id, name, parentId) {
     normalizedName: normaliseQueryText(labelOf({ name })),
     breadcrumb: ancestry.breadcrumb,
     breadcrumbIds: ancestry.breadcrumbIds,
+    // The folder that directly holds this occurrence, which is where a reveal has to navigate to. It is
+    // stamped here rather than derived by the caller because the breadcrumb chain cannot answer it: a
+    // root-level occurrence has an empty chain, and a layout member's chain ends with the layout itself
+    // (not a folder), so reading a destination out of the chain sends the reader to the wrong place or
+    // nowhere at all. The walk already knows the parent, so it records it.
+    containerId: typeof parentId === 'string' && parentId !== '' ? parentId : ROOT_ID,
     actionRef: null,
   };
 }
@@ -104,6 +112,13 @@ function layoutMemberRows(state, rows) {
         normalizedName: normaliseQueryText(title),
         breadcrumb,
         breadcrumbIds: [...ancestry.breadcrumbIds, layout.id],
+        // The folder holding the layout, not the layout: a reveal navigates to a folder, and the layout id
+        // is not one (the workspace's own open-selection command knows groups and shortcuts, not layouts).
+        containerId: typeof layout.parentId === 'string' && layout.parentId !== '' ? layout.parentId : ROOT_ID,
+        // The identity the persisted descriptor declares, in the one vocabulary the resolution module also
+        // reads. Availability is noted against this, so a member whose fingerprint changed is not mistaken
+        // for the window an earlier answer was about.
+        descriptorKey: descriptorIdentityKey(member.descriptor),
         actionRef: { kind: 'layout-member', layoutId: layout.id, memberId: member.id },
         layoutId: layout.id,
         memberId: member.id,

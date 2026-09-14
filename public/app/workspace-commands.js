@@ -239,9 +239,15 @@ export function createWorkspaceCommands({
     if (moved) saveWorkspaceView();
   }
 
+  /** The one place the workspace goes to a folder it is not already in.
+   *
+   * It takes any folder id, including the workspace root, which is a synthetic
+   * id with no group record behind it - the root breadcrumb navigates with
+   * exactly this call. activateItem() reaches it only for an id it can find as
+   * a group, which is why a caller whose destination may be the root (Quick
+   * Run's reveal) names this command instead. */
   function navigateToFolder(folderId) {
-    const session = store.getSession();
-    if (session.binMode) {
+    const session = store.getSession();    if (session.binMode) {
       // Drilling into a binned folder stays inside the Bin — it must never
       // jump to the real explorer, since the folder (and everything under
       // it) is still hidden there and would just show up empty.
@@ -255,7 +261,6 @@ export function createWorkspaceCommands({
     render();
     saveWorkspaceView({ persistSurfaceLocation: !session.binMode });
   }
-
   async function launchShortcut(itemId) {
     closeMenu();
     try {
@@ -624,6 +629,7 @@ export function createWorkspaceCommands({
     updateMarqueeSelection,
     finishMarqueeSelection,
     activateItem,
+    goToFolder: navigateToFolder,
     revealSelection,
     activateSelection,
     copySelection,

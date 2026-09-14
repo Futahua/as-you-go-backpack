@@ -1,0 +1,192 @@
+/*
+ * Quick Run — the surface itself.
+ *
+ * The feature shipped behaviourally complete and visually absent: the markup declared
+ * .quick-run-layer, -input, -chips, -results, -cap and -notice, and no stylesheet mentioned any of them.
+ * The layer therefore rendered as a static, transparent, in-flow block at the top-left of the workspace,
+ * underneath the absolutely-positioned graph viewport - painted, but impossible to click, hover or scroll,
+ * because every pointer event at those coordinates hit #graph-viewport instead. This file is the surface
+ * those elements were always meant to have.
+ *
+ * Placement is a judgement call, not a measurement: a command surface belongs near the top, over the
+ * workspace, and out of the way of the floating toolbars at the top-left, so this is centred with a
+ * bounded width. z-index 60 is deliberately between the workspace content and the modal layers: above the
+ * graph viewport (0), items (2) and the toolbars (20/40), and below the context menu (100) and the dialogs
+ * (120/130) - a right-click menu or a dialog must still be able to appear over Quick Run.
+ *
+ * Colours come from tokens.css and nothing here is a literal, so the dark theme is not a second file.
+ */
+
+.quick-run-layer {
+  position: absolute;
+  z-index: 60;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(680px, calc(100% - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: 0 18px 40px var(--shadow);
+}
+
+.quick-run-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+
+.quick-run-input::placeholder {
+  color: var(--text-faint);
+}
+
+.quick-run-input:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+/* The chips are a filter strip, not a toolbar: small, quiet, and the active one carries the accent. */
+.quick-run-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 12px;
+  list-style: none;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.quick-run-chip {
+  padding: 2px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  user-select: none;
+}
+
+.quick-run-chip.active {
+  border-color: var(--accent-border-soft);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/*
+ * The list scrolls, and that is load-bearing: section 6.3 leaves scrolling to the list while the wheel
+ * moves the highlight with it (quick-run-surface.js). A list that could not scroll would make that rule
+ * vacuous, so the height bound below is what gives the wheel something to do.
+ */
+.quick-run-results {
+  margin: 0;
+  padding: 4px 0;
+  max-height: 320px;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.quick-run-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* The measured row height when a wheel delta is turned into rows; QUICK_RUN_WHEEL_ROW_HEIGHT_PX in
+     quick-run-surface.js is the fallback for a caller without layout. Change one and change the other. */
+  min-height: 24px;
+  padding: 3px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.quick-run-result[data-quick-run-hovered="true"] {
+  background: var(--item-surface-hover);
+}
+
+/* The keyboard highlight is the one that Enter runs, so it is the one that reads as selected. */
+.quick-run-result.highlighted,
+.quick-run-result.highlighted[data-quick-run-hovered="true"] {
+  background: var(--selection);
+}
+
+.quick-run-result.highlighted .quick-run-name {
+  color: var(--text);
+}
+
+/*
+ * The icon is a kind, not artwork (section 1.2): the row carries an icon kind and the picture is
+ * presentation, so each kind gets a plain shape rather than a coloured glyph the contract never fixed.
+ */
+.quick-run-icon {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--surface-soft);
+}
+
+.quick-run-icon-folder {
+  background: var(--folder-top);
+  border-color: var(--folder-body);
+}
+
+.quick-run-icon-link {
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border-color: var(--accent-border-soft);
+}
+
+.quick-run-icon-shortcut {
+  background: var(--icon-surface);
+}
+
+.quick-run-icon-layout-item {
+  border-radius: 2px;
+  background: var(--surface-muted);
+}
+
+.quick-run-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Section 1.2's faint trailing breadcrumb: quiet, right-aligned, and never wider than it needs to be. */
+.quick-run-breadcrumb {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-run-cap,
+.quick-run-notice {
+  margin: 0;
+  padding: 7px 14px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* The no-matches line is an answer, not a footnote: it gets room so a blank layer cannot read as a stall. */
+.quick-run-notice {
+  padding: 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+}

@@ -134,7 +134,7 @@ test('every v1 prohibition has a named holder', () => {
     ['Embeddings/vector search', 'no embedding, vector, cosine or similarity reference'],
     ['Prompt/verb syntax in the query', 'the query is normalised text matched against names; the query path is scanned for verb parsing'],
     ['Command verbs inside the Tab filter cycle', 'the cycle is the five fixed contract names, asserted in quick-run-types.test.mjs'],
-    ['Launch-a-shortcut-and-then-capture-its-new-window behavior for Shift+Enter', 'Shift+Enter plans a layout membership and nothing captures a window'],
+    ['Launch-a-shortcut-and-then-capture-its-new-window behavior for Shift+Enter', 'the gesture was cut on 2026-09-13 (see papers/quick-run.md): after the cut no key, no plan and no write exist for it, so nothing can capture a window'],
     ['Worker architecture before profiling proves it necessary', 'no worker, thread or message passing anywhere in the feature'],
     ['New search dependency/library before the pure matcher has been measured', 'the modules import each other and two model helpers, and nothing else'],
   ];

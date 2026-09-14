@@ -11,6 +11,9 @@
  *   and nothing else, so no create/move/launch/select/navigate/persist can ride along with it;
  * - closing clears the query, the highlight, the rows and the filter — a reopened session starts empty
  *   rather than resuming a previous search.
+ * - when an action finds its target gone, `quickRunSessionRefreshed` rebuilds the snapshot from the current
+ *   state, keeping the query and the filter and moving the highlight to the nearest survivor, so a dead row
+ *   is replaced rather than left to be hit again.
  * - the rows it holds are **at most QUICK_RUN_MAX_PAINTED_ROWS of the matches**, because one keystroke can
  *   rank thousands of them and the surface paints every row it is handed. `totalRows` keeps the honest match
  *   count and `capped` says the list on screen is a prefix of it.
@@ -133,16 +136,51 @@ export function quickRunSessionAfterTab(session, direction = 1) {
   return quickRunSessionWithFilter(session, nextAvailableFilter(session.filter, direction, offered));
 }
 
-/** ArrowUp and ArrowDown, which move the highlight without changing the result set. */
+/** ArrowUp and ArrowDown: one row at a time, clamped at both ends. */
 export function quickRunSessionAfterArrow(session, delta) {
+  return quickRunSessionAfterScroll(session, delta < 0 ? -1 : 1);
+}
+
+/**
+ * The same movement, by a count of rows, for a caller whose step is more than one row.
+ *
+ * The wheel is that caller, and the arithmetic is deliberately here rather than in the surface: how far the
+ * highlight travels is session knowledge (the highlighted row is a member of the painted list), while how
+ * many rows a wheel notch is worth is layout knowledge the surface owns. Clamped, never wrapped, so a flick
+ * cannot leave the reader somewhere the arrow keys would not go.
+ */
+export function quickRunSessionAfterScroll(session, rows) {
   if (!session.open || session.rows.length === 0) return session;
+  const step = Number.isFinite(rows) ? Math.trunc(rows) : 0;
+  if (step === 0) return session;
   const index = session.rows.findIndex((row) => row.resultKey === session.highlightKey);
   const from = index === -1 ? 0 : index;
-  const next = Math.min(Math.max(from + (delta < 0 ? -1 : 1), 0), session.rows.length - 1);
+  const next = Math.min(Math.max(from + step, 0), session.rows.length - 1);
   return { ...session, highlightKey: session.rows[next].resultKey };
 }
 
 /** Closing: everything the session held is gone, and nothing else is produced. */
 export function closeQuickRunSession() {
   return closedQuickRunSession();
+}
+
+/**
+ * The same session rebuilt from the current workspace state, after an action found its target gone.
+ *
+ * This is the recovery half of section 5. Re-reading the target protects the *action* - a stale payload is
+ * never executed - but on its own it left the dead row on screen for the reader to hit again, which is a
+ * loop rather than an answer. So the snapshot is rebuilt from the state that just refused the row, the
+ * query and the filter the reader chose are kept, and the highlight moves to the **nearest survivor**: the
+ * row that now occupies the position the vanished one held, or the last row when the list got shorter.
+ *
+ * The filter is re-resolved rather than forced, so a filter the new state has emptied falls back to All by
+ * the same rule a keystroke uses. Rows are still capped, so this cannot paint more than a session may hold.
+ */
+export function quickRunSessionRefreshed(session, state) {
+  if (!session?.open) return session;
+  const previousIndex = session.rows.findIndex((row) => row.resultKey === session.highlightKey);
+  const wanted = previousIndex === -1 ? 0 : previousIndex;
+  const refreshed = withResults({ ...session, allRows: quickRunRows(state) }, session.query, session.filter);
+  if (refreshed.rows.length === 0) return refreshed;
+  return { ...refreshed, highlightKey: refreshed.rows[Math.min(wanted, refreshed.rows.length - 1)].resultKey };
 }

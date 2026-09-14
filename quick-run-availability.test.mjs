@@ -14,7 +14,7 @@ import {
 } from './public/app/quick-run/quick-run-presentation.js';
 import { availabilityAfterResolution } from './public/app/quick-run/quick-run-resolution.js';
 
-const layoutState = (title = 'Chrome') => ({
+const layoutState = (title = 'Chrome', executableFingerprint = 'a'.repeat(64)) => ({
   groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
   shortcuts: [],
   windowLayouts: [
@@ -22,7 +22,7 @@ const layoutState = (title = 'Chrome') => ({
       id: 'l-1',
       parentId: 'g-root',
       name: 'Focus',
-      arrangement: { members: [{ id: 'm-1', descriptor: { title } }] },
+      arrangement: { members: [{ id: 'm-1', descriptor: { title, executableFingerprint } }] },
     },
   ],
 });
@@ -30,16 +30,38 @@ const layoutState = (title = 'Chrome') => ({
 const viewsOf = (state, noted) => quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(state), 'chrome'), noted);
 const viewFor = (state, noted) => viewsOf(state, noted)[0];
 
+// The identity a caller notes an answer against is the one the view hands it: the row's own descriptor
+// key, which is what the presentation layer compares when it decides whether the answer still describes
+// this row. Nothing here re-derives it from the display name.
 const note = (state, availability) => {
   const row = viewsOf(state, undefined)[0];
-  return { [row.key]: { availability, descriptor: quickRunDescriptorFingerprint({ ...row, ...rowIdentity(state) }) } };
+  return { [row.key]: { availability, descriptor: quickRunDescriptorFingerprint(row) } };
 };
 
-/** The fields the fingerprint reads, taken from the state because a view carries the display name only. */
-function rowIdentity(state) {
-  const member = state.windowLayouts[0].arrangement.members[0];
-  return { layoutId: 'l-1', memberId: member.id, name: member.descriptor.title };
-}
+test('the identity a note is kept against is the persisted descriptor, not the name or the occurrence', () => {
+  const both = viewsOf(layoutState(), undefined)[0];
+  assert.equal(both.descriptorKey, `Chrome\u0000${'a'.repeat(64)}`, 'title and fingerprint, in the model order');
+  assert.equal(quickRunDescriptorFingerprint(both), both.descriptorKey, 'and that is what a note records');
+
+  // A member that declares only a title is identified by that title alone, because that is all it declares.
+  // (An empty fingerprint is not a declared one: the model persists a 64-hex value or nothing at all.)
+  const titled = viewsOf(layoutState('Chrome', ''), undefined)[0];
+  assert.equal(titled.descriptorKey, 'Chrome');
+  // A member that declares nothing is not identified by its display name.
+  const bareState = {
+    groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
+    shortcuts: [],
+    windowLayouts: [{
+      id: 'l-1',
+      parentId: 'g-root',
+      name: 'Focus',
+      arrangement: { members: [{ id: 'm-1', descriptor: {} }] },
+    }],
+  };
+  const bare = quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(bareState), 'untitled'), undefined)[0];
+  assert.equal(bare.descriptorKey, '', 'no declared identity is an empty key, not the name it happens to show');
+  assert.equal(bare.primary, 'Untitled window', 'even though the row still has a name to draw');
+});
 
 test('an untouched layout item is unknown, and nothing else has availability at all', () => {
   const folderState = layoutState();
@@ -79,6 +101,22 @@ test('a descriptor change resets the noted answer to unknown (section 10.5)', ()
     viewFor(retitled, noted).availability,
     'unknown',
     'a member whose title changed is treated as a different window, so the prior answer does not survive it',
+  );
+});
+
+test('a fingerprint change under the same title resets it too (section 10.5)', () => {
+  // The defect this holds: the fingerprint used to be `layoutId + memberId + name`, so a member whose
+  // executable fingerprint changed while its title stayed the same kept the availability that belonged to
+  // a different window - the one field the persisted descriptor exists to distinguish.
+  const state = layoutState();
+  const noted = note(state, availabilityAfterResolution('unique'));
+  assert.equal(viewFor(state, noted).availability, 'available');
+
+  const refingerprinted = layoutState('Chrome', 'b'.repeat(64));
+  assert.equal(
+    viewFor(refingerprinted, noted).availability,
+    'unknown',
+    'same title, different executable fingerprint: a different window, and no stale answer',
   );
 });
 

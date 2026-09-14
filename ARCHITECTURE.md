@@ -24,7 +24,22 @@ clear responsibility lives in a module.
 | Compatibility composition | `public/workspace-20260730b.js` |
 | Quick Run search (filter vocabulary and cycle, the searchable universe, the index, the session, what the surface draws) | `public/app/quick-run/quick-run-types.js`, `quick-run-search.js`, `quick-run-index.js`, `quick-run-session.js`, `quick-run-presentation.js`, `quick-run-surface.js`, `quick-run-activation.js` |
 | Quick Run layout-item resolution (the fail-closed decision that names one window or refuses, and the ephemeral availability the surface shows) | `public/app/quick-run/quick-run-resolution.js`, `quick-run-presentation.js` |
-| Quick Run workspace binding (what Enter, Shift+Enter and Ctrl+Enter execute against the workspace, and the close-on-success rule) | `public/app/quick-run/quick-run-workspace.js` |
+| Quick Run workspace binding (what Enter and Ctrl+Enter execute against the workspace, and the close-on-success rule) | `public/app/quick-run/quick-run-workspace.js` |
+| Quick Run presentation (the palette, its chips, rows and two sentences) | `public/styles/quick-run.css`, imported by `public/workspace-20260730b.css` |
+
+Quick Run writes no workspace state. Its binding is handed commands, the state reader, the visible ids and
+the status line, and nothing else: Shift+Enter (add to the active layout) was cut on 2026-09-13 rather than
+repaired, because its only write installed state in memory without committing it, so a surface without
+document-write authority could report success after a refused write. The gesture has no key, no plan and no
+notice; `quick-run-entry.test.mjs` fails if any of them comes back, and `papers/quick-run.md` carries the
+cut note.
+
+The palette is an overlay (`z-index: 60`: above the graph viewport and toolbars, below the context menu and
+dialogs). That is not decoration — measured in the real host before `public/styles/quick-run.css` existed,
+the layer computed to a static transparent block underneath the absolutely-positioned `#graph-viewport`, so
+its rows were painted but every pointer event at their coordinates hit the graph. `quick-run-style.test.mjs`
+holds the layering, the scrollable list, the row height the wheel arithmetic falls back to, and the rule
+that keeps `[hidden]` able to hide a `display: flex` layer.
 
 ## Quick Run's paint cap
 

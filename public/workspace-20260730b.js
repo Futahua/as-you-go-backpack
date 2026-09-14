@@ -5256,6 +5256,11 @@ const setMembershipMode = createSetMembershipMode({
 // in dom.js namespaces its keys (quickRunLayer, quickRunInput, ...) while the surface takes the handles it
 // paints - and the collaborators this file owns, so a mismatch in the adapter is still the
 // one thing quick-run-entry.test.mjs checks against both files.
+//
+// The binding is handed commands, the state reader, the visible ids and the status line, and nothing else:
+// it is not given this file's workspace store or this file's render or the window-layout helpers, because
+// nothing Quick Run does writes workspace state. Shift+Enter used to, through an in-memory replace, and was
+// cut rather than repaired (see public/app/quick-run/quick-run-activation.js and papers/quick-run.md).
 const quickRun = bindQuickRunWorkspace({
   document,
   elements: {
@@ -5266,14 +5271,10 @@ const quickRun = bindQuickRunWorkspace({
     results: elements.quickRunResults,
     notice: elements.quickRunNotice,
   },
-  store,
   commands,
   getState: () => state,
   getVisibleItemIds: visibleItemIds,
   setStatus,
-  render: () => render(),
-  windowLayout,
-  addWindowLayoutMember,
 });
 
 const keyboard = createKeyboardController({

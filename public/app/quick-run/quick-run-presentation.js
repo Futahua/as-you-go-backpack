@@ -9,7 +9,8 @@
  * - duplicate names are allowed and expected when breadcrumbs differ, so nothing here de-duplicates: two
  *   placements of one shortcut are two rows that happen to share a primary name;
  * - the **cap line** (below) is a sentence this module owns, so the surface paints a string it was handed
- *   rather than composing copy of its own.
+ *   rather than composing copy of its own, and the **no-matches line** is the same arrangement: a query
+ *   that matches nothing says so instead of leaving a blank layer that reads like a stall.
  *
  * The icon is a *kind* rather than a glyph: the contract says a row has an icon, and glyph choice is
  * presentation, so the surface picks the picture from the kind it is given.
@@ -29,6 +30,11 @@ const ICON_BY_TYPE = Object.freeze({
  * longer describes the row. That last part is section 10.5's reset rule and it is why an entry carries the
  * descriptor it was noted against rather than only the state: a member whose descriptor changed is a
  * different window as far as anything here can tell, so the prior answer must not survive it.
+ *
+ * The descriptor it carries is the one the model persists - `title` plus `executableFingerprint`, the
+ * fields `descriptorIdentityKey` reads - and not the occurrence ids or the display name. An earlier version
+ * of this function fingerprinted `layoutId + memberId + name`, which meant a member whose executable
+ * fingerprint changed while its title stayed the same kept the answer that belonged to a different window.
  */
 export function quickRunAvailabilityFor(noted, row) {
   if (row?.type !== 'layout-item') return null;
@@ -38,9 +44,9 @@ export function quickRunAvailabilityFor(noted, row) {
   return entry.availability;
 }
 
-/** The part of a row a noted availability belongs to: the occurrence and the descriptor it was seen with. */
+/** The identity a noted availability belongs to: what the persisted descriptor declares, and nothing else. */
 export function quickRunDescriptorFingerprint(row) {
-  return [row?.layoutId ?? null, row?.memberId ?? null, row?.name ?? null].join('\u0000');
+  return typeof row?.descriptorKey === 'string' ? row.descriptorKey : '';
 }
 
 /** The rows to draw, in the order the session ranked and highlighted them. */
@@ -55,6 +61,9 @@ export function quickRunRowViews(session, noted) {
     // starts at 'unknown' rather than 'Not running'. A noted resolution may answer otherwise, and only
     // while the descriptor it was noted against still describes the row.
     availability: quickRunAvailabilityFor(noted, row),
+    // Carried out to the caller so it can note an answer against the same identity this module compares:
+    // a caller that had to re-derive it from the display name would be inventing a second vocabulary.
+    descriptorKey: typeof row.descriptorKey === 'string' ? row.descriptorKey : null,
   }));
 }
 
@@ -85,4 +94,22 @@ export function quickRunCapNotice(session) {
 /** 12213 -> "12,213", with no locale to vary and no Intl object to construct. */
 function groupDigits(value) {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/**
+ * The no-matches line, as data, or `null` when there is nothing to say.
+ *
+ * A non-empty query that matches nothing used to draw a completely blank layer: no rows, no chips, no
+ * line. On a slow machine that is indistinguishable from a surface that has not answered yet, which is
+ * the one thing a search line must never look like. So the empty result gets a sentence of its own.
+ *
+ * It is drawn only for a live query. An empty query shows nothing by design (there is no home screen), and
+ * a closed session shows nothing at all - neither of those is a failed search, and neither should claim to
+ * be one. The query is quoted exactly as the reader typed it, because that is what did not match.
+ */
+export function quickRunEmptyNotice(session) {
+  if (session?.open !== true) return null;
+  if (typeof session.query !== 'string' || session.query.trim() === '') return null;
+  if (session.rows.length > 0) return null;
+  return { text: `No matches for “${session.query.trim()}”.` };
 }
