@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { closeQuickRunSession, openQuickRunSession, quickRunSessionWithQuery } from './public/app/quick-run/quick-run-session.js';
-import { mountQuickRun, paintQuickRunSurface } from './public/app/quick-run/quick-run-surface.js';
+import { mountQuickRun, paintQuickRunSurface, QUICK_RUN_WHEEL_SCROLL_WINDOW_MS } from './public/app/quick-run/quick-run-surface.js';
 
 const state = {
   groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
@@ -368,7 +368,184 @@ test('the highlighted row is brought into view on movement, and typing never for
   assert.deepEqual(scrolled(), ['shortcut:p-1'], 'an arrow brings the new highlight into view, not merely marks it');
 
   elements.layer.fire('wheel', { deltaY: 48 });
-  assert.deepEqual(scrolled(), ['shortcut:p-3'], 'the wheel brings its row into view too');
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-3', 'the wheel still moves the highlight with the list');
+  assert.deepEqual(
+    scrolled(),
+    [],
+    'but the wheel adds no scroll of its own: the browser is already scrolling by the same travel, and a reveal here would emit a scroll event that could not be told from a manual drag',
+  );
+});
+
+/** Elements whose list can scroll, so a wheel event is credited with the scroll it is about to cause. */
+function scrollableElements() {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  elements.results.scrollTop = 0;
+  elements.results.clientHeight = 240;
+  elements.results.scrollHeight = 1448;
+  return { document, elements };
+}
+
+/** A mounted, open, typed surface over a scrollable list. */
+function mountedOn(state) {
+  const { document, elements } = scrollableElements();
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+  return { quickRun, elements };
+}
+
+/* Fractional wheel travel belongs to the baseline it was measured against - a list, a highlight and a scroll
+   position. Every non-wheel operation that establishes a new one discards it; the wheel's own scrolling
+   keeps it, which is the whole point of accumulating. Each wheel event that moves the list is followed by
+   the scroll event a browser emits for it, because that is what the credits are matched against. */
+
+test('a filter change discards fractional wheel travel (section 6.3)', () => {
+  const { quickRun, elements } = mountedOn(crowdedState(40));
+  elements.layer.fire('wheel', { deltaY: 20 });
+  elements.results.fire('scroll', {});
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-0', '20 px of a 24 px row moves nothing');
+
+  elements.layer.fire('keydown', { key: 'Tab', preventDefault() {} });
+  assert.equal(quickRun.session().filter, 'Shortcuts', 'the filter changed, so the list did too');
+
+  elements.layer.fire('wheel', { deltaY: 4 });
+  assert.equal(
+    quickRun.session().highlightKey,
+    quickRun.session().rows[0].resultKey,
+    'and 4 px of travel left over from before the change cannot complete a row',
+  );
+});
+
+test('arrow movement discards fractional wheel travel (section 6.3)', () => {
+  const { quickRun, elements } = mountedOn(crowdedState(40));
+  elements.layer.fire('wheel', { deltaY: 20 });
+  elements.results.fire('scroll', {});
+
+  elements.layer.fire('keydown', { key: 'ArrowDown', preventDefault() {} });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-1', 'the arrow moved one row');
+
+  elements.layer.fire('wheel', { deltaY: 4 });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-1', 'and 4 px of stale travel cannot move another');
+});
+
+test('a refreshed snapshot discards fractional wheel travel (section 6.3)', () => {
+  let state = crowdedState(40);
+  const { document, elements } = scrollableElements();
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+  elements.layer.fire('wheel', { deltaY: 20 });
+  elements.results.fire('scroll', {});
+
+  state = { ...state, shortcuts: state.shortcuts.slice(1) };
+  const refreshed = quickRun.refresh();
+  assert.equal(refreshed.rows.length, 39, 'the refreshed list is the current state');
+
+  elements.layer.fire('wheel', { deltaY: 4 });
+  assert.equal(quickRun.session().highlightKey, refreshed.highlightKey, 'the stale 20 px went with the old baseline');
+});
+
+test("the wheel's own scrolling keeps fractional travel, however many scroll events it produces (section 6.3)", () => {
+  // Measured in the host: one 20 px wheel event produced five scroll events (scroll positions 1, 6, 12, 17,
+  // 20), because the wheel's scrolling is animated. Pairing one credit per wheel event with one scroll event
+  // read the extra four as manual drags and threw the accumulation away.
+  let clock = 0;
+  const { document, elements } = scrollableElements();
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(40), now: () => clock });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+
+  elements.layer.fire('wheel', { deltaY: 20 });
+  for (let index = 0; index < 5; index += 1) {
+    clock += 20;
+    elements.results.fire('scroll', {});
+  }
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-0', 'the wheel scrolled without completing a row');
+
+  clock += 20;
+  elements.layer.fire('wheel', { deltaY: 4 });
+  elements.results.fire('scroll', {});
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-1', 'the accumulated 24 px moved exactly one row');
+});
+
+test('a drag that begins right after a wheel still discards fractional travel (section 6.3)', () => {
+  // The case the recency window alone cannot decide, and which the host produced: the reader wheels 20 px and
+  // grabs the scrollbar immediately, so the drag's scroll events arrive while the wheel's own animated
+  // scrolling is still inside the window. The press is what settles it - measured in the host, a real
+  // scrollbar drag delivers pointerdown with the list itself as the target.
+  let clock = 0;
+  const { document, elements } = scrollableElements();
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(40), now: () => clock });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+
+  elements.layer.fire('wheel', { deltaY: 20 });
+  clock += 30;
+  elements.results.fire('pointerdown', {});
+  elements.results.fire('scroll', {});
+  elements.results.fire('pointerup', {});
+  clock += 10;
+  assert.ok(clock < QUICK_RUN_WHEEL_SCROLL_WINDOW_MS, 'the whole drag happened inside the wheel window');
+  elements.layer.fire('wheel', { deltaY: 4 });
+  assert.equal(
+    quickRun.session().highlightKey,
+    'shortcut:p-0',
+    'the press, not the clock, decided that this scroll was manual',
+  );
+});
+
+test('a press and release that straddle the scroll they cause still count as manual (section 6.3)', () => {
+  // The host's own ordering, measured page-side: pointerdown at 8992 ms, pointerup at 8994 ms, and the
+  // scroll the press caused at 8995 ms - a click on the scrollbar track, whose press is over before its
+  // scroll arrives. A press therefore has to mark the next scroll as manual even though it is no longer down.
+  let clock = 0;
+  const { document, elements } = scrollableElements();
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(40), now: () => clock });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+
+  elements.layer.fire('wheel', { deltaY: 20 });
+  clock += 30;
+  elements.results.fire('pointerdown', {});
+  elements.results.fire('pointerup', {});
+  elements.results.fire('scroll', {}); // the jump the press caused, arriving after the release
+  clock += 10;
+  elements.layer.fire('wheel', { deltaY: 4 });
+  assert.equal(
+    quickRun.session().highlightKey,
+    'shortcut:p-0',
+    'the press marked the scroll that followed it, so the stale 20 px is gone',
+  );
+});
+
+test('a manual scroll discards fractional wheel travel (section 6.3)', () => {
+  let clock = 0;
+  const { document, elements } = scrollableElements();
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(40), now: () => clock });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+
+  elements.layer.fire('wheel', { deltaY: 20 });
+  elements.results.fire('scroll', {}); // the wheel's own scroll, inside the window
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-0', '20 px of a 24 px row moves nothing');
+
+  // The wheel's scrolling is over, so the next scroll is somebody else's: a dragged scrollbar or a touch
+  // scroll. It is a new scroll baseline, and the travel owed to the old one goes with it.
+  clock += QUICK_RUN_WHEEL_SCROLL_WINDOW_MS + 1;
+  elements.results.fire('scroll', {});
+  elements.layer.fire('wheel', { deltaY: 4 });
+  assert.equal(
+    quickRun.session().highlightKey,
+    'shortcut:p-0',
+    'the stale 20 px cannot complete a row on 4 px of travel after a manual scroll',
+  );
 });
 
 test('a keystroke touches no scroll box, and the list resets to its top once the reader has scrolled', () => {

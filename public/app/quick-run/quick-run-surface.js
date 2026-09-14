@@ -24,6 +24,15 @@
  *   forces the layout the paint cap exists to keep out of the keystroke (measured: forcing it there took the
  *   integrated harness from p95 4.3 ms to 8.1 ms). The list's own scroll event feeds that same bookkeeping,
  *   so a dragged scrollbar counts as the reader having scrolled.
+ * - **Fractional wheel travel belongs to one baseline.** A row moves on the *sum* of the travel a gesture has
+ *   delivered, which means something has to hold the remainder between events — and something has to throw it
+ *   away when the list, the highlight or the scroll position is replaced by anything other than the wheel.
+ *   Every such operation does: typing, arrows, Tab, a refresh, opening and closing. The awkward case is a
+ *   manual scroll (a dragged scrollbar, a touch scroll), because the wheel's own scrolling arrives as scroll
+ *   events too — and, measured in the host, a *single* 20 px wheel produces five of them, so counting scroll
+ *   events against wheel events does not work. A press on the list is the signal that distinguishes them: the
+ *   wheel has no pointer, and a press marks the scroll it causes even when it is released before that scroll
+ *   arrives (a track click, measured at 2 ms of press followed by its scroll).
  * - **Nothing is drawn for a state that has nothing to say.** An empty query shows no home screen, an
  *   uncapped list shows no cap line, and a query that matches draws the no-matches line rather than a
  *   blank layer that reads like a stall.
@@ -104,14 +113,21 @@ function revealHighlightedRow(elements) {
  * things — the cap line is about the list being longer than what is shown, the no-matches line is about
  * there being no list at all — and each appears only while it is true.
  *
- * The list's own scroll position is handled by `keepScroll` and `resetScroll`. A repaint that follows a
- * *movement* inside the list (arrow, wheel, Tab, a refreshed snapshot) keeps where the reader was and
- * brings the moved highlight into view. A repaint that follows typing resets the new list to its own top,
- * so the row the highlight moved to is the first thing on screen. Neither is done unless it is needed:
- * reading or writing a scroll box forces style-and-layout, and the keystroke path is the one the
- * integrated harness measures, so the mount only asks for the reset once the reader has actually scrolled.
+ * The list's own scroll position is handled by `keepScroll`, `resetScroll` and `reveal`. A repaint that
+ * follows a *movement* inside the list (arrow, Tab, a refreshed snapshot) keeps where the reader was and
+ * brings the moved highlight into view. A repaint that follows typing resets the new list to its own top, so
+ * the row the highlight moved to is the first thing on screen. The wheel path keeps the reader's position
+ * but does *not* reveal: the browser's own scroll moves the viewport by exactly the travel the highlight
+ * moves by, so they stay in step without help — and, more importantly, a reveal of our own would emit a
+ * scroll event that could not be told from a manual drag (see the mount's scroll bookkeeping).
+ *
+ * Neither is done unless it is needed: reading or writing a scroll box forces style-and-layout, and the
+ * keystroke path is the one the integrated harness measures, so the mount only asks for the reset once the
+ * reader has actually scrolled.
  */
-export function paintQuickRunSurface({ document, elements, session, onRowClick, keepScroll = false, resetScroll = false }) {
+export function paintQuickRunSurface({
+  document, elements, session, onRowClick, keepScroll = false, resetScroll = false, reveal = false,
+}) {
   elements.layer.hidden = !session.open;
   if (elements.notice) {
     const empty = quickRunEmptyNotice(session);
@@ -147,9 +163,24 @@ export function paintQuickRunSurface({ document, elements, session, onRowClick, 
   const scrollTop = canScroll && keepScroll ? elements.results.scrollTop : 0;
   elements.results.replaceChildren(...rows);
   if (canScroll) elements.results.scrollTop = scrollTop;
-  if (keepScroll) revealHighlightedRow(elements);
+  if (reveal) revealHighlightedRow(elements);
   return rows.length;
 }
+
+/**
+ * How long after a wheel event the list's own scrolling is still attributed to that wheel.
+ *
+ * This exists because the wheel's scrolling is animated: measured in the host, one 20 px wheel event
+ * produced FIVE scroll events (scroll positions 1, 6, 12, 17, 20), so pairing one credit per wheel event with
+ * one scroll event read the extra four as manual drags and threw away the fractional travel the accumulation
+ * depends on. A window covers however many scroll events the animation produces. It is a timestamp
+ * comparison rather than a timer: nothing here schedules work.
+ *
+ * The cost of the window is that a manual scroll begun within it is attributed to the wheel once, which
+ * keeps at most one sub-row of travel. Everything else that establishes a baseline - typing, arrows, Tab, a
+ * refresh, opening and closing - discards the remainder exactly, with no window involved.
+ */
+export const QUICK_RUN_WHEEL_SCROLL_WINDOW_MS = 400;
 
 /**
  * The two lengths a wheel delta is measured against: how tall a painted row is, and how much of the list
@@ -192,7 +223,7 @@ function wheelPixels(event, { rowHeight, viewportHeight }) {
  * lives here, where a test can drive it with element mocks instead of by launching the app.
  */
 export function mountQuickRun(input) {
-  const { document, elements, getState, onActivate, onReveal } = input ?? {};
+  const { document, elements, getState, onActivate, onReveal, now = () => Date.now() } = input ?? {};
   if (!document || !elements || typeof getState !== 'function') {
     throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
   }
@@ -202,13 +233,36 @@ export function mountQuickRun(input) {
   // this flag, an ordinary typed character touches the scroll box not at all, and the reset happens only
   // when there is something to reset.
   let listScrolled = false;
-  // Wheel travel that has not yet added up to a whole row (see the wheel handler below).
+  // Wheel travel that has not yet added up to a whole row (see the wheel handler below). It belongs to the
+  // baseline it was measured against - a particular list, highlight and scroll position - so every non-wheel
+  // operation that establishes a new one discards it. Kept across a wheel's own scrolling, which is the
+  // whole point of accumulating: a touchpad gesture arrives as a stream of small deltas and their sum is
+  // what moves a row.
   let wheelRemainderPx = 0;
+  // When the wheel last ran, so the scrolling it causes can be told from a manual drag or touch scroll. The
+  // wheel's scrolling is animated and arrives as several scroll events; a window covers all of them.
+  let lastWheelAt = Number.NEGATIVE_INFINITY;
+  // Whether a press on the list is currently under way: a scrollbar drag or a touch scroll, as opposed to the
+  // wheel, which has no pointer. Set by the listeners below.
+  let manualScrollUnderway = false;
+  // Whether a press has ended but the scroll it caused has not arrived yet. Both flags exist because the
+  // press and its scroll are not simultaneous: measured in the host, a track click's press and release span
+  // two milliseconds and the scroll it causes lands AFTER the release. A press therefore marks the next
+  // scroll as manual whether or not it is still down when that scroll arrives.
+  let manualScrollPending = false;
   // Section 6.4: one execution implementation, reached from the keyboard and the pointer alike.
   const activate = (key) => { if (key && typeof onActivate === 'function') onActivate(key); };
   const highlighted = () => (typeof session.highlightKey === 'string' ? session.highlightKey : null);
+  /** A new selection, list or scroll baseline, established by something other than the wheel. */
+  const newBaseline = () => {
+    wheelRemainderPx = 0;
+    lastWheelAt = Number.NEGATIVE_INFINITY;
+    manualScrollUnderway = false;
+    manualScrollPending = false;
+  };
   const paint = (options = {}) => {
     const keepScroll = options.keepScroll === true;
+    const reveal = options.reveal === true;
     const resetScroll = !keepScroll && listScrolled;
     const drawn = paintQuickRunSurface({
       document,
@@ -217,6 +271,7 @@ export function mountQuickRun(input) {
       onRowClick: activate,
       keepScroll,
       resetScroll,
+      reveal,
     });
     if (keepScroll) listScrolled = true;
     else if (resetScroll) listScrolled = false;
@@ -226,29 +281,54 @@ export function mountQuickRun(input) {
   elements.input.addEventListener('input', () => {
     // A new query is a new list: any part of a wheel gesture still owed to the old one is dropped, and the
     // painted list starts at its own top.
-    wheelRemainderPx = 0;
+    newBaseline();
     session = quickRunSessionWithQuery(session, elements.input.value);
     paint();
   });
 
   // The list is natively scrollable, so a dragged scrollbar or a touch scroll moves it without any repaint
-  // of ours. The dirty flag has to come from the element's own scroll event as well, or typing after such a
-  // scroll would leave the newly highlighted row above the viewport - the list was scrolled, and only the
-  // flag knows it. It stays false for a session the reader never scrolls, which is what keeps the keystroke
-  // path free of the layout flush this flag exists to avoid.
-  elements.results.addEventListener?.('scroll', () => { listScrolled = true; });
+  // of ours. Two things have to come from the element's own scroll event: the dirty flag, or typing after
+  // such a scroll would leave the newly highlighted row above the viewport; and the distinction between that
+  // manual scroll and the wheel's own, because the wheel's scrolling must not discard the fractional travel
+  // this file accumulates.
+  elements.results.addEventListener?.('scroll', () => {
+    listScrolled = true;
+    if (manualScrollUnderway || manualScrollPending) {
+      manualScrollPending = false;
+      wheelRemainderPx = 0;
+      return;
+    }
+    if (now() - lastWheelAt < QUICK_RUN_WHEEL_SCROLL_WINDOW_MS) return;
+    wheelRemainderPx = 0;
+  });
+
+  // A drag on the scrollbar, or a touch scroll, begins with a press on the list: measured in the host, a real
+  // scrollbar drag delivers pointerdown with the list itself as the target. That press is the exact signal,
+  // and it is what makes a drag distinguishable from the wheel's own animated scrolling even when it starts
+  // while that animation is still running - which the recency window alone cannot do. The wheel has no
+  // pointer at all, so it never arms this; and the wheel clears both flags, so a missed pointerup heals
+  // itself and cannot leave the remainder permanently discarded.
+  elements.results.addEventListener?.('pointerdown', () => {
+    manualScrollUnderway = true;
+    manualScrollPending = true;
+  });
+  elements.results.addEventListener?.('pointerup', () => { manualScrollUnderway = false; });
+  elements.results.addEventListener?.('pointercancel', () => { manualScrollUnderway = false; });
 
   elements.layer.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       if (event.preventDefault) event.preventDefault();
+      newBaseline();
       session = closeQuickRunSession();
       paint();
       return;
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       if (event.preventDefault) event.preventDefault();
+      // A new row is a new baseline: travel still owed to the wheel belonged to the row the reader just left.
+      newBaseline();
       session = quickRunSessionAfterArrow(session, event.key === 'ArrowDown' ? 1 : -1);
-      paint({ keepScroll: true });
+      paint({ keepScroll: true, reveal: true });
       return;
     }
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -272,9 +352,10 @@ export function mountQuickRun(input) {
     if (event.key === 'Tab') {
       if (event.preventDefault) event.preventDefault();
       // The AUTHOR ruling of 2026-09-12: Tab steps through the chips on offer, never onto a type the
-      // current query has emptied.
+      // current query has emptied. A filter change is a new list and a new highlight, so it is a new baseline.
+      newBaseline();
       session = quickRunSessionAfterTab(session, event.shiftKey ? -1 : 1);
-      paint({ keepScroll: true });
+      paint({ keepScroll: true, reveal: true });
     }
   });
 
@@ -290,11 +371,19 @@ export function mountQuickRun(input) {
     const metrics = wheelMetrics(elements);
     const pixels = wheelPixels(event, metrics);
     if (pixels === 0) return;
+    // A wheel is not a drag: it clears the press flags, so a pointerup that never arrived cannot leave the
+    // remainder permanently discarded, and a press that caused no scroll cannot mark the wheel's own.
+    manualScrollUnderway = false;
+    manualScrollPending = false;
+    lastWheelAt = now();
     wheelRemainderPx += pixels;
     const rows = Math.trunc(wheelRemainderPx / metrics.rowHeight);
     if (rows === 0) return;
     wheelRemainderPx -= rows * metrics.rowHeight;
     session = quickRunSessionAfterScroll(session, rows);
+    // No reveal here: the browser's own scroll moves the viewport by exactly the travel the highlight moves
+    // by, so the two stay in step on their own, and a reveal of ours would emit a scroll event that the
+    // bookkeeping above could not tell from a manual drag.
     paint({ keepScroll: true });
   });
 
@@ -304,7 +393,7 @@ export function mountQuickRun(input) {
     /** The keyboard controller's openQuickRun callback: open on the current state and show the line. */
     open() {
       listScrolled = false;
-      wheelRemainderPx = 0;
+      newBaseline();
       session = openQuickRunSession(getState());
       paint();
       // One empty *focused* line: the section says the reader types immediately, so the field takes
@@ -314,7 +403,7 @@ export function mountQuickRun(input) {
     },
     close() {
       listScrolled = false;
-      wheelRemainderPx = 0;
+      newBaseline();
       session = closeQuickRunSession();
       paint();
     },
@@ -322,12 +411,14 @@ export function mountQuickRun(input) {
      * Rebuild the snapshot from the current state, keeping the query and the filter (section 5).
      *
      * The caller uses this after an action found its target gone: without it the dead row stays on screen
-     * and the reader can only hit it again, which is how a stale index turns into a loop.
+     * and the reader can only hit it again, which is how a stale index turns into a loop. A rebuilt list with
+     * a re-chosen highlight is a new baseline, so fractional wheel travel does not survive it.
      */
     refresh() {
       if (!session.open) return session;
+      newBaseline();
       session = quickRunSessionRefreshed(session, getState());
-      paint({ keepScroll: true });
+      paint({ keepScroll: true, reveal: true });
       return session;
     },
     session: () => session,
