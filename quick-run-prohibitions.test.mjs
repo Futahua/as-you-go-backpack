@@ -8,7 +8,7 @@
 // to be re-opened rather than quietly kept.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 
 const moduleNames = [
   'quick-run-types.js',
@@ -105,6 +105,50 @@ test('the query path has no verb syntax, and the cycle has no command entries', 
       assert.equal(text.includes(token), false, `${queryPath[index]} must not parse ${token}`);
     }
   }
+});
+
+test('the descriptor identity vocabulary is declared in one place, and read from there', async () => {
+  // The drift this holds: resolution compared `executable` and `fingerprint` (names the model never
+  // persists), while availability was keyed on layoutId + memberId + name - so a member whose fingerprint
+  // changed under the same title kept an answer that belonged to a different window. One vocabulary, in the
+  // module every other module already imports, is the fix; this is what stops a second copy growing back,
+  // which matters most before any host-side activation starts reading these fields.
+  //
+  // The modules are enumerated from the directory rather than from a list here, because the list this file
+  // scans for section 6 does not include quick-run-resolution.js: a hand-written list is exactly how the
+  // module that had the duplicate vocabulary would have dodged the check.
+  const directory = await readdir(new URL('./public/app/quick-run/', import.meta.url));
+  const files = directory.filter((name) => name.endsWith('.js')).sort();
+  assert.ok(files.includes('quick-run-resolution.js'), 'the enumeration covers the module that had the duplicate');
+  assert.ok(files.includes('quick-run-types.js'), 'and the module that owns the vocabulary');
+  const sources = new Map(await Promise.all(files.map(async (name) => [
+    name,
+    await readFile(new URL(`./public/app/quick-run/${name}`, import.meta.url), 'utf8'),
+  ])));
+
+  const declaring = files.filter((name) => /\['title', 'executableFingerprint'\]/.test(sources.get(name)));
+  assert.deepEqual(declaring, ['quick-run-types.js'], 'exactly one module declares the descriptor identity fields');
+
+  for (const name of ['quick-run-resolution.js', 'quick-run-search.js']) {
+    assert.match(
+      sources.get(name),
+      /from '\.\/quick-run-types\.js'/,
+      `${name} imports the vocabulary rather than keeping its own copy`,
+    );
+  }
+  for (const name of files) {
+    assert.doesNotMatch(
+      sources.get(name),
+      /const\s+DESCRIPTOR_FIELDS\s*=/,
+      `${name} must not declare a private descriptor field list`,
+    );
+  }
+
+  // And availability is noted against the descriptor the row carries, not against occurrence ids or the
+  // display name it happens to show.
+  const presentation = sources.get('quick-run-presentation.js');
+  assert.match(presentation, /row\?\.descriptorKey/, 'the fingerprint is the row\'s declared descriptor identity');
+  assert.doesNotMatch(presentation, /layoutId \?\? null|memberId \?\? null/, 'and not the occurrence ids');
 });
 
 /**

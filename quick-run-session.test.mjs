@@ -5,6 +5,7 @@ import {
   closeQuickRunSession,
   openQuickRunSession,
   quickRunSessionAfterArrow,
+  quickRunSessionRefreshed,
   quickRunSessionWithFilter,
   quickRunSessionWithQuery,
 } from './public/app/quick-run/quick-run-session.js';
@@ -216,4 +217,60 @@ test('closing a capped session forgets the total and the cap along with the rows
     open: false, query: '', filter: 'All', rows: [], totalRows: 0, capped: false,
     chips: [], highlightKey: null, fellBack: false,
   });
+});
+
+/* A refresh is what happens when an action finds its target gone: the snapshot is rebuilt from the state
+   that refused the row, so the dead row is replaced rather than left on screen to be hit again. */
+
+test('a refresh rebuilds the snapshot, keeps the query and the filter, and highlights the nearest survivor', () => {
+  let session = quickRunSessionWithFilter(quickRunSessionWithQuery(openQuickRunSession(state), 'do'), 'Links');
+  assert.deepEqual(session.rows.map((row) => row.resultKey), ['link:p-1', 'link:p-2']);
+  session = quickRunSessionAfterArrow(session, 1);
+  assert.equal(session.highlightKey, 'link:p-2', 'the reader asked for the second row');
+
+  // The second placement is gone from the workspace the state now describes.
+  const trimmed = {
+    ...state,
+    shortcuts: [{ ...state.shortcuts[0], placements: [state.shortcuts[0].placements[0]] }, state.shortcuts[1]],
+  };
+  const refreshed = quickRunSessionRefreshed(session, trimmed);
+
+  assert.equal(refreshed.open, true, 'a refresh does not close the session');
+  assert.equal(refreshed.query, 'do', 'the query the reader typed is preserved');
+  assert.equal(refreshed.filter, 'Links', 'and so is the filter they chose');
+  assert.deepEqual(refreshed.rows.map((row) => row.resultKey), ['link:p-1'], 'the list is the current state');
+  assert.equal(refreshed.highlightKey, 'link:p-1', 'the highlight lands on the survivor nearest the row that vanished');
+});
+
+test('a refresh whose filter lost every match falls back to All, by the same rule a keystroke uses', () => {
+  const session = quickRunSessionWithFilter(quickRunSessionWithQuery(openQuickRunSession(state), 'do'), 'Shortcuts');
+  assert.deepEqual(session.rows.map((row) => row.resultKey), ['shortcut:p-3']);
+
+  // The only shortcut goes; the two links are what the query still matches.
+  const refreshed = quickRunSessionRefreshed(session, { ...state, shortcuts: [state.shortcuts[0]] });
+  assert.equal(refreshed.filter, 'All', 'a filter with nothing left in it cannot stay active');
+  assert.equal(refreshed.fellBack, true, 'and the fallback is reported rather than done silently');
+  assert.deepEqual(refreshed.rows.map((row) => row.resultKey), ['link:p-1', 'link:p-2']);
+  assert.equal(refreshed.highlightKey, 'link:p-1');
+});
+
+test('a refresh that leaves nothing shows nothing, with the reader\'s query still there to explain why', () => {
+  const session = quickRunSessionWithQuery(openQuickRunSession(state), 'do');
+  const refreshed = quickRunSessionRefreshed(session, { groups: [], shortcuts: [], windowLayouts: [] });
+  assert.deepEqual(refreshed.rows, []);
+  assert.equal(refreshed.highlightKey, null, 'no rows, no highlight to run');
+  assert.equal(refreshed.query, 'do', 'the query stays, which is what lets the surface say what matched nothing');
+  assert.equal(refreshed.capped, false);
+  assert.deepEqual(refreshed.chips, []);
+});
+
+test('a refresh cannot paint more than a session may hold, and a closed session is not refreshed at all', () => {
+  const session = quickRunSessionWithQuery(openQuickRunSession(crowdedState(20)), 'kestrel');
+  const refreshed = quickRunSessionRefreshed(session, crowdedState(500));
+  assert.equal(refreshed.rows.length, QUICK_RUN_MAX_PAINTED_ROWS, 'the cap still bounds what a refresh may paint');
+  assert.equal(refreshed.totalRows, 500);
+  assert.equal(refreshed.capped, true, 'and the honest total still rides beside it');
+
+  const closed = closeQuickRunSession(session);
+  assert.equal(quickRunSessionRefreshed(closed, crowdedState(500)), closed, 'a closed session has nothing to rebuild');
 });
