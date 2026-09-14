@@ -91,7 +91,20 @@ export function bindQuickRunWorkspace({
         setStatus('Quick Run: activating a live application window is not wired up yet.');
         return;
       }
-      const itemId = plan ? quickRunWorkspaceItemId(plan) : null;
+      if (!plan) {
+        setStatus('Quick Run: that result has no workspace action.');
+        return;
+      }
+      // A folder row navigates the active workspace, not the Bin. Quick Run's universe excludes Bin
+      // contents, so every folder it can name is a workspace folder - and activateItem() reaches the same
+      // Bin-following navigation a click inside the Bin uses, which would leave the reader in the Bin
+      // looking at an empty view while the layer closed as if it had gone somewhere.
+      if (plan.action === 'navigate-folder') {
+        commands.goToWorkspaceFolder(plan.target.groupId);
+        closeAfterSuccess();
+        return;
+      }
+      const itemId = quickRunWorkspaceItemId(plan);
       if (!itemId) {
         setStatus('Quick Run: that result has no workspace action.');
         return;
@@ -104,10 +117,10 @@ export function bindQuickRunWorkspace({
     // the way the ordinary reveal command does - which is why `planQuickRunReveal` answers hostReveal: false
     // on every branch and this callback follows the plan rather than any other command.
     //
-    // The navigation names `goToFolder` rather than `activateItem` because the destination may be the
-    // workspace root, which has no group record for activateItem to match - handing it one navigated
-    // nowhere at all. goToFolder is the workspace's own go-to-a-folder command (the same call its root
-    // breadcrumb makes), so this is still one navigation implementation rather than a second one.
+    // The navigation names `goToWorkspaceFolder` rather than `activateItem`, for two reasons that are the
+    // same reason: the destination may be the workspace root, which has no group record for activateItem to
+    // match, and it is always a folder of the *active workspace*, because Bin contents are not in Quick
+    // Run's universe. activateItem's navigation follows the Bin while it is open; this one leaves it.
     onReveal: (resultKey) => {
       const current = revalidateQuickRunRow(getState(), resultKey);
       if (!current.ok) {
@@ -119,7 +132,7 @@ export function bindQuickRunWorkspace({
         setStatus('Quick Run: that result cannot be revealed.');
         return;
       }
-      if (reveal.navigateTo) commands.goToFolder(reveal.navigateTo);
+      if (reveal.navigateTo) commands.goToWorkspaceFolder(reveal.navigateTo);
       if (reveal.select) {
         commands.selectItem(reveal.select, {
           shiftKey: false,

@@ -327,3 +327,47 @@ test('Ctrl+Enter on a Layout Item goes to the folder holding the layout, not to 
   assert.equal(h.store.getSession().selected.has('wl-1'), true, 'and the layout record is what gets selected');
   assert.equal(isOpen(h.elements), false, 'section 16.1: a successful reveal closes the layer');
 });
+
+test('Ctrl+Enter reveals in the active workspace even while the Bin is open (section 1.6)', async () => {
+  // Quick Run's universe excludes Bin contents, so every result belongs to the active workspace. The
+  // navigation used to follow the Bin whenever it was open - setting the Bin's own drill-down id - so a
+  // reveal from the Bin left the reader inside the Bin looking at an empty view while the layer closed as
+  // if it had gone somewhere.
+  const h = await boot();
+  h.mutate((state) => ({
+    ...state,
+    shortcuts: [...state.shortcuts, {
+      id: 's-top',
+      name: 'Rooftop note',
+      target: 'C:/notes/rooftop.md',
+      placements: [{ id: 'p-top', parentId: 'root', order: 9 }],
+    }],
+  }));
+  h.store.setNavigation({ binMode: true, binCurrentId: 'bin' });
+  h.surface.open();
+  h.type('rooftop');
+  assert.deepEqual(rowKeys(h.elements), ['shortcut:p-top'], 'the active-workspace occurrence is one row');
+
+  h.key('Enter', { ctrlKey: true });
+
+  assert.equal(h.store.getSession().binMode, false, 'the reveal leaves the Bin rather than drilling inside it');
+  assert.equal(h.store.getSession().currentId, 'root', 'and shows the folder the occurrence actually lives in');
+  assert.equal(h.store.getSession().selected.has('s-top'), true, 'with the record selected');
+  assert.equal(isOpen(h.elements), false, 'section 16.1: a successful reveal closes the layer');
+});
+
+test('Folder Enter navigates the active workspace even while the Bin is open (section 1.5)', async () => {
+  // The same defect on the other key: activateItem() reaches the Bin-following navigation, so Enter on a
+  // folder Quick Run can only have found in the active workspace drilled into the Bin instead.
+  const h = await boot();
+  h.store.setNavigation({ binMode: true, binCurrentId: 'bin' });
+  h.surface.open();
+  h.type('alpha');
+  assert.deepEqual(rowKeys(h.elements), ['folder:g-a'], 'Alpha is an active-workspace folder row');
+
+  h.key('Enter');
+
+  assert.equal(h.store.getSession().binMode, false, 'Enter leaves the Bin rather than drilling inside it');
+  assert.equal(h.store.getSession().currentId, 'g-a', 'and lands in the folder that was searched for');
+  assert.equal(isOpen(h.elements), false, 'section 16.1: a successful navigate closes the layer');
+});

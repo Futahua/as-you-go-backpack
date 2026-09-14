@@ -277,7 +277,78 @@ test('the wheel moves the highlight with the list, so Enter cannot run a row tha
   assert.equal(elements.results.children.filter((row) => row.dataset.quickRunHighlighted === 'true').length, 1);
 });
 
-test('a highlight moved by the keyboard or the wheel is brought into view (section 6.3)', () => {
+test('a sub-row wheel delta accumulates instead of moving a row per event (section 6.3)', () => {
+  // A precision touchpad reports a stream of small pixel deltas. Treating every non-zero one as a whole row
+  // ran the selection ahead of the list by however many events the gesture produced.
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(30) });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+
+  elements.layer.fire('wheel', { deltaY: 8 });
+  elements.layer.fire('wheel', { deltaY: 8 });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-0', 'two thirds of a row is not a row');
+
+  elements.layer.fire('wheel', { deltaY: 8 });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-1', 'the third event completes the row, and only now does one move');
+
+  elements.layer.fire('wheel', { deltaY: 24 });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-2', 'and the remainder carried over rather than being discarded');
+
+  // A new query is a new list: travel still owed to the old gesture is dropped, so the first small delta on
+  // the new list cannot complete a row the old one started.
+  elements.layer.fire('wheel', { deltaY: 20 });
+  elements.input.value = 'kestrel 2';
+  elements.input.fire('input', {});
+  const afterTyping = quickRun.session().highlightKey;
+  assert.notEqual(afterTyping, null, 'the narrower query still matched rows');
+  elements.layer.fire('wheel', { deltaY: 8 });
+  assert.equal(quickRun.session().highlightKey, afterTyping, 'the leftover 20 px does not decide the new list');
+});
+
+test('the wheel honours deltaMode: a line is a row and a page is what the list shows (section 6.3)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  elements.results.clientHeight = 240; // ten rows of 24 px
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(40) });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+
+  // deltaMode 1 is lines: read as pixels, two lines would have been two pixels and moved nothing.
+  elements.layer.fire('wheel', { deltaY: 2, deltaMode: 1 });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-2', 'two lines are two rows');
+
+  // deltaMode 2 is pages: read as pixels, one page would have been one pixel.
+  elements.layer.fire('wheel', { deltaY: 1, deltaMode: 2 });
+  assert.equal(quickRun.session().highlightKey, 'shortcut:p-12', 'one page is the ten rows the list shows at once');
+});
+
+test('a native scroll counts as the reader having scrolled, so typing resets the list to its top (section 6.3)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  elements.results.scrollTop = 0;
+  const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(60) });
+  quickRun.open();
+  elements.input.value = 'kestrel';
+  elements.input.fire('input', {});
+
+  // The reader drags the scrollbar: the element scrolls itself and no repaint of ours is involved, so the
+  // only signal is the list's own scroll event.
+  elements.results.scrollTop = 300;
+  elements.results.fire('scroll', {});
+  elements.input.value = 'kestrel 2';
+  elements.input.fire('input', {});
+  assert.equal(
+    elements.results.scrollTop,
+    0,
+    'the new query starts at its own top rather than leaving the newly highlighted row above the viewport',
+  );
+});
+
+test('the highlighted row is brought into view on movement, and typing never forces a scroll (section 6.3)', () => {
   const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
   const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
   const quickRun = mountQuickRun({ document, elements, getState: () => crowdedState(30) });

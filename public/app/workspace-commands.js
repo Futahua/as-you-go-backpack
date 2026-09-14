@@ -247,7 +247,8 @@ export function createWorkspaceCommands({
    * a group, which is why a caller whose destination may be the root (Quick
    * Run's reveal) names this command instead. */
   function navigateToFolder(folderId) {
-    const session = store.getSession();    if (session.binMode) {
+    const session = store.getSession();
+    if (session.binMode) {
       // Drilling into a binned folder stays inside the Bin — it must never
       // jump to the real explorer, since the folder (and everything under
       // it) is still hidden there and would just show up empty.
@@ -260,6 +261,19 @@ export function createWorkspaceCommands({
     closeMenu();
     render();
     saveWorkspaceView({ persistSurfaceLocation: !session.binMode });
+  }
+
+  /** The workspace navigation a revealed occurrence needs, as opposed to the Bin-local one.
+   *
+   * navigateToFolder() follows the Bin while it is open, which is what drilling inside the Bin means for a
+   * click in the Bin. Quick Run never shows Bin contents - its universe excludes them - so every folder it
+   * can name belongs to the active workspace, and inheriting the Bin's semantics left the reader sitting in
+   * the Bin looking at an empty view while Quick Run reported success. So this leaves the Bin first, using
+   * the sequence the Bin control itself uses (bin mode off, drill-down reset to the Bin root), and then
+   * navigates the workspace. */
+  function goToWorkspaceFolder(folderId) {
+    if (store.getSession().binMode) store.setNavigation({ binMode: false, binCurrentId: 'bin' });
+    navigateToFolder(folderId);
   }
   async function launchShortcut(itemId) {
     closeMenu();
@@ -629,7 +643,7 @@ export function createWorkspaceCommands({
     updateMarqueeSelection,
     finishMarqueeSelection,
     activateItem,
-    goToFolder: navigateToFolder,
+    goToWorkspaceFolder,
     revealSelection,
     activateSelection,
     copySelection,

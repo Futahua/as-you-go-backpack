@@ -17,11 +17,13 @@
  *   exactly while the cap line is on screen.
  * - **The highlight travels with the scroll.** Section 6.3 leaves the list to scroll normally, and the
  *   other half of that sentence is that the selection must not be left behind: the wheel moves the
- *   highlight by the rows it scrolled (rounded to rows, clamped by the session), and a highlight *moved*
- *   by the keyboard, the wheel or a refresh is brought back into view. Typing is deliberately not in that
- *   set: a new query is a new list and starts at its own top, where its first row already is, and touching
- *   the scroll box on every keystroke forces the layout the paint cap exists to keep out of the keystroke
- *   (measured: forcing it there took the integrated harness from p95 4.3 ms to 8.1 ms).
+ *   highlight by the rows it scrolled — accumulating the device's deltas, in whatever unit it reports them,
+ *   until a whole row of travel has arrived — and a highlight *moved* by the keyboard, the wheel or a
+ *   refresh is brought back into view. Typing is deliberately not in that set: a new query is a new list and
+ *   starts at its own top, where its first row already is, and touching the scroll box on every keystroke
+ *   forces the layout the paint cap exists to keep out of the keystroke (measured: forcing it there took the
+ *   integrated harness from p95 4.3 ms to 8.1 ms). The list's own scroll event feeds that same bookkeeping,
+ *   so a dragged scrollbar counts as the reader having scrolled.
  * - **Nothing is drawn for a state that has nothing to say.** An empty query shows no home screen, an
  *   uncapped list shows no cap line, and a query that matches draws the no-matches line rather than a
  *   blank layer that reads like a stall.
@@ -149,14 +151,36 @@ export function paintQuickRunSurface({ document, elements, session, onRowClick, 
   return rows.length;
 }
 
-/** How many rows one wheel event is worth: the delta measured in painted rows, never fewer than one. */
-function wheelRowStep(deltaY, elements) {
-  const delta = Number(deltaY);
+/**
+ * The two lengths a wheel delta is measured against: how tall a painted row is, and how much of the list
+ * the reader can see at once.
+ *
+ * The painted row's own height is preferred when it can be measured (`offsetHeight`), and the exported
+ * fallback is what quick-run.css's row `min-height` is written to, so the two agree. A caller without
+ * layout (a test mock) gets the fallbacks.
+ */
+function wheelMetrics(elements) {
+  const measuredRow = Number(elements.results?.children?.[0]?.offsetHeight);
+  const rowHeight = Number.isFinite(measuredRow) && measuredRow > 0 ? measuredRow : QUICK_RUN_WHEEL_ROW_HEIGHT_PX;
+  const measuredViewport = Number(elements.results?.clientHeight);
+  const viewportHeight = Number.isFinite(measuredViewport) && measuredViewport > 0 ? measuredViewport : rowHeight;
+  return { rowHeight, viewportHeight };
+}
+
+/**
+ * One wheel event's travel in pixels, whatever unit the device reported.
+ *
+ * `deltaMode` is the part that is easy to miss: 0 is pixels, 1 is lines and 2 is pages. A device that
+ * reports lines would otherwise be read as a handful of pixels and a device that reports pages as a whole
+ * screenful of them. A line in a list of rows is one row, and a page is what the list can show at once.
+ */
+function wheelPixels(event, { rowHeight, viewportHeight }) {
+  const delta = Number(event?.deltaY);
   if (!Number.isFinite(delta) || delta === 0) return 0;
-  const measured = Number(elements.results?.children?.[0]?.offsetHeight);
-  const rowHeight = Number.isFinite(measured) && measured > 0 ? measured : QUICK_RUN_WHEEL_ROW_HEIGHT_PX;
-  const rows = Math.max(1, Math.round(Math.abs(delta) / rowHeight));
-  return delta > 0 ? rows : -rows;
+  const mode = Number(event?.deltaMode ?? 0);
+  if (mode === 1) return delta * rowHeight;
+  if (mode === 2) return delta * viewportHeight;
+  return delta;
 }
 
 /**
@@ -178,6 +202,8 @@ export function mountQuickRun(input) {
   // this flag, an ordinary typed character touches the scroll box not at all, and the reset happens only
   // when there is something to reset.
   let listScrolled = false;
+  // Wheel travel that has not yet added up to a whole row (see the wheel handler below).
+  let wheelRemainderPx = 0;
   // Section 6.4: one execution implementation, reached from the keyboard and the pointer alike.
   const activate = (key) => { if (key && typeof onActivate === 'function') onActivate(key); };
   const highlighted = () => (typeof session.highlightKey === 'string' ? session.highlightKey : null);
@@ -198,9 +224,19 @@ export function mountQuickRun(input) {
   };
 
   elements.input.addEventListener('input', () => {
+    // A new query is a new list: any part of a wheel gesture still owed to the old one is dropped, and the
+    // painted list starts at its own top.
+    wheelRemainderPx = 0;
     session = quickRunSessionWithQuery(session, elements.input.value);
     paint();
   });
+
+  // The list is natively scrollable, so a dragged scrollbar or a touch scroll moves it without any repaint
+  // of ours. The dirty flag has to come from the element's own scroll event as well, or typing after such a
+  // scroll would leave the newly highlighted row above the viewport - the list was scrolled, and only the
+  // flag knows it. It stays false for a session the reader never scrolls, which is what keeps the keystroke
+  // path free of the layout flush this flag exists to avoid.
+  elements.results.addEventListener?.('scroll', () => { listScrolled = true; });
 
   elements.layer.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
@@ -244,10 +280,20 @@ export function mountQuickRun(input) {
 
   // Section 6.3, both halves: the list scrolls normally — this handler never calls preventDefault — and the
   // highlight moves with it, so the row Enter would run is the row the reader is looking at.
+  //
+  // Travel is accumulated rather than rounded per event. A precision touchpad reports a stream of sub-row
+  // deltas, and treating every non-zero one as a whole row ran the selection ahead of the list by however
+  // many events the gesture happened to produce; a row moves only once a row's worth of travel has arrived,
+  // and the remainder is kept for the next event.
   elements.layer.addEventListener('wheel', (event) => {
     if (!session.open || session.rows.length === 0) return;
-    const rows = wheelRowStep(event?.deltaY, elements);
+    const metrics = wheelMetrics(elements);
+    const pixels = wheelPixels(event, metrics);
+    if (pixels === 0) return;
+    wheelRemainderPx += pixels;
+    const rows = Math.trunc(wheelRemainderPx / metrics.rowHeight);
     if (rows === 0) return;
+    wheelRemainderPx -= rows * metrics.rowHeight;
     session = quickRunSessionAfterScroll(session, rows);
     paint({ keepScroll: true });
   });
@@ -258,6 +304,7 @@ export function mountQuickRun(input) {
     /** The keyboard controller's openQuickRun callback: open on the current state and show the line. */
     open() {
       listScrolled = false;
+      wheelRemainderPx = 0;
       session = openQuickRunSession(getState());
       paint();
       // One empty *focused* line: the section says the reader types immediately, so the field takes
@@ -267,6 +314,7 @@ export function mountQuickRun(input) {
     },
     close() {
       listScrolled = false;
+      wheelRemainderPx = 0;
       session = closeQuickRunSession();
       paint();
     },

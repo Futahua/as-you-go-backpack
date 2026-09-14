@@ -103,8 +103,8 @@ test('Ctrl+Enter reveals the occurrence inside the workspace (section 1.6)', () 
   );
   assert.match(
     binding,
-    /commands\.goToFolder\(reveal\.navigateTo\)/,
-    'it navigates to the folder the occurrence lives in, by the workspace command that accepts the root too',
+    /commands\.goToWorkspaceFolder\(reveal\.navigateTo\)/,
+    'it navigates to the folder the occurrence lives in, by the command that accepts the root and leaves the Bin',
   );
   assert.equal(
     binding.includes('commands.activateItem(reveal.navigateTo)'),
