@@ -1,3 +1,4 @@
+import { snapshotMemberNote } from './window-layout-member-note.js';
 /**
  * 019C (RoketPuncha sole-editor lane): the AYG-owned same-origin compact-widget
  * channel. One native widget per (projectId, layoutId); the workspace and the
@@ -235,7 +236,7 @@ function memberDescriptorSnapshot(member) {
  * name). Members with an invalid persisted descriptor are OMITTED (fail
  * closed) so every descriptor the widget later forwards to pickWindowBegin is
  * accepted. Never the whole state, never a capability/token. */
-export function windowLayoutWidgetSnapshot(layout, memberIcon = () => null) {
+export function windowLayoutWidgetSnapshot(layout, memberIcon = () => null, memberNote = () => null) {
   const members = [];
   for (const member of layout?.arrangement?.members ?? []) {
     const descriptor = memberDescriptorSnapshot(member);
@@ -246,11 +247,17 @@ export function windowLayoutWidgetSnapshot(layout, memberIcon = () => null) {
       && utf8ByteLength(rawIcon) <= WINDOW_LAYOUT_WIDGET_MAX_ICON_BYTES) {
       icon = rawIcon;
     }
+    const note = snapshotMemberNote(memberNote?.(layout?.id ?? '', member.id));
     members.push({
       id: member.id,
       descriptor,
       state: member.state === 'minimized' ? 'minimized' : 'normal',
       icon,
+      // The sentence a member card says when the surface checked and could not confirm its window. It rides
+      // the snapshot for the same reason the icon does: the compact widget and the detached surface render
+      // from this snapshot and have no runtime of their own to ask. Absent for every healthy member, and
+      // bounded like every other value on this wire.
+      ...(note === null ? {} : { note }),
     });
   }
   // 035: the shared card geometry rides the snapshot so an opening widget can
@@ -324,6 +331,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
   getLayout,
   snapshot = windowLayoutWidgetSnapshot,
   memberIcon,
+  memberNote,
   applyCommand = async () => ({ ok: false, error: 'no command handler wired' }),
   onWidgetOpen,
   onWidgetDispose,
@@ -360,7 +368,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
     revisions.set(layoutId, next);
     return next;
   }
-  const buildSnapshot = (layout) => snapshot(layout, memberIcon);
+  const buildSnapshot = (layout) => snapshot(layout, memberIcon, memberNote);
   const post = (message) => {
     try { channel.postMessage(message); } catch { /* channel closed */ }
   };

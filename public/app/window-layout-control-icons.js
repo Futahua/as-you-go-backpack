@@ -61,7 +61,7 @@ export function windowLayoutControlButton(name, label, attr, value = 'true', opt
  * persisted title stays on aria-label for the hover popover seam without a
  * duplicate native browser tooltip. `disabled` renders the inert placeholder member (035): same
  * look, not interactive. */
-export function windowLayoutMemberMarkup(layoutId, member, icon = null, disabled = false) {
+export function windowLayoutMemberMarkup(layoutId, member, icon = null, disabled = false, note = null) {
   const iconMarkup = icon
     ? `<img class="window-layout-member-icon" src="${escapeHtml(icon)}" alt="" draggable="false" data-wl-member-icon="${escapeHtml(member.id)}">`
     : `<span class="window-layout-member-icon placeholder" data-wl-member-icon="${escapeHtml(member.id)}" aria-hidden="true"></span>`;
@@ -70,7 +70,15 @@ export function windowLayoutMemberMarkup(layoutId, member, icon = null, disabled
   const runningIndicator = stateClass === 'normal'
     ? `<span class="window-layout-member-state ${stateClass}" data-wl-member-state="${stateClass}" aria-hidden="true"></span>`
     : '';
-  return `<button class="window-layout-member ${stateClass}" data-wl-member="${escapeHtml(member.id)}" data-wl-layout="${escapeHtml(layoutId)}" type="button" aria-label="${escapeHtml(title)}" aria-pressed="${stateClass === 'minimized' ? 'true' : 'false'}" aria-selected="false"${disabled ? ' disabled' : ''}>
+  // A member this surface cannot confirm still looks like a member, and the sentence rides where this widget
+  // can carry words: the accessible label (which is also the hover popover seam, so no duplicate native
+  // tooltip appears) and a data attribute for anything that needs to read it. The strip itself takes no text
+  // by the creator's own correction, so the visible sentence is the card's status line - see
+  // windowLayoutStatusForOutcome, which answers this same note. `note` is null for every healthy member and
+  // for every transient that is not this state, and the class only marks the one state that has words.
+  const noteText = typeof note === 'string' && note.trim() !== '' ? note.trim() : null;
+  const label = noteText === null ? escapeHtml(title) : escapeHtml(`${title} — ${noteText}`);
+  return `<button class="window-layout-member ${stateClass}${noteText === null ? '' : ' wl-member-unconfirmed'}" data-wl-member="${escapeHtml(member.id)}" data-wl-layout="${escapeHtml(layoutId)}" type="button" aria-label="${label}" aria-pressed="${stateClass === 'minimized' ? 'true' : 'false'}" aria-selected="false"${noteText === null ? '' : ` data-wl-member-note="${escapeHtml(noteText)}"`}${disabled ? ' disabled' : ''}>
     ${iconMarkup}
     ${runningIndicator}
   </button>`;

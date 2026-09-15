@@ -442,6 +442,7 @@ export function createWindowLayoutRecordingWiring({
   setStatus,
   patchMember,
   statusText,
+  onMemberOutcome,
   onRetireMember,
   setIntervalFn,
   clearIntervalFn,
@@ -467,6 +468,9 @@ export function createWindowLayoutRecordingWiring({
       scheduleSave();
     },
     onMemberResult: (result) => {
+      // The card's own state listens to every result, before the status mapping decides what to say: a member
+      // this surface cannot confirm has to be visible ON THE MEMBER, not only in a layout-wide status line.
+      onMemberOutcome?.(result);
       if (result.outcome !== 'success' && result.outcome !== 'recorded'
         && result.outcome !== 'echo-suppressed' && result.outcome !== 'superseded') {
         setStatus?.(result.layoutId, statusText?.(result.outcome) ?? 'Failed');

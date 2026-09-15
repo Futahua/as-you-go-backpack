@@ -92,6 +92,11 @@ import { runBoundedConcurrent } from './app/window-layout-actions.js';
 import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, windowLayoutWidgetRenderIdentity, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
 import { createWindowLayoutPickApplier, createWindowLayoutRetirementWriter } from './app/window-layout-workspace.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup } from './app/window-layout-control-icons.js';
+import {
+  WINDOW_LAYOUT_MEMBER_NOTE_UNCONFIRMED,
+  memberNoteForOutcome,
+  snapshotMemberNote,
+} from './app/window-layout-member-note.js';
 import { createWindowLayoutIsolateMode } from './app/window-layout-isolate-mode.js';
 import { createWindowLayoutMemberPreview, windowLayoutPreviewHoverState } from './app/window-layout-preview.js';
 import { compressIconFile } from './app/utilities/image-compression.js';
@@ -599,7 +604,8 @@ function windowLayoutBodyMarkup(candidate, options = {}) {
   const placeholder = windowLayoutCardPlaceholder(options);
   if (placeholder) {
     const members = (candidate.arrangement?.members ?? []).map((member) =>
-      windowLayoutMemberMarkup(candidate.id, member, windowLayoutMemberIcon(candidate.id, member.id), true)).join('');
+      windowLayoutMemberMarkup(candidate.id, member, windowLayoutMemberIcon(candidate.id, member.id), true,
+        windowLayoutMemberNote(candidate.id, member))).join('');
     // Inert greyed workspace summary while the widget is the sole live card:
     // disabled members and status, with one plain-click reattach lock.
     return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" data-wl-placeholder-body="true" aria-label="Window group (detached)">
@@ -609,7 +615,8 @@ function windowLayoutBodyMarkup(candidate, options = {}) {
   </div>`;
   }
   const members = (candidate.arrangement?.members ?? []).map((member) =>
-    windowLayoutMemberMarkup(candidate.id, member, windowLayoutMemberIcon(candidate.id, member.id))).join('');
+    windowLayoutMemberMarkup(candidate.id, member, windowLayoutMemberIcon(candidate.id, member.id), false,
+      windowLayoutMemberNote(candidate.id, member))).join('');
   const widgetSurface = options.widgetSurface === true;
   return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" aria-label="Window group">
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
@@ -915,6 +922,51 @@ async function runWindowLayoutIconRefresh() {
   }
 }
 
+/**
+ * Members this surface has checked and cannot currently confirm, by composite member key.
+ *
+ * In memory, never persisted, and cleared the moment a member records again - the same life as the runtime's
+ * own streak, which is deliberate: this is a statement about RIGHT NOW, and durable state that says a window
+ * is fine (or not) outlives the truth in both directions. It exists so the card can say the true thing,
+ * because until now a member the widget could not confirm looked exactly like a healthy one.
+ */
+const windowLayoutUnconfirmedMembers = new Map();
+
+/** Called from the runtime's per-member results: a member is either confirmed or it is not. */
+function noteWindowLayoutMemberResult(result) {
+  const layoutId = result?.layoutId;
+  const memberId = result?.memberId;
+  if (typeof layoutId !== 'string' || typeof memberId !== 'string') return;
+  const key = windowLayoutMemberKey(layoutId, memberId);
+  if (result.outcome === 'unverified') {
+    const count = Number.isFinite(result.consecutiveMissing) ? result.consecutiveMissing : 1;
+    const changed = !windowLayoutUnconfirmedMembers.has(key);
+    windowLayoutUnconfirmedMembers.set(key, count);
+    return changed;
+  }
+  // Any other answer is either a confirmation or a transient this surface has never annotated: in both cases
+  // the member is not in the unconfirmed state, so it leaves it.
+  return windowLayoutUnconfirmedMembers.delete(key);
+}
+
+/**
+ * The sentence for a member card, or null. The snapshot's note wins when it is there (the compact widget and
+ * the detached surface render from a snapshot and have no runtime of their own to ask), and otherwise this
+ * surface's own live state answers. One function, so all three surfaces say the same words.
+ *
+ * The cycle count is deliberately NOT on the card. It is our diagnostic - it is carried in the result and it
+ * is what proves the member is still being checked - but "unconfirmed for 4 cycles" reads to a person as
+ * something getting worse, and the true thing is the opposite: the member is being held, not dropped. The
+ * count stays in the data and out of the sentence.
+ */
+function windowLayoutMemberNote(layoutId, member) {
+  const fromSnapshot = snapshotMemberNote(member?.note);
+  if (fromSnapshot !== null) return fromSnapshot;
+  return windowLayoutUnconfirmedMembers.has(windowLayoutMemberKey(layoutId, member?.id))
+    ? WINDOW_LAYOUT_MEMBER_NOTE_UNCONFIRMED
+    : null;
+}
+
 function windowLayoutMemberIcon(layoutId, memberId) {
   const cached = windowLayoutRuntime.icons.get(windowLayoutMemberKey(layoutId, memberId));
   if (cached !== undefined) return cached;
@@ -960,6 +1012,9 @@ async function capabilityForMember(layoutId, memberId) {
 }
 
 function windowLayoutStatusForOutcome(outcome) {
+  // The one state with something true and calm to say, in the creator's words: this is also the visible half
+  // of the member note, because the strip itself takes no text by the creator's own correction.
+  if (outcome === 'unverified') return WINDOW_LAYOUT_MEMBER_NOTE_UNCONFIRMED;
   if (outcome === 'missing') return 'Window not visible';
   if (outcome === 'ambiguous') return 'Ambiguous match';
   if (outcome === 'helper-unavailable') return 'Helper unavailable';
@@ -2153,6 +2208,9 @@ const windowLayoutRecording = createWindowLayoutRecordingWiring({
   patchMember: patchWindowLayoutMember,
   statusText: windowLayoutStatusForOutcome,
   onRetireMember: (intent) => handleWindowLayoutRetireMember(intent),
+  // Every member result reaches the card's state, and only a TRANSITION repaints: the cadence runs every few
+  // seconds and a repaint per cycle would be work the creator can see.
+  onMemberOutcome: (result) => { if (noteWindowLayoutMemberResult(result)) render(); },
 });
 const windowLayoutRuntimeController = windowLayoutRecording.runtime;
 
@@ -2359,8 +2417,8 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
     && coordinationState === 'ready'
     && surfaceCoordinator?.role === SURFACE_ROLE.WRITER,
   getLayout: windowLayoutFromState,
-  snapshot: (layout, memberIcon) => ({
-    ...windowLayoutWidgetSnapshot(layout, memberIcon),
+  snapshot: (layout, memberIcon, memberNote) => ({
+    ...windowLayoutWidgetSnapshot(layout, memberIcon, memberNote),
     // The compact surface does not load the whole workspace state. Carry only
     // the bounded visual preferences needed to render the same native window
     // transparency/theme as its host Backpack.
@@ -2374,6 +2432,9 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
   // widget renders REAL member icons (bounded to the channel byte cap).
   // 040: composite layout\u0000member cache identity.
   memberIcon: (layoutId, memberId) => windowLayoutRuntime.icons.get(windowLayoutMemberKey(layoutId, memberId)) ?? null,
+  // The same note, carried the same way, so the compact widget and the detached surface say it too - they
+  // render from this snapshot and have no runtime to ask.
+  memberNote: (layoutId, memberId) => windowLayoutMemberNote(layoutId, { id: memberId }),
   // 035: a widget announcing itself marks its attached card as a placeholder;
   // a dispose restores it. Both re-render the graph node.
   onWidgetOpen: (layoutId) => {
