@@ -5290,8 +5290,9 @@ const keyboard = createKeyboardController({
   setStatus,
   beginSetRename,
   // STAGE 5: the chord the catalog declares reaches the surface. The surface reads the workspace tree
-  // this file owns, through the binding rather than a copy, so a later load is what it searches.
-  openQuickRun: () => quickRun.open(),
+  // this file owns, through the binding rather than a copy, so a later load is what it searches. The key is a
+  // toggle: the same chord dismisses a palette it opened, which is what the creator expected of it.
+  openQuickRun: () => quickRun.toggle(),
 });
 
 const promptLibrary = createPromptLibraryDialog({

@@ -69,7 +69,14 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
 }
 
 function key(event) {
-  return { key: event.key ?? '', ctrlKey: event.ctrlKey ?? false, shiftKey: event.shiftKey ?? false, preventDefault() {} };
+  return {
+    key: event.key ?? '',
+    ctrlKey: event.ctrlKey ?? false,
+    shiftKey: event.shiftKey ?? false,
+    altKey: event.altKey ?? false,
+    metaKey: event.metaKey ?? false,
+    preventDefault() {},
+  };
 }
 
 test('Escape clears the selection and closes the menu', () => {
@@ -264,6 +271,26 @@ test('rename editor keeps workspace hotkeys and native editing keys inert', () =
   assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 0);
   assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0);
   assert.equal(h.called.beginRename, 0);
+});
+
+test('the Quick Run chord is not swallowed by the editable guard (measured on the live machine)', () => {
+  // Reported from the real machine: Alt+Shift+X did nothing at all while any input had focus, so the palette
+  // could not be reopened - or dismissed with its own chord - until the creator clicked somewhere else. The
+  // chord is an explicit Alt+Shift accelerator that types nothing into a text field, so a focused input is no
+  // reason to ignore it. The second half holds the guard's actual job: text editing still owns its own keys.
+  const h = createHarness({ activeElement: { matches: (selector) => selector.includes('input') } });
+  h.listeners[0].handler(key({ key: 'X', altKey: true, shiftKey: true }));
+  assert.equal(h.called.quickRun, 1, 'the chord reaches the surface even though an input has focus');
+
+  h.listeners[0].handler(key({ key: 'a', ctrlKey: true }));
+  assert.equal(h.commandSpies['selectAllVisible:calls'], 0, 'Ctrl+A in a text field is still the field\'s own');
+
+  // And the same chord arriving from the field itself, which is what a keypress inside the palette looks like.
+  const typed = createHarness();
+  const event = key({ key: 'X', altKey: true, shiftKey: true });
+  event.target = { matches: (selector) => selector.includes('input') };
+  typed.listeners[0].handler(event);
+  assert.equal(typed.called.quickRun, 1, 'the chord works from inside the input it is typed into');
 });
 
 test('G is a plain key, so Ctrl+G does not also group', () => {

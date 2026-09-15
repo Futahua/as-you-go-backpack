@@ -389,7 +389,7 @@ export function mountQuickRun(input) {
 
   paint();
 
-  return {
+  const surface = {
     /** The keyboard controller's openQuickRun callback: open on the current state and show the line. */
     open() {
       listScrolled = false;
@@ -421,6 +421,21 @@ export function mountQuickRun(input) {
       paint({ keepScroll: true, reveal: true });
       return session;
     },
+    /**
+     * The chord, as a toggle: open the palette, or dismiss one that is already open.
+     *
+     * The creator's report is why this exists - the chord did nothing at all while an input had focus, so the
+     * palette could be opened but never dismissed with the key that opened it. It reports whether it *opened*;
+     * a caller reading the answer is not told "opened" by a keypress that closed it.
+     */
+    toggle() {
+      if (session.open) {
+        surface.close();
+        return false;
+      }
+      return surface.open();
+    },
     session: () => session,
   };
+  return surface;
 }

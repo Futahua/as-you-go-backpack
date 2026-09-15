@@ -31,12 +31,17 @@ export function createKeyboardController({
       // tree shortcuts and editable controls keep native text behavior.
       if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden
         || !elements.linkEditLayer.hidden || !elements.promptLayer.hidden) return;
-      const editingTarget = event.target?.matches?.('input, textarea, [contenteditable="true"], .set-name-editor')
-        || document.activeElement?.matches?.('input, textarea, [contenteditable="true"], .set-name-editor');
-      if (editingTarget) return;
       const session = store.getSession();
       const preferences = store.getSnapshot?.()?.view?.preferences?.hotkeys ?? {};
       const matches = (actionId) => bindingMatchesAction(actionId, event, preferences, HOTKEY_CATALOG);
+      // An editable control owns its keys: while a field has focus, Enter, Escape, the arrows and the
+      // clipboard chords are the field's own and must not reach the workspace. The one exception is the Quick
+      // Run chord, an explicit Alt+Shift accelerator that types nothing into a field - measured on the live
+      // machine, this guard swallowed it whenever any input had focus, so the palette could not be reopened,
+      // or dismissed with its own chord, until the creator clicked somewhere else.
+      const editingTarget = event.target?.matches?.('input, textarea, [contenteditable="true"], .set-name-editor')
+        || document.activeElement?.matches?.('input, textarea, [contenteditable="true"], .set-name-editor');
+      if (editingTarget && !matches('workspace.quick-run')) return;
 
       // In Bin mode, cut/copy/paste must not reach the host's clipboard.
       if (session.binMode && (

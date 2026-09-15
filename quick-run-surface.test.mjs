@@ -638,6 +638,27 @@ test('Shift+Enter is inert: the cut gesture does not become a second Enter (CUT 
   assert.equal(elements.notice.hidden, true, 'and no notice claims the gesture exists');
 });
 
+test('the chord toggles: it opens a closed palette and dismisses an open one (the creator reported no toggle)', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+
+  assert.equal(quickRun.toggle(), true, 'the first press opens and reports that it opened');
+  assert.equal(elements.layer.hidden, false);
+  elements.input.value = 'docs';
+  elements.input.fire('input', {});
+  assert.equal(elements.results.children.length, 2);
+
+  assert.equal(quickRun.toggle(), false, 'the second press closes and reports that it did not open');
+  assert.equal(elements.layer.hidden, true, 'the palette the chord opened is the palette it dismisses');
+  assert.equal(elements.input.value, '', 'and closing still leaves nothing behind');
+  assert.equal(quickRun.session().open, false);
+
+  assert.equal(quickRun.toggle(), true, 'and the next press opens it again');
+  assert.equal(elements.layer.hidden, false);
+  assert.deepEqual(elements.results.children, [], 'a reopened palette starts empty rather than resuming the query');
+});
+
 test('Enter and a click reach one activation path, and neither invents its own (section 6.4)', () => {
   const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
   const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
