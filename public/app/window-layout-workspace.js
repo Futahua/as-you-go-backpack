@@ -151,6 +151,52 @@ export function createWindowLayoutPickApplier({
   return { apply };
 }
 
+/**
+ * What a committed pick result is worth, as two answers the caller must not conflate.
+ *
+ * `mutated` - did anything actually change? A pick whose removals were all refused (no member carried the
+ * descriptor, or two did) and whose adds all failed changes nothing, and the caller must treat it as nothing:
+ * it must not tell the widget channel a layout was committed, and above all it must not ensure recording,
+ * because that is what ACTIVATES a layout, persists it as the recording context, and applies real windows.
+ * A pure refusal that activated a layout the creator was not using would be a side effect of a no-op.
+ *
+ * `statusText` - what to say. The old wording asserted "nothing was removed" whenever a removal was refused,
+ * which is false the moment some removals in the same array succeeded. It is now decided by `removed`:
+ * nothing removed says so, a partial result reports both halves.
+ */
+export function windowLayoutPickApplyOutcome(applied) {
+  const count = (value) => (Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0);
+  const added = count(applied?.added);
+  const removed = count(applied?.removed);
+  const failures = count(applied?.failures);
+  const unmatched = count(applied?.unmatched);
+  const ambiguous = count(applied?.ambiguous);
+  const refused = ambiguous + unmatched;
+  const reason = [
+    ambiguous > 0 ? `${ambiguous} matched two windows` : null,
+    unmatched > 0 ? `${unmatched} could not be matched` : null,
+  ].filter(Boolean).join('; ');
+  let statusText = '';
+  if (failures > 0) {
+    // Unchanged wording, unchanged priority: an add that could not be bound is the first thing to report.
+    statusText = `${failures} member${failures === 1 ? '' : 's'} could not be added`;
+  } else if (refused > 0 && removed === 0) {
+    // Nothing was removed, so saying so is accurate - and the reason still has to be said, because a removal
+    // that found no member and a removal that found two look identical from the outside.
+    statusText = ambiguous > 0 && unmatched === 0
+      ? 'Two windows here match that one — nothing was removed'
+      : unmatched > 0 && ambiguous === 0
+        ? 'That window has changed since the pick — nothing was removed'
+        : `Nothing was removed — ${reason}`;
+  } else if (refused > 0) {
+    // A partial result: some members went, some did not. Reporting only the removals would hide the refusal,
+    // and reporting only the refusal would hide the removals.
+    statusText = `Removed ${removed} — ${reason}`;
+  }
+  // A failed add is not a mutation either: nothing in the layout changed, so nothing is committed or activated.
+  return { mutated: added > 0 || removed > 0, statusText };
+}
+
 export function createWindowLayoutRetirementWriter({
   getState,
   commitState,

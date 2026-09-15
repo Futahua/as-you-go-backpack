@@ -9,6 +9,7 @@ import test from 'node:test';
 import {
   createWindowLayoutPickApplier,
   createWindowLayoutRetirementWriter,
+  windowLayoutPickApplyOutcome,
 } from './public/app/window-layout-workspace.js';
 import { windowLayoutMemberKey } from './public/app/window-layout-runtime.js';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
@@ -162,6 +163,86 @@ test('a retitled member is not removed by a stale descriptor, and the mismatch i
   assert.equal(result.unmatched, 1, 'a removal that found no member says so');
   assert.equal(JSON.stringify(harness.getState()), before);
   assert.equal(harness.countCommits(), commitsBefore);
+});
+/* The wrapper's decision, as a pure function so it can be tested rather than string-matched.
+ *
+ * The wrapper itself lives in the workspace entry and cannot be constructed here, so the POLICY lives in the
+ * module that owns pick semantics and the entry is a three-line caller of it. These tests therefore prove the
+ * decision behaviourally; that the entry obeys it is asserted separately, by reading the entry, because the
+ * alternative is a harness that copies the wrapper and tests the copy. */
+test('a pure refusal is not a mutation: nothing to commit, nothing to activate', () => {
+  // The blocker: an inactive layout must not become active, persist, or apply real windows because a removal
+  // was refused. `mutated` is what gates noteCommitted and ensureRecording.
+  assert.deepEqual(
+    windowLayoutPickApplyOutcome({ outcome: 'committed', added: 0, removed: 0, failures: 0, unmatched: 1, ambiguous: 0 }),
+    { mutated: false, statusText: 'That window has changed since the pick — nothing was removed' },
+  );
+  assert.deepEqual(
+    windowLayoutPickApplyOutcome({ outcome: 'committed', added: 0, removed: 0, failures: 0, unmatched: 0, ambiguous: 1 }),
+    { mutated: false, statusText: 'Two windows here match that one — nothing was removed' },
+  );
+  assert.deepEqual(
+    windowLayoutPickApplyOutcome({ outcome: 'committed', added: 0, removed: 0, failures: 0, unmatched: 1, ambiguous: 2 }),
+    { mutated: false, statusText: 'Nothing was removed — 2 matched two windows; 1 could not be matched' },
+    'both reasons are named rather than one standing in for the other',
+  );
+  // A failed add changes nothing either, so it activates nothing - only the wording is unchanged.
+  assert.deepEqual(
+    windowLayoutPickApplyOutcome({ outcome: 'committed', added: 0, removed: 0, failures: 2, unmatched: 0, ambiguous: 0 }),
+    { mutated: false, statusText: '2 members could not be added' },
+  );
+});
+
+test('a pick that changed something says what it did, including the half that was refused', () => {
+  assert.deepEqual(
+    windowLayoutPickApplyOutcome({ outcome: 'committed', added: 0, removed: 2, failures: 0, unmatched: 0, ambiguous: 0 }),
+    { mutated: true, statusText: '' },
+    'an ordinary removal says nothing extra',
+  );
+  assert.deepEqual(
+    windowLayoutPickApplyOutcome({ outcome: 'committed', added: 1, removed: 0, failures: 0, unmatched: 0, ambiguous: 0 }),
+    { mutated: true, statusText: '' },
+  );
+  // The second blocker: with one removal applied and one refused, "nothing was removed" is a lie.
+  assert.deepEqual(
+    windowLayoutPickApplyOutcome({ outcome: 'committed', added: 0, removed: 1, failures: 0, unmatched: 1, ambiguous: 0 }),
+    { mutated: true, statusText: 'Removed 1 — 1 could not be matched' },
+  );
+  assert.deepEqual(
+    windowLayoutPickApplyOutcome({ outcome: 'committed', added: 0, removed: 1, failures: 0, unmatched: 0, ambiguous: 1 }),
+    { mutated: true, statusText: 'Removed 1 — 1 matched two windows' },
+  );
+  assert.deepEqual(
+    windowLayoutPickApplyOutcome({ outcome: 'committed', added: 0, removed: 2, failures: 0, unmatched: 1, ambiguous: 1 }),
+    { mutated: true, statusText: 'Removed 2 — 1 matched two windows; 1 could not be matched' },
+  );
+});
+
+test('a missing or unusable result reads as no mutation and says nothing', () => {
+  for (const applied of [null, undefined, {}, { outcome: 'committed' }, { outcome: 'cancelled' }]) {
+    assert.deepEqual(windowLayoutPickApplyOutcome(applied), { mutated: false, statusText: '' }, JSON.stringify(applied));
+  }
+});
+test('the workspace wrapper obeys that decision: a pure refusal notifies nothing and activates nothing', async () => {
+  // The wrapper lives in the workspace entry and cannot be constructed in this suite, so what is proven here is
+  // (a) the decision, behaviourally, above, and (b) that the entry gates BOTH calls on it and has no ungated
+  // path left anywhere. The alternative - a harness that copies the wrapper - would test the copy.
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  // Scoped to the wrapper, because the entry legitimately notifies the channel from other paths - the
+  // retirement writer's own removal does, after it has proved a member was removed.
+  const start = source.indexOf('async function applyWindowLayoutPickSet(');
+  assert.ok(start > 0, 'the pick wrapper is where this test thinks it is');
+  const wrapper = source.slice(start, source.indexOf('\n}', start));
+  assert.match(wrapper, /const outcome = windowLayoutPickApplyOutcome\(applied\);/);
+  assert.match(wrapper, /if \(outcome\.mutated\) windowLayoutWidgetChannelWorkspace\.noteCommitted\(layoutId\);/,
+    'the commit notification is gated on a real mutation');
+  assert.match(wrapper, /if \(outcome\.mutated\) await windowLayoutRecording\.ensureRecording\(layoutId\);/,
+    'and so is ensureRecording, which is what activates a layout and applies real windows');
+  // No ungated call to either may remain INSIDE the wrapper: a refusal that reached one of these would
+  // activate or persist a layout the creator was not using. This is the assertion that fails if the old
+  // shape is ever reinstated.
+  assert.doesNotMatch(wrapper, /^\s*windowLayoutWidgetChannelWorkspace\.noteCommitted\(layoutId\);$/m);
+  assert.doesNotMatch(wrapper, /^\s*(?:await )?windowLayoutRecording\.ensureRecording\(layoutId\);$/m);
 });
 test('cancel is byte-zero: no commit, no mutation', async () => {
   const h = makeHarness();

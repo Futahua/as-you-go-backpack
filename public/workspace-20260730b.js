@@ -90,7 +90,11 @@ import { createWindowLayoutRecordingWiring, windowLayoutMemberKey } from './app/
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
 import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, windowLayoutWidgetRenderIdentity, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
-import { createWindowLayoutPickApplier, createWindowLayoutRetirementWriter } from './app/window-layout-workspace.js';
+import {
+  createWindowLayoutPickApplier,
+  createWindowLayoutRetirementWriter,
+  windowLayoutPickApplyOutcome,
+} from './app/window-layout-workspace.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup } from './app/window-layout-control-icons.js';
 import {
   WINDOW_LAYOUT_MEMBER_NOTE_UNCONFIRMED,
@@ -2553,23 +2557,16 @@ async function applyWindowLayoutPickSet(layoutId, result) {
   if (windowLayoutDetachment.isReadOnly()) return { outcome: 'failed', error: 'read-only' };
   const applied = await windowLayoutPickApplier.apply(layoutId, result);
   if (applied.outcome === 'committed') {
-    windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
-    if (applied.failures > 0) {
-      setWindowLayoutStatus(layoutId, `${applied.failures} member${applied.failures === 1 ? '' : 's'} could not be added`);
-    } else if (applied.ambiguous > 0) {
-      // The pick named a window that more than one member answers to, so nothing was removed. Saying so is the
-      // difference between "the removal did nothing" and "Papers could not tell which window you meant".
-      setWindowLayoutStatus(layoutId, 'Two windows here match that one — nothing was removed');
-    } else if (applied.unmatched > 0) {
-      // The window changed after the pick, so no member carries its descriptor any more. Nothing is removed
-      // and nothing is guessed; the member stays until the creator removes it.
-      setWindowLayoutStatus(layoutId, 'That window has changed since the pick — nothing was removed');
-    } else {
-      setWindowLayoutStatus(layoutId, '');
-    }
-    // Adding to a layout selects/persists it as the recording context and
-    // leaves one active observer; an already-active layout only re-syncs.
-    await windowLayoutRecording.ensureRecording(layoutId);
+    const outcome = windowLayoutPickApplyOutcome(applied);
+    // A pick that changed nothing is not a commit and must not activate anything. noteCommitted would tell the
+    // widget channel a layout had changed when it had not, and ensureRecording is worse: that is what makes a
+    // layout the ACTIVE recording context, persists it as such, and applies real windows. A refusal on an
+    // inactive layout must leave all three alone.
+    if (outcome.mutated) windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
+    setWindowLayoutStatus(layoutId, outcome.statusText);
+    // Adding to a layout selects/persists it as the recording context and leaves one active observer; an
+    // already-active layout only re-syncs. Only a real mutation may do that.
+    if (outcome.mutated) await windowLayoutRecording.ensureRecording(layoutId);
   }
   return applied;
 }
