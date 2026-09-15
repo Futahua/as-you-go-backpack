@@ -6,6 +6,13 @@
  * injected so this module cannot write workspace state or create UI by itself.
  */
 
+/**
+ * A member whose window this surface cannot confirm. Not "gone" - see the counting site: the host cannot
+ * prove termination today, and the match it fails can fail on a changed title alone.
+ */
+export const WINDOW_LAYOUT_MEMBER_UNVERIFIED = 'unverified';
+export const WINDOW_LAYOUT_UNVERIFIED_IDENTITY = 'identity-cannot-be-confirmed';
+
 export const WINDOW_LAYOUT_RUNTIME_CADENCE_MS = 500;
 
 /** 040: the shared composite ephemeral identity the pure runtime uses for its
@@ -67,12 +74,11 @@ export function createWindowLayoutRuntime({
   let switchTail = Promise.resolve();
   const capabilities = new Map();
   const suppressions = new Map();
-  // 019B: per-member consecutive-genuine-missing tracker (in-memory only, never
-  // persisted, keyed by layout/member, reset on ownership change). A member is
-  // retired after exactly two consecutive `missing` observations; any success
-  // clears its streak; timeout/helper-unavailable/denied neither count as
-  // missing nor remove. `retired` guarantees one typed removal intent per
-  // member per ownership and stops further helper round-trips for it.
+  // 019B: per-member consecutive-missing tracker (in-memory only, never persisted, keyed by layout/member,
+  // reset on ownership change). It used to retire a member after exactly two consecutive `missing`
+  // observations; it now only counts, and the count is the honest state of a member that cannot be verified.
+  // See the note at the counting site for the measurement that removed the removal. `retired` is kept, and
+  // nothing populates it today: no host outcome is terminal evidence yet.
   const missingCounts = new Map();
   const retired = new Set();
   // 018X3: in-flight observation promises are tracked so stop() can drain them.
@@ -105,6 +111,12 @@ export function createWindowLayoutRuntime({
       memberId,
       outcome: outcomeFor(result),
       ...(result?.error !== undefined ? { error: result.error } : {}),
+      // Carried through on purpose, and this is the point of the shape: a member this surface cannot confirm
+      // has to be able to SAY so, and to say which of the two it is - "I could not check" against an answer
+      // that would justify more. Without these two fields every unhealthy member reached the card as the same
+      // flat word, which is exactly how an unverifiable one looked identical to a dead one.
+      ...(result?.reason !== undefined ? { reason: result.reason } : {}),
+      ...(result?.consecutiveMissing !== undefined ? { consecutiveMissing: result.consecutiveMissing } : {}),
     };
     onMemberResult(typed);
     return typed;
@@ -274,19 +286,24 @@ export function createWindowLayoutRuntime({
       // descriptor): preserve the streak, never remove, never count.
       return report(layoutId, memberId, reResolved ?? { outcome: 'missing-capability' });
     }
-    // 019B: exactly two CONSECUTIVE confirmed genuine missing results -> one
-    // typed removal intent. The member stays in the observed set but is skipped
-    // (no further helper round-trip) until the store removes it.
+    // Counted, never acted on. What the count means: this member's descriptor no longer matches a live
+    // window, and the match that failed is `executableFingerprint + exact title` (host `resolvePersisted`),
+    // so a window that is alive and well but retitled - a browser tab switch is the creator's own example -
+    // produces `missing` exactly like a dead one. A title is not identity: that is the defect the identity
+    // work fixed on the session-token path and left standing on this one, and the records are explicit that
+    // GONE requires positive terminal evidence while absence, an enumeration miss, a refusal and a timeout
+    // are all UNVERIFIED. So the streak stays in memory, the member stays in the layout, its capability is
+    // still re-resolved on the next cadence (so it recovers on its own when the window is found again), and
+    // nothing here removes anything. Measured end to end before this changed: with the capability lost (a
+    // helper restart - capabilities are in memory and never persisted) and the title changed, two cycles
+    // emitted `retire` for every member and the writer removed all three from the document and saved.
     const count = (missingCounts.get(key) ?? 0) + 1;
     missingCounts.set(key, count);
-    if (count >= 2) {
-      missingCounts.delete(key);
-      retired.add(key);
-      const intent = { layoutId, memberId, outcome: 'retire', consecutiveMissing: count };
-      onRetireMember?.(intent);
-      return intent;
-    }
-    return report(layoutId, memberId, { outcome: 'missing' });
+    return report(layoutId, memberId, {
+      outcome: WINDOW_LAYOUT_MEMBER_UNVERIFIED,
+      reason: WINDOW_LAYOUT_UNVERIFIED_IDENTITY,
+      consecutiveMissing: count,
+    });
   }
 
   async function observeActiveMembers(layoutId = activeLayoutId, expectedGeneration = generation) {

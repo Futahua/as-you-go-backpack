@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createWindowLayoutRuntime } from './public/app/window-layout-runtime.js';
+import {
+  WINDOW_LAYOUT_MEMBER_UNVERIFIED,
+  WINDOW_LAYOUT_UNVERIFIED_IDENTITY,
+  createWindowLayoutRuntime, } from './public/app/window-layout-runtime.js';
 
 const descriptor = (title) => ({ version: 1, title, executableFingerprint: title.repeat(64).slice(0, 64) });
 const member = (id, title, bounds, state = 'normal') => ({ id, descriptor: descriptor(title), bounds, state });
@@ -225,7 +228,7 @@ function missingHarness(observeSequence, resolveSequence = []) {
   });
 }
 
-test('019B emits one typed retirement intent after exactly two confirmed missing', async () => {
+test('019B counts confirmed misses and reports them; it never removes, at any count', async () => {
   const h = missingHarness([
     { outcome: 'missing', error: 'gone' },
     { outcome: 'missing', error: 'gone' },
@@ -236,17 +239,24 @@ test('019B emits one typed retirement intent after exactly two confirmed missing
   ]);
   await h.runtime.switchTo('L1');
   assert.equal(h.runtime.getSnapshot().timerActive, true);
-  await h.runtime.observeActiveMembers(); // first confirmed missing
-  assert.equal(h.intents.length, 0, 'one confirmed missing does not retire');
-  await h.runtime.observeActiveMembers(); // second confirmed missing
-  assert.equal(h.intents.length, 1);
-  assert.deepEqual(h.intents[0], { layoutId: 'L1', memberId: 'a1', outcome: 'retire', consecutiveMissing: 2 });
-  // A later observation of the retired member is a no-op: no helper round-trip,
-  // no second intent.
-  const observesBefore = h.calls.filter(([kind]) => kind === 'observe').length;
+  await h.runtime.observeActiveMembers(); // first confirmed miss
+  assert.equal(h.intents.length, 0, 'one confirmed miss removes nothing');
+  assert.equal(h.results.at(-1).consecutiveMissing, 1);
+  await h.runtime.observeActiveMembers(); // second confirmed miss
+  assert.equal(h.intents.length, 0, 'TWO confirmed misses remove nothing either');
+  assert.deepEqual(h.results.at(-1), {
+    layoutId: 'L1',
+    memberId: 'a1',
+    outcome: WINDOW_LAYOUT_MEMBER_UNVERIFIED,
+    reason: WINDOW_LAYOUT_UNVERIFIED_IDENTITY,
+    consecutiveMissing: 2,
+  });
+  // And the third cycle still CHECKS the member rather than skipping it forever, which is what makes a
+  // reported member recoverable: the old policy stopped the helper round-trip for it permanently. The count
+  // rising is the evidence, because this harness replaces the recording host stubs with its own.
   await h.runtime.observeActiveMembers();
-  assert.equal(h.calls.filter(([kind]) => kind === 'observe').length, observesBefore, 'retired member is not re-observed');
-  assert.equal(h.intents.length, 1, 'one removal intent only');
+  assert.equal(h.results.at(-1).consecutiveMissing, 3, 'the member is checked again, not skipped');
+  assert.equal(h.intents.length, 0);
 });
 
 test('019B the controller continues after the first missing and a later success records', async () => {
@@ -290,9 +300,10 @@ test('019B a success resets the streak; a new confirmed-missing pair emits a new
   assert.equal(h.intents.length, 0);
   await h.runtime.observeActiveMembers(); // missing (1 again)
   assert.equal(h.intents.length, 0);
-  await h.runtime.observeActiveMembers(); // missing (2 confirmed) -> retire
-  assert.equal(h.intents.length, 1);
-  assert.equal(h.intents[0].consecutiveMissing, 2);
+  await h.runtime.observeActiveMembers(); // missing (2 confirmed)
+  assert.equal(h.intents.length, 0, 'a fresh pair of confirmed misses still removes nothing');
+  assert.equal(h.results.at(-1).consecutiveMissing, 2, 'the streak is counted and reported');
+  assert.equal(h.results.at(-1).reason, WINDOW_LAYOUT_UNVERIFIED_IDENTITY);
 });
 
 test('019B/019HR timeout/helper-unavailable/denied re-resolution never counts as missing', async () => {
@@ -320,12 +331,13 @@ test('019B/019HR timeout/helper-unavailable/denied re-resolution never counts as
   assert.equal(h.intents.length, 0, 'no removal on transient re-resolutions');
   await h.runtime.observeActiveMembers(); // confirmed missing (1)
   assert.equal(h.intents.length, 0, 'one confirmed miss does not retire');
-  await h.runtime.observeActiveMembers(); // confirmed missing (2) -> retire
-  assert.equal(h.intents.length, 1, 'transient re-resolutions preserved the streak, never removed');
-  assert.equal(h.intents[0].consecutiveMissing, 2);
+  await h.runtime.observeActiveMembers(); // confirmed missing (2) -> counted, reported, not removed
+  assert.equal(h.intents.length, 0, 'transient re-resolutions preserved the streak, and nothing removes');
+  assert.equal(h.results.at(-1).outcome, WINDOW_LAYOUT_MEMBER_UNVERIFIED, 'the member is reported unverified');
+  assert.equal(h.results.at(-1).consecutiveMissing, 2, 'and the preserved streak is what the count shows');
 });
 
-test('019B retirement is member-independent', async () => {
+test('019B the unverified report is member-independent; nothing is retired', async () => {
   const h = missingHarness([
     { outcome: 'missing', error: 'gone' }, // a2 missing 1 (confirmed)
     { outcome: 'success', observation: { bounds: { x: 20, y: 30, width: 500, height: 300 }, state: 'normal' } }, // b2 success
@@ -340,10 +352,14 @@ test('019B retirement is member-independent', async () => {
   await h.runtime.switchTo('L2');
   await h.runtime.observeActiveMembers(); // a2 missing(1), b2 success
   assert.equal(h.intents.length, 0);
-  await h.runtime.observeActiveMembers(); // a2 missing(2) -> a2 retire; b2 success
-  assert.equal(h.intents.length, 1);
-  assert.deepEqual(h.intents[0], { layoutId: 'L2', memberId: 'a2', outcome: 'retire', consecutiveMissing: 2 });
-  assert.equal(h.intents[0].memberId, 'a2', 'only the missing member is retired');
+  await h.runtime.observeActiveMembers(); // a2 missing(2); b2 success
+  assert.equal(h.intents.length, 0, 'nothing is removed');
+  const reported = h.results.filter((entry) => entry.memberId === 'a2').at(-1);
+  assert.equal(reported.outcome, WINDOW_LAYOUT_MEMBER_UNVERIFIED, 'the member that cannot be confirmed is reported');
+  assert.equal(reported.consecutiveMissing, 2);
+  // (This harness feeds one observation sequence to every member, so b2 is unverifiable here too; what this
+  // test is about is that the report is per-member and nothing is removed.)
+  assert.deepEqual(h.runtime.getSnapshot().recordingMemberIds, ['a2', 'b2'], 'and both members stay members');
 });
 
 test('019B ownership stop/reset clears the tracker; a switch starts a fresh streak', async () => {
@@ -356,7 +372,7 @@ test('019B ownership stop/reset clears the tracker; a switch starts a fresh stre
     { outcome: 'success', capability: { title: 'B' } }, // switch L2 b2
     { outcome: 'success', capability: { title: 'A' } }, // switch L1 a1 again (fresh)
     { outcome: 'missing', error: 'gone' }, // obs2 a1 re-resolve (1 after reset)
-    { outcome: 'missing', error: 'gone' }, // obs3 a1 re-resolve (2) -> retire
+    { outcome: 'missing', error: 'gone' }, // obs3 a1 re-resolve (2)
   ]);
   await h.runtime.switchTo('L1');
   await h.runtime.observeActiveMembers(); // a1 missing (1)
@@ -365,11 +381,12 @@ test('019B ownership stop/reset clears the tracker; a switch starts a fresh stre
   await h.runtime.switchTo('L2');
   await h.runtime.switchTo('L1');
   await h.runtime.observeActiveMembers(); // a1 missing (1 again after reset)
-  await h.runtime.observeActiveMembers(); // a1 missing (2) -> retire
-  assert.equal(h.intents.length, 1);
+  assert.equal(h.results.at(-1).consecutiveMissing, 1, 'the reset really cleared the streak');
+  await h.runtime.observeActiveMembers(); // a1 missing (2)
+  assert.equal(h.intents.length, 0, 'and a fresh pair still removes nothing');
   // stop() resets the tracker entirely.
   await h.runtime.stop();
-  assert.equal(h.intents.length, 1, 'stop never emits retirement intents');
+  assert.equal(h.intents.length, 0, 'stop never emits removal intents');
   assert.equal(h.runtime.getSnapshot().timerActive, false);
 });
 
@@ -381,12 +398,13 @@ test('019B no counters/runtime keys are persisted or exposed in the snapshot', a
   ], [
     { outcome: 'success', capability: { title: 'A' } }, // switch a1
     { outcome: 'missing', error: 'gone' }, // obs1 (1)
-    { outcome: 'missing', error: 'gone' }, // obs2 (2) -> retire
+    { outcome: 'missing', error: 'gone' }, // obs2 (2)
   ]);
   await h.runtime.switchTo('L1');
   await h.runtime.observeActiveMembers();
   await h.runtime.observeActiveMembers();
-  assert.equal(h.intents.length, 1);
+  assert.equal(h.intents.length, 0);
+  assert.equal(h.results.at(-1).consecutiveMissing, 2, 'the streak exists in memory and in the report only');
   const snapshot = h.runtime.getSnapshot();
   assert.deepEqual(Object.keys(snapshot).sort(), [
     'activeLayoutId', 'capabilityKeys', 'generation', 'recordingMemberIds', 'suppressionKeys', 'timerActive',
@@ -453,7 +471,7 @@ test('019HR recovery replaces the stale capability before the next observe', asy
   assert.equal(h.observations.length, 1, 'the recovered member records normally');
 });
 
-test('019HR stale capabilities cannot retire ANY live member; closing exactly B retires only B once', async () => {
+test('019HR stale capabilities cannot remove ANY live member, and a closed one is reported, not removed', async () => {
   const closed = new Set();
   let staleSession = true;
   let resolveCalls = 0;
@@ -484,18 +502,21 @@ test('019HR stale capabilities cannot retire ANY live member; closing exactly B 
   await h.runtime.observeActiveMembers();
   assert.equal(h.intents.length, 0);
   assert.deepEqual(h.runtime.getSnapshot().recordingMemberIds, ['a2', 'b2'], 'both members stay observed after recovery');
-  // Close exactly B: its fresh re-resolution now CONFIRMS missing.
+  // Close exactly B: its fresh re-resolution now reports missing. Even that removes nothing, because a
+  // closed window and a retitled one are the same answer from the host.
   closed.add('B');
-  await h.runtime.observeActiveMembers(); // a2 success; b2 confirmed missing (1)
-  assert.equal(h.intents.length, 0, 'one confirmed miss does not retire');
-  await h.runtime.observeActiveMembers(); // a2 success; b2 confirmed missing (2) -> retire only B
-  assert.equal(h.intents.length, 1);
-  assert.deepEqual(h.intents[0], { layoutId: 'L2', memberId: 'b2', outcome: 'retire', consecutiveMissing: 2 });
-  assert.equal(h.intents[0].memberId, 'b2', 'only the closed member is retired');
-  // A remains live and observed.
+  await h.runtime.observeActiveMembers(); // a2 success; b2 missing (1)
+  assert.equal(h.intents.length, 0, 'one miss removes nothing');
+  await h.runtime.observeActiveMembers(); // a2 success; b2 missing (2)
+  assert.equal(h.intents.length, 0, 'and two remove nothing either');
+  assert.equal(h.results.at(-1).memberId, 'b2');
+  assert.equal(h.results.at(-1).outcome, WINDOW_LAYOUT_MEMBER_UNVERIFIED);
+  // Both remain members and both keep being observed, so B comes back on its own if its window returns.
   assert.deepEqual(h.runtime.getSnapshot().recordingMemberIds, ['a2', 'b2']);
-  await h.runtime.observeActiveMembers(); // a2 success; b2 skipped (retired)
-  assert.equal(h.intents.length, 1, 'no second intent for B');
+  await h.runtime.observeActiveMembers(); // a2 success; b2 checked again (never skipped)
+  const bChecks = h.results.filter((entry) => entry.memberId === 'b2');
+  assert.equal(bChecks.at(-1).consecutiveMissing, bChecks.at(-2).consecutiveMissing + 1, 'B is still checked');
+  assert.equal(h.intents.length, 0, 'no removal intent, ever');
 });
 
 test('019HR a helper-unavailable re-resolution never increments a genuine-missing streak', async () => {
@@ -523,17 +544,18 @@ test('019HR2 reconcile resets the missing streak; only post-recovery confirmed m
     { outcome: 'missing', error: 'gone' }, // obs1 re-resolve confirms gone (1)
     { outcome: 'success', capability: { title: 'A', generation: 2 } }, // reconcile resolves LIVE
     { outcome: 'missing', error: 'gone' }, // obs2 re-resolve confirms gone (1 again)
-    { outcome: 'missing', error: 'gone' }, // obs3 re-resolve confirms gone (2) -> retire
+    { outcome: 'missing', error: 'gone' }, // obs3 re-resolve reports missing (2)
   ]);
   await h.runtime.switchTo('L1');
   await h.runtime.observeActiveMembers(); // confirmed miss #1 (streak 1)
   assert.equal(h.intents.length, 0);
-  await h.runtime.reconcileActive(); // proven-live reconcile resets retired + streak
+  await h.runtime.reconcileActive(); // proven-live reconcile clears the streak
   assert.equal(h.intents.length, 0);
   assert.deepEqual(h.runtime.getSnapshot().recordingMemberIds, ['a1']);
   await h.runtime.observeActiveMembers(); // one NEW confirmed miss after recovery
   assert.equal(h.intents.length, 0, 'a single post-recovery confirmed miss must NOT retire (streak was reset)');
-  await h.runtime.observeActiveMembers(); // second post-recovery confirmed miss -> retire once
-  assert.equal(h.intents.length, 1);
-  assert.deepEqual(h.intents[0], { layoutId: 'L1', memberId: 'a1', outcome: 'retire', consecutiveMissing: 2 });
+  await h.runtime.observeActiveMembers(); // second post-recovery confirmed miss
+  assert.equal(h.intents.length, 0, 'and two post-recovery confirmed misses still remove nothing');
+  assert.equal(h.results.at(-1).consecutiveMissing, 2);
+  assert.deepEqual(h.runtime.getSnapshot().recordingMemberIds, ['a1'], 'the member stays a member');
 });
