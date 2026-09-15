@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openQuickRunSession, quickRunSessionWithQuery } from './public/app/quick-run/quick-run-session.js';
-import { quickRunCapNotice, quickRunChipViews, quickRunRowViews } from './public/app/quick-run/quick-run-presentation.js';
+import { quickRunCapNotice, quickRunChipViews, quickRunEmptyNotice, quickRunRowViews } from './public/app/quick-run/quick-run-presentation.js';
 
 const state = {
   groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
@@ -159,4 +159,22 @@ test('a layout item starts at availability unknown, and nothing guesses otherwis
   }
   assert.equal(minimized[0].availability, 'unknown', 'persisted arrangement state (minimized) is not availability (section 10.1)');
   assert.deepEqual(docs.map((view) => view.availability), [null], 'only a layout item has availability at all');
+});
+test('an empty universe says so instead of claiming the query matched nothing', () => {
+  // Measured in the launcher overlay, which has no canvas behind it: when the surface has no workspace to
+  // search, "No matches for “kestrel”" tells the creator their own item does not exist. The empty universe
+  // gets its own sentence, and it stays true whether the workspace is empty or could not be read.
+  const empty = { open: true, query: 'kestrel', rows: [], allRows: [], totalRows: 0, capped: false, chips: [] };
+  assert.deepEqual(quickRunEmptyNotice(empty), { text: 'Nothing to search yet: this project has no items loaded here.' });
+
+  // A universe with rows in it is unchanged: a query that matches none of them is still a failed search.
+  const populated = { ...empty, allRows: [{ resultKey: 'folder:1', name: 'Letters', type: 'folder' }] };
+  assert.deepEqual(quickRunEmptyNotice(populated), { text: 'No matches for “kestrel”.' });
+
+  // And a session that never carried a universe (a hand-built one) keeps the old sentence rather than
+  // guessing that the project is empty.
+  assert.deepEqual(
+    quickRunEmptyNotice({ open: true, query: 'kestrel', rows: [] }),
+    { text: 'No matches for “kestrel”.' },
+  );
 });

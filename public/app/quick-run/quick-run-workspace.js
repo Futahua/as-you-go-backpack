@@ -54,6 +54,7 @@ export function bindQuickRunWorkspace({
   setStatus,
   onOpen,
   onClose,
+  commandSurface = false,
 }) {
   if (typeof getState !== 'function') {
     throw new TypeError('bindQuickRunWorkspace needs a getState function to re-read the workspace');
@@ -64,7 +65,12 @@ export function bindQuickRunWorkspace({
   // Assigned by the mount below; the callbacks close over it so a successful action can close the layer
   // without the mount having to know what success meant.
   let surface = null;
-  const closeAfterSuccess = () => { surface?.close(); };
+  // On the canvas, a successful action closes the surface because the workspace behind it is where the reader
+  // is now going. In the launcher overlay there is nothing behind it: closing would leave an empty
+  // always-on-top window that only the host can take down, so the surface stays as it is and the host
+  // dismisses the window. That is the second deliberate divergence, and the reason it is the safer one is
+  // that a palette still showing its results is a state the reader already understands.
+  const closeAfterSuccess = () => { if (!commandSurface) surface?.close(); };
   // A vanished target is reported and the snapshot is rebuilt from the state that refused it, keeping the
   // reader's query and filter and moving the highlight to the nearest survivor (section 5). Without the
   // rebuild the dead row would stay on screen and the next Enter would refuse it again.
@@ -81,6 +87,7 @@ export function bindQuickRunWorkspace({
     // binding and the surface stay ignorant of it.
     onOpen,
     onClose,
+    commandSurface,
     // What Enter does (section 1.5). The row is re-read from the current state by its stable key before
     // anything happens (section 5), then the plan is executed by naming the workspace's own
     // open-selection path - activateItem - instead of growing a second launcher (sections 1.5 and 6.4). A

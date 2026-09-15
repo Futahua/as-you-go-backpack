@@ -115,5 +115,13 @@ export function quickRunEmptyNotice(session) {
   if (session?.open !== true) return null;
   if (typeof session.query !== 'string' || session.query.trim() === '') return null;
   if (session.rows.length > 0) return null;
+  // "No matches for X" is a lie when there was nothing to match against. It was measured in the launcher
+  // overlay, which has no canvas behind it: if this surface could not get the project's state, every query
+  // answered "No matches" and the creator would be told their own item does not exist. An empty universe gets
+  // its own sentence, and it is true whether the workspace is empty or could not be read - saying which of
+  // the two it was is the loader's job, not a search result's. Refusing visibly beats returning fewer results.
+  if (Array.isArray(session.allRows) && session.allRows.length === 0) {
+    return { text: 'Nothing to search yet: this project has no items loaded here.' };
+  }
   return { text: `No matches for “${session.query.trim()}”.` };
 }

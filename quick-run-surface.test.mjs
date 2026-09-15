@@ -890,3 +890,67 @@ test('typing never re-reads the world: the snapshot is taken at open and ranked 
   }
   assert.equal(reads, 1, 'and nothing a keystroke does reads it again');
 });
+/* The launcher overlay: the same surface in a 640x220 window with no workspace behind it.
+   Three things differ from the canvas, and each one is a decision rather than a drift:
+   the marker already opened it, Escape belongs to the host, and nothing may take focus back
+   from the application the creator came from. Everything else - the session, the ranking, the
+   rows, Enter - is the same code. */
+test('the overlay opens itself, and Escape is left to the host', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => state, commandSurface: true });
+
+  // The entry opens it once the boot has finished - mount happens before the collaborators exist, so the
+  // surface cannot open itself - and from then on it behaves like the canvas surface.
+  quickRun.open();
+  assert.equal(elements.layer.hidden, false, 'the overlay shows the surface');
+  assert.equal(elements.input.focused, true, 'and the line has the keyboard');
+  assert.equal(quickRun.session().open, true);
+
+  // Escape must not close it: the host tears the window down, and an emptied window the host still has up
+  // would be an always-on-top box with nothing in it.
+  let prevented = false;
+  elements.layer.fire('keydown', { key: 'Escape', shiftKey: false, preventDefault() { prevented = true; } });
+  assert.equal(elements.layer.hidden, false, 'the palette stays up');
+  assert.equal(quickRun.session().open, true);
+  assert.equal(prevented, false, 'and the key is not claimed, so the host still sees it');
+});
+
+test('the overlay does not take focus back when it closes', () => {
+  // Lane 4 hands focus to the application the creator came from while an action runs. A page that focused
+  // its own body on close would fight that, so in this mode nothing is restored.
+  const canvasButton = { isConnected: true, focused: 0, focus() { this.focused += 1; } };
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }), activeElement: canvasButton };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  elements.layer.contains = (node) => node === elements.input || node === elements.layer;
+  const quickRun = mountQuickRun({ document, elements, getState: () => state, commandSurface: true });
+  quickRun.open();
+  document.activeElement = elements.input;
+  quickRun.close();
+  assert.equal(canvasButton.focused, 0, 'nothing in the page takes focus back');
+});
+
+test('a second invoke lands on an empty focused line, never an appended one', () => {
+  // The creator may press the chord again while the overlay is up. That must put them on a cleared line,
+  // not append to what is already there and not do nothing.
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => state, commandSurface: true });
+  quickRun.open();
+
+  elements.input.value = 'docs';
+  elements.input.fire('input', {});
+  assert.equal(elements.input.value, 'docs');
+  assert.equal(elements.results.children.length, 2, 'a live query with rows');
+
+  quickRun.focusEmptyLine();
+  assert.equal(elements.input.value, '', 'the line is cleared');
+  assert.equal(quickRun.session().query, '', 'and so is the query');
+  assert.deepEqual(elements.results.children, [], 'the rows are gone with it');
+  assert.equal(elements.input.focused, true, 'and the line has the keyboard again');
+
+  // Called again on an already-empty line it is idempotent rather than doing nothing visible.
+  quickRun.focusEmptyLine();
+  assert.equal(elements.input.value, '');
+  assert.equal(elements.input.focused, true);
+});

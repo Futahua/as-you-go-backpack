@@ -113,7 +113,11 @@ import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { resolveContextTarget } from './app/context-target-model.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 import { bindQuickRunWorkspace } from './app/quick-run/quick-run-workspace.js';
-import { globalInvokePayload, planQuickRunGlobalInvoke } from './app/quick-run/quick-run-global-invoke.js';
+import {
+  COMMAND_SURFACE_MODE,
+  commandSurfaceModeFromUrl,
+  planCommandSurfaceInvoke,
+} from './app/quick-run/quick-run-command-surface.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
 import { createPointerController } from './app/interactions/pointer-controller.js';
@@ -4998,19 +5002,28 @@ document.querySelector('#open-settings').addEventListener('click', () => {
   promptLibrary.setActivePage('hotkeys');
 });
 
-// The host's half of "Alt+A anywhere" is Lane 4's (Papers-3, branch alt-invoke-global-hotkeys at 523ad79):
-// the host brings Papers to the front and relays a neutral event, never learning what Quick Run is. This is
-// the project's whole side of that contract, and it opens the same surface the in-app chord and the canvas
-// letter open - so nothing underneath is resolved and focus comes back, because those rules live in the
-// surface rather than here.
+// The launcher overlay, and the three entrances to one surface.
 //
-// Through the host bridge, not a window listener: host-to-project pushes arrive as `message` events from
-// `window.parent` (the preload re-posts them), and the bridge is the one place that checks the source. A
-// listener for a named event here would never fire in the real app while passing any test that dispatches
-// the event itself.
-host.onGlobalInvoke((payload) => {
-  const plan = planQuickRunGlobalInvoke(globalInvokePayload(payload) ?? payload);
-  if (plan.kind === 'invoke') openQuickRun();
+// The creator's correction: Alt+A is a LAUNCHER, not a window switcher. The host opens a 640x220
+// always-on-top window on this page with `?papers-surface=command-surface` on the URL and relays one event;
+// Papers itself does not come forward, and the application they came from keeps its place. So the marker is
+// what says "you are the command surface", and the event only means "put them on an empty, focused line".
+//
+// Nothing here is a second surface. The same modules, the same session, the same ranking and the same Enter
+// serve the canvas, the in-app chord and this overlay; the two divergences the overlay forces are named where
+// they happen (Escape belongs to the host, and nothing takes focus back on the way out).
+//
+// The event arrives through the host bridge, not a window listener: host-to-project pushes arrive as `message`
+// events from `window.parent` (the preload re-posts them), and the bridge is the one place that checks the
+// source. A named-event listener here would never fire in the app while passing any test that dispatches it.
+const commandSurfaceMode = commandSurfaceModeFromUrl(window.location.href);
+if (commandSurfaceMode === 'overlay') {
+  // The stylesheet keys off this: no canvas, no toolbars, no chrome - the command surface and nothing else.
+  document.documentElement.dataset.papersSurface = COMMAND_SURFACE_MODE;
+}
+host.onCommandSurfaceInvoke((payload) => {
+  const plan = planCommandSurfaceInvoke(payload);
+  if (plan.kind === 'focus-and-clear') quickRun.focusEmptyLine();
 });
 
 const toolbar = createToolbarController({
@@ -5309,6 +5322,8 @@ const quickRun = bindQuickRunWorkspace({
   // next deliberate action writes it.
   onOpen: () => promptLibrary.setSuspended(true),
   onClose: () => promptLibrary.setSuspended(false),
+  // The mode is a presentation fact, not a second surface: the same binding, session and rules in both.
+  commandSurface: commandSurfaceMode === 'overlay',
 });
 
 const keyboard = createKeyboardController({
@@ -5336,7 +5351,7 @@ const keyboard = createKeyboardController({
 // belong to the chord, and a reader who typed a letter while the palette was up is typing into the line,
 // which the controller's own guard arranges.
 //
-// Named rather than inline because the global-invoke listener above the controller also needs it.
+// Named rather than inline because the overlay's invocation listener above the controller also needs it.
 function openQuickRun(seed) {
   return typeof seed === 'string' && seed !== '' ? quickRun.open(seed) : quickRun.toggle();
 }
@@ -6326,6 +6341,12 @@ if (WIDGET_SURFACE) {
     promptLibrary,
   }).then(() => {
     if (!windowLayoutDetachment.isStopped()) bootstrapWindowLayoutRecording();
+    // The launcher overlay: the marker already put this page in command-surface mode, and now that the state
+    // is loaded and every collaborator exists, the surface opens itself - there is no canvas here to open it
+    // from and no second way in. It cannot be opened at mount time, and the first attempt proved why: mount
+    // runs during module evaluation, so `onOpen` reached the prompt library before it was constructed, the
+    // boot died there, and the overlay came up with no rows to search.
+    if (commandSurfaceMode === 'overlay') quickRun.open();
     // 0B: elect a document writer among the surfaces of this project.
     //
     // Only ordinary workspace surfaces take part. A detached surface receives

@@ -220,3 +220,42 @@
   font-size: 13px;
   text-align: center;
 }
+
+/* The launcher overlay: the same surface in a 640x220 window with no workspace behind it.
+ *
+ * The host opens that window on this page with `?papers-surface=command-surface`, and the marker is the only
+ * difference from the canvas - so this block is the whole of "render ONLY the command surface": every child
+ * of the workspace except the palette goes, and the palette stops being a floating card and becomes the
+ * window. Nothing here changes behaviour; the two behavioural divergences (Escape is the host's, and nothing
+ * takes focus back on close) are in the surface itself, where they can be read next to the rules they bend.
+ */
+html[data-papers-surface='command-surface'],
+html[data-papers-surface='command-surface'] body {
+  background: transparent;
+  overflow: hidden;
+}
+html[data-papers-surface='command-surface'] main.workspace > :not(.quick-run-layer) { display: none !important; }
+html[data-papers-surface='command-surface'] main.workspace {
+  background: transparent;
+  min-height: 0;
+}
+html[data-papers-surface='command-surface'] .quick-run-layer {
+  position: fixed;
+  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  max-width: none;
+  transform: none;
+  border: 0;
+  border-radius: 0;
+  /* The window is the frame: a shadow would draw inside it and read as a dark band. */
+  box-shadow: none;
+}
+/* The list takes what is left of the 220px rather than the canvas's fixed cap, so the rows that fit are the
+   rows shown. The paint cap still applies to how many rows exist to scroll through. */
+html[data-papers-surface='command-surface'] .quick-run-results {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}

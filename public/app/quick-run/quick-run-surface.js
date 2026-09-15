@@ -263,7 +263,7 @@ function wheelPixels(event, { rowHeight, viewportHeight }) {
  * lives here, where a test can drive it with element mocks instead of by launching the app.
  */
 export function mountQuickRun(input) {
-  const { document, elements, getState, onActivate, onReveal, onOpen, onClose, now = () => Date.now() } = input ?? {};
+  const { document, elements, getState, onActivate, onReveal, onOpen, onClose, commandSurface = false, now = () => Date.now() } = input ?? {};
   if (!document || !elements || typeof getState !== 'function') {
     throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
   }
@@ -362,6 +362,12 @@ export function mountQuickRun(input) {
 
   elements.layer.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+      // In the launcher overlay, Escape belongs to the HOST: it dismisses the window from the window's own
+      // input handler, so dismissal works even while this page is still loading. Closing the surface here
+      // instead would empty a window the host still has up - an always-on-top box with nothing in it - so the
+      // key is not claimed at all and is left to travel on. This is the one behavioural divergence the
+      // overlay forces, and it is deliberate.
+      if (commandSurface) return;
       if (event.preventDefault) event.preventDefault();
       // Through the surface's own close, never a second copy of it: the session, the painted list and the
       // return of focus to wherever the reader was are one operation, and this handler is the one Escape
@@ -484,11 +490,33 @@ export function mountQuickRun(input) {
       paint();
       const target = previousFocus;
       previousFocus = null;
-      if (ownsFocus && target && typeof target.focus === 'function' && target.isConnected !== false) {
+      // Not in the overlay: the host is handing focus back to the application the creator came from while an
+      // action runs, and a page that focused its own body on the way out would fight it. Nothing else about
+      // closing changes.
+      if (!commandSurface && ownsFocus && target && typeof target.focus === 'function' && target.isConnected !== false) {
         target.focus();
       }
       // And unfrozen after focus is back, so the next deliberate action persists normally.
       onClose?.();
+    },
+    /**
+     * The invoked event, as the host means it: put the reader on an empty, focused line.
+     *
+     * Not "open" - the marker already opened it - and not "append", which is what typing into a line that
+     * already holds a query would do. Idempotent, because the creator may press the chord twice.
+     */
+    focusEmptyLine() {
+      listScrolled = false;
+      newBaseline();
+      if (!session.open) {
+        session = openQuickRunSession(getState());
+      } else {
+        session = quickRunSessionWithQuery(session, '');
+      }
+      elements.input.value = '';
+      paint();
+      elements.input.focus?.();
+      return true;
     },
     /**
      * Rebuild the snapshot from the current state, keeping the query and the filter (section 5).

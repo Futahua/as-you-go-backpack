@@ -17,10 +17,10 @@ export function createHostBridge(window) {
   const REQUEST_TIMEOUT_MS = 15000;
   const pickListeners = new Set();
   const detachListeners = new Set();
-  // The host's global invocation chord (Lane 4's half of "Alt+A anywhere"). A push, like the detach
+  // The launcher overlay's invocation (the creator's "Alt+A anywhere", host side). A push, like the detach
   // lifecycle, so it is fanned out here rather than listened for by the page: every host-to-project message
   // arrives as a `message` event from `window.parent`, and this is the one place that checks the source.
-  const globalInvokeListeners = new Set();
+  const commandSurfaceListeners = new Set();
 
   function request(type, detail = {}) {
     if (pending.size >= MAX_PENDING) {
@@ -60,12 +60,12 @@ export function createHostBridge(window) {
       }
       return;
     }
-    // The host's command-surface chord, relayed after it brought Papers to the front. Flat push shape like
-    // the detach channel, and the same legacy `{ detail }` wrapper is accepted. The host does not know what
-    // the chord means to this project - it reports the reason and the project decides.
-    if (event.data?.type === 'papers:project:global-invoke') {
+    // The launcher overlay's invocation, relayed while the overlay window is up. Flat push shape like the
+    // detach channel, and the same legacy `{ detail }` wrapper is accepted. The host does not know what a
+    // command surface is - it reports the reason and the project decides.
+    if (event.data?.type === 'papers:project:command-surface-invoke') {
       const detail = event.data.detail ?? event.data;
-      for (const listener of globalInvokeListeners) {
+      for (const listener of commandSurfaceListeners) {
         listener(detail);
       }
       return;
@@ -272,10 +272,10 @@ export function createHostBridge(window) {
       detachListeners.add(callback);
       return () => detachListeners.delete(callback);
     },
-    /** The host's relayed command-surface chord. One subscription per page; the page decides the meaning. */
-    onGlobalInvoke: (callback) => {
-      globalInvokeListeners.add(callback);
-      return () => globalInvokeListeners.delete(callback);
+    /** The launcher overlay's invocation. One subscription per page; the page decides the meaning. */
+    onCommandSurfaceInvoke: (callback) => {
+      commandSurfaceListeners.add(callback);
+      return () => commandSurfaceListeners.delete(callback);
     },
     // 019C: compact widget surface (one native widget per layout). open/focus/
     // close are workspace requests carrying the opaque bounded layout key;
