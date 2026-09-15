@@ -619,14 +619,14 @@ async function main() {
     }
 
     await withProjectWebContents('focus');
-    const chord = async (type) => withProjectWebContents({ type, keyCode: 'X', modifiers: ['alt', 'shift'] });
+    const chord = async (type) => withProjectWebContents({ type, keyCode: 'A', modifiers: ['alt'] });
     await chord('keyDown');
     await chord('keyUp');
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     const layerOpen = await projectView("!document.querySelector('#quick-run-layer').hidden && document.activeElement === document.querySelector('#quick-run-input')");
     if (!layerOpen) {
-      return unmeasurable('Alt+Shift+X did not open Quick Run with the line focused', {
+      return unmeasurable('Alt+A did not open Quick Run with the line focused', {
         projectUrl: evidence.projectUrl,
         layerHidden: await projectView("document.querySelector('#quick-run-layer').hidden"),
         activeElement: await projectView("document.activeElement?.id ?? document.activeElement?.tagName ?? null"),
@@ -804,7 +804,7 @@ async function main() {
       },
       method: {
         input: 'webContents.sendInputEvent keyDown + char + keyUp per character into the papers-backpack:// project view (trusted events: every sample reports isTrusted === true)',
-        activation: 'the app\'s own chord Alt+Shift+X (workspace.quick-run, public/app/hotkeys-model.js) delivered as a trusted key event, then typed characters',
+        activation: 'the app\'s own chord Alt+A (workspace.quick-run, public/app/hotkeys-model.js) delivered as a trusted key event, then typed characters',
         t0: 'the input event\'s own timeStamp, read from a document-capture listener that runs before the surface\'s input listener',
         t1: 'performance.now() inside the MutationObserver callback on #quick-run-results, at the microtask checkpoint immediately after the surface\'s synchronous replaceChildren() commit',
         commitDetection: 'MutationObserver childList on #quick-run-results (the surface paints synchronously, so this is the commit, not a later frame)',

@@ -274,12 +274,12 @@ test('rename editor keeps workspace hotkeys and native editing keys inert', () =
 });
 
 test('the Quick Run chord is not swallowed by the editable guard (measured on the live machine)', () => {
-  // Reported from the real machine: Alt+Shift+X did nothing at all while any input had focus, so the palette
+  // Reported from the real machine: the chord did nothing at all while any input had focus, so the palette
   // could not be reopened - or dismissed with its own chord - until the creator clicked somewhere else. The
-  // chord is an explicit Alt+Shift accelerator that types nothing into a text field, so a focused input is no
+  // chord is an explicit Alt accelerator that types nothing into a text field, so a focused input is no
   // reason to ignore it. The second half holds the guard's actual job: text editing still owns its own keys.
   const h = createHarness({ activeElement: { matches: (selector) => selector.includes('input') } });
-  h.listeners[0].handler(key({ key: 'X', altKey: true, shiftKey: true }));
+  h.listeners[0].handler(key({ key: 'a', altKey: true }));
   assert.equal(h.called.quickRun, 1, 'the chord reaches the surface even though an input has focus');
 
   h.listeners[0].handler(key({ key: 'a', ctrlKey: true }));
@@ -287,10 +287,37 @@ test('the Quick Run chord is not swallowed by the editable guard (measured on th
 
   // And the same chord arriving from the field itself, which is what a keypress inside the palette looks like.
   const typed = createHarness();
-  const event = key({ key: 'X', altKey: true, shiftKey: true });
+  const event = key({ key: 'a', altKey: true });
   event.target = { matches: (selector) => selector.includes('input') };
   typed.listeners[0].handler(event);
   assert.equal(typed.called.quickRun, 1, 'the chord works from inside the input it is typed into');
+});
+
+test('the bare-letter chord reaches Quick Run from inside a field and types nothing (Alt+A)', () => {
+  // Alt+A is one modifier and one letter, so the exemption this chord gets from the editable guard matters
+  // far more than it did for Alt+Shift+X: this is exactly the case where a workspace chord could steal an
+  // ordinary keystroke from a field the creator is typing in.
+  const h = createHarness({ activeElement: { matches: (selector) => selector.includes('input') } });
+  let prevented = false;
+  const event = key({ key: 'a', altKey: true });
+  event.preventDefault = () => { prevented = true; };
+
+  h.listeners[0].handler(event);
+
+  assert.equal(h.called.quickRun, 1, 'the chord opens Quick Run even though a field has focus');
+  assert.equal(prevented, true, 'and the letter never reaches that field: the default is prevented');
+});
+
+test('the chord Alt+A replaced no longer opens Quick Run', () => {
+  const h = createHarness();
+  let prevented = false;
+  const event = key({ key: 'X', altKey: true, shiftKey: true });
+  event.preventDefault = () => { prevented = true; };
+
+  h.listeners[0].handler(event);
+
+  assert.equal(h.called.quickRun, 0, 'Alt+Shift+X is bound to nothing now');
+  assert.equal(prevented, false, 'and it is left alone rather than swallowed');
 });
 
 test('G is a plain key, so Ctrl+G does not also group', () => {
@@ -364,10 +391,10 @@ test('the Quick Run chord reaches the callback the entry file supplies', () => {
   const h = createHarness();
   let prevented = 0;
   h.listeners[0].handler({
-    key: 'x',
-    code: 'KeyX',
+    key: 'a',
+    code: 'KeyA',
     altKey: true,
-    shiftKey: true,
+    shiftKey: false,
     ctrlKey: false,
     metaKey: false,
     preventDefault() { prevented += 1; },

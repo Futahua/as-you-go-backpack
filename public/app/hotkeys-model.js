@@ -58,7 +58,10 @@ const BASE_ACTIONS = [
     label: 'Open Quick Run',
     group: 'Workspace',
     scope: HOTKEY_SCOPE_WORKSPACE,
-    defaults: ['Alt+Shift+X'],
+    // Alt+A: one modifier and one letter, which is the point - it is cheap to press. Cheap chords collide
+    // more easily, so this default is pinned by a test that checks every default in every scope is claimed
+    // once, and only this action claims Alt+A.
+    defaults: ['Alt+A'],
   },
   {
     id: 'workspace.escape',
