@@ -52,6 +52,8 @@ export function bindQuickRunWorkspace({
   getState,
   getVisibleItemIds,
   setStatus,
+  onOpen,
+  onClose,
 }) {
   if (typeof getState !== 'function') {
     throw new TypeError('bindQuickRunWorkspace needs a getState function to re-read the workspace');
@@ -75,6 +77,10 @@ export function bindQuickRunWorkspace({
     document,
     elements,
     getState,
+    // Passed straight through: the entry file knows what is underneath Quick Run and freezes it, while this
+    // binding and the surface stay ignorant of it.
+    onOpen,
+    onClose,
     // What Enter does (section 1.5). The row is re-read from the current state by its stable key before
     // anything happens (section 5), then the plan is executed by naming the workspace's own
     // open-selection path - activateItem - instead of growing a second launcher (sections 1.5 and 6.4). A

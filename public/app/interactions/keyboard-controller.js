@@ -54,14 +54,21 @@ export function createKeyboardController({
   function mount() {
     abortController = new AbortController();
     document.addEventListener('keydown', (event) => {
-      // Any modal layer (including the prompt library) takes over keyboard
-      // handling. While the prompt library is open the tree controller owns
-      // tree shortcuts and editable controls keep native text behavior.
-      if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden
-        || !elements.linkEditLayer.hidden || !elements.promptLayer.hidden) return;
       const session = store.getSession();
       const preferences = store.getSnapshot?.()?.view?.preferences?.hotkeys ?? {};
       const matches = (actionId) => bindingMatchesAction(actionId, event, preferences, HOTKEY_CATALOG);
+      // Any modal layer (including the prompt library) takes over keyboard handling: while the prompt
+      // library is open the tree controller owns tree shortcuts and editable controls keep native text
+      // behavior.
+      //
+      // The Quick Run chord is the one key that punches through, at the reviewer's ruling: the creator asked
+      // for it to work from inside other applications entirely, so refusing it inside Papers' own dialogs is
+      // incoherent. Quick Run is a transient interruption, not a modal resolution - opening it must not save,
+      // discard or close anything underneath, and it leaves the underlying control's buffer exactly as it
+      // found it. Everything else still belongs to the dialog.
+      const modalOpen = !elements.editorLayer.hidden || !elements.confirmLayer.hidden
+        || !elements.linkEditLayer.hidden || !elements.promptLayer.hidden;
+      if (modalOpen && !matches('workspace.quick-run')) return;
       // The Quick Run palette owns the keyboard while it is up, exactly as the modal layers above do. Its
       // own handler consumes Escape, Tab, Enter and the arrows and calls preventDefault on them — but it
       // does not stop them propagating, so without this guard every one of those keys ALSO did its

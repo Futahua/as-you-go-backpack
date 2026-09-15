@@ -263,7 +263,7 @@ function wheelPixels(event, { rowHeight, viewportHeight }) {
  * lives here, where a test can drive it with element mocks instead of by launching the app.
  */
 export function mountQuickRun(input) {
-  const { document, elements, getState, onActivate, onReveal, now = () => Date.now() } = input ?? {};
+  const { document, elements, getState, onActivate, onReveal, onOpen, onClose, now = () => Date.now() } = input ?? {};
   if (!document || !elements || typeof getState !== 'function') {
     throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
   }
@@ -450,6 +450,8 @@ export function mountQuickRun(input) {
       listScrolled = false;
       newBaseline();
       previousFocus = document.activeElement ?? null;
+      // Told before focus moves, so a modal underneath can freeze before anything about it changes.
+      onOpen?.();
       session = openQuickRunSession(getState());
       if (seeded !== '') {
         session = quickRunSessionWithQuery(session, seeded);
@@ -485,6 +487,8 @@ export function mountQuickRun(input) {
       if (ownsFocus && target && typeof target.focus === 'function' && target.isConnected !== false) {
         target.focus();
       }
+      // And unfrozen after focus is back, so the next deliberate action persists normally.
+      onClose?.();
     },
     /**
      * Rebuild the snapshot from the current state, keeping the query and the filter (section 5).

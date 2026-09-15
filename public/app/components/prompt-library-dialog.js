@@ -765,6 +765,19 @@ export function createPromptLibraryDialog({
 
   // ----------------------------------------------------- draft history
 
+  /**
+   * Whether a transient interruption is on top of this dialog.
+   *
+   * Measured, not theoretical: with a folder rename half typed, pressing the Quick Run chord persisted the
+   * half-typed title to disk - content-verified by reconstructing the state file, and it happens through this
+   * dialog's own auto-save rather than through `onRenameFocusout` (which never fires for that focus move, and
+   * which is guarded separately below). A launcher must not invent a state change, and the alternative -
+   * rolling the edit back - throws away work, so while something is on top the draft simply is not persisted.
+   * The edit stays in memory and the next deliberate action saves it, which is what "leave the buffer
+   * untouched" means for a dialog that has no Save step.
+   */
+  let suspended = false;
+
   /** Ends the active text-editing transaction, producing at most one undo entry
    * for the whole editing session. */
   function commitActiveEditTransaction() {
@@ -779,7 +792,6 @@ export function createPromptLibraryDialog({
     activeEditSession = null;
     draftLibrary = history.present;
   }
-
   /** Structural cleanup after a history tree change: close the context menu,
    * cancel delete confirmation and drag, drop invalid editor/rename/expansion
    * state, repair the cut clipboard, repair selection, and render once. */
@@ -1412,9 +1424,21 @@ export function createPromptLibraryDialog({
     }
   }
 
+  /**
+   * Committing on focusout is right for a rename the reader finished by clicking somewhere else, and wrong
+   * for the one case where focus leaves without the reader going anywhere: the Quick Run palette opening on
+   * top of this dialog. That palette is a transient interruption, not a resolution - a launcher must not
+   * commit a half-typed name, and the alternative (rolling it back) loses work just as silently. So a
+   * focusout that hands focus into the palette is ignored: the rename stays live, its buffer untouched, and
+   * when the palette closes focus comes back to this input and the reader carries on typing.
+   *
+   * The test is structural and local on purpose. This dialog must not know what Quick Run is, and the layer
+   * is the only thing it needs to recognise.
+   */
   function onRenameFocusout(event) {
     const input = event.target.closest('.prompt-folder-rename');
     if (!input) return;
+    if (event.relatedTarget?.closest?.('#quick-run-layer')) return;
     const id = input.closest('.prompt-tree-row')?.dataset.nodeId;
     if (!id || editingFolderId !== id) return;
     commitFolderRename();
@@ -1626,6 +1650,10 @@ export function createPromptLibraryDialog({
    * invalid draft (the last prompt removed) is reported and left unsaved, so
    * the persisted library never goes empty. */
   function autoSave() {
+    // A transient interruption on top of this dialog is not a reason to persist anything: see `suspended`.
+    // Nothing is queued for later either - a queued save would write the same half-finished draft the moment
+    // the launcher closed, which is the invisible state change the rule forbids, only later.
+    if (suspended) return;
     const validationError = validatePromptLibrary(history.present);
     if (validationError) {
       error.textContent = validationError;
@@ -1694,5 +1722,24 @@ export function createPromptLibraryDialog({
     contextMenu.destroy();
   }
 
-  return { mount, destroy, open, close, getBatchText, getSnapshotLibrary, setActivePage };
+  /**
+   * Freeze or unfreeze persistence while something transient sits on top of this dialog.
+   *
+   * The caller is the workspace entry, which knows both surfaces; this dialog is told only "something is on
+   * top", never what it is, so it stays ignorant of Quick Run the way the rest of the modal boundary is.
+   */
+  function setSuspended(flag) {
+    const next = flag === true;
+    const was = suspended;
+    suspended = next;
+    // Coming back: the reader was mid-rename when the interruption started, and the tree was re-rendered in
+    // the meantime, so the input they were typing in is a different node now. Measured: the surface records
+    // the element it took focus from and only restores it if it is still connected, which for this dialog is
+    // never - so the caret has to be put back here, by identity rather than by node.
+    if (was && !next && editingFolderId) {
+      focusInRow(editingFolderId, '.prompt-folder-rename');
+    }
+  }
+
+  return { mount, destroy, open, close, getBatchText, getSnapshotLibrary, setActivePage, setSuspended };
 }

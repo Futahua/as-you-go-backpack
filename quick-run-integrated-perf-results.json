@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-15T01:21:18.055Z",
+  "generatedAt": "2026-09-15T02:25:30.884Z",
   "gate": "papers/quick-run.md STAGE 14.1 (real renderer corpus) + STAGE 14.2 (measure keystroke-to-results)",
   "host": {
     "kind": "source",
@@ -18,8 +18,8 @@
     "papersRoot": "D:/Letters/MatTroiSeConMoc/PAPERS 3/Papers-3"
   },
   "isolation": {
-    "disposableProfile": "D:\\Programs\\evTEMP\\ayg-qr-perf-5o54dy",
-    "projectRoot": "D:\\Programs\\evTEMP\\ayg-qr-perf-5o54dy\\project",
+    "disposableProfile": "D:\\Programs\\evTEMP\\ayg-qr-perf-h99ZPd",
+    "projectRoot": "D:\\Programs\\evTEMP\\ayg-qr-perf-h99ZPd\\project",
     "livePapersProcessTouched": false,
     "windowsBound": [
       {
@@ -47,7 +47,7 @@
   },
   "method": {
     "input": "webContents.sendInputEvent keyDown + char + keyUp per character into the papers-backpack:// project view (trusted events: every sample reports isTrusted === true)",
-    "activation": "the app's own chord Alt+Shift+X (workspace.quick-run, public/app/hotkeys-model.js) delivered as a trusted key event, then typed characters",
+    "activation": "the app's own chord Alt+A (workspace.quick-run, public/app/hotkeys-model.js) delivered as a trusted key event, then typed characters",
     "t0": "the input event's own timeStamp, read from a document-capture listener that runs before the surface's input listener",
     "t1": "performance.now() inside the MutationObserver callback on #quick-run-results, at the microtask checkpoint immediately after the surface's synchronous replaceChildren() commit",
     "commitDetection": "MutationObserver childList on #quick-run-results (the surface paints synchronously, so this is the commit, not a later frame)",
@@ -64,7 +64,7 @@
   "samples": {
     "collected": 401,
     "distinctQueries": 7,
-    "measuredWindowMs": 14364
+    "measuredWindowMs": 14378
   },
   "perQuery": [
     {
@@ -80,10 +80,10 @@
         200
       ],
       "samples": 49,
-      "p50": 5.2,
-      "p95": 6.1,
-      "max": 6.2,
-      "min": 4.6,
+      "p50": 5.6,
+      "p95": 7,
+      "max": 7.8,
+      "min": 4.8,
       "overOneFrame": 0
     },
     {
@@ -99,10 +99,10 @@
         200
       ],
       "samples": 65,
-      "p50": 5,
-      "p95": 5.5,
-      "max": 6.2,
-      "min": 2.9,
+      "p50": 5.3,
+      "p95": 7.4,
+      "max": 7.6,
+      "min": 3,
       "overOneFrame": 0
     },
     {
@@ -118,10 +118,10 @@
         200
       ],
       "samples": 60,
-      "p50": 4.9,
-      "p95": 5.8,
-      "max": 6.3,
-      "min": 2.9,
+      "p50": 5,
+      "p95": 7.3,
+      "max": 8,
+      "min": 2.8,
       "overOneFrame": 0
     },
     {
@@ -137,10 +137,10 @@
         200
       ],
       "samples": 64,
-      "p50": 6.3,
-      "p95": 7.2,
-      "max": 7.6,
-      "min": 3.5,
+      "p50": 4.8,
+      "p95": 6,
+      "max": 7.5,
+      "min": 2.6,
       "overOneFrame": 0
     },
     {
@@ -156,10 +156,10 @@
         200
       ],
       "samples": 60,
-      "p50": 6.8,
-      "p95": 8.5,
-      "max": 16.1,
-      "min": 3.9,
+      "p50": 5.4,
+      "p95": 6.8,
+      "max": 7.4,
+      "min": 3.1,
       "overOneFrame": 0
     },
     {
@@ -175,10 +175,10 @@
         200
       ],
       "samples": 49,
-      "p50": 3.9,
-      "p95": 5.6,
-      "max": 8.8,
-      "min": 3,
+      "p50": 3.7,
+      "p95": 5,
+      "max": 5.9,
+      "min": 2.5,
       "overOneFrame": 0
     },
     {
@@ -194,10 +194,10 @@
         200
       ],
       "samples": 54,
-      "p50": 4.4,
-      "p95": 6.7,
-      "max": 11.4,
-      "min": 3.3,
+      "p50": 3.8,
+      "p95": 5.7,
+      "max": 6.2,
+      "min": 2.5,
       "overOneFrame": 0
     }
   ],
@@ -205,28 +205,28 @@
     {
       "rowsRendered": "1",
       "samples": 10,
-      "p50": 3.8,
-      "p95": 11.4,
-      "max": 11.4,
-      "min": 3.3,
+      "p50": 2.6,
+      "p95": 3.2,
+      "max": 3.2,
+      "min": 2.5,
       "overOneFrame": 0
     },
     {
       "rowsRendered": "2-50",
       "samples": 135,
-      "p50": 3.5,
-      "p95": 4.4,
-      "max": 5.3,
-      "min": 2.9,
+      "p50": 3.3,
+      "p95": 4.3,
+      "max": 5.6,
+      "min": 2.5,
       "overOneFrame": 0
     },
     {
       "rowsRendered": "51-200",
       "samples": 256,
-      "p50": 5.3,
-      "p95": 7.7,
-      "max": 16.1,
-      "min": 3.8,
+      "p50": 5.4,
+      "p95": 7.3,
+      "max": 8,
+      "min": 3.7,
       "overOneFrame": 0
     }
   ],
@@ -234,8 +234,8 @@
     "samples": 401,
     "p50": 5,
     "p95": 7.2,
-    "max": 16.1,
-    "min": 2.9,
+    "max": 8,
+    "min": 2.5,
     "overOneFrame": 0
   },
   "timestampCrossCheck": {
@@ -252,8 +252,8 @@
     "count": 1,
     "entries": [
       {
-        "start": 1738.7,
-        "duration": 64,
+        "start": 1794,
+        "duration": 66,
         "name": "self"
       }
     ],
@@ -294,9 +294,9 @@
     {
       "query": "kestrel",
       "value": "k",
-      "t0": 1466.4,
-      "t1": 1471.6,
-      "latencyMs": 5.2,
+      "t0": 1523.4,
+      "t1": 1528.5,
+      "latencyMs": 5.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -304,9 +304,9 @@
     {
       "query": "kestrel",
       "value": "ke",
-      "t0": 1498.2,
-      "t1": 1503.8,
-      "latencyMs": 5.6,
+      "t0": 1554.7,
+      "t1": 1561.3,
+      "latencyMs": 6.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -314,9 +314,9 @@
     {
       "query": "kestrel",
       "value": "kes",
-      "t0": 1529,
-      "t1": 1534.5,
-      "latencyMs": 5.5,
+      "t0": 1586.7,
+      "t1": 1592.3,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -324,9 +324,9 @@
     {
       "query": "kestrel",
       "value": "kest",
-      "t0": 1559.3,
-      "t1": 1564.5,
-      "latencyMs": 5.2,
+      "t0": 1617.1,
+      "t1": 1622.7,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -334,9 +334,9 @@
     {
       "query": "kestrel",
       "value": "kestr",
-      "t0": 1591.5,
-      "t1": 1597.3,
-      "latencyMs": 5.8,
+      "t0": 1648.3,
+      "t1": 1654.8,
+      "latencyMs": 6.5,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -344,9 +344,9 @@
     {
       "query": "kestrel",
       "value": "kestre",
-      "t0": 1625.6,
-      "t1": 1630.9,
-      "latencyMs": 5.3,
+      "t0": 1695,
+      "t1": 1700.8,
+      "latencyMs": 5.8,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -354,9 +354,9 @@
     {
       "query": "kestrel",
       "value": "kestrel",
-      "t0": 1653.6,
-      "t1": 1658.9,
-      "latencyMs": 5.3,
+      "t0": 1728.5,
+      "t1": 1733.7,
+      "latencyMs": 5.2,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -364,8 +364,28 @@
     {
       "query": "kestrel",
       "value": "k",
-      "t0": 1806.5,
-      "t1": 1812.4,
+      "t0": 1871.3,
+      "t1": 1876.6,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "ke",
+      "t0": 1900,
+      "t1": 1907.8,
+      "latencyMs": 7.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "kes",
+      "t0": 1932.5,
+      "t1": 1938.4,
       "latencyMs": 5.9,
       "rows": 200,
       "inputType": "insertText",
@@ -373,30 +393,10 @@
     },
     {
       "query": "kestrel",
-      "value": "ke",
-      "t0": 1839.5,
-      "t1": 1845.1,
-      "latencyMs": 5.6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kes",
-      "t0": 1873.7,
-      "t1": 1879.4,
-      "latencyMs": 5.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
       "value": "kest",
-      "t0": 1917.7,
-      "t1": 1922.8,
-      "latencyMs": 5.1,
+      "t0": 1961.6,
+      "t1": 1966.8,
+      "latencyMs": 5.2,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -404,38 +404,8 @@
     {
       "query": "kestrel",
       "value": "kestr",
-      "t0": 1949.5,
-      "t1": 1955.1,
-      "latencyMs": 5.6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestre",
-      "t0": 1981.3,
-      "t1": 1986.1,
-      "latencyMs": 4.8,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestrel",
-      "t0": 2010.9,
-      "t1": 2015.8,
-      "latencyMs": 4.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "k",
-      "t0": 2090.2,
-      "t1": 2095.3,
+      "t0": 1992.2,
+      "t1": 1997.3,
       "latencyMs": 5.1,
       "rows": 200,
       "inputType": "insertText",
@@ -443,9 +413,39 @@
     },
     {
       "query": "kestrel",
+      "value": "kestre",
+      "t0": 2022.8,
+      "t1": 2029.6,
+      "latencyMs": 6.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "kestrel",
+      "t0": 2053.5,
+      "t1": 2058.6,
+      "latencyMs": 5.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "k",
+      "t0": 2131.3,
+      "t1": 2137.1,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
       "value": "ke",
-      "t0": 2118.7,
-      "t1": 2124.8,
+      "t0": 2161.8,
+      "t1": 2167.9,
       "latencyMs": 6.1,
       "rows": 200,
       "inputType": "insertText",
@@ -454,18 +454,8 @@
     {
       "query": "kestrel",
       "value": "kes",
-      "t0": 2150.7,
-      "t1": 2156.2,
-      "latencyMs": 5.5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kest",
-      "t0": 2182.2,
-      "t1": 2187.5,
+      "t0": 2195.1,
+      "t1": 2200.4,
       "latencyMs": 5.3,
       "rows": 200,
       "inputType": "insertText",
@@ -473,29 +463,9 @@
     },
     {
       "query": "kestrel",
-      "value": "kestr",
-      "t0": 2214.5,
-      "t1": 2219.5,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestre",
-      "t0": 2247.7,
-      "t1": 2252.8,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestrel",
-      "t0": 2276.4,
-      "t1": 2282.6,
+      "value": "kest",
+      "t0": 2224.3,
+      "t1": 2230.5,
       "latencyMs": 6.2,
       "rows": 200,
       "inputType": "insertText",
@@ -503,50 +473,10 @@
     },
     {
       "query": "kestrel",
-      "value": "k",
-      "t0": 2355.5,
-      "t1": 2360.1,
-      "latencyMs": 4.6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "ke",
-      "t0": 2385.4,
-      "t1": 2390.7,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kes",
-      "t0": 2417.3,
-      "t1": 2422.3,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kest",
-      "t0": 2448.2,
-      "t1": 2453.2,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
       "value": "kestr",
-      "t0": 2481.2,
-      "t1": 2486.1,
-      "latencyMs": 4.9,
+      "t0": 2255.3,
+      "t1": 2261.1,
+      "latencyMs": 5.8,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -554,9 +484,9 @@
     {
       "query": "kestrel",
       "value": "kestre",
-      "t0": 2510.5,
-      "t1": 2515.9,
-      "latencyMs": 5.4,
+      "t0": 2286.8,
+      "t1": 2292.4,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -564,28 +494,8 @@
     {
       "query": "kestrel",
       "value": "kestrel",
-      "t0": 2541.4,
-      "t1": 2546.6,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "k",
-      "t0": 2622.5,
-      "t1": 2627.5,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "ke",
-      "t0": 2651.8,
-      "t1": 2657.3,
+      "t0": 2320.5,
+      "t1": 2326,
       "latencyMs": 5.5,
       "rows": 200,
       "inputType": "insertText",
@@ -593,1510 +503,1600 @@
     },
     {
       "query": "kestrel",
-      "value": "kes",
-      "t0": 2683,
-      "t1": 2688.2,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kest",
-      "t0": 2713.8,
-      "t1": 2719,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestr",
-      "t0": 2745.1,
-      "t1": 2750.2,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestre",
-      "t0": 2778.5,
-      "t1": 2783.8,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestrel",
-      "t0": 2807.1,
-      "t1": 2812.2,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
       "value": "k",
-      "t0": 2886.4,
-      "t1": 2891.2,
-      "latencyMs": 4.8,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "ke",
-      "t0": 2917.5,
-      "t1": 2923.6,
-      "latencyMs": 6.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kes",
-      "t0": 2948.4,
-      "t1": 2953.5,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kest",
-      "t0": 2978.9,
-      "t1": 2984.2,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestr",
-      "t0": 3010.1,
-      "t1": 3015.1,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestre",
-      "t0": 3041.3,
-      "t1": 3046.4,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestrel",
-      "t0": 3072.4,
-      "t1": 3077.3,
-      "latencyMs": 4.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "k",
-      "t0": 3151.8,
-      "t1": 3156.5,
-      "latencyMs": 4.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "ke",
-      "t0": 3182.8,
-      "t1": 3188.1,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kes",
-      "t0": 3214.2,
-      "t1": 3219.1,
-      "latencyMs": 4.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kest",
-      "t0": 3244.6,
-      "t1": 3249.9,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestr",
-      "t0": 3276,
-      "t1": 3281.3,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestre",
-      "t0": 3306.6,
-      "t1": 3311.5,
-      "latencyMs": 4.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel",
-      "value": "kestrel",
-      "t0": 3338,
-      "t1": 3342.9,
-      "latencyMs": 4.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "k",
-      "t0": 3416.4,
-      "t1": 3421.5,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "ke",
-      "t0": 3446.7,
-      "t1": 3451.9,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kes",
-      "t0": 3477.1,
-      "t1": 3482.2,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kest",
-      "t0": 3508.9,
-      "t1": 3514.1,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestr",
-      "t0": 3540.4,
-      "t1": 3545.7,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestre",
-      "t0": 3571.6,
-      "t1": 3576.6,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel",
-      "t0": 3602.6,
-      "t1": 3607.6,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel ",
-      "t0": 3634.2,
-      "t1": 3639.6,
-      "latencyMs": 5.4,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel f",
-      "t0": 3664.8,
-      "t1": 3668.7,
-      "latencyMs": 3.9,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel fo",
-      "t0": 3695.6,
-      "t1": 3698.8,
-      "latencyMs": 3.2,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel for",
-      "t0": 3726.4,
-      "t1": 3729.5,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forg",
-      "t0": 3757,
-      "t1": 3760.1,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forge",
-      "t0": 3787.6,
-      "t1": 3790.6,
-      "latencyMs": 3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "k",
-      "t0": 3866,
-      "t1": 3870.7,
-      "latencyMs": 4.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "ke",
-      "t0": 3896.9,
-      "t1": 3902.3,
-      "latencyMs": 5.4,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kes",
-      "t0": 3929.1,
-      "t1": 3934.2,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kest",
-      "t0": 3960.2,
-      "t1": 3965.5,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestr",
-      "t0": 3991.6,
-      "t1": 3996.8,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestre",
-      "t0": 4022.5,
-      "t1": 4027.4,
-      "latencyMs": 4.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel",
-      "t0": 4054.7,
-      "t1": 4059.7,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel ",
-      "t0": 4085.7,
-      "t1": 4091,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel f",
-      "t0": 4116.9,
-      "t1": 4120.7,
-      "latencyMs": 3.8,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel fo",
-      "t0": 4147.9,
-      "t1": 4150.9,
-      "latencyMs": 3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel for",
-      "t0": 4179.4,
-      "t1": 4182.5,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forg",
-      "t0": 4210.7,
-      "t1": 4214,
-      "latencyMs": 3.3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forge",
-      "t0": 4241.7,
-      "t1": 4244.7,
-      "latencyMs": 3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "k",
-      "t0": 4321,
-      "t1": 4325.6,
-      "latencyMs": 4.6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "ke",
-      "t0": 4351.2,
-      "t1": 4356.7,
+      "t0": 2396.3,
+      "t1": 2401.8,
       "latencyMs": 5.5,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge",
-      "value": "kes",
-      "t0": 4382.3,
-      "t1": 4387.4,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kest",
-      "t0": 4413.8,
-      "t1": 4418.8,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestr",
-      "t0": 4445.5,
-      "t1": 4450.5,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestre",
-      "t0": 4476.2,
-      "t1": 4481.5,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel",
-      "t0": 4506.4,
-      "t1": 4511.9,
-      "latencyMs": 5.5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel ",
-      "t0": 4537.9,
-      "t1": 4543,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel f",
-      "t0": 4568.3,
-      "t1": 4572.9,
-      "latencyMs": 4.6,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel fo",
-      "t0": 4599,
-      "t1": 4602.2,
-      "latencyMs": 3.2,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel for",
-      "t0": 4630.3,
-      "t1": 4633.4,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forg",
-      "t0": 4661,
-      "t1": 4664.5,
-      "latencyMs": 3.5,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forge",
-      "t0": 4692.5,
-      "t1": 4695.6,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "k",
-      "t0": 4771.7,
-      "t1": 4776.5,
-      "latencyMs": 4.8,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
+      "query": "kestrel",
       "value": "ke",
-      "t0": 4801.4,
-      "t1": 4806.9,
-      "latencyMs": 5.5,
+      "t0": 2428.2,
+      "t1": 2434.1,
+      "latencyMs": 5.9,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge",
+      "query": "kestrel",
       "value": "kes",
-      "t0": 4832.4,
-      "t1": 4837.8,
-      "latencyMs": 5.4,
+      "t0": 2457.4,
+      "t1": 2463.7,
+      "latencyMs": 6.3,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge",
+      "query": "kestrel",
       "value": "kest",
-      "t0": 4864.1,
-      "t1": 4869.2,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestr",
-      "t0": 4895.1,
-      "t1": 4900.3,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestre",
-      "t0": 4925.8,
-      "t1": 4931.1,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel",
-      "t0": 4956.9,
-      "t1": 4962.1,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel ",
-      "t0": 4992.7,
-      "t1": 4998.9,
-      "latencyMs": 6.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel f",
-      "t0": 5017.7,
-      "t1": 5021.7,
-      "latencyMs": 4,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel fo",
-      "t0": 5048.6,
-      "t1": 5051.7,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel for",
-      "t0": 5079.6,
-      "t1": 5082.6,
-      "latencyMs": 3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forg",
-      "t0": 5111,
-      "t1": 5114.2,
-      "latencyMs": 3.2,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forge",
-      "t0": 5142.2,
-      "t1": 5145.6,
-      "latencyMs": 3.4,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "k",
-      "t0": 5221.4,
-      "t1": 5226.1,
-      "latencyMs": 4.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "ke",
-      "t0": 5252.2,
-      "t1": 5257.6,
-      "latencyMs": 5.4,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kes",
-      "t0": 5284.3,
-      "t1": 5289.3,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kest",
-      "t0": 5315.4,
-      "t1": 5320.6,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestr",
-      "t0": 5347.1,
-      "t1": 5352.2,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestre",
-      "t0": 5378.4,
-      "t1": 5383.4,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel",
-      "t0": 5409,
-      "t1": 5414.3,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel ",
-      "t0": 5439.9,
-      "t1": 5445.4,
-      "latencyMs": 5.5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel f",
-      "t0": 5471.8,
-      "t1": 5475.8,
-      "latencyMs": 4,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel fo",
-      "t0": 5503.1,
-      "t1": 5506.5,
-      "latencyMs": 3.4,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel for",
-      "t0": 5534.3,
-      "t1": 5537.4,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forg",
-      "t0": 5566.3,
-      "t1": 5569.2,
-      "latencyMs": 2.9,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge",
-      "value": "kestrel forge",
-      "t0": 5597.2,
-      "t1": 5600.3,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "k",
-      "t0": 5677.3,
-      "t1": 5682.4,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "ke",
-      "t0": 5707.2,
-      "t1": 5713.2,
+      "t0": 2489.3,
+      "t1": 2495.3,
       "latencyMs": 6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 1",
-      "value": "kes",
-      "t0": 5739.3,
-      "t1": 5744.4,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kest",
-      "t0": 5770.7,
-      "t1": 5775.8,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
+      "query": "kestrel",
       "value": "kestr",
-      "t0": 5801.4,
-      "t1": 5806.9,
+      "t0": 2520.3,
+      "t1": 2525.7,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "kestre",
+      "t0": 2553.6,
+      "t1": 2559,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "kestrel",
+      "t0": 2583.7,
+      "t1": 2589.6,
+      "latencyMs": 5.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "k",
+      "t0": 2663,
+      "t1": 2668,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "ke",
+      "t0": 2694.6,
+      "t1": 2700.1,
       "latencyMs": 5.5,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 1",
-      "value": "kestre",
-      "t0": 5832.6,
-      "t1": 5838.3,
-      "latencyMs": 5.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel",
-      "t0": 5863.8,
-      "t1": 5868.8,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel ",
-      "t0": 5894.2,
-      "t1": 5899.5,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel f",
-      "t0": 5925.7,
-      "t1": 5929.7,
-      "latencyMs": 4,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel fo",
-      "t0": 5956.3,
-      "t1": 5959.6,
-      "latencyMs": 3.3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel for",
-      "t0": 5987,
-      "t1": 5990.1,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forg",
-      "t0": 6018.7,
-      "t1": 6021.8,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge",
-      "t0": 6050.1,
-      "t1": 6053.3,
-      "latencyMs": 3.2,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge ",
-      "t0": 6081.7,
-      "t1": 6084.8,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge 1",
-      "t0": 6113,
-      "t1": 6116,
-      "latencyMs": 3,
-      "rows": 13,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "k",
-      "t0": 6191.8,
-      "t1": 6196.5,
-      "latencyMs": 4.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "ke",
-      "t0": 6222,
-      "t1": 6227.3,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
+      "query": "kestrel",
       "value": "kes",
-      "t0": 6253,
-      "t1": 6258.1,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kest",
-      "t0": 6284,
-      "t1": 6289,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestr",
-      "t0": 6314.8,
-      "t1": 6320.2,
+      "t0": 2725.2,
+      "t1": 2730.6,
       "latencyMs": 5.4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 1",
-      "value": "kestre",
-      "t0": 6345.8,
-      "t1": 6350.9,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel",
-      "t0": 6377.3,
-      "t1": 6382.5,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel ",
-      "t0": 6408.2,
-      "t1": 6413.6,
-      "latencyMs": 5.4,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel f",
-      "t0": 6438.8,
-      "t1": 6442.7,
-      "latencyMs": 3.9,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel fo",
-      "t0": 6470.4,
-      "t1": 6473.7,
-      "latencyMs": 3.3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel for",
-      "t0": 6500.8,
-      "t1": 6504.2,
-      "latencyMs": 3.4,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forg",
-      "t0": 6532.2,
-      "t1": 6535.3,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge",
-      "t0": 6563.3,
-      "t1": 6566.4,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge ",
-      "t0": 6595.1,
-      "t1": 6598.1,
-      "latencyMs": 3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge 1",
-      "t0": 6626.2,
-      "t1": 6629.3,
-      "latencyMs": 3.1,
-      "rows": 13,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "k",
-      "t0": 6704.4,
-      "t1": 6709.3,
-      "latencyMs": 4.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "ke",
-      "t0": 6734.3,
-      "t1": 6740.6,
-      "latencyMs": 6.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kes",
-      "t0": 6766.5,
-      "t1": 6771.6,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
+      "query": "kestrel",
       "value": "kest",
-      "t0": 6796.9,
-      "t1": 6801.9,
-      "latencyMs": 5,
+      "t0": 2755.7,
+      "t1": 2761.7,
+      "latencyMs": 6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 1",
+      "query": "kestrel",
       "value": "kestr",
-      "t0": 6827.3,
-      "t1": 6832.3,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestre",
-      "t0": 6857.8,
-      "t1": 6863.6,
-      "latencyMs": 5.8,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel",
-      "t0": 6891,
-      "t1": 6896.7,
-      "latencyMs": 5.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel ",
-      "t0": 6922.6,
-      "t1": 6928.4,
-      "latencyMs": 5.8,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel f",
-      "t0": 6950.8,
-      "t1": 6954.9,
-      "latencyMs": 4.1,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel fo",
-      "t0": 6982.4,
-      "t1": 6985.7,
-      "latencyMs": 3.3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel for",
-      "t0": 7013.6,
-      "t1": 7016.6,
-      "latencyMs": 3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forg",
-      "t0": 7044.4,
-      "t1": 7047.5,
-      "latencyMs": 3.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge",
-      "t0": 7075.3,
-      "t1": 7078.5,
-      "latencyMs": 3.2,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge ",
-      "t0": 7106.7,
-      "t1": 7109.7,
-      "latencyMs": 3,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge 1",
-      "t0": 7137.7,
-      "t1": 7140.6,
-      "latencyMs": 2.9,
-      "rows": 13,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "k",
-      "t0": 7215.7,
-      "t1": 7220.4,
-      "latencyMs": 4.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "ke",
-      "t0": 7245.8,
-      "t1": 7251,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kes",
-      "t0": 7276.1,
-      "t1": 7281.1,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kest",
-      "t0": 7306.7,
-      "t1": 7312,
+      "t0": 2787,
+      "t1": 2792.3,
       "latencyMs": 5.3,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 1",
-      "value": "kestr",
-      "t0": 7338.8,
-      "t1": 7343.9,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
+      "query": "kestrel",
       "value": "kestre",
-      "t0": 7369.9,
-      "t1": 7375,
+      "t0": 2818.1,
+      "t1": 2823.2,
       "latencyMs": 5.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 1",
+      "query": "kestrel",
       "value": "kestrel",
-      "t0": 7400.6,
-      "t1": 7405.6,
-      "latencyMs": 5,
+      "t0": 2849.5,
+      "t1": 2854.8,
+      "latencyMs": 5.3,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 1",
-      "value": "kestrel ",
-      "t0": 7431.2,
-      "t1": 7436.2,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel f",
-      "t0": 7462.7,
-      "t1": 7466.6,
-      "latencyMs": 3.9,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel fo",
-      "t0": 7494.4,
-      "t1": 7497.6,
-      "latencyMs": 3.2,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel for",
-      "t0": 7526.1,
-      "t1": 7530,
-      "latencyMs": 3.9,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forg",
-      "t0": 7559.1,
-      "t1": 7563.3,
-      "latencyMs": 4.2,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge",
-      "t0": 7589.1,
-      "t1": 7593.2,
-      "latencyMs": 4.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge ",
-      "t0": 7620.8,
-      "t1": 7625.2,
-      "latencyMs": 4.4,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 1",
-      "value": "kestrel forge 1",
-      "t0": 7652,
-      "t1": 7655.8,
-      "latencyMs": 3.8,
-      "rows": 13,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
+      "query": "kestrel",
       "value": "k",
-      "t0": 7730.7,
-      "t1": 7737,
-      "latencyMs": 6.3,
+      "t0": 2929.5,
+      "t1": 2934.3,
+      "latencyMs": 4.8,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
+      "query": "kestrel",
       "value": "ke",
-      "t0": 7761.2,
-      "t1": 7768,
-      "latencyMs": 6.8,
+      "t0": 2959.2,
+      "t1": 2964.8,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
+      "query": "kestrel",
       "value": "kes",
-      "t0": 7793,
-      "t1": 7799.8,
-      "latencyMs": 6.8,
+      "t0": 2990.5,
+      "t1": 2996.6,
+      "latencyMs": 6.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
+      "query": "kestrel",
       "value": "kest",
-      "t0": 7825,
-      "t1": 7832,
+      "t0": 3021.4,
+      "t1": 3026.8,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "kestr",
+      "t0": 3052.3,
+      "t1": 3059.3,
       "latencyMs": 7,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kestr",
-      "t0": 7856.4,
-      "t1": 7863.2,
-      "latencyMs": 6.8,
+      "query": "kestrel",
+      "value": "kestre",
+      "t0": 3084.6,
+      "t1": 3090.2,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
+      "query": "kestrel",
+      "value": "kestrel",
+      "t0": 3114.8,
+      "t1": 3120.2,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "k",
+      "t0": 3194.4,
+      "t1": 3199.5,
+      "latencyMs": 5.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "ke",
+      "t0": 3225.3,
+      "t1": 3231.3,
+      "latencyMs": 6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "kes",
+      "t0": 3255.8,
+      "t1": 3261.6,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "kest",
+      "t0": 3286.7,
+      "t1": 3292.1,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "kestr",
+      "t0": 3318.3,
+      "t1": 3325.7,
+      "latencyMs": 7.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
       "value": "kestre",
-      "t0": 7887.3,
-      "t1": 7894.9,
+      "t0": 3349.4,
+      "t1": 3354.7,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel",
+      "value": "kestrel",
+      "t0": 3380.3,
+      "t1": 3385.8,
+      "latencyMs": 5.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "k",
+      "t0": 3457.8,
+      "t1": 3464.8,
+      "latencyMs": 7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "ke",
+      "t0": 3488.1,
+      "t1": 3494.5,
+      "latencyMs": 6.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kes",
+      "t0": 3518.7,
+      "t1": 3526.3,
       "latencyMs": 7.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
+      "query": "kestrel forge",
+      "value": "kest",
+      "t0": 3550.3,
+      "t1": 3557.6,
+      "latencyMs": 7.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestr",
+      "t0": 3581.2,
+      "t1": 3588.6,
+      "latencyMs": 7.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestre",
+      "t0": 3612.6,
+      "t1": 3619.6,
+      "latencyMs": 7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel",
+      "t0": 3644.1,
+      "t1": 3649.4,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel ",
+      "t0": 3675.2,
+      "t1": 3680.4,
+      "latencyMs": 5.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel f",
+      "t0": 3706.3,
+      "t1": 3711.8,
+      "latencyMs": 5.5,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel fo",
+      "t0": 3737.6,
+      "t1": 3742,
+      "latencyMs": 4.4,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel for",
+      "t0": 3769,
+      "t1": 3773.3,
+      "latencyMs": 4.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forg",
+      "t0": 3800.3,
+      "t1": 3803.5,
+      "latencyMs": 3.2,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forge",
+      "t0": 3830.3,
+      "t1": 3833.8,
+      "latencyMs": 3.5,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "k",
+      "t0": 3910.3,
+      "t1": 3915.6,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "ke",
+      "t0": 3940.6,
+      "t1": 3946.2,
+      "latencyMs": 5.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kes",
+      "t0": 3972.3,
+      "t1": 3979.9,
+      "latencyMs": 7.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kest",
+      "t0": 4003.3,
+      "t1": 4010.4,
+      "latencyMs": 7.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestr",
+      "t0": 4033.8,
+      "t1": 4039.3,
+      "latencyMs": 5.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestre",
+      "t0": 4066,
+      "t1": 4073.3,
+      "latencyMs": 7.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel",
+      "t0": 4097.5,
+      "t1": 4102.8,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel ",
+      "t0": 4129,
+      "t1": 4135.7,
+      "latencyMs": 6.7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel f",
+      "t0": 4160.8,
+      "t1": 4166,
+      "latencyMs": 5.2,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel fo",
+      "t0": 4192.5,
+      "t1": 4196.8,
+      "latencyMs": 4.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel for",
+      "t0": 4223.9,
+      "t1": 4227.4,
+      "latencyMs": 3.5,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forg",
+      "t0": 4255.6,
+      "t1": 4261.2,
+      "latencyMs": 5.6,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forge",
+      "t0": 4286.3,
+      "t1": 4289.5,
+      "latencyMs": 3.2,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "k",
+      "t0": 4364.9,
+      "t1": 4369.7,
+      "latencyMs": 4.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "ke",
+      "t0": 4395.4,
+      "t1": 4401,
+      "latencyMs": 5.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kes",
+      "t0": 4426.7,
+      "t1": 4433.9,
+      "latencyMs": 7.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kest",
+      "t0": 4457.5,
+      "t1": 4462.7,
+      "latencyMs": 5.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestr",
+      "t0": 4489.2,
+      "t1": 4496.6,
+      "latencyMs": 7.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestre",
+      "t0": 4520.2,
+      "t1": 4527.3,
+      "latencyMs": 7.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel",
+      "t0": 4552.1,
+      "t1": 4557.6,
+      "latencyMs": 5.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel ",
+      "t0": 4583,
+      "t1": 4589.8,
+      "latencyMs": 6.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel f",
+      "t0": 4614.2,
+      "t1": 4619.3,
+      "latencyMs": 5.1,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel fo",
+      "t0": 4645.7,
+      "t1": 4649.8,
+      "latencyMs": 4.1,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel for",
+      "t0": 4677.1,
+      "t1": 4680.5,
+      "latencyMs": 3.4,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forg",
+      "t0": 4708.5,
+      "t1": 4712.4,
+      "latencyMs": 3.9,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forge",
+      "t0": 4739.4,
+      "t1": 4742.4,
+      "latencyMs": 3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "k",
+      "t0": 4818.7,
+      "t1": 4825.2,
+      "latencyMs": 6.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "ke",
+      "t0": 4848.8,
+      "t1": 4856.2,
+      "latencyMs": 7.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kes",
+      "t0": 4880.6,
+      "t1": 4887.4,
+      "latencyMs": 6.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kest",
+      "t0": 4911.8,
+      "t1": 4917.1,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestr",
+      "t0": 4943.1,
+      "t1": 4948.3,
+      "latencyMs": 5.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestre",
+      "t0": 4974.1,
+      "t1": 4981.2,
+      "latencyMs": 7.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel",
+      "t0": 5004.7,
+      "t1": 5011.7,
+      "latencyMs": 7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel ",
+      "t0": 5035.6,
+      "t1": 5041,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel f",
+      "t0": 5067.5,
+      "t1": 5072.6,
+      "latencyMs": 5.1,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel fo",
+      "t0": 5098.5,
+      "t1": 5102.8,
+      "latencyMs": 4.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel for",
+      "t0": 5129.5,
+      "t1": 5132.6,
+      "latencyMs": 3.1,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forg",
+      "t0": 5160.3,
+      "t1": 5163.3,
+      "latencyMs": 3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forge",
+      "t0": 5191.3,
+      "t1": 5194.6,
+      "latencyMs": 3.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "k",
+      "t0": 5270.9,
+      "t1": 5275.8,
+      "latencyMs": 4.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "ke",
+      "t0": 5300.7,
+      "t1": 5305.9,
+      "latencyMs": 5.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kes",
+      "t0": 5331.7,
+      "t1": 5337.6,
+      "latencyMs": 5.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kest",
+      "t0": 5363.3,
+      "t1": 5368.4,
+      "latencyMs": 5.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestr",
+      "t0": 5394.2,
+      "t1": 5399.3,
+      "latencyMs": 5.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestre",
+      "t0": 5424.8,
+      "t1": 5429.8,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel",
+      "t0": 5457.1,
+      "t1": 5463,
+      "latencyMs": 5.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel ",
+      "t0": 5488.7,
+      "t1": 5494.9,
+      "latencyMs": 6.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel f",
+      "t0": 5519,
+      "t1": 5524.2,
+      "latencyMs": 5.2,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel fo",
+      "t0": 5550.6,
+      "t1": 5553.6,
+      "latencyMs": 3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel for",
+      "t0": 5581.6,
+      "t1": 5584.7,
+      "latencyMs": 3.1,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forg",
+      "t0": 5613.3,
+      "t1": 5617.5,
+      "latencyMs": 4.2,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge",
+      "value": "kestrel forge",
+      "t0": 5644,
+      "t1": 5647.2,
+      "latencyMs": 3.2,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "k",
+      "t0": 5722.9,
+      "t1": 5729.6,
+      "latencyMs": 6.7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "ke",
+      "t0": 5753.3,
+      "t1": 5758.4,
+      "latencyMs": 5.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kes",
+      "t0": 5784,
+      "t1": 5790.8,
+      "latencyMs": 6.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kest",
+      "t0": 5814.9,
+      "t1": 5821.9,
+      "latencyMs": 7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestr",
+      "t0": 5845.9,
+      "t1": 5853.2,
+      "latencyMs": 7.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestre",
+      "t0": 5877.6,
+      "t1": 5884.3,
+      "latencyMs": 6.7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel",
+      "t0": 5907.8,
+      "t1": 5913.6,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel ",
+      "t0": 5938.8,
+      "t1": 5945.6,
+      "latencyMs": 6.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel f",
+      "t0": 5969.9,
+      "t1": 5974.8,
+      "latencyMs": 4.9,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel fo",
+      "t0": 6001.7,
+      "t1": 6004.7,
+      "latencyMs": 3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel for",
+      "t0": 6033.6,
+      "t1": 6036.6,
+      "latencyMs": 3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forg",
+      "t0": 6064.6,
+      "t1": 6067.9,
+      "latencyMs": 3.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge",
+      "t0": 6095.7,
+      "t1": 6098.7,
+      "latencyMs": 3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge ",
+      "t0": 6126.8,
+      "t1": 6131.1,
+      "latencyMs": 4.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge 1",
+      "t0": 6157.3,
+      "t1": 6160.4,
+      "latencyMs": 3.1,
+      "rows": 13,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "k",
+      "t0": 6236.1,
+      "t1": 6242.7,
+      "latencyMs": 6.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "ke",
+      "t0": 6266.7,
+      "t1": 6272.2,
+      "latencyMs": 5.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kes",
+      "t0": 6298.6,
+      "t1": 6305.8,
+      "latencyMs": 7.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kest",
+      "t0": 6329.1,
+      "t1": 6334.2,
+      "latencyMs": 5.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestr",
+      "t0": 6360.2,
+      "t1": 6367,
+      "latencyMs": 6.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestre",
+      "t0": 6391.3,
+      "t1": 6397.1,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel",
+      "t0": 6422.9,
+      "t1": 6429.4,
+      "latencyMs": 6.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel ",
+      "t0": 6456.6,
+      "t1": 6464.6,
+      "latencyMs": 8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel f",
+      "t0": 6488.8,
+      "t1": 6494.1,
+      "latencyMs": 5.3,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel fo",
+      "t0": 6515.9,
+      "t1": 6520.1,
+      "latencyMs": 4.2,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel for",
+      "t0": 6547.1,
+      "t1": 6550,
+      "latencyMs": 2.9,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forg",
+      "t0": 6577.7,
+      "t1": 6581.7,
+      "latencyMs": 4,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge",
+      "t0": 6609,
+      "t1": 6612.2,
+      "latencyMs": 3.2,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge ",
+      "t0": 6639.9,
+      "t1": 6643.4,
+      "latencyMs": 3.5,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge 1",
+      "t0": 6672.1,
+      "t1": 6676.2,
+      "latencyMs": 4.1,
+      "rows": 13,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "k",
+      "t0": 6750.9,
+      "t1": 6755.5,
+      "latencyMs": 4.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "ke",
+      "t0": 6781.4,
+      "t1": 6789,
+      "latencyMs": 7.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kes",
+      "t0": 6812.6,
+      "t1": 6817.6,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kest",
+      "t0": 6843.7,
+      "t1": 6849.1,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestr",
+      "t0": 6875.5,
+      "t1": 6881.3,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestre",
+      "t0": 6906.3,
+      "t1": 6911.2,
+      "latencyMs": 4.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel",
+      "t0": 6937.4,
+      "t1": 6944.5,
+      "latencyMs": 7.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel ",
+      "t0": 6969.1,
+      "t1": 6976.4,
+      "latencyMs": 7.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel f",
+      "t0": 7000.5,
+      "t1": 7004.3,
+      "latencyMs": 3.8,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel fo",
+      "t0": 7031.9,
+      "t1": 7036.2,
+      "latencyMs": 4.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel for",
+      "t0": 7062.6,
+      "t1": 7066.7,
+      "latencyMs": 4.1,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forg",
+      "t0": 7093.5,
+      "t1": 7097.5,
+      "latencyMs": 4,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge",
+      "t0": 7125.6,
+      "t1": 7129.9,
+      "latencyMs": 4.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge ",
+      "t0": 7156.5,
+      "t1": 7159.8,
+      "latencyMs": 3.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge 1",
+      "t0": 7187.3,
+      "t1": 7191.1,
+      "latencyMs": 3.8,
+      "rows": 13,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "k",
+      "t0": 7265.8,
+      "t1": 7270.5,
+      "latencyMs": 4.7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "ke",
+      "t0": 7297,
+      "t1": 7304.3,
+      "latencyMs": 7.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kes",
+      "t0": 7327.6,
+      "t1": 7332.6,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kest",
+      "t0": 7358.6,
+      "t1": 7363.6,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestr",
+      "t0": 7390.7,
+      "t1": 7398,
+      "latencyMs": 7.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestre",
+      "t0": 7420.9,
+      "t1": 7425.8,
+      "latencyMs": 4.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel",
+      "t0": 7452.5,
+      "t1": 7459.7,
+      "latencyMs": 7.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel ",
+      "t0": 7483.2,
+      "t1": 7490.1,
+      "latencyMs": 6.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel f",
+      "t0": 7514.6,
+      "t1": 7519.7,
+      "latencyMs": 5.1,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel fo",
+      "t0": 7545.6,
+      "t1": 7549.6,
+      "latencyMs": 4,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel for",
+      "t0": 7577,
+      "t1": 7579.9,
+      "latencyMs": 2.9,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forg",
+      "t0": 7608,
+      "t1": 7611.5,
+      "latencyMs": 3.5,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge",
+      "t0": 7639,
+      "t1": 7642.1,
+      "latencyMs": 3.1,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge ",
+      "t0": 7670.8,
+      "t1": 7674.3,
+      "latencyMs": 3.5,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 1",
+      "value": "kestrel forge 1",
+      "t0": 7702.8,
+      "t1": 7705.6,
+      "latencyMs": 2.8,
+      "rows": 13,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "k",
+      "t0": 7781.4,
+      "t1": 7787.1,
+      "latencyMs": 5.7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "ke",
+      "t0": 7811,
+      "t1": 7816.3,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kes",
+      "t0": 7842,
+      "t1": 7849.2,
+      "latencyMs": 7.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kest",
+      "t0": 7873.4,
+      "t1": 7878.4,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestr",
+      "t0": 7905.2,
+      "t1": 7911,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestre",
+      "t0": 7936.2,
+      "t1": 7941.6,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
       "query": "kestrel forge 17",
       "value": "kestrel",
-      "t0": 7918.1,
-      "t1": 7924.9,
-      "latencyMs": 6.8,
+      "t0": 7968.4,
+      "t1": 7973.7,
+      "latencyMs": 5.3,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2104,9 +2104,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel ",
-      "t0": 7950.2,
-      "t1": 7957.2,
-      "latencyMs": 7,
+      "t0": 7999.8,
+      "t1": 8004.9,
+      "latencyMs": 5.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2114,8 +2114,8 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel f",
-      "t0": 7982.3,
-      "t1": 7987.3,
+      "t0": 8031.7,
+      "t1": 8036.7,
       "latencyMs": 5,
       "rows": 70,
       "inputType": "insertText",
@@ -2124,9 +2124,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel fo",
-      "t0": 8013.7,
-      "t1": 8017.6,
-      "latencyMs": 3.9,
+      "t0": 8062.2,
+      "t1": 8065.3,
+      "latencyMs": 3.1,
       "rows": 35,
       "inputType": "insertText",
       "trusted": true
@@ -2134,9 +2134,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel for",
-      "t0": 8044.5,
-      "t1": 8048.5,
-      "latencyMs": 4,
+      "t0": 8092.2,
+      "t1": 8095.7,
+      "latencyMs": 3.5,
       "rows": 35,
       "inputType": "insertText",
       "trusted": true
@@ -2144,8 +2144,8 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forg",
-      "t0": 8074.7,
-      "t1": 8078.7,
+      "t0": 8123.7,
+      "t1": 8127.7,
       "latencyMs": 4,
       "rows": 35,
       "inputType": "insertText",
@@ -2154,9 +2154,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forge",
-      "t0": 8106.4,
-      "t1": 8110.5,
-      "latencyMs": 4.1,
+      "t0": 8155.2,
+      "t1": 8158.7,
+      "latencyMs": 3.5,
       "rows": 35,
       "inputType": "insertText",
       "trusted": true
@@ -2164,9 +2164,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forge ",
-      "t0": 8137.2,
-      "t1": 8141.1,
-      "latencyMs": 3.9,
+      "t0": 8185.3,
+      "t1": 8188.5,
+      "latencyMs": 3.2,
       "rows": 35,
       "inputType": "insertText",
       "trusted": true
@@ -2174,9 +2174,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forge 1",
-      "t0": 8169.1,
-      "t1": 8172.9,
-      "latencyMs": 3.8,
+      "t0": 8217.4,
+      "t1": 8220.7,
+      "latencyMs": 3.3,
       "rows": 13,
       "inputType": "insertText",
       "trusted": true
@@ -2184,9 +2184,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forge 17",
-      "t0": 8200.2,
-      "t1": 8204.3,
-      "latencyMs": 4.1,
+      "t0": 8248.6,
+      "t1": 8251.2,
+      "latencyMs": 2.6,
       "rows": 1,
       "inputType": "insertText",
       "trusted": true
@@ -2194,9 +2194,9 @@
     {
       "query": "kestrel forge 17",
       "value": "k",
-      "t0": 8276.9,
-      "t1": 8283.3,
-      "latencyMs": 6.4,
+      "t0": 8327.8,
+      "t1": 8332.7,
+      "latencyMs": 4.9,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2204,9 +2204,9 @@
     {
       "query": "kestrel forge 17",
       "value": "ke",
-      "t0": 8308.1,
-      "t1": 8315.5,
-      "latencyMs": 7.4,
+      "t0": 8357.1,
+      "t1": 8362.3,
+      "latencyMs": 5.2,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2214,9 +2214,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kes",
-      "t0": 8338.9,
-      "t1": 8345.8,
-      "latencyMs": 6.9,
+      "t0": 8388.2,
+      "t1": 8393.7,
+      "latencyMs": 5.5,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2224,9 +2224,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kest",
-      "t0": 8369.4,
-      "t1": 8376.1,
-      "latencyMs": 6.7,
+      "t0": 8419.6,
+      "t1": 8425,
+      "latencyMs": 5.4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2234,9 +2234,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestr",
-      "t0": 8400,
-      "t1": 8406.8,
-      "latencyMs": 6.8,
+      "t0": 8451.4,
+      "t1": 8456.5,
+      "latencyMs": 5.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2244,9 +2244,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestre",
-      "t0": 8431.6,
-      "t1": 8438.5,
-      "latencyMs": 6.9,
+      "t0": 8481.6,
+      "t1": 8487.8,
+      "latencyMs": 6.2,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2254,9 +2254,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel",
-      "t0": 8462.6,
-      "t1": 8469.2,
-      "latencyMs": 6.6,
+      "t0": 8514,
+      "t1": 8519.6,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2264,9 +2264,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel ",
-      "t0": 8495.1,
-      "t1": 8501.9,
-      "latencyMs": 6.8,
+      "t0": 8544.8,
+      "t1": 8550.2,
+      "latencyMs": 5.4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2274,9 +2274,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel f",
-      "t0": 8524.4,
-      "t1": 8529.2,
-      "latencyMs": 4.8,
+      "t0": 8576,
+      "t1": 8579.9,
+      "latencyMs": 3.9,
       "rows": 70,
       "inputType": "insertText",
       "trusted": true
@@ -2284,9 +2284,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel fo",
-      "t0": 8555.4,
-      "t1": 8560.3,
-      "latencyMs": 4.9,
+      "t0": 8606.7,
+      "t1": 8610.4,
+      "latencyMs": 3.7,
       "rows": 35,
       "inputType": "insertText",
       "trusted": true
@@ -2294,9 +2294,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel for",
-      "t0": 8587.9,
-      "t1": 8591.9,
-      "latencyMs": 4,
+      "t0": 8637.9,
+      "t1": 8641.3,
+      "latencyMs": 3.4,
       "rows": 35,
       "inputType": "insertText",
       "trusted": true
@@ -2304,9 +2304,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forg",
-      "t0": 8619.3,
-      "t1": 8623.4,
-      "latencyMs": 4.1,
+      "t0": 8669.5,
+      "t1": 8673.5,
+      "latencyMs": 4,
       "rows": 35,
       "inputType": "insertText",
       "trusted": true
@@ -2314,8 +2314,168 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forge",
-      "t0": 8650.4,
-      "t1": 8654.5,
+      "t0": 8701.8,
+      "t1": 8705.2,
+      "latencyMs": 3.4,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forge ",
+      "t0": 8732.5,
+      "t1": 8736,
+      "latencyMs": 3.5,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forge 1",
+      "t0": 8763.7,
+      "t1": 8767.6,
+      "latencyMs": 3.9,
+      "rows": 13,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forge 17",
+      "t0": 8793.6,
+      "t1": 8796.8,
+      "latencyMs": 3.2,
+      "rows": 1,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "k",
+      "t0": 8874.1,
+      "t1": 8878.9,
+      "latencyMs": 4.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "ke",
+      "t0": 8904.8,
+      "t1": 8910.3,
+      "latencyMs": 5.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kes",
+      "t0": 8936.1,
+      "t1": 8941.1,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kest",
+      "t0": 8966.3,
+      "t1": 8972.1,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestr",
+      "t0": 8997.8,
+      "t1": 9003,
+      "latencyMs": 5.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestre",
+      "t0": 9029.2,
+      "t1": 9034.1,
+      "latencyMs": 4.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel",
+      "t0": 9059.9,
+      "t1": 9065.1,
+      "latencyMs": 5.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel ",
+      "t0": 9091.3,
+      "t1": 9096.4,
+      "latencyMs": 5.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel f",
+      "t0": 9123.1,
+      "t1": 9126.8,
+      "latencyMs": 3.7,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel fo",
+      "t0": 9154.7,
+      "t1": 9158.8,
+      "latencyMs": 4.1,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel for",
+      "t0": 9186.1,
+      "t1": 9189.5,
+      "latencyMs": 3.4,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forg",
+      "t0": 9215.9,
+      "t1": 9219,
+      "latencyMs": 3.1,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forge",
+      "t0": 9247,
+      "t1": 9251.1,
       "latencyMs": 4.1,
       "rows": 35,
       "inputType": "insertText",
@@ -2324,9 +2484,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forge ",
-      "t0": 8681.3,
-      "t1": 8685.5,
-      "latencyMs": 4.2,
+      "t0": 9279.5,
+      "t1": 9282.5,
+      "latencyMs": 3,
       "rows": 35,
       "inputType": "insertText",
       "trusted": true
@@ -2334,9 +2494,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forge 1",
-      "t0": 8712.7,
-      "t1": 8716.3,
-      "latencyMs": 3.6,
+      "t0": 9309.2,
+      "t1": 9312.5,
+      "latencyMs": 3.3,
       "rows": 13,
       "inputType": "insertText",
       "trusted": true
@@ -2344,9 +2504,9 @@
     {
       "query": "kestrel forge 17",
       "value": "kestrel forge 17",
-      "t0": 8744.2,
-      "t1": 8747.7,
-      "latencyMs": 3.5,
+      "t0": 9340.6,
+      "t1": 9343.2,
+      "latencyMs": 2.6,
       "rows": 1,
       "inputType": "insertText",
       "trusted": true
@@ -2354,329 +2514,529 @@
     {
       "query": "kestrel forge 17",
       "value": "k",
-      "t0": 8822.3,
-      "t1": 8828.6,
+      "t0": 9419.1,
+      "t1": 9423.7,
+      "latencyMs": 4.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "ke",
+      "t0": 9449.9,
+      "t1": 9455.2,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kes",
+      "t0": 9480.8,
+      "t1": 9486.1,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kest",
+      "t0": 9511.6,
+      "t1": 9519.1,
+      "latencyMs": 7.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestr",
+      "t0": 9543.4,
+      "t1": 9549.4,
+      "latencyMs": 6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestre",
+      "t0": 9574,
+      "t1": 9579.8,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel",
+      "t0": 9605.5,
+      "t1": 9610.9,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel ",
+      "t0": 9635,
+      "t1": 9640,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel f",
+      "t0": 9667.1,
+      "t1": 9671.1,
+      "latencyMs": 4,
+      "rows": 70,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel fo",
+      "t0": 9698.2,
+      "t1": 9701.8,
+      "latencyMs": 3.6,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel for",
+      "t0": 9728.5,
+      "t1": 9731.9,
+      "latencyMs": 3.4,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forg",
+      "t0": 9759.5,
+      "t1": 9762.4,
+      "latencyMs": 2.9,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forge",
+      "t0": 9786.8,
+      "t1": 9790.6,
+      "latencyMs": 3.8,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forge ",
+      "t0": 9837.7,
+      "t1": 9842,
+      "latencyMs": 4.3,
+      "rows": 35,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forge 1",
+      "t0": 9868.3,
+      "t1": 9871.2,
+      "latencyMs": 2.9,
+      "rows": 13,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "kestrel forge 17",
+      "value": "kestrel forge 17",
+      "t0": 9899.5,
+      "t1": 9902.1,
+      "latencyMs": 2.6,
+      "rows": 1,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "n",
+      "t0": 9977.2,
+      "t1": 9983.6,
+      "latencyMs": 6.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "ni",
+      "t0": 10007.8,
+      "t1": 10014.1,
       "latencyMs": 6.3,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "ke",
-      "t0": 8853.3,
-      "t1": 8859.9,
-      "latencyMs": 6.6,
+      "query": "nimbus orbit",
+      "value": "nim",
+      "t0": 10039.4,
+      "t1": 10045,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kes",
-      "t0": 8884.3,
-      "t1": 8891,
-      "latencyMs": 6.7,
+      "query": "nimbus orbit",
+      "value": "nimb",
+      "t0": 10070.7,
+      "t1": 10076.3,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kest",
-      "t0": 8915.4,
-      "t1": 8922.1,
-      "latencyMs": 6.7,
+      "query": "nimbus orbit",
+      "value": "nimbu",
+      "t0": 10102.1,
+      "t1": 10107.4,
+      "latencyMs": 5.3,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kestr",
-      "t0": 8945.7,
-      "t1": 8953.1,
-      "latencyMs": 7.4,
+      "query": "nimbus orbit",
+      "value": "nimbus",
+      "t0": 10133.4,
+      "t1": 10139.6,
+      "latencyMs": 6.2,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kestre",
-      "t0": 8977.1,
-      "t1": 8983.9,
+      "query": "nimbus orbit",
+      "value": "nimbus ",
+      "t0": 10165.1,
+      "t1": 10171.6,
+      "latencyMs": 6.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus o",
+      "t0": 10195.7,
+      "t1": 10202.5,
       "latencyMs": 6.8,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kestrel",
-      "t0": 9008.6,
-      "t1": 9015.4,
-      "latencyMs": 6.8,
+      "query": "nimbus orbit",
+      "value": "nimbus or",
+      "t0": 10227.1,
+      "t1": 10232.4,
+      "latencyMs": 5.3,
+      "rows": 69,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orb",
+      "t0": 10258.4,
+      "t1": 10262.6,
+      "latencyMs": 4.2,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orbi",
+      "t0": 10290.3,
+      "t1": 10293.4,
+      "latencyMs": 3.1,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orbit",
+      "t0": 10321.9,
+      "t1": 10326.2,
+      "latencyMs": 4.3,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "n",
+      "t0": 10400.1,
+      "t1": 10405.7,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kestrel ",
-      "t0": 9039.3,
-      "t1": 9045.7,
+      "query": "nimbus orbit",
+      "value": "ni",
+      "t0": 10428.4,
+      "t1": 10434.9,
+      "latencyMs": 6.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nim",
+      "t0": 10462.3,
+      "t1": 10469.4,
+      "latencyMs": 7.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimb",
+      "t0": 10494,
+      "t1": 10500.5,
+      "latencyMs": 6.5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbu",
+      "t0": 10525.5,
+      "t1": 10530.8,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus",
+      "t0": 10557.4,
+      "t1": 10563,
+      "latencyMs": 5.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus ",
+      "t0": 10588.1,
+      "t1": 10593.5,
+      "latencyMs": 5.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus o",
+      "t0": 10619.4,
+      "t1": 10624.7,
+      "latencyMs": 5.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus or",
+      "t0": 10650.6,
+      "t1": 10654.6,
+      "latencyMs": 4,
+      "rows": 69,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orb",
+      "t0": 10681.7,
+      "t1": 10684.9,
+      "latencyMs": 3.2,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orbi",
+      "t0": 10714.5,
+      "t1": 10718,
+      "latencyMs": 3.5,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orbit",
+      "t0": 10745.4,
+      "t1": 10748.7,
+      "latencyMs": 3.3,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "n",
+      "t0": 10824.7,
+      "t1": 10830.5,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "ni",
+      "t0": 10855.3,
+      "t1": 10861.6,
+      "latencyMs": 6.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nim",
+      "t0": 10886.1,
+      "t1": 10892.5,
       "latencyMs": 6.4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kestrel f",
-      "t0": 9070.6,
-      "t1": 9075,
-      "latencyMs": 4.4,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel fo",
-      "t0": 9101.7,
-      "t1": 9105.7,
-      "latencyMs": 4,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel for",
-      "t0": 9132.5,
-      "t1": 9136.4,
-      "latencyMs": 3.9,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel forg",
-      "t0": 9164,
-      "t1": 9168.1,
-      "latencyMs": 4.1,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel forge",
-      "t0": 9195.7,
-      "t1": 9199.9,
-      "latencyMs": 4.2,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel forge ",
-      "t0": 9226.7,
-      "t1": 9230.9,
-      "latencyMs": 4.2,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel forge 1",
-      "t0": 9257.7,
-      "t1": 9262.4,
-      "latencyMs": 4.7,
-      "rows": 13,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel forge 17",
-      "t0": 9288.7,
-      "t1": 9292.2,
-      "latencyMs": 3.5,
-      "rows": 1,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "k",
-      "t0": 9368.1,
-      "t1": 9374.6,
-      "latencyMs": 6.5,
+      "query": "nimbus orbit",
+      "value": "nimb",
+      "t0": 10917.3,
+      "t1": 10922.4,
+      "latencyMs": 5.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "ke",
-      "t0": 9398.6,
-      "t1": 9405.8,
-      "latencyMs": 7.2,
+      "query": "nimbus orbit",
+      "value": "nimbu",
+      "t0": 10948.6,
+      "t1": 10953.9,
+      "latencyMs": 5.3,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kes",
-      "t0": 9429.7,
-      "t1": 9436.8,
-      "latencyMs": 7.1,
+      "query": "nimbus orbit",
+      "value": "nimbus",
+      "t0": 10979.5,
+      "t1": 10984.9,
+      "latencyMs": 5.4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kest",
-      "t0": 9460.6,
-      "t1": 9467.4,
-      "latencyMs": 6.8,
+      "query": "nimbus orbit",
+      "value": "nimbus ",
+      "t0": 11010.9,
+      "t1": 11016.1,
+      "latencyMs": 5.2,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kestr",
-      "t0": 9491.7,
-      "t1": 9498.5,
-      "latencyMs": 6.8,
+      "query": "nimbus orbit",
+      "value": "nimbus o",
+      "t0": 11043.1,
+      "t1": 11048,
+      "latencyMs": 4.9,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kestre",
-      "t0": 9522.7,
-      "t1": 9529.7,
-      "latencyMs": 7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel",
-      "t0": 9554.6,
-      "t1": 9561.7,
-      "latencyMs": 7.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel ",
-      "t0": 9585.1,
-      "t1": 9591.6,
-      "latencyMs": 6.5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel f",
-      "t0": 9616.2,
-      "t1": 9622.3,
-      "latencyMs": 6.1,
-      "rows": 70,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel fo",
-      "t0": 9647,
-      "t1": 9651,
-      "latencyMs": 4,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel for",
-      "t0": 9678.1,
-      "t1": 9682,
-      "latencyMs": 3.9,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel forg",
-      "t0": 9709.5,
-      "t1": 9713.5,
-      "latencyMs": 4,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel forge",
-      "t0": 9740.4,
-      "t1": 9744.4,
-      "latencyMs": 4,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel forge ",
-      "t0": 9771.3,
-      "t1": 9775.2,
-      "latencyMs": 3.9,
-      "rows": 35,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "kestrel forge 17",
-      "value": "kestrel forge 1",
-      "t0": 9801.8,
-      "t1": 9805.6,
+      "query": "nimbus orbit",
+      "value": "nimbus or",
+      "t0": 11073.8,
+      "t1": 11077.6,
       "latencyMs": 3.8,
-      "rows": 13,
+      "rows": 69,
       "inputType": "insertText",
       "trusted": true
     },
     {
-      "query": "kestrel forge 17",
-      "value": "kestrel forge 17",
-      "t0": 9833,
-      "t1": 9836.5,
-      "latencyMs": 3.5,
-      "rows": 1,
+      "query": "nimbus orbit",
+      "value": "nimbus orb",
+      "t0": 11105.1,
+      "t1": 11108.3,
+      "latencyMs": 3.2,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orbi",
+      "t0": 11137.6,
+      "t1": 11140.7,
+      "latencyMs": 3.1,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orbit",
+      "t0": 11167.9,
+      "t1": 11171,
+      "latencyMs": 3.1,
+      "rows": 34,
       "inputType": "insertText",
       "trusted": true
     },
     {
       "query": "nimbus orbit",
       "value": "n",
-      "t0": 9912.4,
-      "t1": 9920.6,
-      "latencyMs": 8.2,
+      "t0": 11246.4,
+      "t1": 11252.2,
+      "latencyMs": 5.8,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2684,9 +3044,9 @@
     {
       "query": "nimbus orbit",
       "value": "ni",
-      "t0": 9942.5,
-      "t1": 9950.6,
-      "latencyMs": 8.1,
+      "t0": 11276.6,
+      "t1": 11282.4,
+      "latencyMs": 5.8,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2694,9 +3054,9 @@
     {
       "query": "nimbus orbit",
       "value": "nim",
-      "t0": 9972.6,
-      "t1": 9980.3,
-      "latencyMs": 7.7,
+      "t0": 11307.9,
+      "t1": 11313.9,
+      "latencyMs": 6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2704,8 +3064,108 @@
     {
       "query": "nimbus orbit",
       "value": "nimb",
-      "t0": 10004.6,
-      "t1": 10012,
+      "t0": 11338.7,
+      "t1": 11344.3,
+      "latencyMs": 5.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbu",
+      "t0": 11370,
+      "t1": 11375.6,
+      "latencyMs": 5.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus",
+      "t0": 11401.8,
+      "t1": 11407,
+      "latencyMs": 5.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus ",
+      "t0": 11433.3,
+      "t1": 11438.9,
+      "latencyMs": 5.6,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus o",
+      "t0": 11465.6,
+      "t1": 11470.6,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus or",
+      "t0": 11496.4,
+      "t1": 11500.7,
+      "latencyMs": 4.3,
+      "rows": 69,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orb",
+      "t0": 11528.1,
+      "t1": 11531.4,
+      "latencyMs": 3.3,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orbi",
+      "t0": 11560.9,
+      "t1": 11564.1,
+      "latencyMs": 3.2,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "nimbus orbit",
+      "t0": 11591.5,
+      "t1": 11594.7,
+      "latencyMs": 3.2,
+      "rows": 34,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "n",
+      "t0": 11669,
+      "t1": 11674.8,
+      "latencyMs": 5.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "nimbus orbit",
+      "value": "ni",
+      "t0": 11699.8,
+      "t1": 11707.2,
       "latencyMs": 7.4,
       "rows": 200,
       "inputType": "insertText",
@@ -2713,110 +3173,10 @@
     },
     {
       "query": "nimbus orbit",
-      "value": "nimbu",
-      "t0": 10032.6,
-      "t1": 10039.7,
-      "latencyMs": 7.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus",
-      "t0": 10066.2,
-      "t1": 10073.1,
-      "latencyMs": 6.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus ",
-      "t0": 10097.8,
-      "t1": 10104.5,
-      "latencyMs": 6.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus o",
-      "t0": 10128.6,
-      "t1": 10135.5,
-      "latencyMs": 6.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus or",
-      "t0": 10160,
-      "t1": 10164.9,
-      "latencyMs": 4.9,
-      "rows": 69,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orb",
-      "t0": 10190.9,
-      "t1": 10194.9,
-      "latencyMs": 4,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orbi",
-      "t0": 10222.6,
-      "t1": 10226.7,
-      "latencyMs": 4.1,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orbit",
-      "t0": 10253.7,
-      "t1": 10257.6,
-      "latencyMs": 3.9,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "n",
-      "t0": 10331.2,
-      "t1": 10339.9,
-      "latencyMs": 8.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "ni",
-      "t0": 10361.4,
-      "t1": 10369.3,
-      "latencyMs": 7.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
       "value": "nim",
-      "t0": 10392.7,
-      "t1": 10399.9,
-      "latencyMs": 7.2,
+      "t0": 11731.3,
+      "t1": 11737.1,
+      "latencyMs": 5.8,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2824,9 +3184,9 @@
     {
       "query": "nimbus orbit",
       "value": "nimb",
-      "t0": 10423.3,
-      "t1": 10430.4,
-      "latencyMs": 7.1,
+      "t0": 11762.5,
+      "t1": 11768.8,
+      "latencyMs": 6.3,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2834,9 +3194,9 @@
     {
       "query": "nimbus orbit",
       "value": "nimbu",
-      "t0": 10454.6,
-      "t1": 10461.6,
-      "latencyMs": 7,
+      "t0": 11794.5,
+      "t1": 11800.1,
+      "latencyMs": 5.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2844,9 +3204,9 @@
     {
       "query": "nimbus orbit",
       "value": "nimbus",
-      "t0": 10486,
-      "t1": 10492.8,
-      "latencyMs": 6.8,
+      "t0": 11824.7,
+      "t1": 11830.1,
+      "latencyMs": 5.4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2854,9 +3214,9 @@
     {
       "query": "nimbus orbit",
       "value": "nimbus ",
-      "t0": 10517.4,
-      "t1": 10524.3,
-      "latencyMs": 6.9,
+      "t0": 11854.8,
+      "t1": 11860.2,
+      "latencyMs": 5.4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2864,9 +3224,9 @@
     {
       "query": "nimbus orbit",
       "value": "nimbus o",
-      "t0": 10548,
-      "t1": 10564.1,
-      "latencyMs": 16.1,
+      "t0": 11886.9,
+      "t1": 11892.6,
+      "latencyMs": 5.7,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -2874,9 +3234,9 @@
     {
       "query": "nimbus orbit",
       "value": "nimbus or",
-      "t0": 10578.2,
-      "t1": 10583.1,
-      "latencyMs": 4.9,
+      "t0": 11917.3,
+      "t1": 11922.3,
+      "latencyMs": 5,
       "rows": 69,
       "inputType": "insertText",
       "trusted": true
@@ -2884,9 +3244,9 @@
     {
       "query": "nimbus orbit",
       "value": "nimbus orb",
-      "t0": 10609.6,
-      "t1": 10613.8,
-      "latencyMs": 4.2,
+      "t0": 11948,
+      "t1": 11951.3,
+      "latencyMs": 3.3,
       "rows": 34,
       "inputType": "insertText",
       "trusted": true
@@ -2894,9 +3254,9 @@
     {
       "query": "nimbus orbit",
       "value": "nimbus orbi",
-      "t0": 10640.9,
-      "t1": 10645.1,
-      "latencyMs": 4.2,
+      "t0": 11979.5,
+      "t1": 11982.7,
+      "latencyMs": 3.2,
       "rows": 34,
       "inputType": "insertText",
       "trusted": true
@@ -2904,369 +3264,9 @@
     {
       "query": "nimbus orbit",
       "value": "nimbus orbit",
-      "t0": 10672.8,
-      "t1": 10676.8,
-      "latencyMs": 4,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "n",
-      "t0": 10752.2,
-      "t1": 10760.1,
-      "latencyMs": 7.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "ni",
-      "t0": 10782.6,
-      "t1": 10790.7,
-      "latencyMs": 8.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nim",
-      "t0": 10814.5,
-      "t1": 10821.5,
-      "latencyMs": 7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimb",
-      "t0": 10845.1,
-      "t1": 10852,
-      "latencyMs": 6.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbu",
-      "t0": 10877,
-      "t1": 10883.9,
-      "latencyMs": 6.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus",
-      "t0": 10907.4,
-      "t1": 10914.9,
-      "latencyMs": 7.5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus ",
-      "t0": 10938.1,
-      "t1": 10944.7,
-      "latencyMs": 6.6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus o",
-      "t0": 10969.6,
-      "t1": 10976.2,
-      "latencyMs": 6.6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus or",
-      "t0": 11000.5,
-      "t1": 11005.4,
-      "latencyMs": 4.9,
-      "rows": 69,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orb",
-      "t0": 11031.5,
-      "t1": 11035.6,
-      "latencyMs": 4.1,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orbi",
-      "t0": 11063.4,
-      "t1": 11067.4,
-      "latencyMs": 4,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orbit",
-      "t0": 11095.6,
-      "t1": 11099.5,
-      "latencyMs": 3.9,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "n",
-      "t0": 11172.8,
-      "t1": 11180.5,
-      "latencyMs": 7.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "ni",
-      "t0": 11203.2,
-      "t1": 11211.1,
-      "latencyMs": 7.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nim",
-      "t0": 11234.2,
-      "t1": 11241.7,
-      "latencyMs": 7.5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimb",
-      "t0": 11265.3,
-      "t1": 11272.2,
-      "latencyMs": 6.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbu",
-      "t0": 11297.2,
-      "t1": 11304.4,
-      "latencyMs": 7.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus",
-      "t0": 11327.5,
-      "t1": 11334.2,
-      "latencyMs": 6.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus ",
-      "t0": 11358.3,
-      "t1": 11365.1,
-      "latencyMs": 6.8,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus o",
-      "t0": 11390,
-      "t1": 11396.8,
-      "latencyMs": 6.8,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus or",
-      "t0": 11421.5,
-      "t1": 11426.3,
-      "latencyMs": 4.8,
-      "rows": 69,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orb",
-      "t0": 11452.6,
-      "t1": 11456.5,
-      "latencyMs": 3.9,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orbi",
-      "t0": 11483.3,
-      "t1": 11487.3,
-      "latencyMs": 4,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orbit",
-      "t0": 11515.1,
-      "t1": 11519.1,
-      "latencyMs": 4,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "n",
-      "t0": 11593.8,
-      "t1": 11602.3,
-      "latencyMs": 8.5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "ni",
-      "t0": 11624.1,
-      "t1": 11632.5,
-      "latencyMs": 8.4,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nim",
-      "t0": 11655,
-      "t1": 11661.9,
-      "latencyMs": 6.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimb",
-      "t0": 11685.7,
-      "t1": 11692.4,
-      "latencyMs": 6.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbu",
-      "t0": 11715.9,
-      "t1": 11723,
-      "latencyMs": 7.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus",
-      "t0": 11747.6,
-      "t1": 11754.3,
-      "latencyMs": 6.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus ",
-      "t0": 11778.1,
-      "t1": 11784.8,
-      "latencyMs": 6.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus o",
-      "t0": 11808.4,
-      "t1": 11815.1,
-      "latencyMs": 6.7,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus or",
-      "t0": 11840,
-      "t1": 11845.1,
-      "latencyMs": 5.1,
-      "rows": 69,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orb",
-      "t0": 11870.6,
-      "t1": 11874.6,
-      "latencyMs": 4,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orbi",
-      "t0": 11901.7,
-      "t1": 11907,
-      "latencyMs": 5.3,
-      "rows": 34,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "nimbus orbit",
-      "value": "nimbus orbit",
-      "t0": 11932.5,
-      "t1": 11936.5,
-      "latencyMs": 4,
+      "t0": 12010.7,
+      "t1": 12013.9,
+      "latencyMs": 3.2,
       "rows": 34,
       "inputType": "insertText",
       "trusted": true
@@ -3274,9 +3274,9 @@
     {
       "query": "console",
       "value": "c",
-      "t0": 12012.9,
-      "t1": 12018.1,
-      "latencyMs": 5.2,
+      "t0": 12089.9,
+      "t1": 12095.6,
+      "latencyMs": 5.7,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3284,9 +3284,9 @@
     {
       "query": "console",
       "value": "co",
-      "t0": 12042.2,
-      "t1": 12047.8,
-      "latencyMs": 5.6,
+      "t0": 12120.7,
+      "t1": 12124.8,
+      "latencyMs": 4.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3294,9 +3294,9 @@
     {
       "query": "console",
       "value": "con",
-      "t0": 12072.3,
-      "t1": 12077.9,
-      "latencyMs": 5.6,
+      "t0": 12150.8,
+      "t1": 12154.9,
+      "latencyMs": 4.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3304,18 +3304,8 @@
     {
       "query": "console",
       "value": "cons",
-      "t0": 12105.1,
-      "t1": 12109,
-      "latencyMs": 3.9,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "conso",
-      "t0": 12136.1,
-      "t1": 12139.5,
+      "t0": 12181.4,
+      "t1": 12184.8,
       "latencyMs": 3.4,
       "rows": 12,
       "inputType": "insertText",
@@ -3323,10 +3313,20 @@
     },
     {
       "query": "console",
+      "value": "conso",
+      "t0": 12212.9,
+      "t1": 12215.9,
+      "latencyMs": 3,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
       "value": "consol",
-      "t0": 12167,
-      "t1": 12170.6,
-      "latencyMs": 3.6,
+      "t0": 12243.7,
+      "t1": 12246.3,
+      "latencyMs": 2.6,
       "rows": 12,
       "inputType": "insertText",
       "trusted": true
@@ -3334,9 +3334,9 @@
     {
       "query": "console",
       "value": "console",
-      "t0": 12198.2,
-      "t1": 12201.5,
-      "latencyMs": 3.3,
+      "t0": 12274.9,
+      "t1": 12277.9,
+      "latencyMs": 3,
       "rows": 12,
       "inputType": "insertText",
       "trusted": true
@@ -3344,9 +3344,9 @@
     {
       "query": "console",
       "value": "c",
-      "t0": 12276.9,
-      "t1": 12281.7,
-      "latencyMs": 4.8,
+      "t0": 12353.2,
+      "t1": 12357.1,
+      "latencyMs": 3.9,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3354,9 +3354,9 @@
     {
       "query": "console",
       "value": "co",
-      "t0": 12308.5,
-      "t1": 12317.3,
-      "latencyMs": 8.8,
+      "t0": 12383.2,
+      "t1": 12387.3,
+      "latencyMs": 4.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3364,9 +3364,9 @@
     {
       "query": "console",
       "value": "con",
-      "t0": 12339.6,
-      "t1": 12344.7,
-      "latencyMs": 5.1,
+      "t0": 12414.2,
+      "t1": 12418.8,
+      "latencyMs": 4.6,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3374,9 +3374,9 @@
     {
       "query": "console",
       "value": "cons",
-      "t0": 12370.1,
-      "t1": 12374,
-      "latencyMs": 3.9,
+      "t0": 12444.7,
+      "t1": 12448.4,
+      "latencyMs": 3.7,
       "rows": 12,
       "inputType": "insertText",
       "trusted": true
@@ -3384,9 +3384,9 @@
     {
       "query": "console",
       "value": "conso",
-      "t0": 12401.4,
-      "t1": 12404.9,
-      "latencyMs": 3.5,
+      "t0": 12475.7,
+      "t1": 12478.6,
+      "latencyMs": 2.9,
       "rows": 12,
       "inputType": "insertText",
       "trusted": true
@@ -3394,9 +3394,9 @@
     {
       "query": "console",
       "value": "consol",
-      "t0": 12431.3,
-      "t1": 12434.8,
-      "latencyMs": 3.5,
+      "t0": 12507.7,
+      "t1": 12510.7,
+      "latencyMs": 3,
       "rows": 12,
       "inputType": "insertText",
       "trusted": true
@@ -3404,9 +3404,9 @@
     {
       "query": "console",
       "value": "console",
-      "t0": 12462.2,
-      "t1": 12465.5,
-      "latencyMs": 3.3,
+      "t0": 12539.5,
+      "t1": 12543.3,
+      "latencyMs": 3.8,
       "rows": 12,
       "inputType": "insertText",
       "trusted": true
@@ -3414,8 +3414,8 @@
     {
       "query": "console",
       "value": "c",
-      "t0": 12540.9,
-      "t1": 12545.9,
+      "t0": 12618.2,
+      "t1": 12623.2,
       "latencyMs": 5,
       "rows": 200,
       "inputType": "insertText",
@@ -3424,9 +3424,9 @@
     {
       "query": "console",
       "value": "co",
-      "t0": 12571.5,
-      "t1": 12576.7,
-      "latencyMs": 5.2,
+      "t0": 12648.2,
+      "t1": 12652.6,
+      "latencyMs": 4.4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3434,9 +3434,9 @@
     {
       "query": "console",
       "value": "con",
-      "t0": 12602.4,
-      "t1": 12607.5,
-      "latencyMs": 5.1,
+      "t0": 12679.7,
+      "t1": 12684,
+      "latencyMs": 4.3,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3444,9 +3444,9 @@
     {
       "query": "console",
       "value": "cons",
-      "t0": 12634.4,
-      "t1": 12638.3,
-      "latencyMs": 3.9,
+      "t0": 12711,
+      "t1": 12714.6,
+      "latencyMs": 3.6,
       "rows": 12,
       "inputType": "insertText",
       "trusted": true
@@ -3454,28 +3454,8 @@
     {
       "query": "console",
       "value": "conso",
-      "t0": 12664.7,
-      "t1": 12668.9,
-      "latencyMs": 4.2,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "consol",
-      "t0": 12697.3,
-      "t1": 12700.7,
-      "latencyMs": 3.4,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "console",
-      "t0": 12728,
-      "t1": 12731.1,
+      "t0": 12742.9,
+      "t1": 12746,
       "latencyMs": 3.1,
       "rows": 12,
       "inputType": "insertText",
@@ -3483,10 +3463,30 @@
     },
     {
       "query": "console",
+      "value": "consol",
+      "t0": 12772.9,
+      "t1": 12776.3,
+      "latencyMs": 3.4,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "console",
+      "t0": 12804.3,
+      "t1": 12806.9,
+      "latencyMs": 2.6,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
       "value": "c",
-      "t0": 12808,
-      "t1": 12813,
-      "latencyMs": 5,
+      "t0": 12882.8,
+      "t1": 12886.8,
+      "latencyMs": 4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3494,9 +3494,9 @@
     {
       "query": "console",
       "value": "co",
-      "t0": 12838,
-      "t1": 12843.4,
-      "latencyMs": 5.4,
+      "t0": 12912.9,
+      "t1": 12917,
+      "latencyMs": 4.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3504,9 +3504,9 @@
     {
       "query": "console",
       "value": "con",
-      "t0": 12868.8,
-      "t1": 12874.3,
-      "latencyMs": 5.5,
+      "t0": 12944.3,
+      "t1": 12948.4,
+      "latencyMs": 4.1,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3514,8 +3514,8 @@
     {
       "query": "console",
       "value": "cons",
-      "t0": 12900.4,
-      "t1": 12904.3,
+      "t0": 12976.4,
+      "t1": 12980.3,
       "latencyMs": 3.9,
       "rows": 12,
       "inputType": "insertText",
@@ -3524,8 +3524,218 @@
     {
       "query": "console",
       "value": "conso",
-      "t0": 12930.9,
-      "t1": 12934.6,
+      "t0": 13007.2,
+      "t1": 13009.8,
+      "latencyMs": 2.6,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "consol",
+      "t0": 13038.6,
+      "t1": 13041.2,
+      "latencyMs": 2.6,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "console",
+      "t0": 13070.3,
+      "t1": 13073,
+      "latencyMs": 2.7,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "c",
+      "t0": 13149.9,
+      "t1": 13153.8,
+      "latencyMs": 3.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "co",
+      "t0": 13179.4,
+      "t1": 13183.4,
+      "latencyMs": 4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "con",
+      "t0": 13210.8,
+      "t1": 13214.8,
+      "latencyMs": 4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "cons",
+      "t0": 13242.9,
+      "t1": 13246.5,
+      "latencyMs": 3.6,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "conso",
+      "t0": 13273.4,
+      "t1": 13276.1,
+      "latencyMs": 2.7,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "consol",
+      "t0": 13305,
+      "t1": 13307.5,
+      "latencyMs": 2.5,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "console",
+      "t0": 13335.5,
+      "t1": 13338.2,
+      "latencyMs": 2.7,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "c",
+      "t0": 13415.2,
+      "t1": 13419,
+      "latencyMs": 3.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "co",
+      "t0": 13446.3,
+      "t1": 13452.2,
+      "latencyMs": 5.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "con",
+      "t0": 13477.2,
+      "t1": 13481.5,
+      "latencyMs": 4.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "cons",
+      "t0": 13508.6,
+      "t1": 13511.7,
+      "latencyMs": 3.1,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "conso",
+      "t0": 13539.6,
+      "t1": 13542.7,
+      "latencyMs": 3.1,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "consol",
+      "t0": 13570.4,
+      "t1": 13573,
+      "latencyMs": 2.6,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "console",
+      "t0": 13601.1,
+      "t1": 13604,
+      "latencyMs": 2.9,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "c",
+      "t0": 13680.2,
+      "t1": 13683.9,
+      "latencyMs": 3.7,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "co",
+      "t0": 13712,
+      "t1": 13716.2,
+      "latencyMs": 4.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "con",
+      "t0": 13745,
+      "t1": 13749.1,
+      "latencyMs": 4.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "cons",
+      "t0": 13772.8,
+      "t1": 13776.9,
+      "latencyMs": 4.1,
+      "rows": 12,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "console",
+      "value": "conso",
+      "t0": 13803.8,
+      "t1": 13807.5,
       "latencyMs": 3.7,
       "rows": 12,
       "inputType": "insertText",
@@ -3534,78 +3744,8 @@
     {
       "query": "console",
       "value": "consol",
-      "t0": 12961.9,
-      "t1": 12964.9,
-      "latencyMs": 3,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "console",
-      "t0": 12994,
-      "t1": 12997.4,
-      "latencyMs": 3.4,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "c",
-      "t0": 13072.5,
-      "t1": 13078.1,
-      "latencyMs": 5.6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "co",
-      "t0": 13103.3,
-      "t1": 13108.3,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "con",
-      "t0": 13135,
-      "t1": 13140.1,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "cons",
-      "t0": 13166.1,
-      "t1": 13170,
-      "latencyMs": 3.9,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "conso",
-      "t0": 13197,
-      "t1": 13200.4,
-      "latencyMs": 3.4,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "consol",
-      "t0": 13227.7,
-      "t1": 13231.1,
+      "t0": 13834.2,
+      "t1": 13837.6,
       "latencyMs": 3.4,
       "rows": 12,
       "inputType": "insertText",
@@ -3614,149 +3754,9 @@
     {
       "query": "console",
       "value": "console",
-      "t0": 13258.4,
-      "t1": 13261.8,
-      "latencyMs": 3.4,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "c",
-      "t0": 13337.6,
-      "t1": 13342.2,
-      "latencyMs": 4.6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "co",
-      "t0": 13367.5,
-      "t1": 13372.7,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "con",
-      "t0": 13399.1,
-      "t1": 13404.3,
-      "latencyMs": 5.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "cons",
-      "t0": 13430.4,
-      "t1": 13435,
-      "latencyMs": 4.6,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "conso",
-      "t0": 13461.8,
-      "t1": 13465.3,
-      "latencyMs": 3.5,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "consol",
-      "t0": 13492.8,
-      "t1": 13496.2,
-      "latencyMs": 3.4,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "console",
-      "t0": 13524.4,
-      "t1": 13527.7,
-      "latencyMs": 3.3,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "c",
-      "t0": 13601.1,
-      "t1": 13605.9,
-      "latencyMs": 4.8,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "co",
-      "t0": 13632.5,
-      "t1": 13637.8,
-      "latencyMs": 5.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "con",
-      "t0": 13664.4,
-      "t1": 13669.5,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "cons",
-      "t0": 13694.1,
-      "t1": 13698,
-      "latencyMs": 3.9,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "conso",
-      "t0": 13724.9,
-      "t1": 13728.5,
-      "latencyMs": 3.6,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "consol",
-      "t0": 13756.3,
-      "t1": 13759.7,
-      "latencyMs": 3.4,
-      "rows": 12,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "console",
-      "value": "console",
-      "t0": 13787.4,
-      "t1": 13791.6,
-      "latencyMs": 4.2,
+      "t0": 13865.3,
+      "t1": 13869,
+      "latencyMs": 3.7,
       "rows": 12,
       "inputType": "insertText",
       "trusted": true
@@ -3764,9 +3764,9 @@
     {
       "query": "archive d",
       "value": "a",
-      "t0": 13866.6,
-      "t1": 13872.8,
-      "latencyMs": 6.2,
+      "t0": 13943.3,
+      "t1": 13948.2,
+      "latencyMs": 4.9,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3774,9 +3774,9 @@
     {
       "query": "archive d",
       "value": "ar",
-      "t0": 13897,
-      "t1": 13903.7,
-      "latencyMs": 6.7,
+      "t0": 13974.4,
+      "t1": 13980.1,
+      "latencyMs": 5.7,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3784,99 +3784,9 @@
     {
       "query": "archive d",
       "value": "arc",
-      "t0": 13928.1,
-      "t1": 13933.1,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "arch",
-      "t0": 13959.3,
-      "t1": 13964.4,
-      "latencyMs": 5.1,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archi",
-      "t0": 13990.4,
-      "t1": 13994.3,
-      "latencyMs": 3.9,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archiv",
-      "t0": 14021.9,
-      "t1": 14025.4,
-      "latencyMs": 3.5,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive",
-      "t0": 14053.7,
-      "t1": 14057.2,
-      "latencyMs": 3.5,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive ",
-      "t0": 14084.2,
-      "t1": 14087.7,
-      "latencyMs": 3.5,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive d",
-      "t0": 14116,
-      "t1": 14120.1,
+      "t0": 14005.5,
+      "t1": 14009.6,
       "latencyMs": 4.1,
-      "rows": 1,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "a",
-      "t0": 14195.5,
-      "t1": 14201.4,
-      "latencyMs": 5.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "ar",
-      "t0": 14225.9,
-      "t1": 14232.2,
-      "latencyMs": 6.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "arc",
-      "t0": 14256.7,
-      "t1": 14262.1,
-      "latencyMs": 5.4,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -3884,8 +3794,98 @@
     {
       "query": "archive d",
       "value": "arch",
-      "t0": 14287.6,
-      "t1": 14292.7,
+      "t0": 14036.5,
+      "t1": 14040.5,
+      "latencyMs": 4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archi",
+      "t0": 14068.4,
+      "t1": 14071.5,
+      "latencyMs": 3.1,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archiv",
+      "t0": 14099,
+      "t1": 14101.7,
+      "latencyMs": 2.7,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive",
+      "t0": 14130.4,
+      "t1": 14133.5,
+      "latencyMs": 3.1,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive ",
+      "t0": 14160.8,
+      "t1": 14163.8,
+      "latencyMs": 3,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive d",
+      "t0": 14191.6,
+      "t1": 14194.2,
+      "latencyMs": 2.6,
+      "rows": 1,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "a",
+      "t0": 14271.3,
+      "t1": 14275.7,
+      "latencyMs": 4.4,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "ar",
+      "t0": 14302.8,
+      "t1": 14307.6,
+      "latencyMs": 4.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "arc",
+      "t0": 14333.9,
+      "t1": 14337.7,
+      "latencyMs": 3.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "arch",
+      "t0": 14364,
+      "t1": 14369.1,
       "latencyMs": 5.1,
       "rows": 200,
       "inputType": "insertText",
@@ -3894,9 +3894,9 @@
     {
       "query": "archive d",
       "value": "archi",
-      "t0": 14318.1,
-      "t1": 14322.1,
-      "latencyMs": 4,
+      "t0": 14394.7,
+      "t1": 14398,
+      "latencyMs": 3.3,
       "rows": 5,
       "inputType": "insertText",
       "trusted": true
@@ -3904,9 +3904,9 @@
     {
       "query": "archive d",
       "value": "archiv",
-      "t0": 14349.1,
-      "t1": 14352.6,
-      "latencyMs": 3.5,
+      "t0": 14425.2,
+      "t1": 14428.2,
+      "latencyMs": 3,
       "rows": 5,
       "inputType": "insertText",
       "trusted": true
@@ -3914,9 +3914,9 @@
     {
       "query": "archive d",
       "value": "archive",
-      "t0": 14379.3,
-      "t1": 14382.8,
-      "latencyMs": 3.5,
+      "t0": 14456.8,
+      "t1": 14460.5,
+      "latencyMs": 3.7,
       "rows": 5,
       "inputType": "insertText",
       "trusted": true
@@ -3924,8 +3924,8 @@
     {
       "query": "archive d",
       "value": "archive ",
-      "t0": 14410.2,
-      "t1": 14413.7,
+      "t0": 14487.6,
+      "t1": 14491.1,
       "latencyMs": 3.5,
       "rows": 5,
       "inputType": "insertText",
@@ -3934,9 +3934,9 @@
     {
       "query": "archive d",
       "value": "archive d",
-      "t0": 14441.4,
-      "t1": 14444.7,
-      "latencyMs": 3.3,
+      "t0": 14518.6,
+      "t1": 14521.2,
+      "latencyMs": 2.6,
       "rows": 1,
       "inputType": "insertText",
       "trusted": true
@@ -3944,99 +3944,9 @@
     {
       "query": "archive d",
       "value": "a",
-      "t0": 14521,
-      "t1": 14527.6,
-      "latencyMs": 6.6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "ar",
-      "t0": 14551.5,
-      "t1": 14557.5,
-      "latencyMs": 6,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "arc",
-      "t0": 14582.5,
-      "t1": 14587.5,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "arch",
-      "t0": 14614.2,
-      "t1": 14619.2,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archi",
-      "t0": 14645.3,
-      "t1": 14649.2,
-      "latencyMs": 3.9,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archiv",
-      "t0": 14676.5,
-      "t1": 14680,
-      "latencyMs": 3.5,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive",
-      "t0": 14707.8,
-      "t1": 14713,
+      "t0": 14598.2,
+      "t1": 14603.4,
       "latencyMs": 5.2,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive ",
-      "t0": 14738.7,
-      "t1": 14743.6,
-      "latencyMs": 4.9,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive d",
-      "t0": 14769.7,
-      "t1": 14781.1,
-      "latencyMs": 11.4,
-      "rows": 1,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "a",
-      "t0": 14848.5,
-      "t1": 14855.2,
-      "latencyMs": 6.7,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -4044,18 +3954,8 @@
     {
       "query": "archive d",
       "value": "ar",
-      "t0": 14878.2,
-      "t1": 14884.5,
-      "latencyMs": 6.3,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "arc",
-      "t0": 14913,
-      "t1": 14918,
+      "t0": 14628,
+      "t1": 14633,
       "latencyMs": 5,
       "rows": 200,
       "inputType": "insertText",
@@ -4063,150 +3963,70 @@
     },
     {
       "query": "archive d",
-      "value": "arch",
-      "t0": 14944.1,
-      "t1": 14949,
-      "latencyMs": 4.9,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archi",
-      "t0": 14972.1,
-      "t1": 14975.9,
-      "latencyMs": 3.8,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archiv",
-      "t0": 15004.1,
-      "t1": 15007.5,
-      "latencyMs": 3.4,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive",
-      "t0": 15035.4,
-      "t1": 15038.9,
-      "latencyMs": 3.5,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive ",
-      "t0": 15066.7,
-      "t1": 15070,
-      "latencyMs": 3.3,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive d",
-      "t0": 15097.7,
-      "t1": 15101.5,
-      "latencyMs": 3.8,
-      "rows": 1,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "a",
-      "t0": 15175.2,
-      "t1": 15181.4,
-      "latencyMs": 6.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "ar",
-      "t0": 15205.6,
-      "t1": 15211.8,
-      "latencyMs": 6.2,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
       "value": "arc",
-      "t0": 15237.2,
-      "t1": 15242.2,
-      "latencyMs": 5,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "arch",
-      "t0": 15267.7,
-      "t1": 15272.5,
-      "latencyMs": 4.8,
-      "rows": 200,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archi",
-      "t0": 15300.1,
-      "t1": 15304.1,
-      "latencyMs": 4,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archiv",
-      "t0": 15331,
-      "t1": 15334.5,
-      "latencyMs": 3.5,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive",
-      "t0": 15362.7,
-      "t1": 15366.2,
-      "latencyMs": 3.5,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive ",
-      "t0": 15394.1,
-      "t1": 15397.5,
-      "latencyMs": 3.4,
-      "rows": 5,
-      "inputType": "insertText",
-      "trusted": true
-    },
-    {
-      "query": "archive d",
-      "value": "archive d",
-      "t0": 15424.8,
-      "t1": 15428.7,
+      "t0": 14657.9,
+      "t1": 14661.8,
       "latencyMs": 3.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "arch",
+      "t0": 14689.7,
+      "t1": 14693.6,
+      "latencyMs": 3.9,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archi",
+      "t0": 14721.4,
+      "t1": 14724.8,
+      "latencyMs": 3.4,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archiv",
+      "t0": 14751.5,
+      "t1": 14754.3,
+      "latencyMs": 2.8,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive",
+      "t0": 14784,
+      "t1": 14786.7,
+      "latencyMs": 2.7,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive ",
+      "t0": 14814,
+      "t1": 14817,
+      "latencyMs": 3,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive d",
+      "t0": 14844.9,
+      "t1": 14847.8,
+      "latencyMs": 2.9,
       "rows": 1,
       "inputType": "insertText",
       "trusted": true
@@ -4214,8 +4034,8 @@
     {
       "query": "archive d",
       "value": "a",
-      "t0": 15503.5,
-      "t1": 15509.2,
+      "t0": 14923.3,
+      "t1": 14929,
       "latencyMs": 5.7,
       "rows": 200,
       "inputType": "insertText",
@@ -4224,9 +4044,9 @@
     {
       "query": "archive d",
       "value": "ar",
-      "t0": 15533.1,
-      "t1": 15539.2,
-      "latencyMs": 6.1,
+      "t0": 14954.7,
+      "t1": 14960.9,
+      "latencyMs": 6.2,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -4234,9 +4054,9 @@
     {
       "query": "archive d",
       "value": "arc",
-      "t0": 15564.4,
-      "t1": 15569.3,
-      "latencyMs": 4.9,
+      "t0": 14985.9,
+      "t1": 14990.4,
+      "latencyMs": 4.5,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -4244,9 +4064,9 @@
     {
       "query": "archive d",
       "value": "arch",
-      "t0": 15594.9,
-      "t1": 15599.3,
-      "latencyMs": 4.4,
+      "t0": 15016,
+      "t1": 15019.9,
+      "latencyMs": 3.9,
       "rows": 200,
       "inputType": "insertText",
       "trusted": true
@@ -4254,9 +4074,9 @@
     {
       "query": "archive d",
       "value": "archi",
-      "t0": 15626.2,
-      "t1": 15630.2,
-      "latencyMs": 4,
+      "t0": 15047.6,
+      "t1": 15051.9,
+      "latencyMs": 4.3,
       "rows": 5,
       "inputType": "insertText",
       "trusted": true
@@ -4264,9 +4084,9 @@
     {
       "query": "archive d",
       "value": "archiv",
-      "t0": 15656.9,
-      "t1": 15660.4,
-      "latencyMs": 3.5,
+      "t0": 15078,
+      "t1": 15080.6,
+      "latencyMs": 2.6,
       "rows": 5,
       "inputType": "insertText",
       "trusted": true
@@ -4274,8 +4094,98 @@
     {
       "query": "archive d",
       "value": "archive",
-      "t0": 15687.9,
-      "t1": 15691.4,
+      "t0": 15110.1,
+      "t1": 15113.2,
+      "latencyMs": 3.1,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive ",
+      "t0": 15140.1,
+      "t1": 15143.2,
+      "latencyMs": 3.1,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive d",
+      "t0": 15171.3,
+      "t1": 15174.1,
+      "latencyMs": 2.8,
+      "rows": 1,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "a",
+      "t0": 15250.4,
+      "t1": 15255.2,
+      "latencyMs": 4.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "ar",
+      "t0": 15280.7,
+      "t1": 15285.9,
+      "latencyMs": 5.2,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "arc",
+      "t0": 15312.2,
+      "t1": 15316.5,
+      "latencyMs": 4.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "arch",
+      "t0": 15342.8,
+      "t1": 15346.6,
+      "latencyMs": 3.8,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archi",
+      "t0": 15375,
+      "t1": 15378.8,
+      "latencyMs": 3.8,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archiv",
+      "t0": 15405.6,
+      "t1": 15408.7,
+      "latencyMs": 3.1,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive",
+      "t0": 15435.8,
+      "t1": 15439.3,
       "latencyMs": 3.5,
       "rows": 5,
       "inputType": "insertText",
@@ -4284,9 +4194,9 @@
     {
       "query": "archive d",
       "value": "archive ",
-      "t0": 15718.6,
-      "t1": 15722,
-      "latencyMs": 3.4,
+      "t0": 15466.6,
+      "t1": 15469.4,
+      "latencyMs": 2.8,
       "rows": 5,
       "inputType": "insertText",
       "trusted": true
@@ -4294,9 +4204,99 @@
     {
       "query": "archive d",
       "value": "archive d",
-      "t0": 15749.6,
-      "t1": 15753,
-      "latencyMs": 3.4,
+      "t0": 15496.4,
+      "t1": 15498.9,
+      "latencyMs": 2.5,
+      "rows": 1,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "a",
+      "t0": 15575.7,
+      "t1": 15580.7,
+      "latencyMs": 5,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "ar",
+      "t0": 15605.5,
+      "t1": 15610.6,
+      "latencyMs": 5.1,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "arc",
+      "t0": 15636.3,
+      "t1": 15640.6,
+      "latencyMs": 4.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "arch",
+      "t0": 15667.4,
+      "t1": 15671.7,
+      "latencyMs": 4.3,
+      "rows": 200,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archi",
+      "t0": 15699,
+      "t1": 15703.5,
+      "latencyMs": 4.5,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archiv",
+      "t0": 15729.6,
+      "t1": 15732.2,
+      "latencyMs": 2.6,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive",
+      "t0": 15760.8,
+      "t1": 15764.4,
+      "latencyMs": 3.6,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive ",
+      "t0": 15792.3,
+      "t1": 15795.3,
+      "latencyMs": 3,
+      "rows": 5,
+      "inputType": "insertText",
+      "trusted": true
+    },
+    {
+      "query": "archive d",
+      "value": "archive d",
+      "t0": 15824.3,
+      "t1": 15827.3,
+      "latencyMs": 3,
       "rows": 1,
       "inputType": "insertText",
       "trusted": true

@@ -19,6 +19,8 @@ const css = await readFile(new URL('./public/styles/quick-run.css', import.meta.
 const entryCss = await readFile(new URL('./public/workspace-20260730b.css', import.meta.url), 'utf8');
 const baseCss = await readFile(new URL('./public/styles/base.css', import.meta.url), 'utf8');
 const graphCss = await readFile(new URL('./public/styles/graph.css', import.meta.url), 'utf8');
+const dialogCss = await readFile(new URL('./public/styles/dialogs.css', import.meta.url), 'utf8');
+const contextMenuCss = await readFile(new URL('./public/styles/context-menu.css', import.meta.url), 'utf8');
 const markup = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
 
 /** The declarations of one single-selector rule, or '' when the rule does not exist. */
@@ -42,7 +44,7 @@ test('the surface has a stylesheet, and the page pulls it in', () => {
   ]);
 });
 
-test('the layer is an overlay above the workspace content and below the menus', () => {
+test('the layer is an overlay above the workspace content and above every modal', () => {
   const layer = ruleFor('.quick-run-layer');
   assert.match(layer, /position:\s*absolute/, 'a palette floats over the workspace rather than taking layout space');
   const zIndex = zIndexOf(layer);
@@ -60,7 +62,21 @@ test('the layer is an overlay above the workspace content and below the menus', 
     'it has no z-index of its own, which is why an explicit one on the layer is what decides the order',
   );
   assert.ok(zIndex > 0, `the layer must paint above the positioned workspace content (z-index ${zIndex})`);
-  assert.ok(zIndex < 100, 'and below the context menu (z-index 100), so a right-click menu can still appear over it');
+  // This assertion is the reverse of the one it replaces. It used to require the palette to sit *below* the
+  // context menu (100) and the dialogs (120/130), so a menu or a dialog could paint over Quick Run - true of
+  // a surface with no modal story, and reversed by the reviewer's ruling that the chord opens Quick Run from
+  // inside those dialogs and that the palette has exclusive input while it is up. Read from the same
+  // stylesheets as the numbers it is compared against, so it cannot drift from them.
+  const modalLayers = [
+    ...dialogCss.matchAll(/z-index:\s*(-?\d+)/g),
+    ...contextMenuCss.matchAll(/z-index:\s*(-?\d+)/g),
+  ].map((match) => Number(match[1]));
+  assert.ok(modalLayers.length > 0, 'the dialog and context-menu stylesheets declare z-indexes to compare against');
+  assert.ok(
+    modalLayers.every((value) => zIndex > value),
+    `the palette (z-index ${zIndex}) must paint above every menu and dialog (${modalLayers.join(', ')}), or the chord's punch-through would open an invisible surface`,
+  );
+  assert.ok(zIndex < 2147483640, 'and below the informational band, which is the one thing that may cover it');
   assert.match(layer, /width:\s*min\(/, 'the palette has a bounded width rather than spanning the window');
 });
 

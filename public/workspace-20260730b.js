@@ -113,6 +113,7 @@ import { createWorkspaceCommands } from './app/workspace-commands.js';
 import { resolveContextTarget } from './app/context-target-model.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 import { bindQuickRunWorkspace } from './app/quick-run/quick-run-workspace.js';
+import { globalInvokePayload, planQuickRunGlobalInvoke } from './app/quick-run/quick-run-global-invoke.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
 import { createPointerController } from './app/interactions/pointer-controller.js';
@@ -4986,6 +4987,32 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
   }
 });
 
+// Settings, at top level, beside the copy button. The creator asked for a hotkey setting that was already
+// in this dialog: the destination existed and the route to it did not, so this control does not go through
+// the copy button's own decision - that one copies when there is anything to copy and opens the dialog only
+// when there is nothing, which is why the dialog's activation looked unreliable (see
+// prompt-library-model.test.mjs, "the prompt library opens only when the batch is empty"). This calls
+// open() directly, which is the same call the explained path makes, and lands on the Settings tab.
+document.querySelector('#open-settings').addEventListener('click', () => {
+  promptLibrary.open();
+  promptLibrary.setActivePage('hotkeys');
+});
+
+// The host's half of "Alt+A anywhere" is Lane 4's (Papers-3, branch alt-invoke-global-hotkeys at 523ad79):
+// the host brings Papers to the front and relays a neutral event, never learning what Quick Run is. This is
+// the project's whole side of that contract, and it opens the same surface the in-app chord and the canvas
+// letter open - so nothing underneath is resolved and focus comes back, because those rules live in the
+// surface rather than here.
+//
+// Through the host bridge, not a window listener: host-to-project pushes arrive as `message` events from
+// `window.parent` (the preload re-posts them), and the bridge is the one place that checks the source. A
+// listener for a named event here would never fire in the real app while passing any test that dispatches
+// the event itself.
+host.onGlobalInvoke((payload) => {
+  const plan = planQuickRunGlobalInvoke(globalInvokePayload(payload) ?? payload);
+  if (plan.kind === 'invoke') openQuickRun();
+});
+
 const toolbar = createToolbarController({
   window,
   document,
@@ -5275,6 +5302,13 @@ const quickRun = bindQuickRunWorkspace({
   getState: () => state,
   getVisibleItemIds: visibleItemIds,
   setStatus,
+  // What sits underneath Quick Run is frozen while it is up, and told only that: "something transient is on
+  // top", never what it is. Measured reason, not a precaution: with a folder rename half typed in the prompt
+  // library, pressing the chord persisted the half-typed title through the dialog's own auto-save - the
+  // launcher inventing a state change, which the ruling forbids. The dialog keeps the edit in memory and the
+  // next deliberate action writes it.
+  onOpen: () => promptLibrary.setSuspended(true),
+  onClose: () => promptLibrary.setSuspended(false),
 });
 
 const keyboard = createKeyboardController({
@@ -5289,18 +5323,23 @@ const keyboard = createKeyboardController({
   setMembershipMode,
   setStatus,
   beginSetRename,
-  // STAGE 5: the chord the catalog declares reaches the surface. The surface reads the workspace tree
-  // this file owns, through the binding rather than a copy, so a later load is what it searches. The key is a
-  // toggle: the same chord dismisses a palette it opened, which is what the creator expected of it.
-  //
-  // A seed is the other way in (type-to-run): the controller has already decided that this keystroke is a
-  // letter and not a binding, and hands the letter over so the palette opens with it in the line. A seeded
-  // call always OPENS — toggle semantics belong to the chord, and a reader who typed a letter while the
-  // palette was up is typing into the line, which the controller's own guard arranges.
-  openQuickRun: (seed) => (
-    typeof seed === 'string' && seed !== '' ? quickRun.open(seed) : quickRun.toggle()
-  ),
+  openQuickRun,
 });
+
+// The three entrances to one surface, in one place.
+//
+// The chord the catalog declares (which the controller reports, whether it was pressed on the canvas or
+// through a dialog) and the host's relayed Alt+A are the same gesture and toggle: the same key dismisses a
+// palette it opened, which is what the creator expected of it. A seed is the other way in (type-to-run):
+// the controller has already decided that this keystroke is a letter and not a binding, and hands the
+// letter over so the palette opens with it in the line. A seeded call always OPENS — toggle semantics
+// belong to the chord, and a reader who typed a letter while the palette was up is typing into the line,
+// which the controller's own guard arranges.
+//
+// Named rather than inline because the global-invoke listener above the controller also needs it.
+function openQuickRun(seed) {
+  return typeof seed === 'string' && seed !== '' ? quickRun.open(seed) : quickRun.toggle();
+}
 
 const promptLibrary = createPromptLibraryDialog({
   document,

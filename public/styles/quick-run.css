@@ -10,16 +10,24 @@
  *
  * Placement is a judgement call, not a measurement: a command surface belongs near the top, over the
  * workspace, and out of the way of the floating toolbars at the top-left, so this is centred with a
- * bounded width. z-index 60 is deliberately between the workspace content and the modal layers: above the
- * graph viewport (0), items (2) and the toolbars (20/40), and below the context menu (100) and the dialogs
- * (120/130) - a right-click menu or a dialog must still be able to appear over Quick Run.
+ * bounded width. z-index 140 is above every modal layer on purpose, at the reviewer's ruling: the chord
+ * opens Quick Run from inside the editor dialog, the prompt library and the Settings tab, so the palette
+ * has to paint over them - and it has exclusive input while it is up, which a context menu (100) or a
+ * dialog (120/130) painting above it would contradict. It stays below the informational band (2147483640)
+ * and the read-only toolbar (2147483647). This was 60, deliberately *under* the dialogs so that a dialog
+ * could appear over Quick Run; that reasoning was right for a surface with no modal story, and it is
+ * exactly what the ruling reverses.
+ *
+ * Being above the dialogs is one half of it; the other half is that opening here resolves nothing.
+ * Nothing underneath is saved, discarded or closed, its unsaved buffer is left exactly as it was, and
+ * focus goes back to the control it came from when the palette closes.
  *
  * Colours come from tokens.css and nothing here is a literal, so the dark theme is not a second file.
  */
 
 .quick-run-layer {
   position: absolute;
-  z-index: 60;
+  z-index: 140;
   top: 72px;
   left: 50%;
   transform: translateX(-50%);

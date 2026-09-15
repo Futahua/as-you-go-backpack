@@ -1027,6 +1027,51 @@ test('folder rename commits on focusout', () => {
   assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Blurred');
 });
 
+test('a folder rename is NOT committed when focus leaves for the Quick Run palette', () => {
+  // The reviewer's rule, at the one place in this dialog that could break it: committing on focusout is
+  // right when the reader clicked somewhere else, and wrong when a launcher took focus. A half-typed name
+  // must not be committed by pressing a chord, and it must not be rolled back either - both are invisible
+  // resolutions of something the creator was still editing.
+  const h = createHarness({ initialView: treeFixture().view });
+  open(h);
+  clickRow(h, 'folder-dev');
+  keyOn(h, { key: 'F2' });
+  const input = h.rowFor('folder-dev').querySelector('.prompt-folder-rename');
+  input.value = 'Half typed';
+  input.dispatch('input', { target: input });
+
+  // Focus went into the palette. The dialog is allowed to know the layer and nothing else about Quick Run.
+  input.dispatch('focusout', {
+    target: input,
+    preventDefault,
+    stopPropagation,
+    relatedTarget: { closest: (selector) => (selector === '#quick-run-layer' ? { id: 'quick-run-layer' } : null) },
+  });
+  assert.equal(
+    h.rowFor('folder-dev').querySelector('.prompt-folder-rename').value,
+    'Half typed',
+    'the rename is still live and its buffer is untouched',
+  );
+  assert.ok(
+    h.rowFor('folder-dev').querySelector('.prompt-folder-rename'),
+    'the rename editor is still there and still live',
+  );
+  assert.equal(
+    Boolean(h.rowFor('folder-dev').querySelector('.prompt-folder-title')),
+    false,
+    'and nothing was committed behind the palette',
+  );
+
+  // The ordinary case is unchanged: focus left for somewhere this dialog does not know, so it commits.
+  input.dispatch('focusout', {
+    target: input,
+    preventDefault,
+    stopPropagation,
+    relatedTarget: { closest: () => null },
+  });
+  assert.equal(h.rowFor('folder-dev').querySelector('.prompt-folder-title').textContent, 'Half typed');
+});
+
 test('multiple folders can remain expanded; collapse removes hidden selection', () => {
   const h = createHarness({ initialView: treeFixture().view });
   open(h);

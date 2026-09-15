@@ -17,6 +17,10 @@ export function createHostBridge(window) {
   const REQUEST_TIMEOUT_MS = 15000;
   const pickListeners = new Set();
   const detachListeners = new Set();
+  // The host's global invocation chord (Lane 4's half of "Alt+A anywhere"). A push, like the detach
+  // lifecycle, so it is fanned out here rather than listened for by the page: every host-to-project message
+  // arrives as a `message` event from `window.parent`, and this is the one place that checks the source.
+  const globalInvokeListeners = new Set();
 
   function request(type, detail = {}) {
     if (pending.size >= MAX_PENDING) {
@@ -53,6 +57,16 @@ export function createHostBridge(window) {
       const detail = event.data.detail ?? event.data;
       for (const listener of detachListeners) {
         listener(event.data.type, detail);
+      }
+      return;
+    }
+    // The host's command-surface chord, relayed after it brought Papers to the front. Flat push shape like
+    // the detach channel, and the same legacy `{ detail }` wrapper is accepted. The host does not know what
+    // the chord means to this project - it reports the reason and the project decides.
+    if (event.data?.type === 'papers:project:global-invoke') {
+      const detail = event.data.detail ?? event.data;
+      for (const listener of globalInvokeListeners) {
+        listener(detail);
       }
       return;
     }
@@ -257,6 +271,11 @@ export function createHostBridge(window) {
     onDetachMessage: (callback) => {
       detachListeners.add(callback);
       return () => detachListeners.delete(callback);
+    },
+    /** The host's relayed command-surface chord. One subscription per page; the page decides the meaning. */
+    onGlobalInvoke: (callback) => {
+      globalInvokeListeners.add(callback);
+      return () => globalInvokeListeners.delete(callback);
     },
     // 019C: compact widget surface (one native widget per layout). open/focus/
     // close are workspace requests carrying the opaque bounded layout key;

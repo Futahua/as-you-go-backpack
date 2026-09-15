@@ -522,6 +522,43 @@ test('the open palette keeps its own keys: Escape is not also a workspace Escape
   assert.equal(h.called.quickRun, 1, 'but the chord it was opened with still reaches it, so it can be dismissed');
 });
 
+test('the chord punches through every modal layer, and nothing else does', () => {
+  // The reviewer's ruling: the creator asked for this chord to work from inside other applications
+  // entirely, so blocking it inside Papers' own dialogs is incoherent. Quick Run is a transient
+  // interruption, not a modal resolution - opening it resolves nothing underneath.
+  for (const layer of ['editorLayer', 'confirmLayer', 'linkEditLayer', 'promptLayer']) {
+    const h = createHarness();
+    h.elements[layer].hidden = false;
+    h.store.setSelection(['a']);
+    let prevented = 0;
+    const event = key({ key: 'a', altKey: true });
+    event.preventDefault = () => { prevented += 1; };
+    h.listeners[0].handler(event);
+    assert.equal(h.called.quickRun, 1, `the chord reaches the surface through an open ${layer}`);
+    assert.equal(prevented, 1, 'and the key does not also do whatever it otherwise would');
+    // Everything the modal owns stays the modal's. If any of these fired, the chord would not be a
+    // transient interruption but a resolution of the thing underneath it.
+    for (const other of [key({ key: 'Escape' }), key({ key: 'Delete' }), key({ key: 'c', ctrlKey: true }), key({ key: 'Enter' })]) {
+      h.listeners[0].handler(other);
+    }
+    assert.equal(h.commandSpies['clearSelection:calls'], 0, `${layer}: Escape still belongs to the dialog`);
+    assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0, `${layer}: Delete still belongs to the dialog`);
+    assert.equal(h.commandSpies['copySelection:calls'], 0, `${layer}: Ctrl+C still belongs to the dialog`);
+    assert.equal(h.commandSpies['activateItem:calls'], 0, `${layer}: Enter still belongs to the dialog`);
+    assert.equal(h.called.close, 0, `${layer}: the menu is not closed behind it`);
+    assert.equal(h.called.quickRun, 1, `${layer}: and no second open happened`);
+  }
+});
+
+test('the chord punches through, and a printable character does not', () => {
+  // The counterpart of the ruling, in the same state: the chord is a deliberate accelerator, while a letter
+  // typed under a dialog belongs to whatever the dialog is doing - and to the field the reader is in.
+  const h = createHarness();
+  h.elements.promptLayer.hidden = false;
+  h.listeners[0].handler(key({ key: 'l' }));
+  assert.equal(h.called.quickRun, 0, 'a letter does not open Quick Run from under a dialog');
+});
+
 test('the two editable selectors are the shapes they claim to be', () => {
   // This is here because the host caught what the harness could not: the node mock answers `matches()` by
   // looking for a substring, so an INVALID CSS selector passes every test in this file and then throws in
