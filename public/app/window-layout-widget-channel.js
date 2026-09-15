@@ -31,6 +31,14 @@ export const PAPERS_PICK_MEMBER_LIMIT = 32;
 // optional icon. Data URLs can exceed the 512-byte key bound, so the icon has
 // its own generous-but-bounded ceiling.
 export const WINDOW_LAYOUT_WIDGET_MAX_ICON_BYTES = 262144;
+// A COMMITTED command may carry ONE short sentence saying what actually
+// happened: a pick whose removals were all refused (nothing changed) or one
+// that removed some members and could not match others. It is display text
+// beside the snapshot, never a payload and never a substitute for the message:
+// a refusal is NOT a failure, so it travels as `committed` with a status and
+// not as an `error` (which would tell the widget a working command broke).
+// Bounded like the member note it appears next to.
+export const WINDOW_LAYOUT_WIDGET_MAX_STATUS_CHARS = 160;
 
 const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window']);
 const GROUP_ACTIONS = new Set(['minimize', 'restore', 'isolate']);
@@ -54,6 +62,21 @@ function exactKeys(value, keys) {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+/**
+ * The ONE bound on a committed status, called by both ends: the responder that may put it on the wire and
+ * the surface that renders it. Nothing to say (`undefined`, a non-string, or whitespace) answers `null`, so
+ * the field is absent rather than empty; anything longer than a short line is cut at the bound instead of
+ * being dropped, because a truncated sentence still tells the creator more than silence does.
+ */
+export function windowLayoutWidgetCommittedStatus(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  return trimmed.length <= WINDOW_LAYOUT_WIDGET_MAX_STATUS_CHARS
+    ? trimmed
+    : trimmed.slice(0, WINDOW_LAYOUT_WIDGET_MAX_STATUS_CHARS);
 }
 
 function generateId() {
@@ -479,7 +502,10 @@ export function createWindowLayoutWidgetChannelWorkspace({
         return;
       }
       const revision = revisionOf(layoutId) === startingRevision ? bump(layoutId) : revisionOf(layoutId);
-      post({ type: 'committed', layoutId, clientId, commandId, commandKind: command.kind, revision, snapshot: buildSnapshot(freshLayout) });
+      const committedStatus = windowLayoutWidgetCommittedStatus(result.status);
+      post(committedStatus === null
+        ? { type: 'committed', layoutId, clientId, commandId, commandKind: command.kind, revision, snapshot: buildSnapshot(freshLayout) }
+        : { type: 'committed', layoutId, clientId, commandId, commandKind: command.kind, revision, snapshot: buildSnapshot(freshLayout), status: committedStatus });
     }
   }
   const listener = (event) => { void reply(event); };

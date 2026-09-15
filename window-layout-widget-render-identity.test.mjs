@@ -18,6 +18,7 @@
 // while keeping genuinely-changed same-revision content live.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 
 import {
   windowLayoutWidgetRenderIdentity,
@@ -124,3 +125,47 @@ test('render identity is stable under repeated evaluation of one snapshot', () =
   const snapshot = windowLayoutWidgetSnapshot(BASE);
   assert.equal(windowLayoutWidgetRenderIdentity(snapshot), windowLayoutWidgetRenderIdentity(snapshot));
 });
+
+// The guard above is exactly what would have swallowed a refusal. A pick whose removals were all refused
+// changes NOTHING, so its committed snapshot is byte-identical to the card already on screen and the guard
+// returns before any repaint: the sentence has to be displayed BEFORE the guard, not inside it. This is a
+// source-shape assertion because the entry (public/workspace-20260730b.js) is a browser module with no DOM
+// harness in this suite; the escape it pins is the one that makes the sentence reachable, and the wire that
+// carries it is proven behaviourally in window-layout-widget-channel.test.mjs.
+const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+const channelSource = await readFile(new URL('./public/app/window-layout-widget-channel.js', import.meta.url), 'utf8');
+
+function region(source, start, end) {
+  const from = source.indexOf(start);
+  assert.notEqual(from, -1, `missing: ${start}`);
+  const to = source.indexOf(end, from);
+  assert.notEqual(to, -1, `missing: ${end}`);
+  return source.slice(from, to);
+}
+
+test('the committed status is displayed before the guard that a no-op cannot pass', () => {
+  const handler = region(workspaceSource, 'function handleWidgetMessage(message) {', 'if (message.type === \'error\')');
+  const displayed = handler.indexOf('setWindowLayoutStatus(layoutId, committedStatus)');
+  const guard = handler.indexOf('if (renderIdentity === widgetState.lastRenderIdentity) return;');
+  assert.notEqual(displayed, -1, 'the committed branch must be able to say something');
+  assert.notEqual(guard, -1, 'the duplicate-render guard must still exist');
+  assert.ok(displayed < guard, 'the sentence is shown before the guard can return early');
+  assert.match(handler, /windowLayoutWidgetCommittedStatus\(message\.status\)/);
+});
+
+test('the workspace sends that status only on the committed pick result, from the computed sentence', () => {
+  const branch = region(workspaceSource, "if (command.kind === 'picker-commit') {", "return { ok: false, error: 'unknown command' };");
+  // Same wording authority as the local status line: one computed sentence, not a second vocabulary.
+  assert.match(branch, /windowLayoutPickApplyOutcome\(applied\)\.statusText/);
+  assert.match(branch, /status === null \? \{ ok: true \} : \{ ok: true, status \}/);
+  // Superseded stays a typed failure and never becomes a committed status.
+  assert.match(branch, /if \(applied\.outcome === 'superseded'\) return \{ ok: false, error: 'superseded' \};/);
+});
+
+test('the responder puts a bounded status on the wire and leaves the committed shape alone otherwise', () => {
+  assert.match(channelSource, /export const WINDOW_LAYOUT_WIDGET_MAX_STATUS_CHARS = 160;/);
+  const post = region(channelSource, 'const committedStatus = windowLayoutWidgetCommittedStatus(result.status);', 'const listener = (event)');
+  assert.match(post, /committedStatus === null/);
+  assert.match(post, /status: committedStatus/);
+});
+

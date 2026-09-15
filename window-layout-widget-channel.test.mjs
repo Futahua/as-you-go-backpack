@@ -115,6 +115,89 @@ test('snapshot-request is answered; unknown layouts get a typed error', () => {
   missingClient.close();
 });
 
+/* A pick that refused is still a COMMITTED command - the layout is unchanged or partly changed and nothing
+ * failed - so the widget must not be told it was an error. What it lacked was the sentence: the workspace
+ * computes it (windowLayoutPickApplyOutcome) and the detached widget never saw it, so a refusal was silent
+ * there. The sentence now rides the committed response as an optional bounded status. */
+test('a pick whose removals were all refused stays committed and carries the sentence', async () => {
+  const layouts = [makeLayout('L1', [{ id: 'm1', title: 'Notepad' }])];
+  const sentence = 'That window has changed since the pick — nothing was removed';
+  const { workspace, clientChannel } = makeBus(layouts, () => ({ ok: true, status: sentence }));
+  const received = [];
+  const client = createWindowLayoutWidgetChannelClient({
+    channel: clientChannel, layoutId: 'L1', onMessage: (message) => received.push(message),
+  });
+  client.ready();
+  client.requestSnapshot();
+  client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [], removes: [] } });
+  await new Promise((resolve) => setImmediate(resolve));
+  const committed = received.find((message) => message.type === 'committed');
+  assert.ok(committed, 'a refusal is a committed command, not an error');
+  assert.equal(committed.status, sentence, 'and it says what happened');
+  assert.equal(received.some((message) => message.type === 'error'), false, 'nothing is reported as a failure');
+  // The card renders exactly as before: same message type, snapshot and revision. The snapshot is in fact
+  // BYTE-IDENTICAL to the one this client already rendered, because a refusal changed nothing - which is the
+  // whole point: no repaint can carry this news, so the status field is the only thing that can speak.
+  const initial = received.find((message) => message.type === 'snapshot');
+  assert.equal(JSON.stringify(committed.snapshot), JSON.stringify(initial.snapshot));
+  assert.equal(committed.snapshot.members.length, 1);
+  assert.equal(committed.revision, 1);
+  workspace.close();
+  client.close();
+});
+
+test('a mixed result carries the sentence too, and is still committed', async () => {
+  const layouts = [makeLayout('L1', [{ id: 'm1', title: 'Notepad' }])];
+  const { workspace, clientChannel } = makeBus(layouts, () => ({ ok: true, status: 'Removed 1 — 1 could not be matched' }));
+  const received = [];
+  const client = createWindowLayoutWidgetChannelClient({
+    channel: clientChannel, layoutId: 'L1', onMessage: (message) => received.push(message),
+  });
+  client.ready();
+  client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [], removes: [] } });
+  await new Promise((resolve) => setImmediate(resolve));
+  const committed = received.find((message) => message.type === 'committed');
+  assert.equal(committed.status, 'Removed 1 — 1 could not be matched');
+  assert.equal(received.some((message) => message.type === 'error'), false);
+  workspace.close();
+  client.close();
+});
+
+test('an ordinary command, and an unusable or oversized status, put nothing on the wire', async () => {
+  const layouts = [makeLayout('L1', [{ id: 'm1', title: 'Notepad' }])];
+  for (const [label, result, expected] of [
+    ['no status at all', { ok: true }, undefined],
+    ['an empty status', { ok: true, status: '   ' }, undefined],
+    ['a status that is not a string', { ok: true, status: 42 }, undefined],
+  ]) {
+    const { workspace, clientChannel } = makeBus(layouts, () => result);
+    const received = [];
+    const client = createWindowLayoutWidgetChannelClient({
+      channel: clientChannel, layoutId: 'L1', onMessage: (message) => received.push(message),
+    });
+    client.ready();
+    client.sendCommand({ kind: 'member-toggle', memberId: 'm1' });
+    await new Promise((resolve) => setImmediate(resolve));
+    const committed = received.find((message) => message.type === 'committed');
+    assert.equal(committed.status, expected, label);
+    workspace.close();
+    client.close();
+  }
+  // Bounded like every other value on this channel: a status is a sentence, not a payload.
+  const long = 'x'.repeat(4000);
+  const { workspace, clientChannel } = makeBus(layouts, () => ({ ok: true, status: long }));
+  const received = [];
+  const client = createWindowLayoutWidgetChannelClient({
+    channel: clientChannel, layoutId: 'L1', onMessage: (message) => received.push(message),
+  });
+  client.ready();
+  client.sendCommand({ kind: 'member-toggle', memberId: 'm1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  const committed = received.find((message) => message.type === 'committed');
+  assert.ok(committed.status.length <= 160, `bounded (got ${committed.status.length})`);
+  workspace.close();
+  client.close();
+});
 test('command with a matching baseRevision applies once and posts committed', async () => {
   const layouts = [makeLayout('L1', [{ id: 'm1', title: 'Notepad' }])];
   const order = [];

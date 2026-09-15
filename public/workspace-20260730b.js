@@ -89,7 +89,7 @@ import { createHostBridge } from './app/host/host-bridge.js';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
-import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, windowLayoutWidgetRenderIdentity, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
+import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, windowLayoutWidgetRenderIdentity, windowLayoutWidgetCommittedStatus, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
 import {
   createWindowLayoutPickApplier,
   createWindowLayoutRetirementWriter,
@@ -2520,9 +2520,15 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       // 019DR: a read-only handoff that began during observation surfaces as a
       // typed superseded failure (zero commit/save/recording mutation), so the
       // widget never sees a false committed result.
-      return applied.outcome === 'superseded'
-        ? { ok: false, error: 'superseded' }
-        : { ok: true };
+      if (applied.outcome === 'superseded') return { ok: false, error: 'superseded' };
+      // The sentence this workspace already put on its own status line rides back with the committed
+      // result. A pick whose removals were all refused changes nothing, so the widget's snapshot comes
+      // back byte-identical to the one it is already showing and no repaint can tell the creator anything;
+      // on the DETACHED card the refusal was silent - the creator saw a menu close and nothing else. It
+      // travels as a status ON the committed result, never as an error: a refusal is not a failure, and a
+      // mixed result is a real commit whose two halves both need saying.
+      const status = windowLayoutWidgetCommittedStatus(windowLayoutPickApplyOutcome(applied).statusText);
+      return status === null ? { ok: true } : { ok: true, status };
     }
     return { ok: false, error: 'unknown command' };
   },
@@ -5527,6 +5533,13 @@ function bootstrapWindowLayoutWidget() {
   function handleWidgetMessage(message) {
     if (message.type === 'snapshot' || message.type === 'committed' || message.type === 'stale') {
       if (typeof message.revision !== 'number') return;
+      // A committed response may carry one short sentence about what actually happened (a pick whose
+      // removals were all refused, or one that removed some and could not match others). It is shown HERE,
+      // before the render-identity guard below and not inside it: a refusal-only pick changes nothing, so
+      // its snapshot is identical to the card already on screen and that guard would return early - leaving
+      // this surface exactly as silent about the refusal as it was before the sentence existed.
+      const committedStatus = windowLayoutWidgetCommittedStatus(message.status);
+      if (committedStatus !== null) setWindowLayoutStatus(layoutId, committedStatus);
       widgetState.lastRevision = message.revision;
       if (message.snapshot && typeof message.snapshot === 'object' && message.snapshot.id === layoutId) {
         widgetState.snapshot = message.snapshot;

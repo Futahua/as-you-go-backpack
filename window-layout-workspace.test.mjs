@@ -12,6 +12,7 @@ import {
   windowLayoutPickApplyOutcome,
 } from './public/app/window-layout-workspace.js';
 import { windowLayoutMemberKey } from './public/app/window-layout-runtime.js';
+import { windowLayoutWidgetCommittedStatus } from './public/app/window-layout-widget-channel.js';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
 import {
   addWindowLayoutMember,
@@ -244,6 +245,36 @@ test('the workspace wrapper obeys that decision: a pure refusal notifies nothing
   assert.doesNotMatch(wrapper, /^\s*windowLayoutWidgetChannelWorkspace\.noteCommitted\(layoutId\);$/m);
   assert.doesNotMatch(wrapper, /^\s*(?:await )?windowLayoutRecording\.ensureRecording\(layoutId\);$/m);
 });
+test('the sentence a real refused or mixed pick produces is the one the widget receives, unabridged', async () => {
+  // The end of the chain the widget blocker was about: the REAL applier's output, not a hand-written status.
+  // The channel test proves the wire carries a status; this proves the string on it is the computed sentence.
+  const refused = makeHarness();
+  const refusedApplied = await refused.pickApplier.apply('L1', {
+    outcome: 'committed',
+    removes: [{ descriptor: descriptor('Paint') }],
+    adds: [],
+  });
+  const refusedOutcome = windowLayoutPickApplyOutcome(refusedApplied);
+  assert.equal(refusedApplied.outcome, 'committed');
+  assert.equal(refusedOutcome.mutated, false, 'a refusal changed nothing');
+  assert.equal(refusedOutcome.statusText, 'That window has changed since the pick — nothing was removed');
+  // The widget branch bounds that sentence before it sends it; a bound that altered a real sentence would
+  // put truncated words on the creator's card.
+  assert.equal(windowLayoutWidgetCommittedStatus(refusedOutcome.statusText), refusedOutcome.statusText);
+  assert.equal(refused.countCommits(), 0, 'a refusal still commits nothing');
+
+  const mixed = makeHarness();
+  const mixedOutcome = windowLayoutPickApplyOutcome(await mixed.pickApplier.apply('L1', {
+    outcome: 'committed',
+    removes: [{ descriptor: descriptor('Notepad') }, { descriptor: descriptor('Paint') }],
+    adds: [],
+  }));
+  assert.equal(mixedOutcome.mutated, true, 'one member really went');
+  assert.equal(mixedOutcome.statusText, 'Removed 1 — 1 could not be matched');
+  assert.equal(windowLayoutWidgetCommittedStatus(mixedOutcome.statusText), mixedOutcome.statusText);
+  assert.equal(mixed.countCommits(), 1);
+});
+
 test('cancel is byte-zero: no commit, no mutation', async () => {
   const h = makeHarness();
   const before = JSON.stringify(h.getState());
