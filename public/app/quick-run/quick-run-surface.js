@@ -167,10 +167,11 @@ function revealHighlightedRow(elements) {
  */
 export function paintQuickRunSurface({
   document, elements, session, onRowClick, keepScroll = false, resetScroll = false, reveal = false,
+  loadFailure = null,
 }) {
   elements.layer.hidden = !session.open;
   if (elements.notice) {
-    const empty = quickRunEmptyNotice(session);
+    const empty = quickRunEmptyNotice(session, { loadFailure });
     elements.notice.textContent = empty ? empty.text : '';
     elements.notice.hidden = !empty;
   }
@@ -263,7 +264,7 @@ function wheelPixels(event, { rowHeight, viewportHeight }) {
  * lives here, where a test can drive it with element mocks instead of by launching the app.
  */
 export function mountQuickRun(input) {
-  const { document, elements, getState, onActivate, onReveal, onOpen, onClose, commandSurface = false, now = () => Date.now() } = input ?? {};
+  const { document, elements, getState, onActivate, onReveal, onOpen, onClose, universeNote = null, commandSurface = false, now = () => Date.now() } = input ?? {};
   if (!document || !elements || typeof getState !== 'function') {
     throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
   }
@@ -317,6 +318,10 @@ export function mountQuickRun(input) {
       keepScroll,
       resetScroll,
       reveal,
+      // Why the universe is empty, when the loader knows. The launcher overlay has no canvas behind it, so
+      // this is the only place the difference between "your project is empty" and "I could not read your
+      // project" can be shown - and flattening those two is what hid the creator's failure.
+      loadFailure: typeof universeNote === 'function' ? universeNote() : null,
     });
     if (keepScroll) listScrolled = true;
     else if (resetScroll) listScrolled = false;

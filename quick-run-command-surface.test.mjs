@@ -49,7 +49,7 @@ test('the marker survives the other things a URL carries', () => {
 test('the invoked event means focus-and-clear, and only for the accelerator reason', () => {
   assert.deepEqual(
     planCommandSurfaceInvoke({ reason: 'global-accelerator', chord: 'invoke' }),
-    { kind: 'focus-and-clear' },
+    { kind: 'focus-and-clear', reload: false },
   );
   assert.deepEqual(
     planCommandSurfaceInvoke({ reason: 'bring-to-front' }),
@@ -59,13 +59,33 @@ test('the invoked event means focus-and-clear, and only for the accelerator reas
   assert.deepEqual(planCommandSurfaceInvoke(null), { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.malformed });
 });
 
+test('an invocation asks for the items again when the boot load did not land', () => {
+  // Measured in the installed host: the launcher opened, took the keystroke, and had no items to search. One
+  // of the ways that happens is the boot load losing a race with the overlay window coming up, and the
+  // cheapest honest answer to that is to ask again on the invocation - the same single source of items, the
+  // same channel, no cache and no second store. A load that never failed is not repeated.
+  assert.deepEqual(
+    planCommandSurfaceInvoke({ reason: 'global-accelerator' }),
+    { kind: 'focus-and-clear', reload: false },
+  );
+  assert.deepEqual(
+    planCommandSurfaceInvoke({ reason: 'global-accelerator' }, { loadFailed: true }),
+    { kind: 'focus-and-clear', reload: true },
+  );
+  assert.deepEqual(
+    planCommandSurfaceInvoke({ reason: 'something-else' }, { loadFailed: true }),
+    { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.reason },
+    'and an event that is not the chord reloads nothing',
+  );
+});
+
 test('the ids do not decide it, because a receiving surface cannot verify them', () => {
   // Measured on the host's own payload: `surfaceId` is host-generated (`sf-...`) and appears nowhere in the
   // surface's URL, which carries a different uuid. The overlay is a window the host opened for this project,
   // so anything arriving on that window is for it - filtering on an id it cannot check would only drop real
   // invocations.
   const withIds = planCommandSurfaceInvoke({ reason: 'global-accelerator', projectId: 'bp-1', surfaceId: 'sf-1' });
-  assert.deepEqual(withIds, { kind: 'focus-and-clear' });
+  assert.deepEqual(withIds, { kind: 'focus-and-clear', reload: false });
   assert.deepEqual(planCommandSurfaceInvoke({ reason: 'global-accelerator' }), withIds);
 });
 

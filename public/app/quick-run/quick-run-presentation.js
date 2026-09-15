@@ -111,16 +111,20 @@ function groupDigits(value) {
  * a closed session shows nothing at all - neither of those is a failed search, and neither should claim to
  * be one. The query is quoted exactly as the reader typed it, because that is what did not match.
  */
-export function quickRunEmptyNotice(session) {
+export function quickRunEmptyNotice(session, { loadFailure = null } = {}) {
   if (session?.open !== true) return null;
   if (typeof session.query !== 'string' || session.query.trim() === '') return null;
   if (session.rows.length > 0) return null;
   // "No matches for X" is a lie when there was nothing to match against. It was measured in the launcher
   // overlay, which has no canvas behind it: if this surface could not get the project's state, every query
   // answered "No matches" and the creator would be told their own item does not exist. An empty universe gets
-  // its own sentence, and it is true whether the workspace is empty or could not be read - saying which of
-  // the two it was is the loader's job, not a search result's. Refusing visibly beats returning fewer results.
+  // its own sentence, and when the load itself failed the host's own reason is carried into it - that is the
+  // difference between "your project is empty" and "I could not read your project", and flattening the two
+  // was the thing that hid this failure. Refusing visibly beats returning fewer results.
   if (Array.isArray(session.allRows) && session.allRows.length === 0) {
+    if (typeof loadFailure === 'string' && loadFailure.trim() !== '') {
+      return { text: `Nothing to search yet: this project’s items could not be loaded (${loadFailure.trim()}).` };
+    }
     return { text: 'Nothing to search yet: this project has no items loaded here.' };
   }
   return { text: `No matches for “${session.query.trim()}”.` };

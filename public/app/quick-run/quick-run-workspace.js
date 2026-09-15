@@ -54,6 +54,7 @@ export function bindQuickRunWorkspace({
   setStatus,
   onOpen,
   onClose,
+  universeNote = null,
   commandSurface = false,
 }) {
   if (typeof getState !== 'function') {
@@ -87,6 +88,7 @@ export function bindQuickRunWorkspace({
     // binding and the surface stay ignorant of it.
     onOpen,
     onClose,
+    universeNote,
     commandSurface,
     // What Enter does (section 1.5). The row is re-read from the current state by its stable key before
     // anything happens (section 5), then the plan is executed by naming the workspace's own

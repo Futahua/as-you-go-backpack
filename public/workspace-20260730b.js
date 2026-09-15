@@ -5021,9 +5021,42 @@ if (commandSurfaceMode === 'overlay') {
   // The stylesheet keys off this: no canvas, no toolbars, no chrome - the command surface and nothing else.
   document.documentElement.dataset.papersSurface = COMMAND_SURFACE_MODE;
 }
+// Whether this surface's one load of the project's items landed, and if not, why. The launcher overlay has no
+// canvas behind it, so an empty universe there is ambiguous between "your project is empty" and "I could not
+// read your project" - and the creator's failure was the second one, hidden by the first reading. Recorded
+// here, shown in the surface's own sentence, and it is what decides whether an invocation asks again.
+let workspaceLoad = { settled: false, ok: false, error: null };
+async function loadWorkspaceRecording() {
+  try {
+    const loaded = await host.loadWorkspace();
+    workspaceLoad = { settled: true, ok: true, error: null };
+    return loaded;
+  } catch (error) {
+    workspaceLoad = { settled: true, ok: false, error: error instanceof Error ? error.message : String(error) };
+    throw error;
+  }
+}
+/** Ask for the items again. The same single source, through the same channel: no cache, no second store. */
+async function reloadWorkspace() {
+  try {
+    const loaded = await loadWorkspaceRecording();
+    state = store.install(typeof loaded === 'string' ? JSON.parse(loaded) : loaded);
+    render();
+    quickRun.refresh();
+    setStatus('');
+    return true;
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error));
+    return false;
+  }
+}
 host.onCommandSurfaceInvoke((payload) => {
-  const plan = planCommandSurfaceInvoke(payload);
-  if (plan.kind === 'focus-and-clear') quickRun.focusEmptyLine();
+  const plan = planCommandSurfaceInvoke(payload, { loadFailed: workspaceLoad.ok !== true });
+  if (plan.kind !== 'focus-and-clear') return;
+  quickRun.focusEmptyLine();
+  // The creator is here, looking at an empty launcher: if the boot load did not land, ask again now rather
+  // than making them close and reopen it. Bounded to one attempt per invocation.
+  if (plan.reload) void reloadWorkspace();
 });
 
 const toolbar = createToolbarController({
@@ -5323,6 +5356,9 @@ const quickRun = bindQuickRunWorkspace({
   onOpen: () => promptLibrary.setSuspended(true),
   onClose: () => promptLibrary.setSuspended(false),
   // The mode is a presentation fact, not a second surface: the same binding, session and rules in both.
+  // What to tell the reader when there is nothing to search: the surface asks the loader, which is the only
+  // thing here that knows whether the project is empty or unreadable.
+  universeNote: () => (workspaceLoad.ok === false ? workspaceLoad.error : null),
   commandSurface: commandSurfaceMode === 'overlay',
 });
 
@@ -6318,14 +6354,18 @@ if (WIDGET_SURFACE) {
   }
 
   void bootstrapWorkspace({
+    // The load outcome, kept because the launcher overlay has no canvas behind it: an empty universe there
+    // can mean "this project is empty" or "I could not read this project", and the creator's report - the
+    // launcher opened and had nothing to search - is exactly the case where flattening those two hides the
+    // failure. This is the instrument and the sentence at once.
     loadState: DETACHED_SURFACE
       ? () => windowLayoutDetachment.waitForActivate().then((transferId) => {
         if (transferId === DETACH_ACTIVATE_CANCELLED) {
           throw new Error('detach activate cancelled');
         }
-        return host.loadWorkspace();
+        return loadWorkspaceRecording();
       })
-      : () => host.loadWorkspace(),
+      : () => loadWorkspaceRecording(),
     setState: (next) => { state = store.install(next); },
     restoreWorkspaceView,
     setStatus,
@@ -6347,6 +6387,12 @@ if (WIDGET_SURFACE) {
     // runs during module evaluation, so `onOpen` reached the prompt library before it was constructed, the
     // boot died there, and the overlay came up with no rows to search.
     if (commandSurfaceMode === 'overlay') quickRun.open();
+    if (commandSurfaceMode === 'overlay' && workspaceLoad.ok !== true) {
+      // A launcher window is created and shown in the same breath as its page loads, so the first read of the
+      // project's items can lose that race. One bounded retry, in this mode only and only while nothing has
+      // ever loaded: the same single source of items, asked again a moment later. No cache, no second store.
+      setTimeout(() => { if (workspaceLoad.ok !== true) void reloadWorkspace(); }, 1500);
+    }
     // 0B: elect a document writer among the surfaces of this project.
     //
     // Only ordinary workspace surfaces take part. A detached surface receives

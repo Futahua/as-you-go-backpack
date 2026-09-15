@@ -178,3 +178,25 @@ test('an empty universe says so instead of claiming the query matched nothing', 
     { text: 'No matches for “kestrel”.' },
   );
 });
+
+test('a failed state load is said out loud, with the reason the host gave', () => {
+  // The launcher overlay has no canvas behind it, and the creator's report was "nothing shows up when typed".
+  // The sentence has to distinguish three states rather than flatten them into one: items could not be
+  // loaded (and here is why), loaded but the project is genuinely empty, or a query that matched none of a
+  // universe that is there. The first is the one that was hidden, and it is the one that matters.
+  const empty = { open: true, query: 'lam', rows: [], allRows: [], totalRows: 0, capped: false, chips: [] };
+  assert.deepEqual(
+    quickRunEmptyNotice(empty, { loadFailure: 'Host request timed out.' }),
+    { text: 'Nothing to search yet: this project’s items could not be loaded (Host request timed out.).' },
+  );
+  assert.deepEqual(
+    quickRunEmptyNotice(empty, { loadFailure: null }),
+    { text: 'Nothing to search yet: this project has no items loaded here.' },
+  );
+  const populated = { ...empty, allRows: [{ resultKey: 'folder:1', name: 'Letters', type: 'folder' }] };
+  assert.deepEqual(
+    quickRunEmptyNotice(populated, { loadFailure: 'Host request timed out.' }),
+    { text: 'No matches for “lam”.' },
+    'a universe that arrived is searched even if an earlier attempt failed',
+  );
+});

@@ -74,12 +74,16 @@ export function commandSurfaceModeFromUrl(href) {
  * window, so that dismissal works even if this page is still loading. A second dismissal path in the page
  * would empty a window the host still has up.
  */
-export function planCommandSurfaceInvoke(payload) {
+export function planCommandSurfaceInvoke(payload, { loadFailed = false } = {}) {
   if (!payload || typeof payload !== 'object') {
     return { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.malformed };
   }
   if (payload.reason !== COMMAND_SURFACE_INVOKE_REASON) {
     return { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.reason };
   }
-  return { kind: 'focus-and-clear' };
+  // Measured on the creator's machine: the launcher opened, took the keystroke, and had no items to search.
+  // One of the ways that happens is the surface's boot load losing a race with the overlay window coming up,
+  // and the cheapest honest answer is to ask again on the invocation - the same one source of items through
+  // the same channel, with no cache and no second store. A load that landed is never repeated.
+  return { kind: 'focus-and-clear', reload: loadFailed === true };
 }
