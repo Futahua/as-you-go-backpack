@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { QUICK_RUN_TIERS, quickRunResults, tierForName } from './public/app/quick-run/quick-run-index.js';
+import { QUICK_RUN_TIERS, normaliseQueryText, quickRunResults, tierForName } from './public/app/quick-run/quick-run-index.js';
 
 const row = (key, name) => ({ resultKey: key, name, type: 'folder' });
 const names = (rows) => rows.map((entry) => entry.name);
@@ -88,6 +88,55 @@ test('frequency never moves a lower tier above a higher tier, because frequency 
       `the ranking must not consult ${forbidden}: a tie-break it does not have cannot reorder anything`,
     );
   }
+});
+
+/* Vietnamese. The creator writes it, their items are named in it, and Quick Run's promise is hotkey, type,
+   Enter, gone - so composing a tone mark to find something you are about to open is friction at the exact
+   moment the feature exists to remove. Tones are therefore folded away on BOTH sides of the comparison, and
+   so is case. What is never folded is which base letter the reader sees: only marks come off, plus the
+   stroke in đ, which the creator asked for by name. */
+test('the pinned normalisation folds tone, case and đ, and does it identically on both sides', () => {
+  assert.equal(normaliseQueryText('làm bài'), 'lam bai');
+  assert.equal(normaliseQueryText('LÀM BÀI'), 'lam bai');
+  assert.equal(normaliseQueryText('Đường'), 'duong');
+  assert.equal(normaliseQueryText('đ'), 'd');
+  assert.equal(normaliseQueryText('Ơn gọi'), 'on goi', 'the horn is a mark: the base letter is still o');
+  assert.equal(normaliseQueryText('Thăm'), 'tham', 'so is the breve, and the circumflex');
+  assert.equal(
+    normaliseQueryText('làm bài'.normalize('NFD')),
+    normaliseQueryText('làm bài'.normalize('NFC')),
+    'the same word typed by an IME in either form normalises the same way',
+  );
+});
+
+test('a Vietnamese name is found by a tone-folded query, and a tone-folded name by a composed one', () => {
+  // Neither path is privileged: the two queries are the same string after normalisation.
+  const rows = [row('f-lam', 'làm bài'), row('f-other', 'Notes')];
+  assert.deepEqual(keys(quickRunResults(rows, 'lam bai')), ['f-lam'], 'unaccented query finds the accented name');
+  assert.deepEqual(keys(quickRunResults(rows, 'làm bài')), ['f-lam'], 'and the composed query finds it too');
+  assert.deepEqual(keys(quickRunResults(rows, 'LAM BAI')), ['f-lam']);
+  assert.equal(tierForName('làm bài', 'lam bai'), QUICK_RUN_TIERS.exact, 'a folded match is a full match, not a fuzzy one');
+  assert.equal(tierForName('Đường', 'duong'), QUICK_RUN_TIERS.exact);
+});
+
+test('a folded match is never excluded, and the name shown is exactly what is stored', () => {
+  // Both spellings in one universe: a query in either direction must return both rows, and neither row's
+  // name may be rewritten by the comparison.
+  const rows = [row('f-accented', 'làm bài'), row('f-plain', 'lam bai')];
+  for (const query of ['lam bai', 'làm bài', 'LÀM BÀI']) {
+    assert.deepEqual(keys(quickRunResults(rows, query)), ['f-accented', 'f-plain'], `both rows answer to "${query}"`);
+    assert.deepEqual(names(quickRunResults(rows, query)), ['làm bài', 'lam bai'], 'and neither name is rewritten');
+  }
+});
+
+test('folding removes marks and the đ stroke, and never swaps one base letter for another', () => {
+  // A search convenience, not a transliteration: 'bài' must not answer to "pai", and folding must not
+  // silently drop a letter that a reader would see.
+  assert.deepEqual(keys(quickRunResults([row('f-bai', 'bài')], 'pai')), []);
+  assert.deepEqual(keys(quickRunResults([row('f-ca', 'cá')], 'ka')), []);
+  assert.equal(normaliseQueryText('b'), 'b');
+  assert.notEqual(normaliseQueryText('b'), normaliseQueryText('p'));
+  assert.equal(normaliseQueryText('bài').length, 3, 'three base letters in, three out');
 });
 
 test('deterministic fallback stable: same input, same order, and the tie-break is the universe order', () => {

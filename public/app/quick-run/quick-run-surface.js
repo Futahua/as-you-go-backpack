@@ -291,6 +291,11 @@ export function mountQuickRun(input) {
   // scroll as manual whether or not it is still down when that scroll arrives.
   let manualScrollPending = false;
   // Section 6.4: one execution implementation, reached from the keyboard and the pointer alike.
+  // Where focus was before this surface took it. Type-to-run opens the palette from a keystroke aimed at
+  // the canvas, so the palette is the only thing between the reader and where they were; Escape has to give
+  // that place back. Recorded on open and used on close, and never used to pull focus away from an action
+  // that has already moved it somewhere the reader asked for.
+  let previousFocus = null;
   const activate = (key) => { if (key && typeof onActivate === 'function') onActivate(key); };
   const highlighted = () => (typeof session.highlightKey === 'string' ? session.highlightKey : null);
   /** A new selection, list or scroll baseline, established by something other than the wheel. */
@@ -358,9 +363,10 @@ export function mountQuickRun(input) {
   elements.layer.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       if (event.preventDefault) event.preventDefault();
-      newBaseline();
-      session = closeQuickRunSession();
-      paint();
+      // Through the surface's own close, never a second copy of it: the session, the painted list and the
+      // return of focus to wherever the reader was are one operation, and this handler is the one Escape
+      // actually takes (the controller ignores every other key while the palette is up).
+      surface.close();
       return;
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -430,22 +436,55 @@ export function mountQuickRun(input) {
   paint();
 
   const surface = {
-    /** The keyboard controller's openQuickRun callback: open on the current state and show the line. */
-    open() {
+    /**
+     * The keyboard controller's openQuickRun callback: open on the current state and show the line.
+     *
+     * With a seed (type-to-run), the character that opened the palette is put into the line here, as the
+     * query and as the field's text, and nowhere else: the caller prevents the browser's own insertion for
+     * exactly this reason, so the character cannot arrive twice - once by the default action and once by
+     * this call. `paint()` never overwrites a non-empty query, so the seeded text survives the paint, and
+     * the caret is left after it so the next letter continues the word rather than replacing it.
+     */
+    open(seed) {
+      const seeded = typeof seed === 'string' && seed !== '' ? seed : '';
       listScrolled = false;
       newBaseline();
+      previousFocus = document.activeElement ?? null;
       session = openQuickRunSession(getState());
+      if (seeded !== '') {
+        session = quickRunSessionWithQuery(session, seeded);
+        elements.input.value = seeded;
+      }
       paint();
       // One empty *focused* line: the section says the reader types immediately, so the field takes
       // focus on open. Guarded because a caller may mount without a focusable input.
       elements.input.focus?.();
+      if (seeded !== '') {
+        // UTF-16 units, which is what a selection range counts in - a seed outside the BMP is two of them.
+        const caret = seeded.length;
+        try {
+          elements.input.setSelectionRange?.(caret, caret);
+        } catch {
+          // A field that cannot hold a selection (a mock, or a detached input) still has its text.
+        }
+      }
       return true;
     },
     close() {
+      // Read before painting: hiding the layer takes focus off it, so afterwards the answer would always
+      // be no. Only a close that still owns focus gives it back; an action that navigated to a folder or
+      // launched something has already put focus where the reader asked to be, and taking it back would
+      // undo the thing they just did.
+      const ownsFocus = elements.layer.contains?.(document.activeElement) === true;
       listScrolled = false;
       newBaseline();
       session = closeQuickRunSession();
       paint();
+      const target = previousFocus;
+      previousFocus = null;
+      if (ownsFocus && target && typeof target.focus === 'function' && target.isConnected !== false) {
+        target.focus();
+      }
     },
     /**
      * Rebuild the snapshot from the current state, keeping the query and the filter (section 5).

@@ -5292,7 +5292,14 @@ const keyboard = createKeyboardController({
   // STAGE 5: the chord the catalog declares reaches the surface. The surface reads the workspace tree
   // this file owns, through the binding rather than a copy, so a later load is what it searches. The key is a
   // toggle: the same chord dismisses a palette it opened, which is what the creator expected of it.
-  openQuickRun: () => quickRun.toggle(),
+  //
+  // A seed is the other way in (type-to-run): the controller has already decided that this keystroke is a
+  // letter and not a binding, and hands the letter over so the palette opens with it in the line. A seeded
+  // call always OPENS — toggle semantics belong to the chord, and a reader who typed a letter while the
+  // palette was up is typing into the line, which the controller's own guard arranges.
+  openQuickRun: (seed) => (
+    typeof seed === 'string' && seed !== '' ? quickRun.open(seed) : quickRun.toggle()
+  ),
 });
 
 const promptLibrary = createPromptLibraryDialog({

@@ -38,14 +38,29 @@ const KIND_BY_FILTER = Object.freeze({
  *
  * It lives here, in the module every other Quick Run module already imports, because both the search
  * rows (normalizedName) and the query path need it — and a second copy would be exactly the drift the
- * contract's "pin a single normalization function" forbids. Unicode NFKC, case-fold, trim, collapse
- * repeated whitespace: the comparison is normalized, never the string shown.
+ * contract's "pin a single normalization function" forbids. Unicode NFKC, tone-fold, case-fold, trim,
+ * collapse repeated whitespace: the comparison is normalized, never the string shown.
+ *
+ * Tone-folding is a decided product rule, not a nicety. Quick Run's promise is hotkey, type, Enter, gone,
+ * so composing a tone mark to find something you are about to open is friction at the exact moment the
+ * feature exists to remove: someone searching their own items already knows what they are called, and is
+ * locating rather than spelling. Tones therefore come off BOTH sides of the comparison, and so does case.
+ * đ folds to d by the creator's own request.
+ *
+ * What folding must never do is change which base letter a Vietnamese reader sees. Only marks are removed
+ * — the tone, the horn in ơ/ư, the breve in ă, the circumflex in â — plus the stroke in đ, which is a
+ * letter's own shape rather than a mark and is named in the ruling. Nothing is transliterated: bài does
+ * not answer to "pai", and the length of the string in base letters is preserved. This is a search
+ * convenience and never a rewrite: the names shown stay exactly as the state stores them.
  */
 export function normaliseQueryText(value) {
   if (typeof value !== 'string') return '';
   return value
     .normalize('NFKC')
+    .normalize('NFD')
+    .replace(/\p{M}+/gu, '')
     .toLowerCase()
+    .replace(/đ/g, 'd')
     .trim()
     .replace(/\s+/g, ' ');
 }

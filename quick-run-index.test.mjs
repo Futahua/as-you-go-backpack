@@ -20,9 +20,13 @@ const rows = [
   { type: 'layout-item', resultKey: 'layout-member:1:1', name: 'Chrome', breadcrumb: 'Workspace › Focus' },
 ];
 
-test('normalization is the pinned one: Unicode, case, trim, collapsed whitespace', () => {
+test('normalization is the pinned one: Unicode, case, tone-fold, trim, collapsed whitespace', () => {
   assert.equal(normaliseQueryText('  DOCs   '), 'docs');
-  assert.equal(normaliseQueryText('CAFÉ'), 'café');
+  // This line used to pin `'CAFÉ' -> 'café'`. It moved because the creator ruled the other way: tones are
+  // folded away on both sides of the comparison so that typing "lam bai" finds "làm bài" without composing
+  // a tone mark to look for something you are about to open. Only marks come off - the base letters are
+  // untouched, and the names shown are still exactly what the state stores.
+  assert.equal(normaliseQueryText('CAFÉ'), 'cafe');
   assert.equal(normaliseQueryText('a\t b'), 'a b');
   assert.equal(normaliseQueryText(undefined), '');
 });

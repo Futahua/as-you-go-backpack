@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
-import { createKeyboardController } from './public/app/interactions/keyboard-controller.js';
+import { createKeyboardController, EDITABLE_SELECTOR, TEXT_ENTRY_SELECTOR } from './public/app/interactions/keyboard-controller.js';
 
 function fakeNode() {
   return { hidden: true };
@@ -22,7 +22,12 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
       }
     },
   };
-  const elements = { editorLayer: fakeNode(), confirmLayer: fakeNode(), linkEditLayer: fakeNode(), promptLayer: fakeNode() };
+  const elements = {
+    editorLayer: fakeNode(), confirmLayer: fakeNode(), linkEditLayer: fakeNode(), promptLayer: fakeNode(),
+    // Quick Run's own layer is part of the same vocabulary: `hidden` is the DOM's answer to "is the palette
+    // up", and the controller already reads every other layer this way.
+    quickRunLayer: fakeNode(),
+  };
   const store = createWorkspaceStore({
     getState: () => initialState ?? {},
     setState: () => {},
@@ -32,7 +37,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     initialSession: { binMode },
   });
   const called = {
-  quickRun: 0,
+  quickRun: 0, quickRunSeeds: [],
     close: 0, permanentDelete: 0, beginPicker: 0, beginRename: 0, pickerOpens: true, status: [],
   };
   const commandSpies = {};
@@ -62,7 +67,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     setMembershipMode: membershipMode,
     setStatus: (text) => { called.status.push(text); },
     beginSetRename: () => { called.beginRename += 1; return true; },
-    openQuickRun: () => { called.quickRun += 1; return true; },
+    openQuickRun: (seed) => { called.quickRun += 1; called.quickRunSeeds.push(seed); return true; },
   });
   controller.mount();
   return { controller, store, elements, commandSpies, called, listeners };
@@ -75,6 +80,11 @@ function key(event) {
     shiftKey: event.shiftKey ?? false,
     altKey: event.altKey ?? false,
     metaKey: event.metaKey ?? false,
+    // The three fields type-to-run has to read to stay out of an IME's way. Absent in most tests, and
+    // absent means "not composing", which is what a plain keydown from a plain keyboard looks like.
+    isComposing: event.isComposing ?? false,
+    keyCode: event.keyCode ?? 0,
+    repeat: event.repeat ?? false,
     preventDefault() {},
   };
 }
@@ -404,4 +414,128 @@ test('the Quick Run chord reaches the callback the entry file supplies', () => {
   // The rest of the workspace is untouched by it.
   assert.equal(h.commandSpies['clearSelection:calls'], 0);
   assert.equal(h.called.close, 0);
+});
+
+/* Type-to-run: on the canvas, a printable character that no binding claims opens the palette with that
+   character already in the line. The creator's ruling, and the third way in beside the chord and whatever
+   Lane 4 is wiring globally. These tests are about the wiring: which events reach the callback, with what,
+   and which states keep their keys. The decision itself is held in quick-run-type-to-run.test.mjs. */
+test('a printable character on the canvas opens Quick Run seeded with that character, once', () => {
+  const h = createHarness();
+  let prevented = 0;
+  const event = key({ key: 'l' });
+  event.preventDefault = () => { prevented += 1; };
+  h.listeners[0].handler(event);
+
+  assert.equal(h.called.quickRun, 1, 'the letter reaches the callback');
+  assert.deepEqual(h.called.quickRunSeeds, ['l'], 'and it carries the character that opened it, as the seed');
+  assert.equal(prevented, 1, 'the default is prevented, so the browser cannot insert a second copy of it');
+  assert.equal(h.commandSpies['activateItem:calls'], 0, 'and nothing else in the workspace ran');
+});
+
+test('the binding in force wins over type-to-run, read through the model rather than a key list', () => {
+  // The catalog's bare-letter default: G groups the selection. Type-to-run must yield to it, and the
+  // evidence that it did is that the command ran and the palette did not open.
+  const h = createHarness();
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'g' }));
+  assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 1, 'the bound key did its action');
+  assert.equal(h.called.quickRun, 0, 'and did not open the palette');
+});
+
+test("the creator's own overrides are what decides it: plain G opens once group-selection is Ctrl+G", () => {
+  // Their live state.json, verbatim. This is the authority for the feature: they moved the one bare-letter
+  // default off a plain letter themselves, so plain letters are free on their machine.
+  const h = createHarness({
+    initialState: {
+      view: {
+        preferences: {
+          hotkeys: {
+            overrides: {
+              'workspace.group-selection': ['Ctrl+G'],
+              'workspace.edit-set-membership': ['Shift+G'],
+            },
+          },
+        },
+      },
+    },
+  });
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'g' }));
+  assert.equal(h.called.quickRun, 1, 'the freed letter types');
+  assert.deepEqual(h.called.quickRunSeeds, ['g']);
+  assert.equal(h.commandSpies['groupSelectionIntoSet:calls'], 0, 'and the old default no longer groups');
+
+  // Shift+G is theirs now, so it is a chord even though Shift plus a letter is otherwise a capital.
+  h.listeners[0].handler(key({ key: 'G', shiftKey: true }));
+  assert.equal(h.called.beginPicker, 1, 'their rebound chord runs its action');
+  assert.equal(h.called.quickRun, 1, 'and is not a second type-to-run');
+});
+
+test('Shift plus a letter types a capital when nothing claims it', () => {
+  const h = createHarness();
+  h.listeners[0].handler(key({ key: 'L', shiftKey: true }));
+  assert.deepEqual(h.called.quickRunSeeds, ['L'], 'the capital the reader asked for, not a lowercase l');
+});
+
+test('typing in a field, in a rename or under a dialog stays typing', () => {
+  const inField = createHarness({ activeElement: { matches: (selector) => selector.includes('input') } });
+  inField.listeners[0].handler(key({ key: 'l' }));
+  assert.equal(inField.called.quickRun, 0, 'a focused field owns its letters');
+
+  const renaming = createHarness();
+  const event = key({ key: 'l' });
+  event.target = { matches: (selector) => selector.includes('.set-name-editor') };
+  renaming.listeners[0].handler(event);
+  assert.equal(renaming.called.quickRun, 0, 'a live set-name editor owns its letters');
+
+  const modal = createHarness();
+  modal.elements.editorLayer.hidden = false;
+  modal.listeners[0].handler(key({ key: 'l' }));
+  assert.equal(modal.called.quickRun, 0, 'an open dialog owns every key');
+});
+
+test('a composing keystroke never opens the palette', () => {
+  // The creator writes Vietnamese. Opening on the first half of a composed character would move focus out
+  // from under the composition, so the composition is left alone - it is worth more than the gesture.
+  const h = createHarness();
+  h.listeners[0].handler(key({ key: 'l', isComposing: true }));
+  h.listeners[0].handler(key({ key: 'l', keyCode: 229 }));
+  assert.equal(h.called.quickRun, 0);
+});
+
+test('the open palette keeps its own keys: Escape is not also a workspace Escape', () => {
+  // Measured risk, not a hypothetical: the palette's own handler preventDefaults Escape but does not stop
+  // it propagating, so before this guard one Escape closed the palette and cleared the selection behind it -
+  // two things undone by one keystroke, and the reader returned somewhere they never were.
+  const h = createHarness();
+  h.elements.quickRunLayer.hidden = false;
+  h.store.setSelection(['a']);
+  h.listeners[0].handler(key({ key: 'Escape' }));
+  assert.equal(h.commandSpies['clearSelection:calls'], 0, 'Escape closing the palette must not also clear the selection');
+  assert.equal(h.called.close, 0, 'and must not close the menu behind it either');
+  h.listeners[0].handler(key({ key: 'a', ctrlKey: true }));
+  assert.equal(h.commandSpies['selectAllVisible:calls'], 0, 'Ctrl+A belongs to the search line while it is open');
+  h.listeners[0].handler(key({ key: 'Delete' }));
+  assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0, 'and Delete must not bin anything behind the palette');
+  h.listeners[0].handler(key({ key: 'a', altKey: true }));
+  assert.equal(h.called.quickRun, 1, 'but the chord it was opened with still reaches it, so it can be dismissed');
+});
+
+test('the two editable selectors are the shapes they claim to be', () => {
+  // This is here because the host caught what the harness could not: the node mock answers `matches()` by
+  // looking for a substring, so an INVALID CSS selector passes every test in this file and then throws in
+  // Chromium - where `Element.matches()` throws on a bad selector, the keydown handler dies quietly, and
+  // type-to-run simply never appears. Two wrong shapes were written before this test existed: a bare
+  // `:not(...)` selector-list item (which also matches body, so every keystroke looked like typing) and an
+  // array joined with '' (which fused `textarea` onto the last `:not()`). Neither had a comma problem the
+  // node tests could see, so the shape is pinned here instead.
+  assert.match(TEXT_ENTRY_SELECTOR, /^input:not\(\[type="range"\]\)/, 'the text-entry test starts at the input type');
+  assert.match(TEXT_ENTRY_SELECTOR, /, textarea, \[contenteditable="true"\], \.set-name-editor$/, 'and the other subjects are separate list items, after commas');
+  assert.equal(TEXT_ENTRY_SELECTOR.includes(')textarea'), false, 'no compound was fused together');
+  assert.equal(TEXT_ENTRY_SELECTOR.split(',').length, 4, 'four subjects, four items');
+  for (const excluded of ['range', 'checkbox', 'radio', 'color', 'file', 'button', 'submit', 'reset', 'image']) {
+    assert.equal(TEXT_ENTRY_SELECTOR.includes(`[type="${excluded}"]`), true, `${excluded} is excluded`);
+  }
+  assert.equal(EDITABLE_SELECTOR, 'input, textarea, [contenteditable="true"], .set-name-editor', 'the wider guard is unchanged');
 });

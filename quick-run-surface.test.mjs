@@ -264,6 +264,7 @@ function liveElement() {
     replaceChildren(...nodes) { element.children = nodes; },
     addEventListener(type, handler) { (element.listeners[type] ??= []).push(handler); },
     focus() { element.focused = true; },
+    setSelectionRange(start, end) { element.selection = { start, end }; },
     // `this`, not the closed-over object: rows are built by spreading this template, so a row's own
     // scrollIntoView must record on the row rather than on the template it came from.
     scrollIntoView(options) { this.scrolledIntoView = options; },
@@ -306,6 +307,83 @@ test('mounting wires the keys the contract binds, and opens on the current state
   assert.equal(elements.input.value, '');
   assert.deepEqual(elements.results.children, []);
   assert.equal(quickRun.session().open, false);
+});
+
+/* Type-to-run's surface half: the character that opened the palette has to be IN the line, exactly once.
+   The controller prevents the browser's own insertion for exactly this reason, so the surface is the only
+   thing that writes it - and it must write it once whether the palette was shut or already showing. */
+test('opening with a seed puts the character in the line once and searches with it', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+
+  assert.equal(quickRun.open('d'), true);
+  assert.equal(elements.layer.hidden, false);
+  assert.equal(elements.input.value, 'd', 'the opening character is in the line');
+  assert.equal(quickRun.session().query, 'd', 'and it is the query, not just field text');
+  assert.equal(elements.results.children.length, 2, 'so the palette opens already showing what it found');
+  assert.deepEqual(elements.input.selection, { start: 1, end: 1 }, 'the caret sits after it, ready for the next letter');
+
+  // Opening again with the same seed is the hostile case for a doubled first letter: one call, one character.
+  quickRun.open('d');
+  assert.equal(elements.input.value, 'd', 'a second open does not append a second copy');
+  assert.equal([...elements.input.value].length, 1);
+});
+
+test('opening without a seed is unchanged: one empty focused line', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+  quickRun.open();
+  assert.equal(elements.input.value, '');
+  assert.equal(quickRun.session().query, '');
+  assert.equal(elements.input.focused, true);
+});
+
+test('Escape puts the reader back where they were and changes nothing else', () => {
+  // The cost the creator knowingly bought: a letter pressed meaning nothing shows a palette. Escape has to
+  // give them back the exact place they were, with nothing selected, moved or changed - which is measured
+  // here as focus returned and the session, the field and the list all empty again.
+  const canvasButton = { isConnected: true, focused: 0, focus() { this.focused += 1; } };
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }), activeElement: canvasButton };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  // What the browser reports while the line holds focus: the palette is an ancestor of it.
+  elements.layer.contains = (node) => node === elements.input || node === elements.layer;
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+
+  quickRun.open('d');
+  document.activeElement = elements.input;
+  elements.layer.fire('keydown', { key: 'Escape', shiftKey: false, preventDefault() {} });
+
+  assert.equal(elements.layer.hidden, true, 'the palette is gone');
+  assert.equal(quickRun.session().open, false);
+  assert.equal(elements.input.value, '', 'the line is empty again');
+  assert.deepEqual(elements.results.children, [], 'and the list is empty again');
+  assert.equal(canvasButton.focused, 1, 'focus is back on the control that had it');
+
+  // The same close, from a palette that never had focus: nothing is stolen from wherever the reader is.
+  const other = { isConnected: true, focused: 0, focus() { this.focused += 1; } };
+  document.activeElement = other;
+  quickRun.open('d');
+  document.activeElement = other;
+  quickRun.close();
+  assert.equal(other.focused, 0, 'a close that did not own focus restores nothing');
+});
+
+test('a close after a row handed off does not steal focus back from where the hand-off went', () => {
+  const elsewhere = { isConnected: true, focused: 0, focus() { this.focused += 1; } };
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }), activeElement: elsewhere };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  elements.layer.contains = () => false;
+  let activated = null;
+  const quickRun = mountQuickRun({
+    document, elements, getState: () => state, onActivate: (key) => { activated = key; },
+  });
+  quickRun.open('d');
+  activated = null;
+  elements.layer.fire('keydown', { key: 'Enter', shiftKey: false, altKey: false, preventDefault() {} });
+  assert.equal(activated, 'link:p-1', 'Enter reached the hand-off with the highlighted row');
+  assert.equal(elsewhere.focused, 0, 'and nothing is pulled back to the canvas afterwards');
 });
 
 test('the highlight is always a row of the displayed set, whatever was typed before it', () => {
