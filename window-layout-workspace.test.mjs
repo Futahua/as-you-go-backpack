@@ -28,7 +28,10 @@ function makeLayout(id, members) {
     name: id,
     arrangement: { members: members.map((member) => ({
       id: member.id,
-      descriptor: { title: member.title },
+      // The persisted descriptor is the PAIR the host's own matcher uses. The harness used to store the title
+      // alone, which is what let a title-only member match look correct: a member with no fingerprint could
+      // only ever be found by its title.
+      descriptor: { version: 1, title: member.title, executableFingerprint: member.fingerprint ?? FINGERPRINT_A },
       state: member.state ?? 'normal',
       bounds: null,
     })) },
@@ -79,10 +82,87 @@ function makeHarness({ observe = async () => ({ outcome: 'success', observation:
 function capabilityFor(title) {
   return { version: 1, bindingId: `b:${title}` };
 }
+const FINGERPRINT_A = 'a'.repeat(64);
+const FINGERPRINT_B = 'b'.repeat(64);
+
 function descriptor(title) {
-  return { version: 1, title, executableFingerprint: 'a'.repeat(64) };
+  return { version: 1, title, executableFingerprint: FINGERPRINT_A };
 }
 
+/** A descriptor for the SAME title on a DIFFERENT executable: the case a title-only match cannot tell apart. */
+function descriptorOn(title, executableFingerprint) {
+  return { version: 1, title, executableFingerprint };
+}
+
+/* Identity in the pick applier.
+ *
+ * A picker-commit removal carries ONE thing - a persisted descriptor ({version, title, executableFingerprint}).
+ * The wire format has no member id: the parser rejects any key but `descriptor`, and even the path that holds
+ * an id in hand (the widget's context menu, which builds removals from snapshot members it just selected by
+ * id) sends the descriptor alone. So the narrowest identity a removal actually carries is the PAIR, and it is
+ * only usable when exactly one member carries it.
+ *
+ * These three tests are the cases title-only matching got wrong, and the applier is the last place in this
+ * project that matched a member by a mutable, non-unique string. */
+test('a removal matches the executable as well as the title, so a same-titled window is not the one removed', async () => {
+  const harness = makeHarness();
+  // Two windows titled the same, on different executables, with the WRONG one first: what a title-only match
+  // removes is whatever happens to come first in the layout.
+  const layout = harness.getState().windowLayouts[0];
+  layout.arrangement.members = [
+    { id: 'm-obsidian', descriptor: descriptorOn('GitHub', FINGERPRINT_B), state: 'normal', bounds: null },
+    { id: 'm-chrome', descriptor: descriptorOn('GitHub', FINGERPRINT_A), state: 'normal', bounds: null },
+  ];
+  const result = await harness.pickApplier.apply('L1', {
+    outcome: 'committed',
+    adds: [],
+    removes: [{ descriptor: descriptorOn('GitHub', FINGERPRINT_A) }],
+  });
+  assert.equal(result.removed, 1);
+  assert.deepEqual(
+    harness.getState().windowLayouts[0].arrangement.members.map((member) => member.id),
+    ['m-obsidian'],
+    'the Chrome member goes, the Obsidian member with the same title stays',
+  );
+});
+
+test('two members with the same title AND executable are refused, not guessed between', async () => {
+  const harness = makeHarness();
+  harness.getState().windowLayouts[0].arrangement.members = [
+    { id: 'm-first', descriptor: descriptor('GitHub'), state: 'normal', bounds: null },
+    { id: 'm-second', descriptor: descriptor('GitHub'), state: 'normal', bounds: null },
+  ];
+  const before = JSON.stringify(harness.getState());
+  const commitsBefore = harness.countCommits();
+  const result = await harness.pickApplier.apply('L1', {
+    outcome: 'committed',
+    adds: [],
+    removes: [{ descriptor: descriptor('GitHub') }],
+  });
+  assert.equal(result.removed, 0, 'nothing is removed when the pick cannot say which member it meant');
+  assert.equal(result.ambiguous, 1, 'and the refusal is reported rather than passed off as a no-op');
+  assert.equal(JSON.stringify(harness.getState()), before, 'byte-zero: no member moved');
+  assert.equal(harness.countCommits(), commitsBefore, 'and nothing was written');
+});
+
+test('a retitled member is not removed by a stale descriptor, and the mismatch is reported', async () => {
+  const harness = makeHarness();
+  harness.getState().windowLayouts[0].arrangement.members = [
+    { id: 'm-chrome', descriptor: descriptor('GitHub'), state: 'normal', bounds: null },
+  ];
+  const before = JSON.stringify(harness.getState());
+  const commitsBefore = harness.countCommits();
+  const result = await harness.pickApplier.apply('L1', {
+    outcome: 'committed',
+    adds: [],
+    // The window was retitled between the pick and the apply - the creator's own example is a browser tab.
+    removes: [{ descriptor: descriptorOn('GitHub — a new tab', FINGERPRINT_A) }],
+  });
+  assert.equal(result.removed, 0);
+  assert.equal(result.unmatched, 1, 'a removal that found no member says so');
+  assert.equal(JSON.stringify(harness.getState()), before);
+  assert.equal(harness.countCommits(), commitsBefore);
+});
 test('cancel is byte-zero: no commit, no mutation', async () => {
   const h = makeHarness();
   const before = JSON.stringify(h.getState());

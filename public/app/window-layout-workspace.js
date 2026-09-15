@@ -39,10 +39,28 @@ export function createWindowLayoutPickApplier({
   isReadOnly = () => false,
   memberKey = windowLayoutMemberKey,
 }) {
-  function memberByTitle(next, layoutId, title) {
+  /**
+   * Every member of a layout whose persisted descriptor IS the one the pick named.
+   *
+   * This used to match on the descriptor's TITLE alone, and that was the last place in this project that found
+   * a member by a mutable, non-unique string. A picker-commit removal carries exactly one thing - a persisted
+   * descriptor, `{version, title, executableFingerprint}` - because the wire parser rejects any other key, and
+   * even the caller that holds a member id in hand sends the descriptor alone. So the narrowest identity a
+   * removal actually carries is that PAIR, and a pair is only usable when exactly one member carries it: two
+   * windows of one application can share a title, and a title is not identity - the same defect the host fixed
+   * on its session-token path. Returning every match is what lets the caller refuse rather than take whichever
+   * happened to come first in the layout.
+   */
+  function membersMatchingDescriptor(next, layoutId, descriptor) {
+    if (!isPlainObject(descriptor)) return [];
+    const fingerprint = descriptor.executableFingerprint;
+    const title = descriptor.title;
+    if (typeof fingerprint !== 'string' || typeof title !== 'string') return [];
     return (next.windowLayouts ?? [])
       .find((layout) => layout.id === layoutId)
-      ?.arrangement?.members?.find((member) => member.descriptor?.title === title) ?? null;
+      ?.arrangement?.members
+      ?.filter((member) => member.descriptor?.executableFingerprint === fingerprint
+        && member.descriptor?.title === title) ?? [];
   }
   async function apply(layoutId, result) {
     if (!isPlainObject(result) || result.outcome === 'cancelled') return { outcome: 'cancelled' };
@@ -54,6 +72,11 @@ export function createWindowLayoutPickApplier({
     let removed = 0;
     let added = 0;
     let failures = 0;
+    // A removal the pick named but this layout cannot resolve to exactly one member. Counted and reported
+    // rather than skipped silently: "nothing happened" and "I could not tell which member you meant" look
+    // identical to the caller otherwise.
+    let unmatched = 0;
+    let ambiguous = 0;
     // 019DR2: stage ALL runtime-map changes locally. The durable state and the
     // capability/icon maps must commit TOGETHER or not at all, so a superseded
     // mid-observation apply cannot leave a retained member without its
@@ -63,10 +86,20 @@ export function createWindowLayoutPickApplier({
     const capabilitySets = new Map();
     const iconSets = new Map();
     for (const remove of removes) {
-      const title = remove?.descriptor?.title;
-      if (typeof title !== 'string' || !title) continue;
-      const existing = memberByTitle(next, layoutId, title);
-      if (!existing) continue;
+      const matches = membersMatchingDescriptor(next, layoutId, remove?.descriptor);
+      if (matches.length === 0) {
+        // No member carries this descriptor: the window was retitled, or it is not in this layout at all.
+        // Removing nothing is the only safe answer - the pick cannot name a member it did not match.
+        unmatched += 1;
+        continue;
+      }
+      if (matches.length > 1) {
+        // More than one member carries it, so the pick does not say which; refusing beats removing the wrong
+        // window, and beats removing both.
+        ambiguous += 1;
+        continue;
+      }
+      const existing = matches[0];
       next = model.removeWindowLayoutMember(next, layoutId, existing.id);
       capabilityDeletes.add(memberKey(layoutId, existing.id));
       iconDeletes.add(memberKey(layoutId, existing.id));
@@ -113,7 +146,7 @@ export function createWindowLayoutPickApplier({
       for (const [key, capability] of capabilitySets) capabilities?.set(key, capability);
       for (const [key, icon] of iconSets) icons?.set(key, icon);
     }
-    return { outcome: 'committed', added, removed, failures };
+    return { outcome: 'committed', added, removed, failures, unmatched, ambiguous };
   }
   return { apply };
 }

@@ -2556,6 +2556,14 @@ async function applyWindowLayoutPickSet(layoutId, result) {
     windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
     if (applied.failures > 0) {
       setWindowLayoutStatus(layoutId, `${applied.failures} member${applied.failures === 1 ? '' : 's'} could not be added`);
+    } else if (applied.ambiguous > 0) {
+      // The pick named a window that more than one member answers to, so nothing was removed. Saying so is the
+      // difference between "the removal did nothing" and "Papers could not tell which window you meant".
+      setWindowLayoutStatus(layoutId, 'Two windows here match that one — nothing was removed');
+    } else if (applied.unmatched > 0) {
+      // The window changed after the pick, so no member carries its descriptor any more. Nothing is removed
+      // and nothing is guessed; the member stays until the creator removes it.
+      setWindowLayoutStatus(layoutId, 'That window has changed since the pick — nothing was removed');
     } else {
       setWindowLayoutStatus(layoutId, '');
     }
