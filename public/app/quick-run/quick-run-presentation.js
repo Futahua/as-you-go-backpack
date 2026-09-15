@@ -64,6 +64,10 @@ export function quickRunRowViews(session, noted) {
     // Carried out to the caller so it can note an answer against the same identity this module compares:
     // a caller that had to re-derive it from the display name would be inventing a second vocabulary.
     descriptorKey: typeof row.descriptorKey === 'string' ? row.descriptorKey : null,
+    // The item's own artwork, passed through untouched - no decode, no re-encode, no resizing here and no
+    // invented substitute for an item that has none. This module decides *what* a row shows; whether the
+    // bytes are usable is the surface's question, and it answers it by drawing the kind glyph instead.
+    icon: typeof row.icon === 'string' && row.icon !== '' ? row.icon : null,
   }));
 }
 

@@ -103,6 +103,31 @@ test('every row carries the folder that holds it, which is the only thing a reve
   }
 });
 
+test('a row carries its item\'s own icon, passed through, and nothing when the item has none', () => {
+  const withIcons = {
+    groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace', icon: 'data:image/png;base64,ROOT' }],
+    shortcuts: [
+      { id: 's-art', name: 'Art', target: 'C:/art.exe', icon: 'data:image/webp;base64,ART', placements: [{ id: 'p-art', parentId: 'g-root', order: 1 }] },
+      { id: 's-plain', name: 'Plain', target: 'C:/plain.exe', placements: [{ id: 'p-plain', parentId: 'g-root', order: 2 }] },
+      { id: 's-broken', name: 'Broken', target: 'C:/broken.exe', icon: 7, placements: [{ id: 'p-broken', parentId: 'g-root', order: 3 }] },
+    ],
+    windowLayouts: [{
+      id: 'l-1',
+      parentId: 'g-root',
+      name: 'Desk',
+      arrangement: { version: 2, members: [{ id: 'm-1', descriptor: { version: 1, title: 'Console', executableFingerprint: 'a'.repeat(64) } }] },
+    }],
+  };
+  const rows = quickRunRows(withIcons);
+  const rowFor = (key) => rows.find((row) => row.resultKey === key);
+
+  assert.equal(rowFor('folder:g-root').icon, 'data:image/png;base64,ROOT', 'a folder carries its own icon');
+  assert.equal(rowFor('shortcut:p-art').icon, 'data:image/webp;base64,ART', 'the exact string, undecoded');
+  assert.equal(rowFor('shortcut:p-plain').icon, null, 'an item with no icon carries null, not another item\'s');
+  assert.equal(rowFor('shortcut:p-broken').icon, null, 'a value that is not a string is nothing to carry');
+  assert.equal(rowFor('layout-member:l-1:m-1').icon, null, 'a layout member has no icon of its own (024)');
+});
+
 test('a layout row carries the identity its persisted descriptor declares', () => {
   const rows = quickRunRows(state);
   const member = rows.find((row) => row.resultKey === 'layout-member:l-1:m-1');

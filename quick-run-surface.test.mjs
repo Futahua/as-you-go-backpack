@@ -92,6 +92,84 @@ test('a typed query draws one flat row per occurrence, with stable keys and one 
   assert.equal(rows[0].children[2].textContent, 'Workspace');
 });
 
+/* The creator's own per-item icons: state.json holds them as data URIs, the canvas paints them, and they are
+   how a shortcut is recognised at a glance. Four repeated kind glyphs throw exactly that away. */
+const ITEM_ICON = 'data:image/webp;base64,UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoQABAALmk0mk0iIiIiIgBoSygABc6zbAAA';
+
+const iconState = () => ({
+  groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
+  shortcuts: [
+    { id: 's-art', name: 'Chrome', target: 'C:/chrome.exe', icon: ITEM_ICON, placements: [{ id: 'p-art', parentId: 'g-root', order: 1 }] },
+    { id: 's-plain', name: 'Plain', target: 'C:/plain.exe', placements: [{ id: 'p-plain', parentId: 'g-root', order: 2 }] },
+    { id: 's-text', name: 'Notapicture', target: 'C:/text.exe', icon: 'not-an-icon', placements: [{ id: 'p-text', parentId: 'g-root', order: 3 }] },
+    { id: 's-empty', name: 'Emptystring', target: 'C:/empty.exe', icon: '', placements: [{ id: 'p-empty', parentId: 'g-root', order: 4 }] },
+    { id: 's-notimage', name: 'Htmlpayload', target: 'C:/html.exe', icon: 'data:text/html;base64,PHN2Zz48L3N2Zz4=', placements: [{ id: 'p-notimage', parentId: 'g-root', order: 5 }] },
+    { id: 's-number', name: 'Numbered', target: 'C:/num.exe', icon: 42, placements: [{ id: 'p-number', parentId: 'g-root', order: 6 }] },
+  ],
+  windowLayouts: [],
+});
+
+/** The icon box of the one row a query matches. */
+function iconBoxFor(query) {
+  const h = harness();
+  paintQuickRunSurface({ ...h, session: quickRunSessionWithQuery(openQuickRunSession(iconState()), query) });
+  const row = h.elements.results.children[0];
+  assert.ok(row, `a row was drawn for "${query}"`);
+  return row.children[0];
+}
+
+test("a row paints the item's own icon, and the kind glyph when there is none or it is unusable", () => {
+  // An item with its own artwork: the picture is drawn in the row's icon box, byte for byte as the state
+  // holds it - passed through, never decoded, re-encoded or rewritten.
+  const drawn = iconBoxFor('chrome');
+  assert.equal(drawn.className, 'quick-run-icon quick-run-icon-image');
+  assert.equal(drawn.children.length, 1, 'the box holds the artwork, not the glyph as well');
+  assert.equal(drawn.children[0].className, 'quick-run-icon-art');
+  assert.equal(drawn.children[0].src, ITEM_ICON, 'the exact string the item carries');
+  assert.equal(drawn.children[0].alt, '', 'decorative: the row already names the item');
+
+  // An item without one keeps the kind glyph, and is not given anything invented.
+  const plain = iconBoxFor('plain');
+  assert.equal(plain.className, 'quick-run-icon quick-run-icon-shortcut');
+  assert.deepEqual(plain.children, [], 'no picture, and no empty frame either');
+
+  // Every unusable shape degrades to the glyph silently: prose, an empty string, a data payload that is not
+  // an image, and a value that is not a string at all.
+  for (const query of ['notapicture', 'emptystring', 'htmlpayload', 'numbered']) {
+    const box = iconBoxFor(query);
+    assert.equal(box.className, 'quick-run-icon quick-run-icon-shortcut', `${query} falls back to the kind glyph`);
+    assert.deepEqual(box.children, [], `${query} draws no image element at all`);
+  }
+});
+
+test('artwork that fails to decode is replaced by the kind glyph rather than a broken frame', () => {
+  const h = harness();
+  paintQuickRunSurface({ ...h, session: quickRunSessionWithQuery(openQuickRunSession(iconState()), 'chrome') });
+  const box = h.elements.results.children[0].children[0];
+  assert.equal(box.className, 'quick-run-icon quick-run-icon-image');
+
+  // The bytes were well-formed enough to be given to an img, and the decoder still refused them.
+  box.children[0].fire('error', {});
+
+  assert.equal(box.className, 'quick-run-icon quick-run-icon-shortcut', 'the glyph takes the box back');
+  assert.deepEqual(box.children, [], 'and the failed image is gone rather than left as a frame');
+});
+
+test('a row with an icon still reports its kind, and a row without one never borrows another item\'s icon', () => {
+  const h = harness();
+  paintQuickRunSurface({ ...h, session: quickRunSessionWithQuery(openQuickRunSession(iconState()), 'e') });
+  const rows = h.elements.results.children;
+  assert.ok(rows.length > 1, 'the query matched several rows');
+  for (const row of rows) {
+    const box = row.children[0];
+    const carriesArt = box.className.includes('quick-run-icon-image');
+    const source = carriesArt ? box.children[0].src : null;
+    // Only the one item that has artwork may draw it, and it draws its own.
+    assert.equal(carriesArt, row.dataset.quickRunKey === 'shortcut:p-art', `${row.dataset.quickRunKey} draws art only if it has its own`);
+    if (carriesArt) assert.equal(source, ITEM_ICON);
+  }
+});
+
 test('the chips mark All and the active type, and never carry the reader away from the field', () => {
   const h = harness();
   h.elements.input.value = 'half-typed';

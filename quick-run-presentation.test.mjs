@@ -58,6 +58,29 @@ test('an empty session draws no rows and no chips', () => {
   assert.deepEqual(quickRunChipViews(opened), []);
 });
 
+test("a row view carries the item's own icon beside its kind, and null when it has none", () => {
+  // The kind is not replaced by the picture: it is what the surface draws when there is no picture, and what
+  // names the row for anything that cannot paint one. The icon is passed through exactly as the state holds
+  // it - this layer does not decode, re-encode or resize it.
+  const state = {
+    groups: [{ id: 'g-root', parentId: 'root', name: 'Workspace' }],
+    shortcuts: [
+      { id: 's-art', name: 'Art', target: 'C:/art.exe', icon: 'data:image/png;base64,AAAA', placements: [{ id: 'p-art', parentId: 'g-root', order: 1 }] },
+      { id: 's-plain', name: 'Plain', target: 'C:/plain.exe', placements: [{ id: 'p-plain', parentId: 'g-root', order: 2 }] },
+    ],
+    windowLayouts: [],
+  };
+  const viewFor = (query) => quickRunRowViews(quickRunSessionWithQuery(openQuickRunSession(state), query))[0];
+
+  const art = viewFor('art');
+  assert.equal(art.icon, 'data:image/png;base64,AAAA', 'the item\'s own string, unchanged');
+  assert.equal(art.iconKind, 'shortcut', 'and the kind is still there beside it');
+
+  const plain = viewFor('plain');
+  assert.equal(plain.icon, null, 'an item with no icon carries none, rather than inheriting one');
+  assert.equal(plain.iconKind, 'shortcut');
+});
+
 test('the chips mark exactly one active filter and start with All', () => {
   const session = typed();
   const chips = quickRunChipViews(session);

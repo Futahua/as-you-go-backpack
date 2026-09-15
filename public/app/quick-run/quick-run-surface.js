@@ -63,6 +63,27 @@ const CHIP_CLASS = 'quick-run-chip';
  */
 export const QUICK_RUN_WHEEL_ROW_HEIGHT_PX = 24;
 
+/**
+ * The item's own artwork when it is something this list may paint, or null to fall back to the kind glyph.
+ *
+ * The state persists an icon as a data URI (the same string the canvas paints), so that is what is accepted:
+ * anything else - a missing value, an empty string, a path, a remote URL, a number, a `data:` payload that is
+ * not an image - is not an icon this row can show, and it degrades to the glyph rather than becoming a
+ * broken-image frame. The value is never decoded, re-encoded or rewritten; it is checked and passed on.
+ */
+function usableIconSource(value) {
+  if (typeof value !== 'string') return null;
+  if (!/^data:image\//i.test(value.trim())) return null;
+  return value;
+}
+
+/** The kind glyph: the fallback for every row whose item has no artwork of its own. */
+function iconGlyphNode(document, iconKind) {
+  const glyph = document.createElement('span');
+  glyph.className = 'quick-run-icon quick-run-icon-' + iconKind;
+  return glyph;
+}
+
 function rowNode(document, view, onRowClick, clearHover) {
   const item = document.createElement('li');
   item.className = ROW_CLASS + (view.highlighted ? ' highlighted' : '');
@@ -74,7 +95,26 @@ function rowNode(document, view, onRowClick, clearHover) {
     item.dataset.quickRunHovered = 'true';
   });
   const icon = document.createElement('span');
-  icon.className = 'quick-run-icon quick-run-icon-' + view.iconKind;
+  const source = usableIconSource(view.icon);
+  if (source === null) {
+    icon.className = 'quick-run-icon quick-run-icon-' + view.iconKind;
+  } else {
+    // One fixed box, the artwork contained in it. The img is created and given its source, and nothing waits
+    // for it: the list is not blocked and not reordered by a picture arriving.
+    icon.className = 'quick-run-icon quick-run-icon-image';
+    const art = document.createElement('img');
+    art.className = 'quick-run-icon-art';
+    art.alt = '';
+    // A data URI can still fail to decode (truncated base64, an unsupported codec). That must not leave a
+    // broken-image frame, so the glyph replaces it silently; nothing else about the row changes.
+    art.addEventListener?.('error', () => {
+      const glyph = iconGlyphNode(document, view.iconKind);
+      icon.className = glyph.className;
+      icon.replaceChildren?.();
+    });
+    art.src = source;
+    icon.append(art);
+  }
   const primary = document.createElement('span');
   primary.className = 'quick-run-name';
   primary.textContent = view.primary;

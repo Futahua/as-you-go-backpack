@@ -121,6 +121,44 @@ const LAYOUT_ROW_TOTAL = LAYOUT_COUNT * MEMBERS_PER_LAYOUT;
 const SHORTCUT_TOTAL = TOTAL_OCCURRENCES - TOP_FOLDER_COUNT - SUBFOLDER_COUNT - LAYOUT_ROW_TOTAL;
 const FINGERPRINT = 'b7c1'.repeat(16); // a 64-hex fingerprint, the only persisted member identity
 
+/**
+ * The artwork the corpus shortcuts carry, and which of them carry it.
+ *
+ * The creator's own shortcuts persist a per-item icon as a data URI and the row paints it, so a corpus
+ * without artwork would measure a list that no longer exists. Two constraints decide the shape:
+ *
+ * - Weight. An icon on all 19,928 occurrences is a state the host will not open at all - 16 KiB each is a
+ *   316 MiB state.json and even a 1 KiB one is 24 MiB, and both are refused with "Shared document
+ *   coordination is unavailable; durable editing is disabled". That is not a measurement, so the artwork
+ *   goes where the measurement is: on the two name families the word queries rank and paint, 'kestrel' and
+ *   'nimbus', so those keystrokes paint 200 rows that all carry a real image.
+ * - Reality. The bytes are a 16x16 24-bit BMP, decoded by the same path as the creator's icons and needing
+ *   no encoder. It is smaller than their stored icons (up to ~25 KiB), so this bounds the per-row image cost
+ *   rather than the worst case for a very large payload; the painted count is capped at 200 either way.
+ */
+const CORPUS_ICON_HEADS = Object.freeze(['kestrel', 'nimbus']);
+
+function corpusIcon() {
+  const size = 16;
+  const rowBytes = size * 3;
+  const pixelBytes = rowBytes * size;
+  const header = Buffer.alloc(54);
+  header.write('BM', 0, 'ascii');
+  header.writeUInt32LE(54 + pixelBytes, 2);
+  header.writeUInt32LE(54, 10);
+  header.writeUInt32LE(40, 14);
+  header.writeInt32LE(size, 18);
+  header.writeInt32LE(size, 22);
+  header.writeUInt16LE(1, 26);
+  header.writeUInt16LE(24, 28);
+  header.writeUInt32LE(pixelBytes, 34);
+  const pixels = Buffer.alloc(pixelBytes);
+  for (let index = 0; index < pixelBytes; index += 1) pixels[index] = (index * 37) % 256;
+  return `data:image/bmp;base64,${Buffer.concat([header, pixels]).toString('base64')}`;
+}
+
+const CORPUS_ICON = corpusIcon();
+
 /** The 20,000-occurrence state, in the shape normalizeState() reads. */
 function buildCorpus() {
   const groups = [];
@@ -154,6 +192,9 @@ function buildCorpus() {
         id: `sc-${global}`,
         name: `${pairKey} ${ordinal}`,
         target: `C:/corpus/${head}/${tail}-${ordinal}.md`,
+        // Artwork on the families the word queries paint, so those keystrokes paint 200 rows that all carry a
+        // real image; the rest of the corpus stays iconless and keeps the state small enough for the host.
+        icon: CORPUS_ICON_HEADS.includes(head) ? CORPUS_ICON : null,
         placements: [{ id: `pl-${global}`, parentId: subfolderIds[s], order: n }],
       });
       global += 1;
@@ -408,6 +449,7 @@ async function main() {
   console.log(`  rows by type: ${JSON.stringify(plan.byType)}`);
   console.log(`  graph mode: view.layout = 'graph'; graph nodes at the current folder (root): ${TOP_FOLDER_COUNT + LAYOUT_COUNT}`);
   console.log(`  state.json: ${(plan.stateBytes / 1024 / 1024).toFixed(2)} MiB`);
+  console.log(`  per-item artwork: ${CORPUS_ICON_HEADS.join(' and ')} occurrences carry a ${(CORPUS_ICON.length / 1024).toFixed(1)} KiB data URI (the families the word queries paint) - the rest carry none, keeping the state inside what the host opens`);
   console.log('Queries (each typed one trusted key event at a time)');
   for (const entry of plan.queries) {
     console.log(`  "${entry.query}" x${entry.passes} -> ${entry.query.length * entry.passes} samples, ${entry.expectedMatches} matches ${JSON.stringify(entry.expectedMatchesByType)}`);

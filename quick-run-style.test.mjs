@@ -112,3 +112,26 @@ test('the layer can still be hidden: the rule that makes display safe is in plac
   assert.match(baseCss, /\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/, 'base.css hides [hidden] with !important');
   assert.match(ruleFor('.quick-run-layer'), /display:\s*flex/, 'and the layer does set its own display, which is why that matters');
 });
+
+test('the row icon is one fixed box, with the artwork contained in it', () => {
+  // Real per-item artwork must not turn the list into a texture: every row has the same leading box, the
+  // picture is contained rather than cropped or stretched, and a row with no artwork keeps that box with the
+  // kind's own fill. The box also has to stay inside the row's own min-height, because that row height is
+  // what the wheel arithmetic measures when it turns a delta into rows.
+  const box = ruleFor('.quick-run-icon');
+  assert.match(box, /width:\s*16px/, 'one fixed width for every row');
+  assert.match(box, /height:\s*16px/, 'and one fixed height');
+  assert.match(box, /justify-content:\s*center/, 'the artwork is centred in the box');
+  assert.match(ruleFor('.quick-run-icon-art'), /object-fit:\s*contain/, 'contained, never cropped or stretched');
+  assert.match(ruleFor('.quick-run-icon-image'), /border:\s*0/, 'the box is a window, not a tile, behind artwork');
+
+  const row = ruleFor('.quick-run-result');
+  const rowMinHeight = Number(row.match(/min-height:\s*(\d+)px/)?.[1] ?? NaN);
+  const padding = Number(row.match(/padding:\s*(\d+)px/)?.[1] ?? 0);
+  const boxHeight = Number(box.match(/height:\s*(\d+)px/)?.[1] ?? NaN);
+  assert.equal(rowMinHeight, QUICK_RUN_WHEEL_ROW_HEIGHT_PX, 'the row is still the height the wheel arithmetic assumes');
+  assert.ok(
+    boxHeight + padding * 2 <= rowMinHeight,
+    `a ${boxHeight}px icon plus the row's padding stays inside the ${rowMinHeight}px row, so artwork cannot change how far a wheel notch travels`,
+  );
+});

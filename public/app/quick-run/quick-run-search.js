@@ -46,13 +46,27 @@ function ancestryFor(state, parentId) {
   return { breadcrumb: names.join(QUICK_RUN_BREADCRUMB_SEPARATOR), breadcrumbIds: ids };
 }
 
-function baseRow(state, id, name, parentId) {
+/**
+ * The item's own icon, carried exactly as the state holds it, or null when there is nothing to carry.
+ *
+ * Pass-through, never a decode and never a re-encode: the bytes the canvas paints are the bytes Quick Run
+ * paints. A value that is not a non-empty string is nothing at all, and the row falls back to its kind glyph
+ * at the surface - an item with no icon must not borrow one, and must not be given an invented one.
+ */
+function iconOf(item) {
+  return typeof item?.icon === 'string' && item.icon !== '' ? item.icon : null;
+}
+
+function baseRow(state, id, name, parentId, icon) {
   const ancestry = ancestryFor(state, parentId);
   return {
     resultKey: id,
     type: 'folder',
     name: labelOf({ name }),
     normalizedName: normaliseQueryText(labelOf({ name })),
+    // The item's own artwork rides the row beside its kind. The kind stays: it is what the surface draws when
+    // the item has no icon, and it is what names the row for anything that cannot paint a picture.
+    icon: typeof icon === 'string' && icon !== '' ? icon : null,
     breadcrumb: ancestry.breadcrumb,
     breadcrumbIds: ancestry.breadcrumbIds,
     // The folder that directly holds this occurrence, which is where a reveal has to navigate to. It is
@@ -70,12 +84,15 @@ function folderRows(state, parentId, seen, rows) {
     if (seen.has(item.id)) continue;
     seen.add(item.id);
     if (item.kind === 'group') {
-      rows.push({ ...baseRow(state, 'folder:' + item.id, item.name, item.parentId), groupId: item.id });
+      rows.push({
+        ...baseRow(state, 'folder:' + item.id, item.name, item.parentId, iconOf(item)),
+        groupId: item.id,
+      });
       folderRows(state, item.id, seen, rows);
     } else if (item.kind === 'shortcut') {
       const link = isWebLink(item);
       const type = link ? 'link' : 'shortcut';
-      const row = baseRow(state, type + ':' + item.id, item.name, item.parentId);
+      const row = baseRow(state, type + ':' + item.id, item.name, item.parentId, iconOf(item));
       rows.push({
         ...row,
         type,
@@ -112,6 +129,9 @@ function layoutMemberRows(state, rows) {
         normalizedName: normaliseQueryText(title),
         breadcrumb,
         breadcrumbIds: [...ancestry.breadcrumbIds, layout.id],
+        // A layout has no icon of its own (024: layout name/icon customization was removed), so this row
+        // answers null like every other iconless row rather than leaving the field out of the shape.
+        icon: null,
         // The folder holding the layout, not the layout: a reveal navigates to a folder, and the layout id
         // is not one (the workspace's own open-selection command knows groups and shortcuts, not layouts).
         containerId: typeof layout.parentId === 'string' && layout.parentId !== '' ? layout.parentId : ROOT_ID,

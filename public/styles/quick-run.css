@@ -120,16 +120,38 @@
 }
 
 /*
- * The icon is a kind, not artwork (section 1.2): the row carries an icon kind and the picture is
- * presentation, so each kind gets a plain shape rather than a coloured glyph the contract never fixed.
+ * One fixed box per row, and the icon kind is the fallback that fills it: a row whose item has no artwork of
+ * its own shows a plain shape rather than a hole, and every row keeps the same leading edge so the list stays
+ * scannable. The box is deliberately no taller than the row's own min-height (the wheel arithmetic measures
+ * that row), so a real icon cannot change how far a wheel notch travels.
  */
 .quick-run-icon {
   flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
   background: var(--surface-soft);
+}
+
+/*
+ * The item's own artwork (the creator's per-item icons, the strings the canvas paints). The box becomes a
+ * window rather than a tile: no border and no fill behind the picture, and the picture is contained rather
+ * than cropped or stretched. A picture that has not arrived yet simply shows this box's own background, so
+ * there is never a blank white frame.
+ */
+.quick-run-icon-image {
+  border: 0;
+  background: none;
+}
+
+.quick-run-icon-art {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .quick-run-icon-folder {
