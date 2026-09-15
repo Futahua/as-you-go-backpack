@@ -22,6 +22,32 @@ import {
   resolveCopierAction,
 } from './public/prompt-library-model.js';
 
+/**
+ * Why the copy-prompt button does not open the library on a fresh workspace - measured in the host first, then
+ * pinned here. effectivePromptLibrary() substitutes an INCLUDED fallback prompt whenever the stored library is
+ * empty, so the batch text is never empty and resolveCopierAction always answers 'copy'. The dialog's `open`
+ * branch, which is the only entry point to the hotkey settings page, is reachable only when every prompt is
+ * excluded from the batch.
+ *
+ * This is a characterization test rather than an endorsement: it records the condition so that changing the
+ * seeding, or giving the settings page an entry point of its own, shows up here instead of in a creator's
+ * silent click.
+ */
+test('the prompt library opens only when the batch is empty, which the fallback prompt prevents', () => {
+  const fallback = 'PICKUP PROMPT TEXT';
+
+  const absent = effectivePromptLibrary({}, fallback);
+  assert.equal(buildBatchPromptText(absent), fallback, 'an empty library is replaced by an included fallback prompt');
+  assert.equal(resolveCopierAction([], absent).kind, 'copy', 'so the button copies rather than opening the dialog');
+
+  const excluded = effectivePromptLibrary({ promptLibrary: [prompt('p1', 'T', 'hello', false)] }, fallback);
+  assert.equal(buildBatchPromptText(excluded), '', 'nothing included means nothing to copy');
+  assert.equal(resolveCopierAction([], excluded).kind, 'open', 'which is the one condition that opens the dialog');
+
+  const included = effectivePromptLibrary({ promptLibrary: [prompt('p1', 'T', 'hello', true)] }, fallback);
+  assert.equal(resolveCopierAction([], included).kind, 'copy', 'an included prompt is copied, not shown');
+});
+
 const prompt = (id, title, text, includeInBatch) => ({
   id, type: 'prompt', title, text, includeInBatch,
 });
