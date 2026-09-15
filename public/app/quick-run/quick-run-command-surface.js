@@ -29,6 +29,39 @@ export const COMMAND_SURFACE_MODE = 'command-surface';
 /** The project-side name of the host's invoke channel, as the preload relays it. */
 export const COMMAND_SURFACE_INVOKE_CHANNEL = 'papers:project:command-surface-invoke';
 
+/**
+ * WHY THE LAUNCHER HAS NO ITEMS — diagnosed, host-side, one gate. Read this before touching the load path.
+ *
+ * Measured on the creator's installed build (4a6120a), by making the failure say itself out loud in the
+ * overlay: every project request from the launcher is refused with
+ *
+ *   Error invoking remote method 'host:backpack-project:state-load':
+ *   Error: host channel called from non-host sender
+ *
+ * That is thrown in `src/main/ipc/hostIpc.ts` before the facade is reached, by a guard that admits a sender
+ * when `isHostSender(sender)` OR `isBackpackProjectSender(sender)`. The launcher is neither. The predicate
+ * behind the second (`src/main/backpacks/backpackSurfaceRegistry.ts`) admits exactly three things: the live
+ * workspace frame, a sender in `detachRegistry` with kind `detached`, or a sender in `widgetRegistry` with
+ * kind `compact-widget` — and the launcher window is registered in NEITHER registry. It is only bound to
+ * `surfaceContexts` (by `bindOwnedProjectSurface(overlayWindow, projectId, 'widget', …)`), which is a
+ * different registry, consulted by a different check (`requireProjectForSender`), and that check is reached
+ * only after this guard has already thrown.
+ *
+ * What that means in full, because it is wider than the empty box:
+ *   - `state-load` is refused, so the surface has no items to search (what the creator saw);
+ *   - `launch-shortcut`, `copy-text`, `state-save-checked` and every other project request are refused by the
+ *     same rule, so running a result from the launcher would fail even with the items in hand.
+ *
+ * So the bar the creator set — items appear AND are runnable — needs one host-side change: admit the
+ * launcher's sender in `isAllowedProjectSurfaceSender` (a third registration kind alongside detached and
+ * compact-widget, registered where the window is created). Nothing on this side can or should work around it:
+ * a second store, a cached copy or a side channel would all be a second source of items, which is exactly
+ * what the contract forbids. The retries this project does make (one bounded one at boot, one per invocation
+ * while nothing has ever loaded) are the most this side can honestly do, and they mean the feature starts
+ * working the moment that gate admits the sender — without anyone reopening the overlay.
+ */
+
+
 /** Why an invoked event was left alone. */
 export const QUICK_RUN_INVOKE_IGNORE = Object.freeze({
   /** Not the chord: the same wire carries other neutral events. */
