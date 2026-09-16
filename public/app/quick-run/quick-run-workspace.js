@@ -56,6 +56,7 @@ export function bindQuickRunWorkspace({
   onClose,
   universeNote = null,
   commandSurface = false,
+  openFolderSurface = null,
 }) {
   if (typeof getState !== 'function') {
     throw new TypeError('bindQuickRunWorkspace needs a getState function to re-read the workspace');
@@ -67,10 +68,8 @@ export function bindQuickRunWorkspace({
   // without the mount having to know what success meant.
   let surface = null;
   // On the canvas, a successful action closes the surface because the workspace behind it is where the reader
-  // is now going. In the launcher overlay there is nothing behind it: closing would leave an empty
-  // always-on-top window that only the host can take down, so the surface stays as it is and the host
-  // dismisses the window. That is the second deliberate divergence, and the reason it is the safer one is
-  // that a palette still showing its results is a state the reader already understands.
+  // is now going. The global launcher is dismissed by losing focus to the external action (or by opening the
+  // ordinary project surface for a folder), so this callback intentionally remains a canvas-only close.
   const closeAfterSuccess = () => { if (!commandSurface) surface?.close(); };
   // A vanished target is reported and the snapshot is rebuilt from the state that refused it, keeping the
   // reader's query and filter and moving the highlight to the nearest survivor (section 5). Without the
@@ -115,8 +114,17 @@ export function bindQuickRunWorkspace({
       // Bin-following navigation a click inside the Bin uses, which would leave the reader in the Bin
       // looking at an empty view while the layer closed as if it had gone somewhere.
       if (plan.action === 'navigate-folder') {
-        commands.goToWorkspaceFolder(plan.target.groupId);
-        closeAfterSuccess();
+        // The global launcher is its own always-on-top renderer. Navigating its
+        // private session would be invisible behind the palette, so hand the
+        // folder to a normal project surface when this is the global entry.
+        if (commandSurface && typeof openFolderSurface === 'function') {
+          Promise.resolve(openFolderSurface(plan.target.groupId)).catch((error) => {
+            setStatus(error instanceof Error ? error.message : String(error));
+          });
+        } else {
+          commands.goToWorkspaceFolder(plan.target.groupId);
+          closeAfterSuccess();
+        }
         return;
       }
       const itemId = quickRunWorkspaceItemId(plan);

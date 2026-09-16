@@ -138,7 +138,7 @@ function createHarness() {
 }
 
 /** The real binding, on the production markup's elements, over the harness's store and commands. */
-async function boot() {
+async function boot(options = {}) {
   const harness = createHarness();
   const elements = await productionElements();
   const surface = bindQuickRunWorkspace({
@@ -148,6 +148,8 @@ async function boot() {
     getState: harness.state,
     getVisibleItemIds: () => [],
     setStatus: (text) => { harness.effects.status.push(text); },
+    commandSurface: options.commandSurface === true,
+    openFolderSurface: options.openFolderSurface,
   });
   const type = (query) => {
     elements.input.value = query;
@@ -176,6 +178,23 @@ test('Folder Enter navigates the workspace and closes Quick Run (Definition of D
   assert.equal(isOpen(h.elements), false, 'section 16.1: a successful navigate closes the layer');
   assert.deepEqual(h.effects.status, [], 'nothing had to be reported');
   assert.deepEqual(h.effects.launch, [], 'a folder is navigated into, never launched');
+});
+
+test('Folder Enter from the global launcher opens a normal project surface at that folder', async () => {
+  const opened = [];
+  const h = await boot({
+    commandSurface: true,
+    openFolderSurface: async (groupId) => { opened.push(groupId); },
+  });
+  h.surface.open();
+  h.type('alpha');
+
+  h.key('Enter');
+  await Promise.resolve();
+
+  assert.deepEqual(opened, ['g-a'], 'the launcher hands the folder to the visible project surface');
+  assert.equal(h.store.getSession().currentId, null, 'the private launcher session does not pretend it navigated');
+  assert.equal(isOpen(h.elements), true, 'the native launcher owns dismissal when the new surface takes focus');
 });
 
 test('Shortcut Enter launches that record and closes Quick Run (Definition of Done: Actions)', async () => {

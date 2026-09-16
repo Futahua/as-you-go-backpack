@@ -5384,6 +5384,16 @@ const setMembershipMode = createSetMembershipMode({
   setStatus,
 });
 
+// The global launcher hands folder results to a normal project surface. Kept
+// outside the Quick Run composition region so the search/activation seam stays
+// free of host-specific work; the entry owns this one surface-opening adapter.
+function openQuickRunFolderSurface(groupId) {
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.delete('papers-surface');
+  nextUrl.searchParams.set('as-you-go-folder', groupId);
+  return host.openNewSurface(nextUrl.toString());
+}
+
 // Quick Run (STAGE 5). The composition seam lives in its own module so the wiring can be exercised
 // without booting the app: quick-run-workspace.test.mjs drives these same keys on the production markup
 // with a real store and the real command object. What is left here is the element adapter - the registry
@@ -5421,6 +5431,7 @@ const quickRun = bindQuickRunWorkspace({
   // thing here that knows whether the project is empty or unreadable.
   universeNote: () => (workspaceLoad.ok === false ? workspaceLoad.error : null),
   commandSurface: commandSurfaceMode === 'overlay',
+  openFolderSurface: openQuickRunFolderSurface,
 });
 
 const keyboard = createKeyboardController({
