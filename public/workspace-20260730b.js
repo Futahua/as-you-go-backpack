@@ -5063,17 +5063,6 @@ document.querySelector('#copy-prompt').addEventListener('click', async () => {
   }
 });
 
-// Settings, at top level, beside the copy button. The creator asked for a hotkey setting that was already
-// in this dialog: the destination existed and the route to it did not, so this control does not go through
-// the copy button's own decision - that one copies when there is anything to copy and opens the dialog only
-// when there is nothing, which is why the dialog's activation looked unreliable (see
-// prompt-library-model.test.mjs, "the prompt library opens only when the batch is empty"). This calls
-// open() directly, which is the same call the explained path makes, and lands on the Settings tab.
-document.querySelector('#open-settings').addEventListener('click', () => {
-  promptLibrary.open();
-  promptLibrary.setActivePage('hotkeys');
-});
-
 // The launcher overlay, and the three entrances to one surface.
 //
 // The creator's correction: Alt+A is a LAUNCHER, not a window switcher. The host opens a 640x220

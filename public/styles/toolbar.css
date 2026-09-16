@@ -20,19 +20,6 @@
   gap: 6px;
   padding: 9px;
 }
-/* Settings is a word, not a pictogram. The rest of the toolbar is icon-only with sr-only labels, which is
- * fine for Bin and Restore all - the reader learns them once - but the creator asked for a hotkey setting
- * that had been behind an unlabelled copy icon all along. So this one button carries its name in text and
- * sits beside that icon; `width: auto` undoes any square sizing an icon button would otherwise inherit. */
-.toolbar-shell > .labelled-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: auto;
-  padding: 9px 11px;
-  white-space: nowrap;
-}
-.labelled-button .button-label { font: inherit; }
 .toolbar-drag-handle {
   display: inline-flex;
   flex: 0 0 12px;
