@@ -286,6 +286,22 @@ export function createWindowLayoutRuntime({
       // descriptor): preserve the streak, never remove, never count.
       return report(layoutId, memberId, reResolved ?? { outcome: 'missing-capability' });
     }
+    // Exact tagged identities are terminal only when the helper completed a
+    // successful enumeration and proved that this opaque instance id is absent.
+    // Unlike the legacy title/fingerprint hint, a missing exact id cannot be a
+    // Chrome tab-title change. Retire every occurrence through the injected
+    // writer; transient helper failures never reach this branch.
+    if (typeof member?.descriptor?.windowInstanceId === 'string') {
+      retired.add(key);
+      missingCounts.delete(key);
+      onRetireMember({
+        layoutId,
+        memberId,
+        descriptor: member.descriptor,
+        reason: 'exact native window instance is gone',
+      });
+      return report(layoutId, memberId, { outcome: 'retired', reason: 'exact native window instance is gone' });
+    }
     // Counted, never acted on. What the count means: this member's descriptor no longer matches a live
     // window, and the match that failed is `executableFingerprint + exact title` (host `resolvePersisted`),
     // so a window that is alive and well but retitled - a browser tab switch is the creator's own example -

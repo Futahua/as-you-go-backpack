@@ -107,6 +107,27 @@ test('partial and zero-success switches retain the selected id but start no time
   assert.equal(zero.runtime.getSnapshot().timerActive, false);
 });
 
+test('an exact tagged instance retires immediately after a confirmed disappearance', async () => {
+  let resolveCalls = 0;
+  const h = harness({
+    host: {
+      observeWindowCapability: async () => ({ outcome: 'missing', error: 'gone' }),
+      resolveWindowDescriptor: async () => {
+        resolveCalls += 1;
+        return resolveCalls === 1
+          ? { outcome: 'success', capability: { title: 'A' } }
+          : { outcome: 'missing', error: 'instance absent' };
+      },
+    },
+  });
+  h.layouts.L1.arrangement.members[0].descriptor.windowInstanceId = 'W0123456789abcdef';
+  await h.runtime.switchTo('L1');
+  await h.runtime.observeActiveMembers();
+  assert.equal(h.intents.length, 1);
+  assert.equal(h.intents[0].memberId, 'a1');
+  assert.equal(h.results.at(-1).outcome, 'retired');
+});
+
 test('stale switch results cannot become active or start a timer', async () => {
   let release;
   let resolveCalls = 0;
