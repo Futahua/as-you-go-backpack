@@ -22,6 +22,7 @@ export function createHostBridge(window) {
   // arrives as a `message` event from `window.parent`, and this is the one place that checks the source.
   const commandSurfaceListeners = new Set();
   const lifecycleListeners = new Set();
+  const lifecycleBaselineListeners = new Set();
 
   function request(type, detail = {}) {
     if (pending.size >= MAX_PENDING) {
@@ -73,6 +74,10 @@ export function createHostBridge(window) {
     }
     if (event.data?.type === 'papers:project:window-lifecycle-event') {
       for (const listener of lifecycleListeners) listener(event.data.event);
+      return;
+    }
+    if (event.data?.type === 'papers:project:window-lifecycle-baseline') {
+      for (const listener of lifecycleBaselineListeners) listener(event.data.baseline);
       return;
     }
     if (event.data?.type !== HOST_RESULT) return;
@@ -224,6 +229,10 @@ export function createHostBridge(window) {
     onWindowLifecycleEvent: (callback) => {
       lifecycleListeners.add(callback);
       return () => lifecycleListeners.delete(callback);
+    },
+    onWindowLifecycleBaseline: (callback) => {
+      lifecycleBaselineListeners.add(callback);
+      return () => lifecycleBaselineListeners.delete(callback);
     },
     bindWindowCandidate: (candidateId) =>
       request('papers:project:window-bind-candidate', { candidateId }),
