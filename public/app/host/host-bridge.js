@@ -21,6 +21,7 @@ export function createHostBridge(window) {
   // lifecycle, so it is fanned out here rather than listened for by the page: every host-to-project message
   // arrives as a `message` event from `window.parent`, and this is the one place that checks the source.
   const commandSurfaceListeners = new Set();
+  const lifecycleListeners = new Set();
 
   function request(type, detail = {}) {
     if (pending.size >= MAX_PENDING) {
@@ -68,6 +69,10 @@ export function createHostBridge(window) {
       for (const listener of commandSurfaceListeners) {
         listener(detail);
       }
+      return;
+    }
+    if (event.data?.type === 'papers:project:window-lifecycle-event') {
+      for (const listener of lifecycleListeners) listener(event.data.event);
       return;
     }
     if (event.data?.type !== HOST_RESULT) return;
@@ -215,6 +220,11 @@ export function createHostBridge(window) {
       request('papers:project:resolve-dropped-targets', { files }),
     copyText: (text) => request('papers:project:copy-text', { text }),
     windowCandidates: () => request('papers:project:window-candidates'),
+    windowLifecycleSnapshot: () => request('papers:project:window-lifecycle-snapshot'),
+    onWindowLifecycleEvent: (callback) => {
+      lifecycleListeners.add(callback);
+      return () => lifecycleListeners.delete(callback);
+    },
     bindWindowCandidate: (candidateId) =>
       request('papers:project:window-bind-candidate', { candidateId }),
     activateWindowCapability: (capability) =>
@@ -237,6 +247,8 @@ export function createHostBridge(window) {
       request('papers:project:window-apply-capability', { capability, bounds }),
     resolveWindowDescriptor: (descriptor) =>
       request('papers:project:window-resolve-descriptor', { descriptor }),
+    resolveWindowInstance: (instanceId) =>
+      request('papers:project:window-resolve-instance', { instanceId }),
     // 016: direct onscreen pick (Papers-owned overlay + eligibility).
     pickWindowBegin: (members) => request('papers:project:window-pick-begin', { members }),
     // 022: active picker keyboard controls are handled by the Papers picker
