@@ -4630,7 +4630,28 @@ async function runMenuAction(action) {
   if (action === 'new-web-link') return editorDialog.showEditor('web', null, elements.menu.dataset.parent);
   if (action === 'new-window-layout') {
     try {
-      await commit(createWindowLayout(state, { parentId: elements.menu.dataset.parent ?? session.currentId ?? ROOT_ID }));
+      const parentId = elements.menu.dataset.parent ?? session.currentId ?? ROOT_ID;
+      let committed = await commit(createWindowLayout(state, { parentId }));
+      // A freshly restored tab can receive input before its shared-document
+      // baseline is ready. The first commit is deliberately refused in that
+      // short interval; retry once after coordination settles instead of
+      // turning the creator's click into a silent no-op.
+      const needsCoordination = () => coordinationState !== 'ready'
+        || !surfaceCoordinator?.baselineReady;
+      if (committed === false && needsCoordination()) {
+        const deadline = Date.now() + 5000;
+        while (needsCoordination() && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        if (hasDocumentWriteAuthority()) {
+          committed = await commit(createWindowLayout(state, { parentId }));
+        }
+      }
+      if (committed === false) {
+        setStatus(windowLayoutDetachment.isReadOnly()
+          ? 'Reattach the window layout before creating another layout.'
+          : 'Workspace is still synchronizing; try again in a moment.');
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
