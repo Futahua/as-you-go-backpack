@@ -2251,6 +2251,48 @@ const windowLayoutRecording = createWindowLayoutRecordingWiring({
 });
 const windowLayoutRuntimeController = windowLayoutRecording.runtime;
 
+// Native Papers lifecycle stream: the watcher owns existence/eligibility;
+// this writer owns the one tracking layout's durable membership.  Events are
+// advisory until the host resolves the exact instance into a fresh capability.
+let trackingEventInFlight = false;
+async function reconcileTrackingLifecycleEvent(event) {
+  if (trackingEventInFlight || windowLayoutDetachment.isReadOnly()) return;
+  if (!event || typeof event.windowInstanceId !== 'string') return;
+  const trackingLayout = (state.windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true);
+  if (!trackingLayout) return;
+  trackingEventInFlight = true;
+  try {
+    if (event.kind === 'destroy') {
+      const doomed = (trackingLayout.arrangement?.members ?? []).filter((member) =>
+        member.descriptor?.windowInstanceId === event.windowInstanceId);
+      for (const member of doomed) handleWindowLayoutRetireMember({ layoutId: trackingLayout.id, memberId: member.id, descriptor: member.descriptor, reason: 'watcher-destroy' });
+      return;
+    }
+    const existing = (trackingLayout.arrangement?.members ?? []).some((member) => member.descriptor?.windowInstanceId === event.windowInstanceId);
+    if (existing || trackingLayout.tracking?.suppressedInstanceIds?.includes(event.windowInstanceId)) return;
+    const resolved = await host.resolveWindowInstance(event.windowInstanceId);
+    if (resolved?.outcome !== 'success' || !resolved.capability || !resolved.descriptor) return;
+    const observed = await host.observeWindowCapability(resolved.capability);
+    if (observed?.outcome !== 'success') return;
+    const member = {
+      id: crypto.randomUUID(),
+      descriptor: resolved.descriptor,
+      bounds: observed.observation?.bounds ?? event.observation?.bounds ?? null,
+      state: observed.observation?.state === 'minimized' ? 'minimized' : 'normal',
+    };
+    const next = addWindowLayoutMember(state, trackingLayout.id, member);
+    windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(trackingLayout.id, member.id), resolved.capability);
+    if (await store.commit(next)) {
+      saveWorkspaceView();
+      noteWindowLayoutCommit(trackingLayout.id);
+      await windowLayoutRecording.ensureRecording(trackingLayout.id);
+    }
+  } finally {
+    trackingEventInFlight = false;
+  }
+}
+host.onWindowLifecycleEvent?.((event) => { void reconcileTrackingLifecycleEvent(event); });
+
 // ---- 018A1 exclusive-controller handoff (As You Go half) ------------------
 // One controller/observer/save owner at any time. While detached the workspace
 // is read-only (persist gate + stopped controller + cancelled pick); the
