@@ -2761,6 +2761,37 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
   }
 }
 
+async function reconcileTrackingBaseline() {
+  const response = await host.windowLifecycleSnapshot?.().catch(() => null);
+  const snapshot = response?.snapshot;
+  if (!snapshot || snapshot.complete !== true || !Array.isArray(snapshot.windows)) return;
+  const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId).filter((id) => typeof id === 'string'));
+  const layout = (state.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
+  if (!layout) return;
+  let next = state;
+  let changed = false;
+  for (const member of layout.arrangement?.members ?? []) {
+    const id = member.descriptor?.windowInstanceId;
+    if (typeof id === 'string' && !live.has(id)) {
+      next = removeWindowLayoutMember(next, layout.id, member.id);
+      changed = true;
+      windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layout.id, member.id));
+      windowLayoutRuntime.icons.delete(windowLayoutMemberKey(layout.id, member.id));
+    }
+  }
+  const suppressed = (layout.tracking?.suppressedInstanceIds ?? []).filter((id) => live.has(id));
+  if (suppressed.length !== (layout.tracking?.suppressedInstanceIds ?? []).length) {
+    next = setWindowLayoutTracking(next, layout.id, true);
+    next = { ...next, windowLayouts: next.windowLayouts.map((entry) => entry.id === layout.id ? { ...entry, tracking: { ...entry.tracking, suppressedInstanceIds: suppressed } } : entry) };
+    changed = true;
+  }
+  if (changed && await store.commit(next)) {
+    saveWorkspaceView();
+    noteWindowLayoutCommit(layout.id);
+  }
+  await populateTrackingLayout(layout.id);
+}
+
 async function populateTrackingLayout(layoutId) {
   const layout = windowLayoutFromState(layoutId);
   if (!layout || layout.tracking?.enabled !== true) return;
@@ -6600,6 +6631,7 @@ if (WIDGET_SURFACE) {
     pointer,
     promptLibrary,
   }).then(() => {
+    void reconcileTrackingBaseline();
     if (!windowLayoutDetachment.isStopped()) bootstrapWindowLayoutRecording();
     // The launcher overlay: the marker already put this page in command-surface mode, and now that the state
     // is loaded and every collaborator exists, the surface opens itself - there is no canvas here to open it
