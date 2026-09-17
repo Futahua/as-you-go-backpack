@@ -41,6 +41,8 @@ import {
   setItemSets,
   setTrailExpandedByContext,
   createWindowLayout,
+  setWindowLayoutTracking,
+  setWindowLayoutInstanceSuppressed,
   addWindowLayoutMember,
   removeWindowLayoutMember,
   removeClosedWindowFromAllLayouts,
