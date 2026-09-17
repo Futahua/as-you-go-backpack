@@ -43,6 +43,8 @@ import {
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
   setActiveWindowLayoutId,
+  setWindowLayoutTracking,
+  setWindowLayoutInstanceSuppressed,
   setWindowLayoutCardSize,
   setSurfaceLocation,
   surfaceLocationFor,
@@ -1932,6 +1934,22 @@ test('017I1: active id never selects a layout nested under a binned folder', () 
     schemaVersion: 1, groups: binned.groups, shortcuts: [],
     windowLayouts: binned.windowLayouts, activeWindowLayoutId: l1,
   }).activeWindowLayoutId, null, 'layout under a binned folder normalizes to null');
+});
+
+test('tracking has one durable owner and suppression survives reload', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'A' });
+  state = createWindowLayout(state, { name: 'B' });
+  const [a, b] = state.windowLayouts;
+  state = setWindowLayoutTracking(state, a.id, true);
+  assert.equal(state.startupWindowLayoutId, a.id);
+  assert.equal(state.windowLayouts.find((entry) => entry.id === a.id).tracking.enabled, true);
+  state = setWindowLayoutTracking(state, b.id, true);
+  assert.equal(state.windowLayouts.find((entry) => entry.id === a.id).tracking.enabled, false);
+  assert.equal(state.windowLayouts.find((entry) => entry.id === b.id).tracking.enabled, true);
+  state = setWindowLayoutInstanceSuppressed(state, b.id, 'W0123456789abcdef', true);
+  const reloaded = normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(reloaded.windowLayouts.find((entry) => entry.id === b.id).tracking.suppressedInstanceIds, ['W0123456789abcdef']);
 });
 
 test('017I1: setActiveWindowLayoutId leaves every arrangement byte-stable', () => {
