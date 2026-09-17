@@ -877,29 +877,11 @@ async function runWindowLayoutIconRefresh() {
       candidate.title === member.descriptor.title);
     if (titleMatches.length !== 1) continue;
     const match = titleMatches[0];
-    let icon = match.icon ?? null;
-    // 040I: hydrate the exact HWND/class icon via a separate post-list request.
-    // This keeps the latency-critical desktop enumeration small while allowing
-    // packaged/Electron apps (ChatGPT, OpenCode) to use their taskbar icon
-    // instead of the executable's generic fallback. Work is sequential and
-    // bounded to actual layout members, never every visible desktop window.
-    try {
-      const bound = await host.bindWindowCandidate(match.id);
-      if (windowLayoutDetachment.isReadOnly()) return;
-      if (bound.outcome === 'success' && bound.capability) {
-        windowLayoutRuntime.capabilities.set(key, bound.capability);
-        const nativeIcon = await host.windowThumbnailCapability(bound.capability, {
-          maxWidth: 48,
-          maxHeight: 48,
-        });
-        if (windowLayoutDetachment.isReadOnly()) return;
-        if (nativeIcon.outcome === 'success' && nativeIcon.imageUrl) {
-          icon = nativeIcon.imageUrl;
-        }
-      }
-    } catch {
-      // Keep the executable icon fallback when the native icon is unavailable.
-    }
+    // `windowCandidates()` already requests the native/executable icon. A
+    // 48x48 window thumbnail is content preview data, not program artwork;
+    // replacing the candidate icon with that capture made newly tracked
+    // Chrome members display the wrong glyph. Keep icon hydration display-only.
+    const icon = match.icon ?? null;
     if (!icon) continue;
     windowLayoutRuntime.icons.set(key, icon);
     updatedLayouts.add(layoutId);
@@ -1890,6 +1872,7 @@ function widgetPreviewIdentity(member) {
     member?.descriptor?.version ?? '',
     member?.descriptor?.title ?? '',
     member?.descriptor?.executableFingerprint ?? '',
+    member?.windowInstanceId ?? '',
   ]);
 }
 
@@ -1943,7 +1926,10 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
   }
   const cached = windowLayoutWidgetPreviewCapabilities.get(key);
   if (cached) return Promise.resolve(cached);
-  return Promise.resolve(host.resolveWindowDescriptor(member.descriptor)).then((resolved) => {
+  const resolve = typeof member.windowInstanceId === 'string' && typeof host.resolveWindowInstance === 'function'
+    ? host.resolveWindowInstance(member.windowInstanceId)
+    : host.resolveWindowDescriptor(member.descriptor);
+  return Promise.resolve(resolve).then((resolved) => {
     if (!resolved || resolved.outcome !== 'success' || !resolved.capability) {
       windowLayoutWidgetPreviewCapabilities.delete(key);
       return null;

@@ -244,6 +244,10 @@ export function windowLayoutWidgetRenderIdentity(snapshot) {
       member?.descriptor?.title ?? '',
       member?.descriptor?.version ?? '',
       member?.descriptor?.executableFingerprint ?? '',
+      // The opaque native instance identity is not rendered, but it is part
+      // of preview resolution. Include it so a re-identified duplicate-title
+      // window cannot retain a stale capability.
+      member?.windowInstanceId ?? '',
     ]),
   ]);
 }
@@ -255,12 +259,10 @@ export function windowLayoutWidgetRenderIdentity(snapshot) {
  * emitting a partial `{}` that later poisons pickWindowBegin. Never carries a
  * runtime capability, token or any extra field. */
 function memberDescriptorSnapshot(member) {
-  // Persisted members carry runtime-only identity alongside the descriptor
-  // (currently `windowInstanceId`). The widget wire must never expose that
-  // field, but rejecting the whole member because the persisted object has an
-  // extra key makes every real window disappear from the detached card. Read
-  // the three descriptor fields explicitly, then emit the exact bounded wire
-  // shape below.
+  // Persisted members carry runtime-only identity alongside the descriptor.
+  // Keep the descriptor itself exact for picker commands, while the opaque
+  // native instance id travels as a separate bounded snapshot field for exact
+  // preview resolution.
   const raw = member?.descriptor;
   if (!isPlainObject(raw)
     || raw.version !== 1
@@ -292,11 +294,16 @@ export function windowLayoutWidgetSnapshot(layout, memberIcon = () => null, memb
       icon = rawIcon;
     }
     const note = snapshotMemberNote(memberNote?.(layout?.id ?? '', member.id));
+    const windowInstanceId = typeof member?.descriptor?.windowInstanceId === 'string'
+      && /^W[0-9a-f]{16}$/i.test(member.descriptor.windowInstanceId)
+      ? member.descriptor.windowInstanceId
+      : null;
     members.push({
       id: member.id,
       descriptor,
       state: member.state === 'minimized' ? 'minimized' : 'normal',
       icon,
+      ...(windowInstanceId === null ? {} : { windowInstanceId }),
       // The sentence a member card says when the surface checked and could not confirm its window. It rides
       // the snapshot for the same reason the icon does: the compact widget and the detached surface render
       // from this snapshot and have no runtime of their own to ask. Absent for every healthy member, and

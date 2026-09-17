@@ -143,6 +143,18 @@ const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js'
 test('widget render forwards tracking state into the shared card candidate', () => {
   assert.match(workspaceSource, /tracking: snapshot\.tracking/);
 });
+
+test('a native instance identity change is render identity even when title and executable stay the same', () => {
+  const first = windowLayoutWidgetSnapshot({
+    ...BASE,
+    arrangement: { ...BASE.arrangement, members: [{ ...BASE.arrangement.members[0], descriptor: { ...BASE.arrangement.members[0].descriptor, windowInstanceId: 'W0123456789abcdef' }, }, BASE.arrangement.members[1]] },
+  });
+  const second = windowLayoutWidgetSnapshot({
+    ...BASE,
+    arrangement: { ...BASE.arrangement, members: [{ ...BASE.arrangement.members[0], descriptor: { ...BASE.arrangement.members[0].descriptor, windowInstanceId: 'Wfedcba9876543210' }, }, BASE.arrangement.members[1]] },
+  });
+  assert.notEqual(windowLayoutWidgetRenderIdentity(first), windowLayoutWidgetRenderIdentity(second));
+});
 const channelSource = await readFile(new URL('./public/app/window-layout-widget-channel.js', import.meta.url), 'utf8');
 
 function region(source, start, end) {

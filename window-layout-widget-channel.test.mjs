@@ -618,7 +618,7 @@ test('019DR: snapshot descriptors retain the Papers pick-begin identity', () => 
 
 test('persisted runtime identity does not hide a real widget member', () => {
   const layout = makeLayout('L1', [{ id: 'm1', title: 'Papers' }]);
-  layout.arrangement.members[0].descriptor.windowInstanceId = 'W-real-window';
+  layout.arrangement.members[0].descriptor.windowInstanceId = 'W0123456789abcdef';
   const snapshot = windowLayoutWidgetSnapshot(layout);
   assert.equal(snapshot.members.length, 1);
   assert.deepEqual(snapshot.members[0].descriptor, {
@@ -626,6 +626,7 @@ test('persisted runtime identity does not hide a real widget member', () => {
     title: 'Papers',
     executableFingerprint: fingerprint('Papers'),
   });
+  assert.equal(snapshot.members[0].windowInstanceId, 'W0123456789abcdef');
 });
 
 test('019DR: an ENTIRE picker-commit with one malformed entry is rejected, not filtered', () => {
