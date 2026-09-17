@@ -2313,6 +2313,12 @@ host.onWindowLifecycleEvent?.((event) => {
   if (trackingEventQueue.length < 64) trackingEventQueue.push(event);
   void drainTrackingLifecycleEvents();
 });
+host.onWindowLifecycleBaseline?.((baseline) => {
+  if (!baseline || baseline.complete !== true || typeof baseline.trackerSessionId !== 'string') return;
+  trackingSessionId = baseline.trackerSessionId;
+  if (Number.isSafeInteger(baseline.sequence)) trackingLastSequence = baseline.sequence;
+  void reconcileTrackingBaseline();
+});
 
 // ---- 018A1 exclusive-controller handoff (As You Go half) ------------------
 // One controller/observer/save owner at any time. While detached the workspace
