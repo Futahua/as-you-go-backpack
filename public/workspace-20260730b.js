@@ -6675,11 +6675,21 @@ if (WIDGET_SURFACE) {
       if (surfaceCoordinator.receive(event.data)) render();
     });
     void surfaceCoordinator.start().then(async () => {
-      await reconcileTrackingBaseline();
-      await ensureStartupWindowLayoutWidget();
-    }).catch(() => {
+      // Writer election is the durable-editing gate. Tracking/widget refresh
+      // is an optional window capability and must not be allowed to turn a
+      // successfully elected writer into a read-only workspace when its
+      // helper is unavailable or still restarting.
+      try {
+        await reconcileTrackingBaseline();
+        await ensureStartupWindowLayoutWidget();
+      } catch (error) {
+        console.warn('[AsYouGo] window tracking startup failed; editing remains enabled', error);
+      }
+    }).catch((error) => {
       coordinationState = 'unavailable';
-      statusToast.show('Shared document coordination failed to elect a writer; durable editing is disabled.', { tone: 'error' });
+      statusToast.show(error instanceof Error && error.message
+        ? `Shared document coordination failed; durable editing is disabled. ${error.message}`
+        : 'Shared document coordination failed to elect a writer; durable editing is disabled.', { tone: 'error' });
       reportCoordinationUnavailableToWidgets('Workspace coordination unavailable');
     });
   }
