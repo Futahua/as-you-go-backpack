@@ -1015,6 +1015,36 @@ async function capabilityForMember(layoutId, memberId) {
   return resolved.capability;
 }
 
+/** Quick Run's Layout Item activation. Resolution remains descriptor-based and
+ * fail-closed: an ambiguous/missing member is reported, never guessed. The
+ * Papers host performs the final token identity check and atomically restores
+ * an iconic window before raising it. */
+async function activateWindowLayoutMember(layoutId, memberId) {
+  if (windowLayoutDetachment.isReadOnly()) {
+    return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
+  }
+  const capability = await capabilityForMember(layoutId, memberId);
+  if (windowLayoutDetachment.isReadOnly()) {
+    return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
+  }
+  if (!capability || typeof host.activateWindowCapability !== 'function') {
+    return { outcome: 'failed', message: 'Window activation is unavailable.' };
+  }
+  const result = await host.activateWindowCapability(capability);
+  if (windowLayoutDetachment.isReadOnly()) {
+    return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
+  }
+  if (result?.outcome === 'success') return result;
+  if (result?.outcome === 'missing') {
+    windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
+    windowLayoutRuntimeController.invalidateCapabilities(layoutId);
+  }
+  return {
+    outcome: result?.outcome ?? 'failed',
+    message: windowLayoutStatusForOutcome(result?.outcome),
+  };
+}
+
 function windowLayoutStatusForOutcome(outcome) {
   // The one state with something true and calm to say, in the creator's words: this is also the visible half
   // of the member note, because the strip itself takes no text by the creator's own correction.
@@ -5432,6 +5462,7 @@ const quickRun = bindQuickRunWorkspace({
   universeNote: () => (workspaceLoad.ok === false ? workspaceLoad.error : null),
   commandSurface: commandSurfaceMode === 'overlay',
   openFolderSurface: openQuickRunFolderSurface,
+  activateLayoutMember: activateWindowLayoutMember,
 });
 
 const keyboard = createKeyboardController({

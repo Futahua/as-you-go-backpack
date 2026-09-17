@@ -427,6 +427,21 @@ test('host bridge surfaces window capability failures as rejected outcomes, neve
   });
   await assert.rejects(pending, /denied/);
 });
+
+test('host bridge exposes exact-window activation separately from minimize/restore', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const capability = { version: 1, bindingId: 'wl-binding-a' };
+  const pending = host.activateWindowCapability(capability);
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:window-activate-capability');
+  assert.deepEqual(sent.capability, capability);
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sent.requestId, ok: true,
+    outcome: 'success', observation: { runtimeId: 'Ta', title: 'Window A', processId: 1001, processPath: 'p', state: 'normal', bounds: { x: 1, y: 2, width: 300, height: 200 } },
+  });
+  assert.equal((await pending).outcome, 'success');
+});
 test('018X1 detach pushes accept the canonical FLAT shape and the legacy detail wrapper', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);
