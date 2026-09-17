@@ -38,6 +38,7 @@ export function emptyState() {
     // stored and normalization keeps it only when it names an existing,
     // non-binned window-layout record.
     activeWindowLayoutId: null,
+    startupWindowLayoutId: null,
     view: {
       iconSize: DEFAULT_ICON_SIZE,
       currentGroupId: ROOT_ID,
@@ -357,12 +358,18 @@ function normalizeWindowLayouts(raw) {
   if (!Array.isArray(raw)) return [];
   const seen = new Set();
   const records = [];
+  let trackingOwnerSeen = false;
   for (const candidate of raw) {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
     const id = typeof candidate.id === 'string' && candidate.id ? candidate.id : null;
     const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
     if (!id || !name || seen.has(id)) continue;
     seen.add(id);
+    const tracking = candidate.tracking;
+    const trackingEnabled = Boolean(tracking && typeof tracking === 'object' && tracking.enabled === true);
+    const suppressedInstanceIds = tracking && typeof tracking === 'object' && Array.isArray(tracking.suppressedInstanceIds)
+      ? [...new Set(tracking.suppressedInstanceIds.filter((value) => typeof value === 'string' && /^W[0-9a-f]{16}$/i.test(value)))]
+      : [];
     records.push({
       id,
       name,
@@ -381,11 +388,13 @@ function normalizeWindowLayouts(raw) {
         }
         : {}),
       arrangement: normalizeWindowLayoutArrangement(candidate.arrangement),
+      tracking: { enabled: trackingEnabled && !trackingOwnerSeen, suppressedInstanceIds },
       // 035: the shared attached/detached card geometry survives reloads (the
       // detached widget's latest window content size); malformed or missing
       // values stay null so an old record renders at the default width.
       ...(normalizeWindowLayoutCardSize(candidate.cardSize) ? { cardSize: normalizeWindowLayoutCardSize(candidate.cardSize) } : {}),
     });
+    if (trackingEnabled && !trackingOwnerSeen) trackingOwnerSeen = true;
   }
   return records;
 }
@@ -498,6 +507,7 @@ export function normalizeState(raw) {
       : [],
     windowLayouts,
     activeWindowLayoutId: normalizeActiveWindowLayoutId(raw?.activeWindowLayoutId, windowLayouts, groups),
+    startupWindowLayoutId: normalizeActiveWindowLayoutId(raw?.startupWindowLayoutId, windowLayouts, groups),
     view: {
       iconSize: Math.min(
         MAX_ICON_SIZE,
@@ -697,7 +707,45 @@ export function createWindowLayout(state, { name = 'Window layout', parentId = R
       name: trimmed,
       icon: null,
       arrangement: emptyWindowLayoutArrangement(),
+      tracking: { enabled: false, suppressedInstanceIds: [] },
     }],
+  };
+}
+
+/** Enables or disables the one durable auto-tracking owner. Enabling a layout
+ * atomically disables every other layout; disabling leaves existing members
+ * untouched and only stops future automatic additions. */
+export function setWindowLayoutTracking(state, windowLayoutId, enabled) {
+  const layout = windowLayout(state, windowLayoutId);
+  if (!layout) throw new Error('Window layout not found.');
+  const nextEnabled = enabled === true;
+  return {
+    ...state,
+    startupWindowLayoutId: nextEnabled ? windowLayoutId : state.startupWindowLayoutId,
+    windowLayouts: (state.windowLayouts ?? []).map((candidate) => ({
+      ...candidate,
+      tracking: {
+        enabled: candidate.id === windowLayoutId ? nextEnabled : (nextEnabled ? false : Boolean(candidate.tracking?.enabled)),
+        suppressedInstanceIds: [...(candidate.tracking?.suppressedInstanceIds ?? [])],
+      },
+    })),
+  };
+}
+
+export function setWindowLayoutInstanceSuppressed(state, windowLayoutId, windowInstanceId, suppressed) {
+  if (typeof windowInstanceId !== 'string' || !/^W[0-9a-f]{16}$/i.test(windowInstanceId)) {
+    throw new Error('Window instance id is invalid.');
+  }
+  const layout = windowLayout(state, windowLayoutId);
+  if (!layout) throw new Error('Window layout not found.');
+  const current = new Set(layout.tracking?.suppressedInstanceIds ?? []);
+  if (suppressed === true) current.add(windowInstanceId);
+  else current.delete(windowInstanceId);
+  return {
+    ...state,
+    windowLayouts: state.windowLayouts.map((candidate) => candidate.id === windowLayoutId
+      ? { ...candidate, tracking: { enabled: Boolean(candidate.tracking?.enabled), suppressedInstanceIds: [...current] } }
+      : candidate),
   };
 }
 
