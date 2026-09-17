@@ -991,7 +991,7 @@ async function capabilityForMember(layoutId, memberId) {
   const key = windowLayoutMemberKey(layoutId, memberId);
   const cached = windowLayoutRuntime.capabilities.get(key);
   if (cached) return cached;
-  const resolved = await host.resolveWindowDescriptor(member.descriptor);
+  const resolved = await resolveWindowLayoutMemberDescriptor(member.descriptor);
   // 018X4: a handoff begun during the resolve must abort IMMEDIATELY after the
   // await, before either the failure status or the success cache side effect.
   if (windowLayoutDetachment.isReadOnly()) return null;
@@ -1001,6 +1001,25 @@ async function capabilityForMember(layoutId, memberId) {
   }
   windowLayoutRuntime.capabilities.set(key, resolved.capability);
   return resolved.capability;
+}
+
+/** Resolve a persisted member by its exact native identity first. Papers-owned
+ * windows are recreated when Papers itself restarts, so that opaque identity
+ * can legitimately be gone while the same unique window is alive again. A
+ * fallback without the identity is therefore allowed only after an explicit
+ * `missing` result, and the host still requires one unique
+ * executable-fingerprint + title match. Duplicate Chrome windows remain
+ * ambiguous and are never guessed. */
+async function resolveWindowLayoutMemberDescriptor(descriptor) {
+  const resolved = await host.resolveWindowDescriptor(descriptor);
+  if (resolved?.outcome !== 'missing'
+    || typeof descriptor?.windowInstanceId !== 'string') return resolved;
+  const fallbackDescriptor = {
+    version: descriptor.version,
+    title: descriptor.title,
+    executableFingerprint: descriptor.executableFingerprint,
+  };
+  return host.resolveWindowDescriptor(fallbackDescriptor);
 }
 
 /** Quick Run's Layout Item activation. Resolution remains descriptor-based and
@@ -1930,6 +1949,11 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
     ? host.resolveWindowInstance(member.windowInstanceId)
     : host.resolveWindowDescriptor(member.descriptor);
   return Promise.resolve(resolve).then((resolved) => {
+    if (resolved?.outcome === 'missing' && typeof member.windowInstanceId === 'string') {
+      return host.resolveWindowDescriptor(member.descriptor);
+    }
+    return resolved;
+  }).then((resolved) => {
     if (!resolved || resolved.outcome !== 'success' || !resolved.capability) {
       windowLayoutWidgetPreviewCapabilities.delete(key);
       return null;
@@ -2220,7 +2244,7 @@ window.addEventListener('pagehide', () => {
 const windowLayoutRecording = createWindowLayoutRecordingWiring({
   getLayout: windowLayoutFromState,
   host: {
-    resolveWindowDescriptor: (descriptor) => host.resolveWindowDescriptor(descriptor),
+    resolveWindowDescriptor: (descriptor) => resolveWindowLayoutMemberDescriptor(descriptor),
     observeWindowCapability: (capability) => host.observeWindowCapability(capability),
     applyWindowCapability: (capability, bounds) => host.applyWindowCapability(capability, bounds),
     minimizeWindowCapability: (capability) => host.minimizeWindowCapability(capability),
