@@ -5885,7 +5885,12 @@ function bootstrapWindowLayoutWidget() {
     // attached grid node - one shared card, two homes.
     removeWindowLayoutCardPresentation(elements.grid);
     elements.grid.innerHTML = windowLayoutCardMarkup(
-      { id: snapshot.id, name: snapshot.name, arrangement: { members: snapshot.members } },
+      {
+        id: snapshot.id,
+        name: snapshot.name,
+        tracking: snapshot.tracking,
+        arrangement: { members: snapshot.members },
+      },
       { widgetSurface: true },
     );
     installWindowLayoutCardPresentation(elements.grid);

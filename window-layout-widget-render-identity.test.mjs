@@ -139,6 +139,10 @@ test('render identity is stable under repeated evaluation of one snapshot', () =
 // harness in this suite; the escape it pins is the one that makes the sentence reachable, and the wire that
 // carries it is proven behaviourally in window-layout-widget-channel.test.mjs.
 const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+
+test('widget render forwards tracking state into the shared card candidate', () => {
+  assert.match(workspaceSource, /tracking: snapshot\.tracking/);
+});
 const channelSource = await readFile(new URL('./public/app/window-layout-widget-channel.js', import.meta.url), 'utf8');
 
 function region(source, start, end) {
