@@ -179,6 +179,7 @@
    detached; it is NOT a member/icon/column-count breakpoint. No title. */
 .window-layout-card {
   display: block;
+  position: relative;
   width: 100%;
   max-width: min(100%, var(--wl-card-max-width, 280px));
   margin-inline: auto;
@@ -287,6 +288,24 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
   -webkit-app-region: no-drag;
   flex-wrap: wrap;
   scrollbar-width: none;
+}
+/* The tracking toggle is a widget-only state control. Keep it out of the
+   taskbar row and pin it to the card's lower-right corner so the three action
+   controls retain a stable centered order. */
+.icon-grid > .window-layout-card:has(.wl-tracking) {
+  padding-bottom: 28px;
+}
+.icon-grid > .window-layout-card .wl-tracking {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+}
+.window-layout-control.wl-tracking svg circle {
+  fill: none;
+}
+.window-layout-control.wl-tracking.tracking-enabled svg circle {
+  fill: currentColor;
+  fill-opacity: 1;
 }
 /* The native BrowserWindow is transparent. Widget mode must not add a second
    opaque page/workspace sheet beneath the opacity-controlled Backpack card. */

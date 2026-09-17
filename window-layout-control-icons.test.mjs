@@ -75,6 +75,16 @@ test('control buttons keep exact title/aria-label semantics and data attributes'
   assert.ok(button.includes('type="button"'), 'button type preserved');
 });
 
+test('tracking toggle exposes an outlined off state and pressed active state', () => {
+  assert.match(WINDOW_LAYOUT_CONTROL_GLYPHS.tracking.path, /fill="none"/);
+  const off = windowLayoutControlButton('tracking', 'Start automatic window tracking', 'data-wl-track', 'L1', { toggle: true, active: false, activeClass: 'tracking-enabled' });
+  assert.match(off, /class="window-layout-control wl-tracking"/);
+  assert.match(off, /aria-pressed="false"/);
+  const on = windowLayoutControlButton('tracking', 'Stop automatic window tracking', 'data-wl-track', 'L1', { toggle: true, active: true, activeClass: 'tracking-enabled' });
+  assert.match(on, /class="window-layout-control wl-tracking tracking-enabled"/);
+  assert.match(on, /aria-pressed="true"/);
+});
+
 test('the list opener uses the cursor glyph while retaining list behavior', () => {
   const button = windowLayoutControlButton('list', 'Choose windows', 'data-wl-list', 'L1', { glyph: 'pick' });
   assert.match(button, /class="window-layout-control wl-list"/);

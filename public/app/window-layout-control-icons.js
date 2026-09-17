@@ -33,7 +33,7 @@ export const WINDOW_LAYOUT_CONTROL_GLYPHS = {
   'restore-all': { path: '<rect x="5" y="5" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' },
   detach: { path: '<path d="M8 10.5V7.5a4 4 0 0 1 8 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="6" y="10.5" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' },
   reattach: { path: '<path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="6" y="10.5" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' },
-  tracking: { path: '<circle cx="12" cy="12" r="7" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.7"/>' },
+  tracking: { path: '<circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.7"/>' },
 };
 
 /** The three persistent control actions (left-to-right). */

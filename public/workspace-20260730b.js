@@ -624,10 +624,13 @@ function windowLayoutBodyMarkup(candidate, options = {}) {
     windowLayoutMemberMarkup(candidate.id, member, windowLayoutMemberIcon(candidate.id, member.id), false,
       windowLayoutMemberNote(candidate.id, member))).join('');
   const widgetSurface = options.widgetSurface === true;
+  const trackingControl = widgetSurface
+    ? windowLayoutControlButton('tracking', candidate.tracking?.enabled === true ? 'Stop automatic window tracking' : 'Start automatic window tracking', 'data-wl-track', candidate.id, { toggle: true, active: candidate.tracking?.enabled === true, activeClass: 'tracking-enabled' })
+    : '';
   return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" aria-label="Window group">
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
+    ${trackingControl}
     <div class="window-layout-controls">
-      ${widgetSurface ? windowLayoutControlButton('tracking', candidate.tracking?.enabled === true ? 'Stop automatic window tracking' : 'Start automatic window tracking', 'data-wl-track', candidate.id, { toggle: true, active: candidate.tracking?.enabled === true, activeClass: 'tracking-enabled' }) : ''}
       ${windowLayoutControlButton('list', 'Choose from the list of onscreen windows', 'data-wl-list', candidate.id, { glyph: 'pick' })}
       ${windowLayoutControlButton('min-all', widgetSurface ? 'Minimize all members; middle-click to reattach widget' : 'Minimize all members; right-click to toggle isolate mode', 'data-wl-min-all', candidate.id, { toggle: true, active: windowLayoutRuntime.isolateMode.isActive(candidate.id) })}
       ${windowLayoutControlButton('restore-all', widgetSurface ? 'Restore/open all members' : 'Restore/open all members; middle-click to undock widget', 'data-wl-restore-all', candidate.id)}
@@ -2580,6 +2583,10 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
     if (windowLayoutDetachment.isReadOnly()) return { ok: false, error: 'read-only' };
     if (command.kind === 'member-toggle') {
       await handleWindowLayoutMemberClick(layoutId, command.memberId);
+      return { ok: true };
+    }
+    if (command.kind === 'toggle-tracking') {
+      await handleWindowLayoutTrackingToggle(layoutId);
       return { ok: true };
     }
     if (command.kind === 'remove-member') {
@@ -6123,6 +6130,12 @@ function bootstrapWindowLayoutWidget() {
     }
     const listButton = event.target.closest('[data-wl-list]');
     if (listButton) {
+      void openWidgetPicker();
+      return;
+    }
+    const trackingButton = event.target.closest('[data-wl-track]');
+    if (trackingButton) {
+      client.sendCommand({ kind: 'toggle-tracking' });
       return;
     }
     const minAll = event.target.closest('[data-wl-min-all]');
