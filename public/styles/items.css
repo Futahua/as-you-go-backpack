@@ -293,7 +293,9 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
    taskbar row and pin it to the card's lower-right corner so the three action
    controls retain a stable centered order. */
 .icon-grid > .window-layout-card:has(.wl-tracking) {
-  padding-bottom: 28px;
+  /* Reserve only the toggle's own height plus its bottom inset. The previous
+     28px left a visible dead band between the action row and the corner. */
+  padding-bottom: 22px;
 }
 .icon-grid > .window-layout-card .wl-tracking {
   position: absolute;

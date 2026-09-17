@@ -240,3 +240,10 @@ test('019F/033/034/035/036 C4: member strip wraps with the available width up to
   assert.match(stripRule, /width:\s*var\(--wl-balanced-member-width/, 'live width chooses balanced rows');
   assert.doesNotMatch(itemsCss, /\.window-layout-member:nth-child/);
 });
+
+test('tracking toggle reserves only its own corner footprint', () => {
+  const cornerRule = itemsCss.match(/\.icon-grid > \.window-layout-card:has\(\.wl-tracking\)\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(cornerRule, /padding-bottom:\s*22px/, 'no dead band remains below the action row');
+  const toggleRule = itemsCss.match(/\.icon-grid > \.window-layout-card \.wl-tracking\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(toggleRule, /bottom:\s*4px/, 'toggle remains inset into the lower-right corner');
+});
