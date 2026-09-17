@@ -87,8 +87,10 @@ function normalizeWindowLayoutMember(member) {
   if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor)) return null;
   if (descriptor.version !== 1) return null;
   const title = typeof descriptor.title === 'string' ? descriptor.title.trim() : '';
+  const windowInstanceId = descriptor.windowInstanceId;
   const executableFingerprint = descriptor.executableFingerprint;
-  if (!id || !title || typeof executableFingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(executableFingerprint)) {
+  if (!id || !title || typeof executableFingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(executableFingerprint)
+    || (windowInstanceId !== undefined && (typeof windowInstanceId !== 'string' || !/^W[0-9a-f]{16}$/i.test(windowInstanceId)))) {
     return null;
   }
   let bounds = null;
@@ -103,7 +105,12 @@ function normalizeWindowLayoutMember(member) {
   const state = member.state === 'minimized' ? 'minimized' : 'normal';
   return {
     id,
-    descriptor: { version: 1, title, executableFingerprint: executableFingerprint.toLowerCase() },
+    descriptor: {
+      version: 1,
+      title,
+      executableFingerprint: executableFingerprint.toLowerCase(),
+      ...(windowInstanceId !== undefined ? { windowInstanceId } : {}),
+    },
     bounds,
     state,
   };
@@ -737,16 +744,20 @@ export function removeWindowLayoutMember(state, windowLayoutId, memberId) {
 export function removeClosedWindowFromAllLayouts(state, descriptor) {
   const title = descriptor?.title;
   const fingerprint = descriptor?.executableFingerprint;
-  if (typeof title !== 'string' || title.length === 0
-    || typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(fingerprint)) {
+  const windowInstanceId = descriptor?.windowInstanceId;
+  if ((windowInstanceId !== undefined && (typeof windowInstanceId !== 'string' || !/^W[0-9a-f]{16}$/i.test(windowInstanceId)))
+    || (windowInstanceId === undefined && (typeof title !== 'string' || title.length === 0
+      || typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(fingerprint)))) {
     throw new Error('Closed window descriptor is invalid.');
   }
-  const normalizedFingerprint = fingerprint.toLowerCase();
+  const normalizedFingerprint = typeof fingerprint === 'string' ? fingerprint.toLowerCase() : null;
   let changed = false;
   const windowLayouts = (state.windowLayouts ?? []).map((layout) => {
     const members = layout.arrangement.members.filter((member) => {
-      const same = member.descriptor.title === title
-        && member.descriptor.executableFingerprint.toLowerCase() === normalizedFingerprint;
+      const same = windowInstanceId !== undefined
+        ? member.descriptor.windowInstanceId === windowInstanceId
+        : member.descriptor.title === title
+          && member.descriptor.executableFingerprint.toLowerCase() === normalizedFingerprint;
       if (same) changed = true;
       return !same;
     });
