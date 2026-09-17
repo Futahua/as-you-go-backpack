@@ -24,7 +24,8 @@ function escapeHtml(value) {
  * 3 horizontal minus = Minimize all
  * 4 outlined square = Restore all
  * 5 unlocked padlock = Detach
- * reattach = locked padlock (widget replacement control). */
+ * reattach = locked padlock (widget replacement control)
+ * tracking = the durable auto-tracking filled/outline circle. */
 export const WINDOW_LAYOUT_CONTROL_GLYPHS = {
   pick: { path: '<path d="M6.5 3.5l13.5 6.5-6.3 2.1-2.1 6.3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>' },
   list: { path: '<rect x="6" y="3" width="12" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 8h6M9 12.5h6M9 17h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' },
@@ -32,6 +33,7 @@ export const WINDOW_LAYOUT_CONTROL_GLYPHS = {
   'restore-all': { path: '<rect x="5" y="5" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' },
   detach: { path: '<path d="M8 10.5V7.5a4 4 0 0 1 8 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="6" y="10.5" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' },
   reattach: { path: '<path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="6" y="10.5" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' },
+  tracking: { path: '<circle cx="12" cy="12" r="7" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="1.7"/>' },
 };
 
 /** The three persistent control actions (left-to-right). */
