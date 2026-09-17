@@ -1259,9 +1259,36 @@ async function openWindowLayoutPicker(layoutId) {
   }
 }
 
+/** A tracking lifecycle refresh can relist the native candidates while the
+ * chooser is still open, replacing the short-lived candidate table behind the
+ * row the user clicked. Retry only that typed `missing` case, and only when a
+ * fresh enumeration has one unambiguous title/application match. Duplicate
+ * Chrome windows remain fail-closed. */
+async function bindWindowLayoutPickerCandidate(candidateId, row) {
+  let bound = await host.bindWindowCandidate(candidateId);
+  if (bound?.outcome !== 'missing' || !row) return { bound, row };
+  const refreshed = await host.windowCandidates();
+  if (refreshed?.outcome !== 'success') return { bound, row };
+  const matches = (refreshed.candidates ?? []).filter((candidate) => {
+    if (candidate.title !== row.title) return false;
+    if (typeof row.applicationLabel === 'string' && typeof candidate.applicationLabel === 'string') {
+      return candidate.applicationLabel === row.applicationLabel;
+    }
+    return true;
+  });
+  if (matches.length !== 1) return { bound, row };
+  const rebound = await host.bindWindowCandidate(matches[0].id);
+  if (rebound?.outcome === 'success') return { bound: rebound, row: matches[0] };
+  return { bound: rebound, row: matches[0] };
+}
+
 async function closeWindowLayoutCandidate(layoutId, candidateId, candidates) {
   if (!candidates.some((candidate) => candidate.id === candidateId)) return false;
-  const bound = await host.bindWindowCandidate(candidateId);
+  const picked = await bindWindowLayoutPickerCandidate(
+    candidateId,
+    candidates.find((candidate) => candidate.id === candidateId),
+  );
+  const bound = picked.bound;
   if (bound.outcome !== 'success') {
     setWindowLayoutTransientStatus(layoutId, bound.error || 'Window is no longer available');
     return false;
@@ -1347,7 +1374,8 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     }
     return;
   }
-  const bound = await host.bindWindowCandidate(candidateId);
+  const picked = await bindWindowLayoutPickerCandidate(candidateId, row);
+  const bound = picked.bound;
   // 018X4: abort immediately after the await, before the failure status or the
   // success continuation.
   if (windowLayoutDetachment.isReadOnly()) return;
@@ -1371,8 +1399,7 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
   };
   const next = addWindowLayoutMember(state, layoutId, member);
   windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(layoutId, memberId), bound.capability);
-  const icon = (windowLayoutRuntime.pickerCandidates ?? [])
-    .find((candidate) => candidate.id === candidateId)?.icon ?? null;
+  const icon = picked.row?.icon ?? null;
   if (icon) windowLayoutRuntime.icons.set(windowLayoutMemberKey(layoutId, memberId), icon);
   store.commit(next);
   saveWorkspaceView();
@@ -6315,7 +6342,8 @@ function bootstrapWindowLayoutWidget() {
   async function handleWidgetListCandidate(candidateId, selectedOverride = null) {
     const row = (widgetState.candidates ?? []).find((candidate) => candidate.id === candidateId);
     if (!row) return false;
-    const bound = await host.bindWindowCandidate(candidateId);
+    const picked = await bindWindowLayoutPickerCandidate(candidateId, row);
+    const bound = picked.bound;
     if (bound.outcome !== 'success') {
       setWindowLayoutStatus(layoutId, bound.error || 'Pick failed');
       return false;
@@ -6327,7 +6355,7 @@ function bootstrapWindowLayoutWidget() {
     if (isMember) {
       client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] } });
     } else {
-      client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [{ descriptor: bound.descriptor, capability: bound.capability, candidate: row }], removes: [] } });
+      client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [{ descriptor: bound.descriptor, capability: bound.capability, candidate: picked.row }], removes: [] } });
     }
     return true;
   }
