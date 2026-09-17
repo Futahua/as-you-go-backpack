@@ -255,7 +255,23 @@ export function windowLayoutWidgetRenderIdentity(snapshot) {
  * emitting a partial `{}` that later poisons pickWindowBegin. Never carries a
  * runtime capability, token or any extra field. */
 function memberDescriptorSnapshot(member) {
-  return parseDescriptorLike(member?.descriptor);
+  // Persisted members carry runtime-only identity alongside the descriptor
+  // (currently `windowInstanceId`). The widget wire must never expose that
+  // field, but rejecting the whole member because the persisted object has an
+  // extra key makes every real window disappear from the detached card. Read
+  // the three descriptor fields explicitly, then emit the exact bounded wire
+  // shape below.
+  const raw = member?.descriptor;
+  if (!isPlainObject(raw)
+    || raw.version !== 1
+    || !boundedString(raw.title, 'descriptor.title')
+    || typeof raw.executableFingerprint !== 'string'
+    || !/^[a-f0-9]{64}$/i.test(raw.executableFingerprint)) return null;
+  return {
+    version: 1,
+    title: raw.title,
+    executableFingerprint: raw.executableFingerprint,
+  };
 }
 
 /** The bounded snapshot the workspace broadcasts and the widget renders: the
