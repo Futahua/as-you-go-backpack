@@ -2792,6 +2792,25 @@ async function reconcileTrackingBaseline() {
   await populateTrackingLayout(layout.id);
 }
 
+async function ensureStartupWindowLayoutWidget() {
+  if (DETACHED_SURFACE || windowLayoutDetachment.isReadOnly()) return;
+  let startup = (state.windowLayouts ?? []).find((layout) => layout.id === state.startupWindowLayoutId && layout.binned !== true);
+  if (!startup) {
+    const created = createWindowLayout(state, { name: 'Tracked windows' });
+    const createdLayoutId = created.windowLayouts[created.windowLayouts.length - 1]?.id;
+    const enabled = createdLayoutId ? setWindowLayoutTracking(created, createdLayoutId, true) : null;
+    if (enabled) {
+      if (await store.commit(enabled)) {
+        state = enabled;
+        startup = state.windowLayouts.find((layout) => layout.id === state.startupWindowLayoutId);
+        saveWorkspaceView();
+        noteWindowLayoutCommit(startup?.id);
+      }
+    }
+  }
+  if (startup?.id) await host.widgetOpen(startup.id).catch(() => undefined);
+}
+
 async function populateTrackingLayout(layoutId) {
   const layout = windowLayoutFromState(layoutId);
   if (!layout || layout.tracking?.enabled !== true) return;
@@ -6631,6 +6650,7 @@ if (WIDGET_SURFACE) {
     pointer,
     promptLibrary,
   }).then(() => {
+    void ensureStartupWindowLayoutWidget();
     void reconcileTrackingBaseline();
     if (!windowLayoutDetachment.isStopped()) bootstrapWindowLayoutRecording();
     // The launcher overlay: the marker already put this page in command-surface mode, and now that the state
