@@ -78,6 +78,12 @@ test('a member state change IS render identity', () => {
   assert.notEqual(windowLayoutWidgetRenderIdentity(before), windowLayoutWidgetRenderIdentity(after));
 });
 
+test('tracking state IS render identity', () => {
+  const before = windowLayoutWidgetSnapshot(BASE);
+  const after = windowLayoutWidgetSnapshot({ ...BASE, tracking: { enabled: true } });
+  assert.notEqual(windowLayoutWidgetRenderIdentity(before), windowLayoutWidgetRenderIdentity(after));
+});
+
 test('member order IS render identity', () => {
   const before = windowLayoutWidgetSnapshot(BASE);
   const after = windowLayoutWidgetSnapshot(layout([['m2', 'Beta', 'normal'], ['m1', 'Alpha', 'normal']]));

@@ -2586,8 +2586,8 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       return { ok: true };
     }
     if (command.kind === 'toggle-tracking') {
-      await handleWindowLayoutTrackingToggle(layoutId);
-      return { ok: true };
+      const toggled = await handleWindowLayoutTrackingToggle(layoutId);
+      return toggled ? { ok: true } : { ok: false, error: 'tracking persistence failed' };
     }
     if (command.kind === 'remove-member') {
       // 040: the widget's `Remove from this layout` routes to the existing
@@ -2894,23 +2894,23 @@ async function populateTrackingLayout(layoutId) {
   }
 }
 
-function handleWindowLayoutTrackingToggle(layoutId) {
-  if (windowLayoutDetachment.isReadOnly()) return;
+async function handleWindowLayoutTrackingToggle(layoutId) {
+  if (windowLayoutDetachment.isReadOnly()) return false;
   const layout = windowLayoutFromState(layoutId);
-  if (!layout) return;
+  if (!layout) return false;
   const nextEnabled = layout.tracking?.enabled !== true;
   const next = setWindowLayoutTracking(state, layoutId, nextEnabled);
-  void store.commit(next).then((persisted) => {
-    if (!persisted) return;
-    saveWorkspaceView();
-    noteWindowLayoutCommit(layoutId);
-    // A newly-enabled owner gets a fresh baseline; disabling only stops future
-    // additions and deliberately keeps its current members.
-    if (nextEnabled) {
-      void windowLayoutRecording.ensureRecording(layoutId);
-      void populateTrackingLayout(layoutId);
-    }
-  });
+  const persisted = await store.commit(next);
+  if (!persisted) return false;
+  saveWorkspaceView();
+  noteWindowLayoutCommit(layoutId);
+  // A newly-enabled owner gets a fresh baseline; disabling only stops future
+  // additions and deliberately keeps its current members.
+  if (nextEnabled) {
+    void windowLayoutRecording.ensureRecording(layoutId);
+    void populateTrackingLayout(layoutId);
+  }
+  return true;
 }
 
 const graph = createGraphController();
@@ -5757,7 +5757,7 @@ function bootstrapWindowLayoutWidget() {
   const widgetState = {
     selection: new Set(),
     anchor: new Map(),
-    snapshot: { id: layoutId, name: layoutId, members: [] },
+    snapshot: { id: layoutId, name: layoutId, tracking: { enabled: false }, members: [] },
     candidates: null,
     pickUnsubscribe: null,
     lastRevision: -1,

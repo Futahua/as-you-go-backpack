@@ -40,7 +40,7 @@ export const WINDOW_LAYOUT_WIDGET_MAX_ICON_BYTES = 262144;
 // Bounded like the member note it appears next to.
 export const WINDOW_LAYOUT_WIDGET_MAX_STATUS_CHARS = 160;
 
-const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window']);
+const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window', 'toggle-tracking']);
 const GROUP_ACTIONS = new Set(['minimize', 'restore', 'isolate']);
 
 function isPlainObject(value) {
@@ -139,6 +139,10 @@ export function windowLayoutWidgetParseCommand(raw) {
     const descriptor = parseDescriptorLike(raw.descriptor);
     return descriptor ? { kind: 'retire-closed-window', descriptor } : null;
   }
+  if (raw.kind === 'toggle-tracking') {
+    if (!exactKeys(raw, ['kind'])) return null;
+    return { kind: 'toggle-tracking' };
+  }
   if (raw.kind === 'group-action') {
     if (!exactKeys(raw, ['kind', 'action', 'memberIds'])) return null;
     if (!GROUP_ACTIONS.has(raw.action)) return null;
@@ -232,6 +236,7 @@ export function windowLayoutWidgetRenderIdentity(snapshot) {
   // The layout name is NOT here: the widget card body never renders it.
   return JSON.stringify([
     snapshot?.id ?? '',
+    snapshot?.tracking?.enabled === true,
     (snapshot?.members ?? []).map((member) => [
       member?.id ?? '',
       member?.state === 'minimized' ? 'minimized' : 'normal',
@@ -293,7 +298,13 @@ export function windowLayoutWidgetSnapshot(layout, memberIcon = () => null, memb
     && rawCardSize.height >= 1 && rawCardSize.height <= 2000
     ? { width: Math.round(rawCardSize.width), height: Math.round(rawCardSize.height) }
     : null;
-  return { id: layout?.id ?? '', name: layout?.name ?? layout?.id ?? '', members, cardSize };
+  return {
+    id: layout?.id ?? '',
+    name: layout?.name ?? layout?.id ?? '',
+    tracking: { enabled: layout?.tracking?.enabled === true },
+    members,
+    cardSize,
+  };
 }
 
 /** 019G/021: bounded retry for a transient channel failure (e.g. a widget
@@ -529,7 +540,15 @@ export function createWindowLayoutWidgetChannelWorkspace({
       if (!boundedString(layoutId, 'layoutId')) return revisionOf(layoutId);
       if (!isAuthoritative()) return revisionOf(layoutId);
       const layout = getLayout(layoutId);
-      if (layout) post({ type: 'snapshot', layoutId, revision: revisionOf(layoutId), snapshot: buildSnapshot(layout) });
+      if (layout) {
+        post({ type: 'snapshot', layoutId, revision: revisionOf(layoutId), snapshot: buildSnapshot(layout) });
+        // A widget can announce itself before writer election finishes. The
+        // first snapshot then legitimately carries placeholder icons, but a
+        // later writer broadcast must also kick the authoritative icon
+        // hydration path; otherwise the detached card stays icon-less while
+        // the attached card eventually fills from its local cache.
+        onAuthoritativeWidgetOpen?.(layoutId);
+      }
       return revisionOf(layoutId);
     },
     /** Tell an open widget that NO surface can act for it, so it shows a reason

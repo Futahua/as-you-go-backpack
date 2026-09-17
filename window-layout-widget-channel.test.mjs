@@ -91,6 +91,7 @@ test('widget-ready is answered with the current snapshot and revision', () => {
   assert.deepEqual(received[0].snapshot, {
     id: 'L1',
     name: 'L1',
+    tracking: { enabled: false },
     members: [{ id: 'm1', descriptor: { version: 1, title: 'Notepad', executableFingerprint: fingerprint('Notepad') }, state: 'normal', icon: null }],
     cardSize: null,
   });
@@ -351,6 +352,8 @@ test('the client rejects invalid commands before sending', () => {
 
 test('windowLayoutWidgetParseCommand bounds the exact vocabulary', () => {
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'member-toggle', memberId: 'm1' }), { kind: 'member-toggle', memberId: 'm1' });
+  assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'toggle-tracking' }), { kind: 'toggle-tracking' });
+  assert.equal(windowLayoutWidgetParseCommand({ kind: 'toggle-tracking', extra: true }), null);
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'group-action', action: 'isolate', memberIds: ['m1'] }), { kind: 'group-action', action: 'isolate', memberIds: ['m1'] });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'group-action', action: 'minimize', memberIds: [] }), { kind: 'group-action', action: 'minimize', memberIds: [] });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'picker-commit', pick: { outcome: 'cancelled' } }), { kind: 'picker-commit', pick: { outcome: 'cancelled' } });
