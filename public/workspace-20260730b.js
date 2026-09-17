@@ -2719,6 +2719,47 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
   }
 }
 
+async function populateTrackingLayout(layoutId) {
+  const layout = windowLayoutFromState(layoutId);
+  if (!layout || layout.tracking?.enabled !== true) return;
+  const existingIds = new Set((layout.arrangement?.members ?? [])
+    .map((member) => member.descriptor?.windowInstanceId)
+    .filter((value) => typeof value === 'string'));
+  const suppressed = new Set(layout.tracking?.suppressedInstanceIds ?? []);
+  const listed = await host.listWindowCandidates();
+  if (listed.outcome !== 'success') {
+    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(listed.outcome));
+    return;
+  }
+  let next = state;
+  let added = 0;
+  for (const candidate of listed.candidates ?? []) {
+    const bound = await host.bindWindowCandidate(candidate.id);
+    if (bound.outcome !== 'success') continue;
+    const instanceId = bound.descriptor?.windowInstanceId;
+    if (typeof instanceId !== 'string' || existingIds.has(instanceId) || suppressed.has(instanceId)) continue;
+    const observed = await host.observeWindowCapability(bound.capability);
+    if (observed.outcome !== 'success') continue;
+    const member = {
+      id: crypto.randomUUID(),
+      descriptor: bound.descriptor,
+      bounds: observed.observation?.bounds ?? null,
+      state: observed.observation?.state === 'minimized' ? 'minimized' : 'normal',
+    };
+    next = addWindowLayoutMember(next, layoutId, member);
+    existingIds.add(instanceId);
+    windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(layoutId, member.id), bound.capability);
+    added += 1;
+  }
+  if (added === 0) return;
+  const persisted = await store.commit(next);
+  if (persisted) {
+    saveWorkspaceView();
+    noteWindowLayoutCommit(layoutId);
+    await windowLayoutRecording.ensureRecording(layoutId);
+  }
+}
+
 function handleWindowLayoutTrackingToggle(layoutId) {
   if (windowLayoutDetachment.isReadOnly()) return;
   const layout = windowLayoutFromState(layoutId);
@@ -2731,7 +2772,10 @@ function handleWindowLayoutTrackingToggle(layoutId) {
     noteWindowLayoutCommit(layoutId);
     // A newly-enabled owner gets a fresh baseline; disabling only stops future
     // additions and deliberately keeps its current members.
-    if (nextEnabled) void windowLayoutRecording.ensureRecording(layoutId);
+    if (nextEnabled) {
+      void windowLayoutRecording.ensureRecording(layoutId);
+      void populateTrackingLayout(layoutId);
+    }
   });
 }
 
