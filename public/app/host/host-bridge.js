@@ -217,6 +217,8 @@ export function createHostBridge(window) {
     windowCandidates: () => request('papers:project:window-candidates'),
     bindWindowCandidate: (candidateId) =>
       request('papers:project:window-bind-candidate', { candidateId }),
+    activateWindowCapability: (capability) =>
+      request('papers:project:window-activate-capability', { capability }),
     observeWindowCapability: (capability) =>
       request('papers:project:window-observe-capability', { capability }),
     minimizeWindowCapability: (capability) =>

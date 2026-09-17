@@ -57,6 +57,7 @@ export function bindQuickRunWorkspace({
   universeNote = null,
   commandSurface = false,
   openFolderSurface = null,
+  activateLayoutMember = null,
 }) {
   if (typeof getState !== 'function') {
     throw new TypeError('bindQuickRunWorkspace needs a getState function to re-read the workspace');
@@ -102,6 +103,18 @@ export function bindQuickRunWorkspace({
       }
       const plan = planQuickRunActivation(current.row);
       if (plan?.deferred) {
+        if (plan.action === 'activate-window' && typeof activateLayoutMember === 'function') {
+          Promise.resolve(activateLayoutMember(plan.target.layoutId, plan.target.memberId))
+            .then((result) => {
+              if (result?.outcome === 'success') {
+                closeAfterSuccess();
+                return;
+              }
+              setStatus(result?.message || 'Quick Run: that window could not be activated.');
+            })
+            .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
+          return;
+        }
         setStatus('Quick Run: activating a live application window is not wired up yet.');
         return;
       }

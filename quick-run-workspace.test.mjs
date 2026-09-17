@@ -150,6 +150,7 @@ async function boot(options = {}) {
     setStatus: (text) => { harness.effects.status.push(text); },
     commandSurface: options.commandSurface === true,
     openFolderSurface: options.openFolderSurface,
+    activateLayoutMember: options.activateLayoutMember,
   });
   const type = (query) => {
     elements.input.value = query;
@@ -345,6 +346,33 @@ test('Ctrl+Enter on a Layout Item goes to the folder holding the layout, not to 
   assert.notEqual(h.store.getSession().currentId, 'wl-1', 'a layout id is not a destination the command knows');
   assert.equal(h.store.getSession().selected.has('wl-1'), true, 'and the layout record is what gets selected');
   assert.equal(isOpen(h.elements), false, 'section 16.1: a successful reveal closes the layer');
+});
+
+test('Enter on a Layout Item uses the host activation seam and closes after success', async () => {
+  const activated = [];
+  const h = await boot({
+    activateLayoutMember: async (layoutId, memberId) => {
+      activated.push([layoutId, memberId]);
+      return { outcome: 'success' };
+    },
+  });
+  h.mutate((state) => ({
+    ...state,
+    windowLayouts: [{
+      id: 'wl-1', parentId: 'g-b', name: 'Desk', order: 3,
+      arrangement: { version: 2, members: [{
+        id: 'm-console',
+        descriptor: { version: 1, title: 'Console 0', executableFingerprint: 'b7c1'.repeat(16) },
+        bounds: { x: 0, y: 0, width: 800, height: 600 }, state: 'normal',
+      }] },
+    }],
+  }));
+  h.surface.open();
+  h.type('console');
+  h.key('Enter');
+  await Promise.resolve();
+  assert.deepEqual(activated, [['wl-1', 'm-console']]);
+  assert.equal(isOpen(h.elements), false, 'a successful native activation closes Quick Run');
 });
 
 test('Ctrl+Enter reveals in the active workspace even while the Bin is open (section 1.6)', async () => {
