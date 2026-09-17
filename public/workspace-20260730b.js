@@ -2256,7 +2256,7 @@ const windowLayoutRuntimeController = windowLayoutRecording.runtime;
 // advisory until the host resolves the exact instance into a fresh capability.
 let trackingEventInFlight = false;
 async function reconcileTrackingLifecycleEvent(event) {
-  if (trackingEventInFlight || windowLayoutDetachment.isReadOnly()) return;
+  if (trackingEventInFlight || windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
   if (!event || typeof event.windowInstanceId !== 'string') return;
   const trackingLayout = (state.windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true);
   if (!trackingLayout) return;
@@ -2793,7 +2793,7 @@ async function reconcileTrackingBaseline() {
 }
 
 async function ensureStartupWindowLayoutWidget() {
-  if (DETACHED_SURFACE || windowLayoutDetachment.isReadOnly()) return;
+  if (DETACHED_SURFACE || windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
   let startup = (state.windowLayouts ?? []).find((layout) => layout.id === state.startupWindowLayoutId && layout.binned !== true);
   if (!startup) {
     const created = createWindowLayout(state, { name: 'Tracked windows' });
@@ -6608,6 +6608,8 @@ if (WIDGET_SURFACE) {
           for (const layout of state.windowLayouts ?? []) {
             windowLayoutWidgetChannelWorkspace.broadcast(layout.id);
           }
+          void reconcileTrackingBaseline();
+          void ensureStartupWindowLayoutWidget();
         }
         render();
       },
@@ -6616,7 +6618,10 @@ if (WIDGET_SURFACE) {
     channel.addEventListener('message', (event) => {
       if (surfaceCoordinator.receive(event.data)) render();
     });
-    void surfaceCoordinator.start().catch(() => {
+    void surfaceCoordinator.start().then(async () => {
+      await reconcileTrackingBaseline();
+      await ensureStartupWindowLayoutWidget();
+    }).catch(() => {
       coordinationState = 'unavailable';
       statusToast.show('Shared document coordination failed to elect a writer; durable editing is disabled.', { tone: 'error' });
       reportCoordinationUnavailableToWidgets('Workspace coordination unavailable');
@@ -6650,8 +6655,6 @@ if (WIDGET_SURFACE) {
     pointer,
     promptLibrary,
   }).then(() => {
-    void ensureStartupWindowLayoutWidget();
-    void reconcileTrackingBaseline();
     if (!windowLayoutDetachment.isStopped()) bootstrapWindowLayoutRecording();
     // The launcher overlay: the marker already put this page in command-surface mode, and now that the state
     // is loaded and every collaborator exists, the surface opens itself - there is no canvas here to open it
