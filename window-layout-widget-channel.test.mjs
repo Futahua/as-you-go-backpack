@@ -721,6 +721,12 @@ test('021 snapshot carries the persisted layout name and a bounded member icon',
   assert.equal(ok.members[0].icon, small, 'bounded icon is carried');
 });
 
+test('tracking is carried as a bounded boolean in widget snapshots', () => {
+  const layout = makeLayout('L1', []);
+  assert.deepEqual(windowLayoutWidgetSnapshot({ ...layout, tracking: { enabled: true } }).tracking, { enabled: true });
+  assert.deepEqual(windowLayoutWidgetSnapshot({ ...layout, tracking: { enabled: 'yes' } }).tracking, { enabled: false });
+});
+
 test('021 broadcast posts a current snapshot without bumping the revision', () => {
   const layouts = [makeLayout('L1', [{ id: 'm1', title: 'Notepad' }])];
   const { workspace, clientChannel } = makeBus(layouts);
