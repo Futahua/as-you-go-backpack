@@ -2255,8 +2255,11 @@ const windowLayoutRuntimeController = windowLayoutRecording.runtime;
 // this writer owns the one tracking layout's durable membership.  Events are
 // advisory until the host resolves the exact instance into a fresh capability.
 let trackingEventInFlight = false;
-async function reconcileTrackingLifecycleEvent(event) {
-  if (trackingEventInFlight || windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
+const trackingEventQueue = [];
+let trackingSessionId = null;
+let trackingLastSequence = 0;
+async function processTrackingLifecycleEvent(event) {
+  if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
   if (!event || typeof event.windowInstanceId !== 'string') return;
   const trackingLayout = (state.windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true);
   if (!trackingLayout) return;
@@ -2291,7 +2294,25 @@ async function reconcileTrackingLifecycleEvent(event) {
     trackingEventInFlight = false;
   }
 }
-host.onWindowLifecycleEvent?.((event) => { void reconcileTrackingLifecycleEvent(event); });
+async function drainTrackingLifecycleEvents() {
+  if (trackingEventInFlight) return;
+  trackingEventInFlight = true;
+  try {
+    while (trackingEventQueue.length > 0) await processTrackingLifecycleEvent(trackingEventQueue.shift());
+  } finally {
+    trackingEventInFlight = false;
+  }
+}
+host.onWindowLifecycleEvent?.((event) => {
+  const sequence = Number(event?.sequence);
+  const sessionChanged = trackingSessionId !== event?.trackerSessionId;
+  const gap = !Number.isSafeInteger(sequence) || (trackingLastSequence > 0 && sequence > trackingLastSequence + 1);
+  trackingSessionId = typeof event?.trackerSessionId === 'string' ? event.trackerSessionId : trackingSessionId;
+  if (Number.isSafeInteger(sequence)) trackingLastSequence = Math.max(trackingLastSequence, sequence);
+  if (sessionChanged || gap) void reconcileTrackingBaseline();
+  if (trackingEventQueue.length < 64) trackingEventQueue.push(event);
+  void drainTrackingLifecycleEvents();
+});
 
 // ---- 018A1 exclusive-controller handoff (As You Go half) ------------------
 // One controller/observer/save owner at any time. While detached the workspace
@@ -2661,6 +2682,10 @@ function handleWindowLayoutRetireMember(intent) {
   if (windowLayoutDetachment.isReadOnly()) return;
   const result = windowLayoutRetirementWriter.retire(layoutId, memberId);
   if (result.outcome !== 'removed') return;
+  if (intent.reason === 'watcher-destroy' && typeof intent.descriptor?.windowInstanceId === 'string') {
+    const cleared = setWindowLayoutInstanceSuppressed(state, layoutId, intent.descriptor.windowInstanceId, false);
+    void store.commit(cleared);
+  }
   // 019G: a removed card must clear/discard any pending hover preview.
   windowLayoutMemberPreview.cancel();
   windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
@@ -2746,7 +2771,11 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
   if (!layout || !memberId) return;
   // 019G: a removed card must clear/discard any pending hover preview.
   windowLayoutMemberPreview.cancel();
-  const next = removeWindowLayoutMember(state, layoutId, memberId);
+  let next = removeWindowLayoutMember(state, layoutId, memberId);
+  if (layout.tracking?.enabled === true && typeof layout.arrangement?.members?.find((member) => member.id === memberId)?.descriptor?.windowInstanceId === 'string') {
+    const instanceId = layout.arrangement.members.find((member) => member.id === memberId).descriptor.windowInstanceId;
+    next = setWindowLayoutInstanceSuppressed(next, layoutId, instanceId, true);
+  }
   windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
   windowLayoutRuntime.icons.delete(windowLayoutMemberKey(layoutId, memberId));
   store.commit(next);
