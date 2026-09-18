@@ -6368,13 +6368,17 @@ function bootstrapWindowLayoutWidget() {
       ? { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] }
       : { outcome: 'committed', adds: [{ descriptor: bound.descriptor, capability: bound.capability, candidate: picked.row }], removes: [] };
     const command = { kind: 'picker-commit', pick };
-    let acknowledgement = await client.sendCommandAndWait(command);
+    // Picker adds perform a live native observation before the single durable
+    // commit. Give that bounded native/host path the channel's full command
+    // acknowledgement window instead of the short default used by ordinary
+    // card toggles.
+    let acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 10000 });
     // A background writer commit may have advanced the revision between the
     // widget snapshot and this picker click. The stale response carries a
     // fresh snapshot; resend this one bounded command once against that
     // revision instead of silently dropping the add.
     if (acknowledgement?.type === 'stale') {
-      acknowledgement = await client.sendCommandAndWait(command);
+      acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 10000 });
     }
     if (acknowledgement?.type === 'error') {
       setWindowLayoutStatus(layoutId, acknowledgement.message || acknowledgement.code || 'Pick failed');
