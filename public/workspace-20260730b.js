@@ -6423,9 +6423,26 @@ function bootstrapWindowLayoutWidget() {
         setWindowLayoutStatus(layoutId, result.error || 'Pick failed');
         return;
       }
+      if (result.outcome !== 'committed') return;
       // Winter's one typed committed set goes to the WORKSPACE writer; the
-      // widget never applies it locally.
-      client.sendCommand({ kind: 'picker-commit', pick: result });
+      // widget never applies it locally. Wait for the authoritative result so
+      // a missing writer or a revision race cannot silently drop the pick.
+      let acknowledgement = await client.sendCommandAndWait(
+        { kind: 'picker-commit', pick: result },
+        { timeoutMs: 10000 },
+      );
+      if (acknowledgement?.type === 'stale') {
+        acknowledgement = await client.sendCommandAndWait(
+          { kind: 'picker-commit', pick: result },
+          { timeoutMs: 10000 },
+        );
+      }
+      if (acknowledgement?.type === 'error') {
+        setWindowLayoutStatus(
+          layoutId,
+          acknowledgement.message || acknowledgement.code || 'Pick failed',
+        );
+      }
     } catch {
       pickUnsubscribe?.();
       if (widgetState.pickUnsubscribe === pickUnsubscribe) {

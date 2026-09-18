@@ -550,6 +550,12 @@ test('direct picker self-recovers orphaned Papers sessions before attached and w
     assert.match(block, /begin\.error \|\| 'Direct pick is unavailable'/,
       `${surface} exposes the real begin failure instead of masking it`);
   }
+  assert.match(widget, /result\.outcome !== 'committed'/,
+    'widget direct pick does not submit a cancelled native result');
+  assert.match(widget, /client\.sendCommandAndWait\([\s\S]*picker-commit/,
+    'widget direct pick waits for the authoritative picker commit');
+  assert.match(widget, /acknowledgement\?\.type === 'stale'/,
+    'widget direct pick retries once after a revision race');
   assert.match(attached, /windowLayoutRuntime\.pickUnsubscribe === pickUnsubscribe/,
     'an older attached attempt cannot unsubscribe a newer attempt');
   assert.match(widget, /widgetState\.pickUnsubscribe === pickUnsubscribe/,
