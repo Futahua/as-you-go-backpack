@@ -2799,9 +2799,21 @@ function bootstrapWindowLayoutRecording() {
 function teardownWindowLayoutRecording() {
   clearTimeout(windowLayoutRuntime.saveTimer);
   windowLayoutRuntime.saveTimer = null;
+  const hadActivePick = Boolean(windowLayoutRuntime.pickAttempt || windowLayoutRuntime.pickUnsubscribe);
+  windowLayoutRuntime.pickAttempt = null;
+  windowLayoutRuntime.pickLayoutId = null;
   windowLayoutRuntime.pickUnsubscribe?.();
   windowLayoutRuntime.pickUnsubscribe = null;
-  return windowLayoutRuntimeController.stop({ clearActive: false });
+  // pagehide can occur without immediately destroying the sender WebContents.
+  // Do not abandon the result listener while leaving that sender owning the
+  // native one-shot session; explicitly release it before teardown completes.
+  const cancelPick = hadActivePick
+    ? host.pickWindowCancel().catch(() => undefined)
+    : Promise.resolve();
+  return Promise.all([
+    cancelPick,
+    windowLayoutRuntimeController.stop({ clearActive: false }),
+  ]).then(() => undefined);
 }
 
 // 018X1: pagehide performs only the detach LIFECYCLE stop (the controller stop
@@ -5794,6 +5806,7 @@ function bootstrapWindowLayoutWidget() {
     snapshot: { id: layoutId, name: layoutId, tracking: { enabled: false }, members: [] },
     candidates: null,
     pickUnsubscribe: null,
+    pickAttempt: null,
     lastRevision: -1,
     // What the currently mounted card DOM was built from. Protocol revision is
     // NOT that identity: see windowLayoutWidgetRenderIdentity.
@@ -6372,9 +6385,15 @@ function bootstrapWindowLayoutWidget() {
   async function beginWidgetDirectPick() {
     // 019G: the pick overlay covers the desktop; clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
+    // Mirror the attached surface's per-attempt token. A second click
+    // supersedes the first BEFORE any awaited chooser/cancel/begin work can
+    // resume and mutate status or shared picker ownership.
+    const pickAttempt = Symbol('window-layout-widget-direct-pick');
+    widgetState.pickAttempt = pickAttempt;
     // As on the attached surface, the native chooser must be fully destroyed
     // before starting the direct picker or it can steal picker ownership.
     await closeWidgetPicker();
+    if (widgetState.pickAttempt !== pickAttempt) return;
     windowLayoutRuntime.pickLayoutId = layoutId;
     const members = uniqueWindowLayoutMemberDescriptors(
       (widgetState.snapshot.members ?? []).map((member) => member.descriptor),
@@ -6384,6 +6403,7 @@ function bootstrapWindowLayoutWidget() {
       // Recover an orphaned main-process picker before starting this widget's
       // fresh one-shot session. This also makes a second click a clean restart.
       await host.pickWindowCancel();
+      if (widgetState.pickAttempt !== pickAttempt) return;
       // Subscribe to the result push BEFORE awaiting begin, so an immediate
       // pick never misses its result (016R pattern).
       const beginPromise = host.pickWindowBegin(members);
@@ -6392,6 +6412,7 @@ function bootstrapWindowLayoutWidget() {
         widgetState.pickUnsubscribe = pickUnsubscribe;
       });
       const begin = await beginPromise;
+      if (widgetState.pickAttempt !== pickAttempt) return;
       if (begin.outcome !== 'started') {
         pickUnsubscribe?.();
         if (widgetState.pickUnsubscribe === pickUnsubscribe) {
@@ -6401,6 +6422,7 @@ function bootstrapWindowLayoutWidget() {
         return;
       }
       const result = await pickPromise;
+      if (widgetState.pickAttempt !== pickAttempt) return;
       if (result.outcome === 'failed') {
         setWindowLayoutStatus(layoutId, result.error || 'Pick failed');
         return;
@@ -6413,11 +6435,13 @@ function bootstrapWindowLayoutWidget() {
         { kind: 'picker-commit', pick: result },
         { timeoutMs: 10000 },
       );
+      if (widgetState.pickAttempt !== pickAttempt) return;
       if (acknowledgement?.type === 'stale') {
         acknowledgement = await client.sendCommandAndWait(
           { kind: 'picker-commit', pick: result },
           { timeoutMs: 10000 },
         );
+        if (widgetState.pickAttempt !== pickAttempt) return;
       }
       if (acknowledgement?.type === 'error') {
         setWindowLayoutStatus(
@@ -6430,6 +6454,7 @@ function bootstrapWindowLayoutWidget() {
       if (widgetState.pickUnsubscribe === pickUnsubscribe) {
         widgetState.pickUnsubscribe = null;
       }
+      if (widgetState.pickAttempt !== pickAttempt) return;
       setWindowLayoutStatus(
         layoutId,
         error instanceof Error ? error.message : String(error || 'Direct pick is unavailable'),
@@ -6439,8 +6464,11 @@ function bootstrapWindowLayoutWidget() {
       if (widgetState.pickUnsubscribe === pickUnsubscribe) {
         widgetState.pickUnsubscribe = null;
       }
-      if (windowLayoutRuntime.pickLayoutId === layoutId) {
-        windowLayoutRuntime.pickLayoutId = null;
+      if (widgetState.pickAttempt === pickAttempt) {
+        widgetState.pickAttempt = null;
+        if (windowLayoutRuntime.pickLayoutId === layoutId) {
+          windowLayoutRuntime.pickLayoutId = null;
+        }
       }
     }
   }
@@ -6459,8 +6487,11 @@ function bootstrapWindowLayoutWidget() {
   });
 
   window.addEventListener('pagehide', () => {
+    const hadActivePick = Boolean(widgetState.pickAttempt || widgetState.pickUnsubscribe);
+    widgetState.pickAttempt = null;
     widgetState.pickUnsubscribe?.();
     widgetState.pickUnsubscribe = null;
+    if (hadActivePick) void host.pickWindowCancel().catch(() => undefined);
     snapshotRetry?.cancel();
     snapshotRetry = null;
     if (cardSizeTimer !== null) {

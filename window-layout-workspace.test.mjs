@@ -561,10 +561,36 @@ test('direct picker self-recovers orphaned Papers sessions before attached and w
     'an older attached attempt cannot unsubscribe a newer attempt');
   assert.match(widget, /widgetState\.pickUnsubscribe === pickUnsubscribe/,
     'an older widget attempt cannot unsubscribe a newer attempt');
+  assert.match(widget, /const pickAttempt = Symbol\('window-layout-widget-direct-pick'\)/,
+    'widget direct pick owns a per-attempt token like the attached surface');
+  assert.match(widget, /widgetState\.pickAttempt !== pickAttempt/,
+    'a superseded widget attempt stops after awaited host/channel work');
+  assert.match(widget, /widgetState\.pickAttempt === pickAttempt/,
+    'only the current widget attempt may clear shared picker ownership');
   assert.match(source, /function uniqueWindowLayoutMemberDescriptors\(members\)/,
     'duplicate saved members are collapsed before they can brick native preparation');
   assert.equal((source.match(/uniqueWindowLayoutMemberDescriptors\(/g) ?? []).length, 3,
     'both attached and widget surfaces use the shared descriptor deduplication');
+});
+
+test('pagehide explicitly releases active native direct-pick ownership on both surfaces', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+
+  const teardownStart = source.indexOf('function teardownWindowLayoutRecording()');
+  const teardownEnd = source.indexOf("\n}\n\n// 018X1: pagehide", teardownStart) + 2;
+  const teardown = source.slice(teardownStart, teardownEnd);
+  assert.match(teardown, /const hadActivePick = Boolean\(windowLayoutRuntime\.pickAttempt \|\| windowLayoutRuntime\.pickUnsubscribe\)/);
+  assert.match(teardown, /host\.pickWindowCancel\(\)\.catch\(\(\) => undefined\)/,
+    'workspace pagehide releases a still-owned Papers picker instead of only dropping its listener');
+
+  const widgetStart = source.indexOf('function bootstrapWindowLayoutWidget()');
+  const pagehideStart = source.indexOf("  window.addEventListener('pagehide', () => {", widgetStart);
+  const pagehideEnd = source.indexOf("\n  });", pagehideStart) + 5;
+  const widgetPagehide = source.slice(pagehideStart, pagehideEnd);
+  assert.match(widgetPagehide, /const hadActivePick = Boolean\(widgetState\.pickAttempt \|\| widgetState\.pickUnsubscribe\)/);
+  assert.match(widgetPagehide, /widgetState\.pickAttempt = null/);
+  assert.match(widgetPagehide, /host\.pickWindowCancel\(\)\.catch\(\(\) => undefined\)/,
+    'widget pagehide invalidates the attempt and releases native ownership before the surface disappears');
 });
 
 test('040 two layouts referencing the SAME window stay cache- and state-isolated', async () => {
