@@ -15,6 +15,12 @@ export function createHostBridge(window) {
   const pending = new Map();
   const MAX_PENDING = 64;
   const REQUEST_TIMEOUT_MS = 15000;
+  // Native direct-pick begin is setup, not the interactive pick itself. Papers
+  // may spend two bounded 10s helper-list attempts preparing the seed set and
+  // then up to 3s waiting for SlopTop to acknowledge activation. Do not let
+  // the renderer's ordinary 15s RPC timeout pre-empt that native bounded
+  // lifecycle; the final human-driven pick result is delivered separately.
+  const PICK_BEGIN_REQUEST_TIMEOUT_MS = 30 * 1000;
   // The native candidate chooser is intentionally user-interactive: its
   // request remains pending while the creator searches and previews windows.
   // Keep it bounded, but do not let the ordinary quick-RPC timeout make a
@@ -264,8 +270,10 @@ export function createHostBridge(window) {
       request('papers:project:window-resolve-descriptor', { descriptor }),
     resolveWindowInstance: (instanceId) =>
       request('papers:project:window-resolve-instance', { instanceId }),
-    // 016: direct onscreen pick (Papers-owned overlay + eligibility).
-    pickWindowBegin: (members) => request('papers:project:window-pick-begin', { members }),
+    // 016: direct onscreen pick. Begin waits only for Papers/SlopTop bounded
+    // setup; the eventual human commit/cancel arrives on the result push.
+    pickWindowBegin: (members) =>
+      request('papers:project:window-pick-begin', { members }, PICK_BEGIN_REQUEST_TIMEOUT_MS),
     // 022: active picker keyboard controls are handled by the Papers picker
     // session; the page only requests stage/commit and never mutates state.
     pickWindowStage: () => request('papers:project:window-pick-stage'),

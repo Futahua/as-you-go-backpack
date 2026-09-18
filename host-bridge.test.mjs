@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { createHostBridge } from './public/app/host/host-bridge.js';
 
@@ -295,6 +296,20 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
     picker: { ok: true },
   });
   assert.deepEqual(await closePicker, { action: 'cancel', candidateId: null });
+});
+
+test('direct-pick begin has its own bounded startup timeout instead of the short RPC or human chooser timeout', async () => {
+  const source = await readFile(new URL('./public/app/host/host-bridge.js', import.meta.url), 'utf8');
+  assert.match(source, /const PICK_BEGIN_REQUEST_TIMEOUT_MS = 30 \* 1000;/,
+    'native picker setup gets enough time for the helper retry plus activation ACK');
+  assert.match(
+    source,
+    /pickWindowBegin: \(members\) =>[\s\S]*?request\('papers:project:window-pick-begin', \{ members \}, PICK_BEGIN_REQUEST_TIMEOUT_MS\)/,
+    'direct-pick begin uses the dedicated bounded setup timeout');
+  assert.match(
+    source,
+    /windowCandidatePicker: \(candidates\) =>[\s\S]*?INTERACTIVE_REQUEST_TIMEOUT_MS/,
+    'the human-search chooser keeps its separate interactive timeout');
 });
 
 test('host bridge preserves the versioned state envelope and decodes its document', async () => {
