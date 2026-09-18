@@ -6287,16 +6287,24 @@ function bootstrapWindowLayoutWidget() {
   }
 
   let widgetPickerOpen = false;
+  let widgetPickerGeneration = 0;
   async function openWidgetPicker() {
     if (widgetPickerOpen) {
-      return;
+      // A native chooser can disappear independently. Re-entering the list
+      // control is an explicit recovery request: invalidate the old attempt
+      // before starting a fresh one so its late reply cannot mutate this
+      // widget or leave the control permanently inert.
+      closeWidgetPicker();
     }
+    const generation = ++widgetPickerGeneration;
     widgetPickerOpen = true;
+    const ownsPicker = () => widgetPickerOpen && widgetPickerGeneration === generation;
     // 019G: a picker covering the desktop must clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
     try {
       while (true) {
         const result = await host.windowCandidates();
+        if (!ownsPicker()) return;
         if (result.outcome !== 'success') {
           setWindowLayoutStatus(layoutId, result.error || 'List unavailable');
           break;
@@ -6312,8 +6320,10 @@ function bootstrapWindowLayoutWidget() {
           icon: candidate.icon ?? null,
           current: currentTitles.has(candidate.title),
         })));
+        if (!ownsPicker()) return;
         if (picked.action === 'close' && picked.candidateId) {
           await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
+          if (!ownsPicker()) return;
           continue;
         }
         if (picked.action === 'direct-pick') {
@@ -6322,12 +6332,13 @@ function bootstrapWindowLayoutWidget() {
         }
         if (picked.action !== 'select' || !picked.candidateId) break;
         await handleWidgetListCandidate(picked.candidateId);
+        if (!ownsPicker()) return;
       }
     } catch (error) {
+      if (!ownsPicker()) return;
       setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
     } finally {
-      closeWidgetPicker();
-      widgetPickerOpen = false;
+      if (ownsPicker()) closeWidgetPicker();
     }
   }
 
@@ -6359,6 +6370,11 @@ function bootstrapWindowLayoutWidget() {
     // that does not exist: an unanswered dismiss used to block live-pick for
     // the full bridge timeout and make every widget button appear inert.
     const wasOpen = widgetPickerOpen || Boolean(pickerHost?.innerHTML);
+    // Invalidate synchronously, before awaiting the native dismiss request;
+    // a late chooser response or a later finally block must not touch the
+    // retired attempt or issue a duplicate close.
+    widgetPickerOpen = false;
+    widgetPickerGeneration += 1;
     if (pickerHost) pickerHost.innerHTML = '';
     restoreHoveredWindowLayoutPreview(layoutId);
     return wasOpen ? host.windowCandidatePickerClose().catch(() => undefined) : Promise.resolve();

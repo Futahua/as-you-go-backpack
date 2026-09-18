@@ -813,3 +813,24 @@ test('attached and detached list picks use bound descriptor identity and the sha
   assert.match(command, /ok: false, error: applied\.error/,
     'a failed durable picker commit is an error ACK, never a false committed result');
 });
+
+test('detached picker re-entry invalidates stale chooser ownership before starting again', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const start = source.indexOf('  let widgetPickerOpen = false;');
+  const end = source.indexOf('  async function handleWidgetListCandidate', start);
+  const widgetPicker = source.slice(start, end);
+  assert.match(widgetPicker, /let widgetPickerGeneration = 0;/,
+    'the widget chooser owns an explicit attempt generation');
+  assert.match(widgetPicker, /if \(widgetPickerOpen\) \{[\s\S]*?closeWidgetPicker\(\);[\s\S]*?\}/,
+    're-entering an apparently open chooser invalidates the old attempt');
+  assert.match(widgetPicker, /const ownsPicker = \(\) => widgetPickerOpen && widgetPickerGeneration === generation;/,
+    'late native replies are scoped to the current chooser attempt');
+  assert.match(widgetPicker, /const result = await host\.windowCandidates\(\);\s*if \(!ownsPicker\(\)\) return;/,
+    'a late enumeration result cannot mutate a retired attempt');
+  assert.match(widgetPicker, /const picked = await host\.windowCandidatePicker\([\s\S]*?\);\s*if \(!ownsPicker\(\)\) return;/,
+    'a late chooser result cannot mutate a retired attempt');
+  assert.match(widgetPicker, /widgetPickerOpen = false;\s*widgetPickerGeneration \+= 1;\s*if \(pickerHost\) pickerHost\.innerHTML = '';/,
+    'close synchronously clears ownership before awaiting native dismissal');
+  assert.match(widgetPicker, /if \(ownsPicker\(\)\) closeWidgetPicker\(\);/,
+    'the owning finally block performs one cleanup and retired attempts do not duplicate it');
+});
