@@ -585,7 +585,7 @@ test('pagehide explicitly releases active native direct-pick ownership on both s
 
   const widgetStart = source.indexOf('function bootstrapWindowLayoutWidget()');
   const pagehideStart = source.indexOf("  window.addEventListener('pagehide', () => {", widgetStart);
-  const pagehideEnd = source.indexOf("  window.addEventListener('keydown'", pagehideStart);
+  const pagehideEnd = source.indexOf('// 035/037/039:', pagehideStart);
   const widgetPagehide = source.slice(pagehideStart, pagehideEnd);
   assert.match(widgetPagehide, /const hadActivePick = Boolean\(widgetState\.pickAttempt \|\| widgetState\.pickUnsubscribe\)/);
   assert.match(widgetPagehide, /widgetState\.pickAttempt = null/);
