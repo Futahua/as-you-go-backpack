@@ -1395,7 +1395,7 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
   return applied.outcome === 'committed' && windowLayoutPickApplyOutcome(applied).mutated;
 }
 
-/** 019B: bounded concurrent group scheduling./** 019B: bounded concurrent group scheduling. At most
+/** 019B: bounded concurrent group scheduling. At most
  * WINDOW_LAYOUT_GROUP_CONCURRENCY members observe/mutate in flight, so a group
  * action's latency scales with the slowest helper call instead of a fully
  * serialized tail; results stay typed per member and a superseded result
@@ -2727,7 +2727,7 @@ async function applyWindowLayoutPickSet(layoutId, result, { activateOnMutation =
   return applied;
 }
 
-/** 019C: Ning's onRetireMember intent/** 019C: Ning's onRetireMember intent -> ONE data-only removal/save and a
+/** 019C: Ning's onRetireMember intent -> ONE data-only removal/save and a
  * status/selection refresh. An intent for a member/layout that no longer
  * exists is ignored; counters are never persisted. */
 function handleWindowLayoutRetireMember(intent) {
@@ -6373,7 +6373,7 @@ function bootstrapWindowLayoutWidget() {
     return true;
   }
 
-  async function beginWidgetDirectPick() {  async function beginWidgetDirectPick() {
+  async function beginWidgetDirectPick() {
     // 019G: the pick overlay covers the desktop; clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
     // As on the attached surface, the native chooser must be fully destroyed
