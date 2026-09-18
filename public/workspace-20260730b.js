@@ -96,6 +96,7 @@ import {
   createWindowLayoutPickApplier,
   createWindowLayoutRetirementWriter,
   windowLayoutPickApplyOutcome,
+  windowLayoutPickForBoundCandidate,
 } from './app/window-layout-workspace.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup } from './app/window-layout-control-icons.js';
 import {
@@ -1370,20 +1371,16 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(bound.outcome));
     return false;
   }
-  const exactMatches = (layout.arrangement?.members ?? [])
-    .filter((member) => sameWindowLayoutDescriptor(member.descriptor, bound.descriptor));
-  const removing = exactMatches.length > 0;
-  const pick = removing
-    ? { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] }
-    : {
-      outcome: 'committed',
-      adds: [{
-        descriptor: bound.descriptor,
-        capability: bound.capability,
-        candidate: picked.row,
-      }],
-      removes: [],
-    };
+  const pick = windowLayoutPickForBoundCandidate(
+    layout.arrangement?.members ?? [],
+    bound,
+    picked.row,
+  );
+  if (!pick) {
+    setWindowLayoutStatus(layoutId, 'Pick failed');
+    return false;
+  }
+  const removing = pick.removes.length > 0;
   // Use the same one-commit writer as direct pick and the detached widget.
   // Adds keep selecting/recording this layout; an inactive-layout removal
   // remains data-only, matching the established attached-list behavior.
@@ -1578,11 +1575,6 @@ async function windowLayoutToggleRange(layoutId, clickedMemberId, explicitMember
 
 /** 016 direct onscreen pick: begin the Papers-owned pick session for THIS
  * layout and wait for its single typed result (Escape/right-click cancels). */
-function sameWindowLayoutDescriptor(left, right) {
-  return left?.version === right?.version
-    && left?.title === right?.title
-    && left?.executableFingerprint === right?.executableFingerprint;
-}
 function uniqueWindowLayoutMemberDescriptors(members) {
   const unique = new Map();
   for (const descriptor of members) {
@@ -6356,11 +6348,15 @@ function bootstrapWindowLayoutWidget() {
     // Candidate current-state is presentation-only: it has no persisted
     // executable fingerprint. After bind, exact descriptor identity decides
     // whether this candidate is an add or a removal.
-    const isMember = (widgetState.snapshot.members ?? [])
-      .some((member) => sameWindowLayoutDescriptor(member.descriptor, bound.descriptor));
-    const pick = isMember
-      ? { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] }
-      : { outcome: 'committed', adds: [{ descriptor: bound.descriptor, capability: bound.capability, candidate: picked.row }], removes: [] };
+    const pick = windowLayoutPickForBoundCandidate(
+      widgetState.snapshot.members ?? [],
+      bound,
+      picked.row,
+    );
+    if (!pick) {
+      setWindowLayoutStatus(layoutId, 'Pick failed');
+      return false;
+    }
     const command = { kind: 'picker-commit', pick };
     let acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 10000 });
     if (acknowledgement?.type === 'stale') {
