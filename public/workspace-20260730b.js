@@ -6313,8 +6313,8 @@ function bootstrapWindowLayoutWidget() {
     } catch (error) {
       setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
     } finally {
-      widgetPickerOpen = false;
       closeWidgetPicker();
+      widgetPickerOpen = false;
     }
   }
 
@@ -6341,9 +6341,14 @@ function bootstrapWindowLayoutWidget() {
   function closeWidgetPicker() {
     widgetState.candidates = null;
     const pickerHost = elements.grid.querySelector(`[data-wl-picker="${CSS.escape(layoutId)}"]`);
+    // A direct-pick click comes from the normal widget card, where the list
+    // picker is not open. Do not issue a host dismiss request for a picker
+    // that does not exist: an unanswered dismiss used to block live-pick for
+    // the full bridge timeout and make every widget button appear inert.
+    const wasOpen = widgetPickerOpen || Boolean(pickerHost?.innerHTML);
     if (pickerHost) pickerHost.innerHTML = '';
     restoreHoveredWindowLayoutPreview(layoutId);
-    return host.windowCandidatePickerClose().catch(() => undefined);
+    return wasOpen ? host.windowCandidatePickerClose().catch(() => undefined) : Promise.resolve();
   }
 
   async function handleWidgetListCandidate(candidateId, selectedOverride = null) {
