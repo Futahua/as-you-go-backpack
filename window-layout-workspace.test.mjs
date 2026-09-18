@@ -577,7 +577,7 @@ test('pagehide explicitly releases active native direct-pick ownership on both s
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
 
   const teardownStart = source.indexOf('function teardownWindowLayoutRecording()');
-  const teardownEnd = source.indexOf("\n}\n\n// 018X1: pagehide", teardownStart) + 2;
+  const teardownEnd = source.indexOf('// 018X1: pagehide', teardownStart);
   const teardown = source.slice(teardownStart, teardownEnd);
   assert.match(teardown, /const hadActivePick = Boolean\(windowLayoutRuntime\.pickAttempt \|\| windowLayoutRuntime\.pickUnsubscribe\)/);
   assert.match(teardown, /host\.pickWindowCancel\(\)\.catch\(\(\) => undefined\)/,
@@ -585,7 +585,7 @@ test('pagehide explicitly releases active native direct-pick ownership on both s
 
   const widgetStart = source.indexOf('function bootstrapWindowLayoutWidget()');
   const pagehideStart = source.indexOf("  window.addEventListener('pagehide', () => {", widgetStart);
-  const pagehideEnd = source.indexOf("\n  });", pagehideStart) + 5;
+  const pagehideEnd = source.indexOf("  window.addEventListener('keydown'", pagehideStart);
   const widgetPagehide = source.slice(pagehideStart, pagehideEnd);
   assert.match(widgetPagehide, /const hadActivePick = Boolean\(widgetState\.pickAttempt \|\| widgetState\.pickUnsubscribe\)/);
   assert.match(widgetPagehide, /widgetState\.pickAttempt = null/);
