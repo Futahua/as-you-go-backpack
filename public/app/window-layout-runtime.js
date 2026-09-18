@@ -23,6 +23,24 @@ export function windowLayoutMemberKey(layoutId, memberId) {
   return `${layoutId}\u0000${memberId}`;
 }
 
+/**
+ * Return the legacy fallback key used when an exact native instance id is no
+ * longer available.  This pair is only a hint: it is safe for fallback only
+ * when it identifies one persisted member in the layout being resolved.
+ */
+export function windowLayoutLegacyDescriptorKey(descriptor) {
+  if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor)) return null;
+  if (typeof descriptor.title !== 'string' || typeof descriptor.executableFingerprint !== 'string') return null;
+  return `${descriptor.executableFingerprint}\u0000${descriptor.title}`;
+}
+
+export function windowLayoutLegacyDescriptorCount(layout, descriptor) {
+  const key = windowLayoutLegacyDescriptorKey(descriptor);
+  if (key === null) return 0;
+  return (layout?.arrangement?.members ?? []).filter((member) =>
+    windowLayoutLegacyDescriptorKey(member?.descriptor) === key).length;
+}
+
 function memberKey(layoutId, memberId) {
   return windowLayoutMemberKey(layoutId, memberId);
 }
@@ -124,7 +142,7 @@ export function createWindowLayoutRuntime({
 
   async function applyMember(layoutId, member, expectedGeneration) {
     if (generation !== expectedGeneration) return report(layoutId, member.id, { outcome: 'superseded' });
-    const resolved = await host.resolveWindowDescriptor(member.descriptor);
+    const resolved = await host.resolveWindowDescriptor(member.descriptor, layoutId);
     if (generation !== expectedGeneration) return report(layoutId, member.id, { outcome: 'superseded' });
     if (resolved.outcome !== 'success' || !resolved.capability) {
       return report(layoutId, member.id, resolved);
@@ -268,7 +286,7 @@ export function createWindowLayoutRuntime({
     let reResolved = null;
     if (member?.descriptor) {
       try {
-        reResolved = await host.resolveWindowDescriptor(member.descriptor);
+        reResolved = await host.resolveWindowDescriptor(member.descriptor, layoutId);
       } catch {
         reResolved = null;
       }
@@ -368,7 +386,7 @@ export function createWindowLayoutRuntime({
       const key = memberKey(layoutId, member.id);
       let capability = capabilities.get(key);
       if (!capability) {
-        const resolved = await host.resolveWindowDescriptor(member.descriptor);
+        const resolved = await host.resolveWindowDescriptor(member.descriptor, layoutId);
         if (generation !== expectedGeneration) return { outcome: 'superseded', layoutId, results: [] };
         if (resolved.outcome === 'success' && resolved.capability) {
           capability = resolved.capability;

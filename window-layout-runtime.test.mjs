@@ -4,7 +4,10 @@ import test from 'node:test';
 import {
   WINDOW_LAYOUT_MEMBER_UNVERIFIED,
   WINDOW_LAYOUT_UNVERIFIED_IDENTITY,
-  createWindowLayoutRuntime, } from './public/app/window-layout-runtime.js';
+  createWindowLayoutRuntime,
+  windowLayoutLegacyDescriptorCount,
+  windowLayoutLegacyDescriptorKey,
+} from './public/app/window-layout-runtime.js';
 
 const descriptor = (title) => ({ version: 1, title, executableFingerprint: title.repeat(64).slice(0, 64) });
 const member = (id, title, bounds, state = 'normal') => ({ id, descriptor: descriptor(title), bounds, state });
@@ -60,6 +63,38 @@ function harness(overrides = {}) {
   });
   return { runtime, layouts, calls, persisted, observations, results, intents, intervals };
 }
+
+test('legacy descriptor fallback is only unique within a persisted layout', () => {
+  const duplicate = {
+    arrangement: {
+      members: [
+        { descriptor: { title: 'New Tab - Google Chrome', executableFingerprint: 'chrome' } },
+        { descriptor: { title: 'New Tab - Google Chrome', executableFingerprint: 'chrome' } },
+      ],
+    },
+  };
+  const descriptor = duplicate.arrangement.members[0].descriptor;
+  assert.equal(windowLayoutLegacyDescriptorKey(descriptor), 'chrome\u0000New Tab - Google Chrome');
+  assert.equal(windowLayoutLegacyDescriptorCount(duplicate, descriptor), 2);
+  assert.equal(windowLayoutLegacyDescriptorCount({ arrangement: { members: [duplicate.arrangement.members[0]] } }, descriptor), 1);
+  assert.equal(windowLayoutLegacyDescriptorCount(duplicate, { title: 'Other', executableFingerprint: 'chrome' }), 0);
+});
+
+test('recording resolution receives its layout id for fail-closed legacy fallback', async () => {
+  const seen = [];
+  const h = harness({
+    host: {
+      resolveWindowDescriptor: async (value, layoutId) => {
+        seen.push([value.title, layoutId]);
+        return { outcome: 'ambiguous', error: 'duplicate persisted fallback' };
+      },
+    },
+  });
+  const result = await h.runtime.switchTo('L2');
+  assert.equal(result.outcome, 'partial');
+  assert.deepEqual(seen, [['A', 'L2'], ['B', 'L2']]);
+  assert.equal(h.calls.some(([kind]) => kind === 'apply'), false);
+});
 
 test('switch applies members in persisted order and records every success', async () => {
   const h = harness();

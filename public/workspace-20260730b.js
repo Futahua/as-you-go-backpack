@@ -88,7 +88,7 @@ import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js';
-import { createWindowLayoutRecordingWiring, windowLayoutMemberKey } from './app/window-layout-runtime.js';
+import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, windowLayoutLegacyDescriptorCount } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
 import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, windowLayoutWidgetRenderIdentity, windowLayoutWidgetCommittedStatus, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
@@ -992,7 +992,7 @@ async function capabilityForMember(layoutId, memberId) {
   const key = windowLayoutMemberKey(layoutId, memberId);
   const cached = windowLayoutRuntime.capabilities.get(key);
   if (cached) return cached;
-  const resolved = await resolveWindowLayoutMemberDescriptor(member.descriptor);
+  const resolved = await resolveWindowLayoutMemberDescriptor(member.descriptor, layoutId);
   // 018X4: a handoff begun during the resolve must abort IMMEDIATELY after the
   // await, before either the failure status or the success cache side effect.
   if (windowLayoutDetachment.isReadOnly()) return null;
@@ -1011,10 +1011,18 @@ async function capabilityForMember(layoutId, memberId) {
  * `missing` result, and the host still requires one unique
  * executable-fingerprint + title match. Duplicate Chrome windows remain
  * ambiguous and are never guessed. */
-async function resolveWindowLayoutMemberDescriptor(descriptor) {
+async function resolveWindowLayoutMemberDescriptor(descriptor, layoutId = null) {
   const resolved = await host.resolveWindowDescriptor(descriptor);
   if (resolved?.outcome !== 'missing'
     || typeof descriptor?.windowInstanceId !== 'string') return resolved;
+  const layout = layoutId === null ? null : windowLayoutFromState(layoutId);
+  if (layout && windowLayoutLegacyDescriptorCount(layout, descriptor) > 1) {
+    return {
+      outcome: 'ambiguous',
+      error: 'legacy fallback is ambiguous within this persisted layout',
+      reason: 'duplicate persisted title and executable fingerprint',
+    };
+  }
   const fallbackDescriptor = {
     version: descriptor.version,
     title: descriptor.title,
@@ -1972,10 +1980,10 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
   if (cached) return Promise.resolve(cached);
   const resolve = typeof member.windowInstanceId === 'string' && typeof host.resolveWindowInstance === 'function'
     ? host.resolveWindowInstance(member.windowInstanceId)
-    : host.resolveWindowDescriptor(member.descriptor);
+    : resolveWindowLayoutMemberDescriptor(member.descriptor, layoutId);
   return Promise.resolve(resolve).then((resolved) => {
     if (resolved?.outcome === 'missing' && typeof member.windowInstanceId === 'string') {
-      return host.resolveWindowDescriptor(member.descriptor);
+      return resolveWindowLayoutMemberDescriptor(member.descriptor, layoutId);
     }
     return resolved;
   }).then((resolved) => {
@@ -2269,7 +2277,7 @@ window.addEventListener('pagehide', () => {
 const windowLayoutRecording = createWindowLayoutRecordingWiring({
   getLayout: windowLayoutFromState,
   host: {
-    resolveWindowDescriptor: (descriptor) => resolveWindowLayoutMemberDescriptor(descriptor),
+    resolveWindowDescriptor: (descriptor, layoutId = null) => resolveWindowLayoutMemberDescriptor(descriptor, layoutId),
     observeWindowCapability: (capability) => host.observeWindowCapability(capability),
     applyWindowCapability: (capability, bounds) => host.applyWindowCapability(capability, bounds),
     minimizeWindowCapability: (capability) => host.minimizeWindowCapability(capability),
