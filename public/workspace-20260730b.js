@@ -6348,14 +6348,25 @@ function bootstrapWindowLayoutWidget() {
       setWindowLayoutStatus(layoutId, bound.error || 'Pick failed');
       return false;
     }
-    const isMember = typeof selectedOverride === 'boolean'
+  const isMember = typeof selectedOverride === 'boolean'
       ? selectedOverride
       : (widgetState.snapshot.members ?? [])
         .some((member) => member.descriptor.title === bound.descriptor.title);
-    if (isMember) {
-      client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] } });
-    } else {
-      client.sendCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [{ descriptor: bound.descriptor, capability: bound.capability, candidate: picked.row }], removes: [] } });
+    const pick = isMember
+      ? { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] }
+      : { outcome: 'committed', adds: [{ descriptor: bound.descriptor, capability: bound.capability, candidate: picked.row }], removes: [] };
+    const command = { kind: 'picker-commit', pick };
+    let acknowledgement = await client.sendCommandAndWait(command);
+    // A background writer commit may have advanced the revision between the
+    // widget snapshot and this picker click. The stale response carries a
+    // fresh snapshot; resend this one bounded command once against that
+    // revision instead of silently dropping the add.
+    if (acknowledgement?.type === 'stale') {
+      acknowledgement = await client.sendCommandAndWait(command);
+    }
+    if (acknowledgement?.type === 'error') {
+      setWindowLayoutStatus(layoutId, acknowledgement.message || acknowledgement.code || 'Pick failed');
+      return false;
     }
     return true;
   }

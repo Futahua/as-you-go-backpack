@@ -609,6 +609,7 @@ export function createWindowLayoutWidgetChannelClient({
   const pendingReorders = [];
   let inFlightReorderId = null;
   let reorderTimer = null;
+  const pendingCommands = new Map();
   const post = (message) => {
     try { channel.postMessage(message); } catch { /* channel closed */ }
   };
@@ -621,6 +622,13 @@ export function createWindowLayoutWidgetChannelClient({
       if (typeof message.revision === 'number' && Number.isFinite(message.revision)) revision = message.revision;
     }
     onMessage?.(message);
+    if ((message.type === 'committed' || message.type === 'stale' || message.type === 'error')
+      && message.commandId && pendingCommands.has(message.commandId)) {
+      const pending = pendingCommands.get(message.commandId);
+      pendingCommands.delete(message.commandId);
+      if (pending.timer !== null) clearTimer(pending.timer);
+      pending.resolve(message);
+    }
     if ((message.type === 'committed' || message.type === 'stale' || message.type === 'error')
       && message.commandId === inFlightReorderId) {
       if (reorderTimer !== null) {
@@ -706,6 +714,31 @@ export function createWindowLayoutWidgetChannelClient({
       }
       return commandId;
     },
+    /** Send a non-reorder command and wait for its authoritative acknowledgement.
+     * Picker loops must not issue the next command against the previous
+     * revision while the writer is still applying the current add/remove. */
+    sendCommandAndWait: (command, options = {}) => {
+      const parsed = windowLayoutWidgetParseCommand(command);
+      if (!parsed) return Promise.resolve(null);
+      if (parsed.kind === 'reorder') {
+        return Promise.resolve({ type: 'error', layoutId, clientId, code: 'invalid-command', message: 'Use sendCommand for reorder' });
+      }
+      const baseRevision = typeof options.baseRevision === 'number' && Number.isFinite(options.baseRevision)
+        ? options.baseRevision : revision;
+      const commandId = generateId();
+      const timeoutMs = typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
+        ? Math.max(250, Math.min(10000, Math.trunc(options.timeoutMs))) : 3000;
+      return new Promise((resolve) => {
+        const pending = { resolve, timer: null };
+        pendingCommands.set(commandId, pending);
+        pending.timer = setTimer(() => {
+          if (pendingCommands.get(commandId) !== pending) return;
+          pendingCommands.delete(commandId);
+          resolve({ type: 'error', layoutId, clientId, commandId, code: 'ack-timeout', message: 'Command acknowledgement timed out' });
+        }, timeoutMs);
+        send({ type: 'command', commandId, baseRevision, command: parsed });
+      });
+    },
     get revision() { return revision; },
     close() {
       if (reorderTimer !== null) {
@@ -714,6 +747,11 @@ export function createWindowLayoutWidgetChannelClient({
       }
       pendingReorders.length = 0;
       inFlightReorderId = null;
+      for (const pending of pendingCommands.values()) {
+        if (pending.timer !== null) clearTimer(pending.timer);
+        pending.resolve({ type: 'error', layoutId, clientId, code: 'closed', message: 'Widget channel closed' });
+      }
+      pendingCommands.clear();
       channel.removeEventListener('message', listener);
       try { channel.close(); } catch { /* already closed */ }
     },

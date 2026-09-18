@@ -314,10 +314,21 @@ test('the widget client exposes NO store/save/commit/recording surface', () => {
     Object.keys(client).sort(),
     // 035: the client also reports its live window content size and its close,
     // still without any store/save/commit surface.
-    ['close', 'dispose', 'ready', 'requestSnapshot', 'revision', 'sendCardSize', 'sendCommand'].sort(),
+    ['close', 'dispose', 'ready', 'requestSnapshot', 'revision', 'sendCardSize', 'sendCommand', 'sendCommandAndWait'].sort(),
   );
   workspace.close();
   client.close();
+});
+
+test('sendCommandAndWait serializes picker-style commands behind their acknowledgement', async () => {
+  const layouts = [makeLayout('L1', [{ id: 'm1', title: 'Notepad' }])];
+  const { workspace, clientChannel, applied } = makeBus(layouts);
+  const client = createWindowLayoutWidgetChannelClient({ channel: clientChannel, layoutId: 'L1' });
+  const acknowledgement = await client.sendCommandAndWait({ kind: 'member-toggle', memberId: 'm1' });
+  assert.equal(acknowledgement.type, 'committed');
+  assert.equal(applied.length, 1);
+  client.close();
+  workspace.close();
 });
 
 test('the channel workspace never flips the workspace read-only (stays writable)', async () => {
