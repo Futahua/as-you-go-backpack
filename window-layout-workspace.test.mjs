@@ -10,6 +10,7 @@ import {
   createWindowLayoutPickApplier,
   createWindowLayoutRetirementWriter,
   windowLayoutPickApplyOutcome,
+  windowLayoutPickForBoundCandidate,
 } from './public/app/window-layout-workspace.js';
 import { windowLayoutMemberKey } from './public/app/window-layout-runtime.js';
 import { windowLayoutWidgetCommittedStatus } from './public/app/window-layout-widget-channel.js';
@@ -233,7 +234,8 @@ test('the workspace wrapper obeys that decision: a pure refusal notifies nothing
   // retirement writer's own removal does, after it has proved a member was removed.
   const start = source.indexOf('async function applyWindowLayoutPickSet(');
   assert.ok(start > 0, 'the pick wrapper is where this test thinks it is');
-  const wrapper = source.slice(start, source.indexOf('\n}', start));
+  const end = source.indexOf('/** 019C: Ning\'s onRetireMember intent', start);
+  const wrapper = source.slice(start, end);
   assert.match(wrapper, /const outcome = windowLayoutPickApplyOutcome\(applied\);/);
   assert.match(wrapper, /if \(outcome\.mutated\) windowLayoutWidgetChannelWorkspace\.noteCommitted\(layoutId\);/,
     'the commit notification is gated on a real mutation');
@@ -692,12 +694,31 @@ test('picker apply waits for the durable workspace commit and reports persistenc
   assert.match(applied.error, /persistence/i);
 });
 
+test('bound list-pick identity treats same title on another executable as an add', () => {
+  const members = makeLayout('L1', [{ id: 'chrome-a', title: 'Inbox', fingerprint: FINGERPRINT_A }]).arrangement.members;
+  const differentExecutable = {
+    descriptor: descriptorOn('Inbox', FINGERPRINT_B),
+    capability: capabilityFor('Inbox'),
+  };
+  const add = windowLayoutPickForBoundCandidate(members, differentExecutable, { icon: 'data:second' });
+  assert.equal(add.adds.length, 1);
+  assert.equal(add.removes.length, 0);
+  assert.equal(add.adds[0].descriptor.executableFingerprint, FINGERPRINT_B);
+
+  const exact = {
+    descriptor: descriptorOn('Inbox', FINGERPRINT_A),
+    capability: capabilityFor('Inbox'),
+  };
+  const remove = windowLayoutPickForBoundCandidate(members, exact);
+  assert.equal(remove.adds.length, 0);
+  assert.deepEqual(remove.removes, [{ descriptor: exact.descriptor }]);
+});
 test('attached and detached list picks use bound descriptor identity and the shared durable writer', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const attachedStart = source.indexOf('async function handleWindowLayoutPickCandidate(layoutId, candidateId)');
   const attachedEnd = source.indexOf('/** 019B: bounded concurrent group scheduling.', attachedStart);
   const attached = source.slice(attachedStart, attachedEnd);
-  assert.match(attached, /sameWindowLayoutDescriptor\(member\.descriptor, bound\.descriptor\)/);
+  assert.match(attached, /windowLayoutPickForBoundCandidate\(/);
   assert.match(attached, /await applyWindowLayoutPickSet\(/);
   assert.doesNotMatch(attached, /store\.commit\(|saveWorkspaceView\(|descriptor\.title\s*===\s*row\.title/,
     'attached list picking has no title-only or side-channel persistence path');
@@ -705,7 +726,7 @@ test('attached and detached list picks use bound descriptor identity and the sha
   const widgetStart = source.indexOf('  async function handleWidgetListCandidate(candidateId)');
   const widgetEnd = source.indexOf('  async function beginWidgetDirectPick()', widgetStart);
   const widget = source.slice(widgetStart, widgetEnd);
-  assert.match(widget, /sameWindowLayoutDescriptor\(member\.descriptor, bound\.descriptor\)/);
+  assert.match(widget, /windowLayoutPickForBoundCandidate\(/);
   assert.doesNotMatch(widget, /selectedOverride|descriptor\.title\s*===\s*bound\.descriptor\.title/,
     'detached list picking decides add/remove only after binding the persisted descriptor pair');
 
