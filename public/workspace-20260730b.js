@@ -1356,65 +1356,46 @@ function restoreHoveredWindowLayoutPreview(layoutId) {
 }
 
 async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
-  if (windowLayoutDetachment.isReadOnly()) return;
+  if (windowLayoutDetachment.isReadOnly()) return false;
   const layout = windowLayoutFromState(layoutId);
-  if (!layout) return;
-  const members = layout.arrangement?.members ?? [];
+  if (!layout) return false;
   const row = (windowLayoutRuntime.pickerCandidates ?? [])
     .find((candidate) => candidate.id === candidateId);
-  // 016 toggle: a row matching an existing member removes it (data-only);
-  // any other row binds the window and captures its state immediately.
-  const existing = row ? members.find((member) => member.descriptor.title === row.title) : null;
-  if (existing) {
-    const next = removeWindowLayoutMember(state, layoutId, existing.id);
-    windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, existing.id));
-    windowLayoutRuntime.icons.delete(windowLayoutMemberKey(layoutId, existing.id));
-    store.commit(next);
-    saveWorkspaceView();
-    noteWindowLayoutCommit(layoutId);
-    // Removing a member of the active layout re-syncs the observer; removing
-    // from an inactive layout never starts recording there.
-    if (isActiveRecordingContext(layoutId)) {
-      await windowLayoutRuntimeController.reconcileActive();
-    }
-    return;
-  }
   const picked = await bindWindowLayoutPickerCandidate(candidateId, row);
   const bound = picked.bound;
-  // 018X4: abort immediately after the await, before the failure status or the
-  // success continuation.
-  if (windowLayoutDetachment.isReadOnly()) return;
+  // Candidate ids are ephemeral. Bind first, then decide add/remove from the
+  // persisted descriptor pair returned by Papers. Title alone is not identity.
+  if (windowLayoutDetachment.isReadOnly()) return false;
   if (bound.outcome !== 'success') {
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(bound.outcome));
-    return;
+    return false;
   }
-  const memberId = crypto.randomUUID();
-  // 016: adding a window captures its current valid bounds/state immediately;
-  // the creator never presses another button to make the member useful.
-  const observed = await host.observeWindowCapability(bound.capability);
-  // 018X2: a handoff begun during the bind/observe must abort before the add.
-  if (windowLayoutDetachment.isReadOnly()) return;
-  const member = {
-    id: memberId,
-    descriptor: bound.descriptor,
-    bounds: observed.outcome === 'success' && observed.observation?.bounds
-      ? observed.observation.bounds : null,
-    state: observed.outcome === 'success' && observed.observation?.state === 'minimized'
-      ? 'minimized' : 'normal',
-  };
-  const next = addWindowLayoutMember(state, layoutId, member);
-  windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(layoutId, memberId), bound.capability);
-  const icon = picked.row?.icon ?? null;
-  if (icon) windowLayoutRuntime.icons.set(windowLayoutMemberKey(layoutId, memberId), icon);
-  store.commit(next);
-  saveWorkspaceView();
-  noteWindowLayoutCommit(layoutId);
-  // Adding to a layout selects/persists that layout as the recording context
-  // and leaves one active observer.
-  await windowLayoutRecording.ensureRecording(layoutId);
+  const exactMatches = (layout.arrangement?.members ?? [])
+    .filter((member) => sameWindowLayoutDescriptor(member.descriptor, bound.descriptor));
+  const removing = exactMatches.length > 0;
+  const pick = removing
+    ? { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] }
+    : {
+      outcome: 'committed',
+      adds: [{
+        descriptor: bound.descriptor,
+        capability: bound.capability,
+        candidate: picked.row,
+      }],
+      removes: [],
+    };
+  // Use the same one-commit writer as direct pick and the detached widget.
+  // Adds keep selecting/recording this layout; an inactive-layout removal
+  // remains data-only, matching the established attached-list behavior.
+  const applied = await applyWindowLayoutPickSet(
+    layoutId,
+    pick,
+    { activateOnMutation: !removing },
+  );
+  return applied.outcome === 'committed' && windowLayoutPickApplyOutcome(applied).mutated;
 }
 
-/** 019B: bounded concurrent group scheduling. At most
+/** 019B: bounded concurrent group scheduling./** 019B: bounded concurrent group scheduling. At most
  * WINDOW_LAYOUT_GROUP_CONCURRENCY members observe/mutate in flight, so a group
  * action's latency scales with the slowest helper call instead of a fully
  * serialized tail; results stay typed per member and a superseded result
@@ -1597,6 +1578,11 @@ async function windowLayoutToggleRange(layoutId, clickedMemberId, explicitMember
 
 /** 016 direct onscreen pick: begin the Papers-owned pick session for THIS
  * layout and wait for its single typed result (Escape/right-click cancels). */
+function sameWindowLayoutDescriptor(left, right) {
+  return left?.version === right?.version
+    && left?.title === right?.title
+    && left?.executableFingerprint === right?.executableFingerprint;
+}
 function uniqueWindowLayoutMemberDescriptors(members) {
   const unique = new Map();
   for (const descriptor of members) {
@@ -1672,7 +1658,10 @@ async function beginWindowLayoutDirectPick(layoutId) {
       windowLayoutRuntime.pickUnsubscribe = null;
     }
     if (windowLayoutDetachment.isReadOnly()) return;
-    setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
+    setWindowLayoutStatus(
+      layoutId,
+      error instanceof Error ? error.message : String(error || 'Direct pick is unavailable'),
+    );
     return;
   } finally {
     pickUnsubscribe?.();
@@ -2672,6 +2661,11 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       // typed superseded failure (zero commit/save/recording mutation), so the
       // widget never sees a false committed result.
       if (applied.outcome === 'superseded') return { ok: false, error: 'superseded' };
+      if (applied.outcome === 'failed') {
+        return { ok: false, error: applied.error || 'picker commit failed' };
+      }
+      if (applied.outcome === 'cancelled') return { ok: true };
+      if (applied.outcome !== 'committed') return { ok: false, error: 'picker commit failed' };
       // The sentence this workspace already put on its own status line rides back with the committed
       // result. A pick whose removals were all refused changes nothing, so the widget's snapshot comes
       // back byte-identical to the one it is already showing and no repaint can tell the creator anything;
@@ -2710,25 +2704,30 @@ const windowLayoutRetirementWriter = createWindowLayoutRetirementWriter({
  * data-only, every successful add) with a single durable commit; cancel is
  * byte-zero and a read-only handoff begun mid-apply surfaces as typed
  * `superseded` with zero commit/save/recording mutation. */
-async function applyWindowLayoutPickSet(layoutId, result) {
+async function applyWindowLayoutPickSet(layoutId, result, { activateOnMutation = true } = {}) {
   if (windowLayoutDetachment.isReadOnly()) return { outcome: 'failed', error: 'read-only' };
   const applied = await windowLayoutPickApplier.apply(layoutId, result);
+  if (applied.outcome === 'failed') {
+    setWindowLayoutStatus(layoutId, applied.error || 'Pick failed');
+    return applied;
+  }
   if (applied.outcome === 'committed') {
     const outcome = windowLayoutPickApplyOutcome(applied);
-    // A pick that changed nothing is not a commit and must not activate anything. noteCommitted would tell the
-    // widget channel a layout had changed when it had not, and ensureRecording is worse: that is what makes a
-    // layout the ACTIVE recording context, persists it as such, and applies real windows. A refusal on an
-    // inactive layout must leave all three alone.
+    // A pick that changed nothing is not a commit and must not activate anything.
     if (outcome.mutated) windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
     setWindowLayoutStatus(layoutId, outcome.statusText);
-    // Adding to a layout selects/persists it as the recording context and leaves one active observer; an
-    // already-active layout only re-syncs. Only a real mutation may do that.
-    if (outcome.mutated) await windowLayoutRecording.ensureRecording(layoutId);
+    if (outcome.mutated) {
+      if (activateOnMutation) {
+        await windowLayoutRecording.ensureRecording(layoutId);
+      } else if (isActiveRecordingContext(layoutId)) {
+        await windowLayoutRuntimeController.reconcileActive();
+      }
+    }
   }
   return applied;
 }
 
-/** 019C: Ning's onRetireMember intent -> ONE data-only removal/save and a
+/** 019C: Ning's onRetireMember intent/** 019C: Ning's onRetireMember intent -> ONE data-only removal/save and a
  * status/selection refresh. An intent for a member/layout that no longer
  * exists is ignored; counters are never persisted. */
 function handleWindowLayoutRetireMember(intent) {
@@ -6276,8 +6275,6 @@ function bootstrapWindowLayoutWidget() {
     // 019G: a picker covering the desktop must clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
     try {
-      const selectedTitles = new Set((widgetState.snapshot.members ?? [])
-        .map((member) => member.descriptor.title));
       while (true) {
         const result = await host.windowCandidates();
         if (result.outcome !== 'success') {
@@ -6285,11 +6282,15 @@ function bootstrapWindowLayoutWidget() {
           break;
         }
         widgetState.candidates = result.candidates;
+        // The chooser stays open while searching/selecting. Recompute its
+        // presentation state after every authoritative command acknowledgement.
+        const currentTitles = new Set((widgetState.snapshot.members ?? [])
+          .map((member) => member.descriptor.title));
         const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
           id: candidate.id,
           title: candidate.title,
           icon: candidate.icon ?? null,
-          current: selectedTitles.has(candidate.title),
+          current: currentTitles.has(candidate.title),
         })));
         if (picked.action === 'close' && picked.candidateId) {
           await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
@@ -6300,15 +6301,7 @@ function bootstrapWindowLayoutWidget() {
           break;
         }
         if (picked.action !== 'select' || !picked.candidateId) break;
-        const pickedRow = result.candidates.find((candidate) => candidate.id === picked.candidateId);
-        const changed = await handleWidgetListCandidate(
-          picked.candidateId,
-          pickedRow ? selectedTitles.has(pickedRow.title) : null,
-        );
-        if (changed && pickedRow) {
-          if (selectedTitles.has(pickedRow.title)) selectedTitles.delete(pickedRow.title);
-          else selectedTitles.add(pickedRow.title);
-        }
+        await handleWidgetListCandidate(picked.candidateId);
       }
     } catch (error) {
       setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
@@ -6351,7 +6344,7 @@ function bootstrapWindowLayoutWidget() {
     return wasOpen ? host.windowCandidatePickerClose().catch(() => undefined) : Promise.resolve();
   }
 
-  async function handleWidgetListCandidate(candidateId, selectedOverride = null) {
+  async function handleWidgetListCandidate(candidateId) {
     const row = (widgetState.candidates ?? []).find((candidate) => candidate.id === candidateId);
     if (!row) return false;
     const picked = await bindWindowLayoutPickerCandidate(candidateId, row);
@@ -6360,23 +6353,16 @@ function bootstrapWindowLayoutWidget() {
       setWindowLayoutStatus(layoutId, bound.error || 'Pick failed');
       return false;
     }
-  const isMember = typeof selectedOverride === 'boolean'
-      ? selectedOverride
-      : (widgetState.snapshot.members ?? [])
-        .some((member) => member.descriptor.title === bound.descriptor.title);
+    // Candidate current-state is presentation-only: it has no persisted
+    // executable fingerprint. After bind, exact descriptor identity decides
+    // whether this candidate is an add or a removal.
+    const isMember = (widgetState.snapshot.members ?? [])
+      .some((member) => sameWindowLayoutDescriptor(member.descriptor, bound.descriptor));
     const pick = isMember
       ? { outcome: 'committed', adds: [], removes: [{ descriptor: bound.descriptor }] }
       : { outcome: 'committed', adds: [{ descriptor: bound.descriptor, capability: bound.capability, candidate: picked.row }], removes: [] };
     const command = { kind: 'picker-commit', pick };
-    // Picker adds perform a live native observation before the single durable
-    // commit. Give that bounded native/host path the channel's full command
-    // acknowledgement window instead of the short default used by ordinary
-    // card toggles.
     let acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 10000 });
-    // A background writer commit may have advanced the revision between the
-    // widget snapshot and this picker click. The stale response carries a
-    // fresh snapshot; resend this one bounded command once against that
-    // revision instead of silently dropping the add.
     if (acknowledgement?.type === 'stale') {
       acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 10000 });
     }
@@ -6387,7 +6373,7 @@ function bootstrapWindowLayoutWidget() {
     return true;
   }
 
-  async function beginWidgetDirectPick() {
+  async function beginWidgetDirectPick() {  async function beginWidgetDirectPick() {
     // 019G: the pick overlay covers the desktop; clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
     // As on the attached surface, the native chooser must be fully destroyed
@@ -6443,12 +6429,15 @@ function bootstrapWindowLayoutWidget() {
           acknowledgement.message || acknowledgement.code || 'Pick failed',
         );
       }
-    } catch {
+    } catch (error) {
       pickUnsubscribe?.();
       if (widgetState.pickUnsubscribe === pickUnsubscribe) {
         widgetState.pickUnsubscribe = null;
       }
-      setWindowLayoutStatus(layoutId, 'Direct pick is unavailable');
+      setWindowLayoutStatus(
+        layoutId,
+        error instanceof Error ? error.message : String(error || 'Direct pick is unavailable'),
+      );
     } finally {
       pickUnsubscribe?.();
       if (widgetState.pickUnsubscribe === pickUnsubscribe) {
