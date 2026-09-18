@@ -237,13 +237,12 @@ test('the workspace wrapper obeys that decision: a pure refusal notifies nothing
   assert.match(wrapper, /const outcome = windowLayoutPickApplyOutcome\(applied\);/);
   assert.match(wrapper, /if \(outcome\.mutated\) windowLayoutWidgetChannelWorkspace\.noteCommitted\(layoutId\);/,
     'the commit notification is gated on a real mutation');
-  assert.match(wrapper, /if \(outcome\.mutated\) await windowLayoutRecording\.ensureRecording\(layoutId\);/,
-    'and so is ensureRecording, which is what activates a layout and applies real windows');
-  // No ungated call to either may remain INSIDE the wrapper: a refusal that reached one of these would
-  // activate or persist a layout the creator was not using. This is the assertion that fails if the old
-  // shape is ever reinstated.
+  assert.match(wrapper, /if \(outcome\.mutated\) \{[\s\S]*if \(activateOnMutation\) \{[\s\S]*await windowLayoutRecording\.ensureRecording\(layoutId\);/,
+    'recording activation is nested under a real mutation and the explicit activation policy');
+  assert.match(wrapper, /else if \(isActiveRecordingContext\(layoutId\)\) \{[\s\S]*await windowLayoutRuntimeController\.reconcileActive\(\);/,
+    'a data-only attached-list removal only reconciles when this layout is already active');
+  // No unconditional call may remain inside the wrapper.
   assert.doesNotMatch(wrapper, /^\s*windowLayoutWidgetChannelWorkspace\.noteCommitted\(layoutId\);$/m);
-  assert.doesNotMatch(wrapper, /^\s*(?:await )?windowLayoutRecording\.ensureRecording\(layoutId\);$/m);
 });
 test('the sentence a real refused or mixed pick produces is the one the widget receives, unabridged', async () => {
   // The end of the chain the widget blocker was about: the REAL applier's output, not a hand-written status.
@@ -644,4 +643,76 @@ test('040 two layouts referencing the SAME window stay cache- and state-isolated
   assert.ok(!two.icons.has(windowLayoutMemberKey('L1', aId)), 'layout A icon removed after its member is removed');
   assert.equal(JSON.stringify(two.getState().windowLayouts[1]), beforeB, 'layout B saved arrangement byte-identical after layout A add+remove');
   assert.equal(two.getState().windowLayouts[0].arrangement.members.length, 0, 'layout A member removed data-only');
+});
+
+test('picker apply waits for the durable workspace commit and reports persistence failure', async () => {
+  let state = makeState([makeLayout('L1', [])]);
+  let releaseCommit;
+  const durable = new Promise((resolve) => { releaseCommit = resolve; });
+  const applier = createWindowLayoutPickApplier({
+    getState: () => state,
+    commitState: (next) => { state = next; return durable; },
+    observeCapability: async () => ({
+      outcome: 'success',
+      observation: { bounds: { x: 0, y: 0, width: 100, height: 80 }, state: 'normal' },
+    }),
+    model: {
+      addWindowLayoutMember: (current, layoutId, member) => ({
+        ...current,
+        windowLayouts: current.windowLayouts.map((layout) => layout.id === layoutId
+          ? { ...layout, arrangement: { ...layout.arrangement, members: [...layout.arrangement.members, member] } }
+          : layout),
+      }),
+      removeWindowLayoutMember: (current, layoutId, memberId) => ({
+        ...current,
+        windowLayouts: current.windowLayouts.map((layout) => layout.id === layoutId
+          ? { ...layout, arrangement: { ...layout.arrangement, members: layout.arrangement.members.filter((member) => member.id !== memberId) } }
+          : layout),
+      }),
+    },
+    capabilities: new Map(),
+    icons: new Map(),
+  });
+  const pending = applier.apply('L1', {
+    outcome: 'committed',
+    adds: [{
+      descriptor: descriptorOn('Chrome', FINGERPRINT_B),
+      capability: capabilityFor('Chrome'),
+      candidate: { icon: 'data:image/png;base64,AAAA' },
+    }],
+    removes: [],
+  });
+  let settled = false;
+  void pending.then(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, 'the picker cannot ACK committed before the durable store promise settles');
+  releaseCommit(false);
+  const applied = await pending;
+  assert.equal(applied.outcome, 'failed');
+  assert.match(applied.error, /persistence/i);
+});
+
+test('attached and detached list picks use bound descriptor identity and the shared durable writer', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const attachedStart = source.indexOf('async function handleWindowLayoutPickCandidate(layoutId, candidateId)');
+  const attachedEnd = source.indexOf('/** 019B: bounded concurrent group scheduling.', attachedStart);
+  const attached = source.slice(attachedStart, attachedEnd);
+  assert.match(attached, /sameWindowLayoutDescriptor\(member\.descriptor, bound\.descriptor\)/);
+  assert.match(attached, /await applyWindowLayoutPickSet\(/);
+  assert.doesNotMatch(attached, /store\.commit\(|saveWorkspaceView\(|descriptor\.title\s*===\s*row\.title/,
+    'attached list picking has no title-only or side-channel persistence path');
+
+  const widgetStart = source.indexOf('  async function handleWidgetListCandidate(candidateId)');
+  const widgetEnd = source.indexOf('  async function beginWidgetDirectPick()', widgetStart);
+  const widget = source.slice(widgetStart, widgetEnd);
+  assert.match(widget, /sameWindowLayoutDescriptor\(member\.descriptor, bound\.descriptor\)/);
+  assert.doesNotMatch(widget, /selectedOverride|descriptor\.title\s*===\s*bound\.descriptor\.title/,
+    'detached list picking decides add/remove only after binding the persisted descriptor pair');
+
+  const commandStart = source.indexOf("    if (command.kind === 'picker-commit')");
+  const commandEnd = source.indexOf("    return { ok: false, error: 'unknown command' };", commandStart);
+  const command = source.slice(commandStart, commandEnd);
+  assert.match(command, /applied\.outcome === 'failed'/);
+  assert.match(command, /ok: false, error: applied\.error/,
+    'a failed durable picker commit is an error ACK, never a false committed result');
 });
