@@ -1,0 +1,33 @@
+name: picker remote verification
+on:
+  push:
+    branches:
+      - 'verify/picker-*'
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: prepare disposable machine-local action targets
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'D:\')) {
+            New-Item -ItemType Directory -Force -Path 'C:\runner-d' | Out-Null
+            subst D: C:\runner-d
+          }
+          $config = Get-Content actions.json -Raw | ConvertFrom-Json
+          foreach ($action in $config.actions) {
+            $parent = Split-Path -Parent $action.target
+            New-Item -ItemType Directory -Force -Path $parent | Out-Null
+            New-Item -ItemType File -Force -Path $action.target | Out-Null
+          }
+      - run: npm ci --no-audit --no-fund
+      - name: focused picker tests
+        run: node --test window-layout-workspace.test.mjs host-bridge.test.mjs window-layout-widget-channel.test.mjs
+      - name: full suite
+        run: npm test
