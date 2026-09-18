@@ -631,7 +631,7 @@ function windowLayoutBodyMarkup(candidate, options = {}) {
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
     ${trackingControl}
     <div class="window-layout-controls">
-      ${windowLayoutControlButton('list', 'Choose from the list of onscreen windows', 'data-wl-list', candidate.id, { glyph: 'pick' })}
+      ${windowLayoutControlButton('list', 'Live-pick an onscreen window (hover for the list)', 'data-wl-list', candidate.id, { glyph: 'pick' })}
       ${windowLayoutControlButton('min-all', widgetSurface ? 'Minimize all members; middle-click to reattach widget' : 'Minimize all members; right-click to toggle isolate mode', 'data-wl-min-all', candidate.id, { toggle: true, active: windowLayoutRuntime.isolateMode.isActive(candidate.id) })}
       ${windowLayoutControlButton('restore-all', widgetSurface ? 'Restore/open all members' : 'Restore/open all members; middle-click to undock widget', 'data-wl-restore-all', candidate.id)}
     </div>
@@ -4944,7 +4944,8 @@ elements.grid.addEventListener('click', (event) => {
     }
     const listButton = event.target.closest('[data-wl-list]');
     if (listButton) {
-      void openWindowLayoutPicker(listButton.dataset.wlList);
+      cancelWindowLayoutListDwell();
+      void beginWindowLayoutDirectPick(listButton.dataset.wlList);
       return;
     }
     const trackingButton = event.target.closest('[data-wl-track]');
@@ -6172,7 +6173,8 @@ function bootstrapWindowLayoutWidget() {
     }
     const listButton = event.target.closest('[data-wl-list]');
     if (listButton) {
-      void openWidgetPicker();
+      cancelWindowLayoutListDwell();
+      void beginWidgetDirectPick();
       return;
     }
     const trackingButton = event.target.closest('[data-wl-track]');

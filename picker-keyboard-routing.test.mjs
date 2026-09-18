@@ -10,3 +10,9 @@ test('022: active direct picker routes Space to stage and Enter to commit', () =
   assert.match(source, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);/);
   assert.match(source, /pickLayoutId/);
 });
+
+test('the picker button click enters live pick mode before the hover list', () => {
+  assert.match(source, /cancelWindowLayoutListDwell\(\);\s*void beginWindowLayoutDirectPick\(listButton\.dataset\.wlList\)/);
+  assert.match(source, /cancelWindowLayoutListDwell\(\);\s*void beginWidgetDirectPick\(\)/);
+  assert.match(source, /Live-pick an onscreen window \(hover for the list\)/);
+});
