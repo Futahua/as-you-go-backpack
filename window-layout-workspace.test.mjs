@@ -97,6 +97,10 @@ function descriptorOn(title, executableFingerprint) {
   return { version: 1, title, executableFingerprint };
 }
 
+function descriptorInstance(title, windowInstanceId, executableFingerprint = FINGERPRINT_A) {
+  return { version: 1, title, executableFingerprint, windowInstanceId };
+}
+
 /* Identity in the pick applier.
  *
  * A picker-commit removal carries ONE thing - a persisted descriptor ({version, title, executableFingerprint}).
@@ -126,6 +130,48 @@ test('a removal matches the executable as well as the title, so a same-titled wi
     harness.getState().windowLayouts[0].arrangement.members.map((member) => member.id),
     ['m-obsidian'],
     'the Chrome member goes, the Obsidian member with the same title stays',
+  );
+});
+
+test('an exact window instance distinguishes same-title siblings for add/remove decisions', async () => {
+  const first = descriptorInstance('GitHub', 'W0000000000000001');
+  const second = descriptorInstance('GitHub', 'W0000000000000002');
+  const members = [{ id: 'm-first', descriptor: first, state: 'normal', bounds: null }];
+
+  const addingSecond = windowLayoutPickForBoundCandidate(
+    members,
+    { descriptor: second, capability: capabilityFor('GitHub') },
+    { icon: 'data:second' },
+  );
+  assert.equal(addingSecond.adds.length, 1, 'the sibling is an add, not a removal of the first same-title window');
+  assert.deepEqual(addingSecond.adds[0].descriptor, second);
+  assert.equal(addingSecond.removes.length, 0);
+
+  const removingFirst = windowLayoutPickForBoundCandidate(
+    members,
+    { descriptor: first, capability: capabilityFor('GitHub') },
+  );
+  assert.equal(removingFirst.adds.length, 0);
+  assert.deepEqual(removingFirst.removes, [{ descriptor: first }]);
+});
+
+test('an instance-qualified removal removes only that sibling when title and executable are identical', async () => {
+  const harness = makeHarness();
+  harness.getState().windowLayouts[0].arrangement.members = [
+    { id: 'm-first', descriptor: descriptorInstance('GitHub', 'W0000000000000001'), state: 'normal', bounds: null },
+    { id: 'm-second', descriptor: descriptorInstance('GitHub', 'W0000000000000002'), state: 'normal', bounds: null },
+  ];
+  const result = await harness.pickApplier.apply('L1', {
+    outcome: 'committed',
+    adds: [],
+    removes: [{ descriptor: descriptorInstance('GitHub', 'W0000000000000002') }],
+  });
+  assert.equal(result.removed, 1);
+  assert.equal(result.ambiguous, 0);
+  assert.deepEqual(
+    harness.getState().windowLayouts[0].arrangement.members.map((member) => member.id),
+    ['m-first'],
+    'the exact sibling remains untouched',
   );
 });
 
@@ -569,6 +615,10 @@ test('direct picker self-recovers orphaned Papers sessions before attached and w
     'only the current widget attempt may clear shared picker ownership');
   assert.match(source, /function uniqueWindowLayoutMemberDescriptors\(members\)/,
     'duplicate saved members are collapsed before they can brick native preparation');
+  assert.doesNotMatch(source, /unique\.set\(key, descriptor\)/,
+    'picker begin never forwards persisted descriptor extras such as windowInstanceId');
+  assert.match(source, /unique\.set\(key, \{[\s\S]*?version: 1,[\s\S]*?title: descriptor\.title,[\s\S]*?executableFingerprint: descriptor\.executableFingerprint,[\s\S]*?\}\)/,
+    'picker begin rebuilds the exact legacy three-field preload descriptor');
   assert.equal((source.match(/uniqueWindowLayoutMemberDescriptors\(/g) ?? []).length, 3,
     'both attached and widget surfaces use the shared descriptor deduplication');
 });

@@ -729,6 +729,35 @@ test('019DR2: exact picker-commit schemas reject hostile fields', () => {
   assert.ok(commit(atCeiling));
 });
 
+test('045 widget picker commits preserve only a valid optional window instance id', () => {
+  const commit = (descriptor) => windowLayoutWidgetParseCommand({
+    kind: 'picker-commit',
+    pick: {
+      outcome: 'committed',
+      adds: [{
+        descriptor,
+        capability: { version: 1, bindingId: 'b:chrome' },
+        candidate: {},
+      }],
+      removes: [],
+    },
+  });
+  const exact = {
+    version: 1,
+    title: 'GitHub',
+    executableFingerprint: 'a'.repeat(64),
+    windowInstanceId: 'W0123456789abcdef',
+  };
+  const accepted = commit(exact);
+  assert.ok(accepted);
+  assert.deepEqual(accepted.pick.adds[0].descriptor, exact,
+    'the exact native sibling identity reaches the authoritative workspace writer');
+  assert.equal(commit({ ...exact, windowInstanceId: 'not-an-instance' }), null,
+    'a malformed instance id fails closed');
+  assert.equal(commit({ ...exact, extra: true }), null,
+    'windowInstanceId does not open the descriptor to arbitrary extra fields');
+});
+
 test('019DR2: unicode title at exactly the 512-byte boundary is accepted, one byte over is not', () => {
   const at512 = 'é'.repeat(256); // 2 bytes each = 512 bytes
   const over512 = 'é'.repeat(257); // 514 bytes

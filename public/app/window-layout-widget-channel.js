@@ -84,15 +84,29 @@ function generateId() {
   return `w-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** 019DR2: exact Papers descriptor schema — keys version,title,
- * executableFingerprint; version 1; non-empty UTF-8 <= 512 bytes; 64-hex
- * fingerprint. Returns a copied descriptor or null for any deviation. */
+/** 019DR2/045: exact persisted Papers descriptor schema. The native host may
+ * add one opaque windowInstanceId to a freshly bound descriptor; it is the
+ * only optional field accepted here and lets the writer distinguish sibling
+ * windows with the same title + executable. The legacy three-field shape is
+ * still accepted. Arbitrary fields remain fail-closed. */
 function parseDescriptorLike(raw) {
-  if (!isPlainObject(raw) || !exactKeys(raw, ['version', 'title', 'executableFingerprint'])) return null;
+  if (!isPlainObject(raw)) return null;
+  const hasWindowInstanceId = raw.windowInstanceId !== undefined;
+  const keys = hasWindowInstanceId
+    ? ['version', 'title', 'executableFingerprint', 'windowInstanceId']
+    : ['version', 'title', 'executableFingerprint'];
+  if (!exactKeys(raw, keys)) return null;
   if (raw.version !== 1) return null;
   if (!boundedString(raw.title, 'descriptor.title')) return null;
   if (typeof raw.executableFingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(raw.executableFingerprint)) return null;
-  return { version: 1, title: raw.title, executableFingerprint: raw.executableFingerprint };
+  if (hasWindowInstanceId
+    && (typeof raw.windowInstanceId !== 'string' || !/^W[0-9a-f]{16}$/i.test(raw.windowInstanceId))) return null;
+  return {
+    version: 1,
+    title: raw.title,
+    executableFingerprint: raw.executableFingerprint,
+    ...(hasWindowInstanceId ? { windowInstanceId: raw.windowInstanceId } : {}),
+  };
 }
 
 /** 019DR2: exact Papers capability schema — keys version,bindingId; version 1;

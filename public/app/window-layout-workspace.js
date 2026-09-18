@@ -29,11 +29,31 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function validWindowInstanceId(value) {
+  return typeof value === 'string' && /^W[0-9a-f]{16}$/i.test(value);
+}
+
+/** Match the strongest identity the host actually supplied.
+ *
+ * Newer Papers helpers attach one opaque, persistable windowInstanceId to a
+ * bound descriptor. When it is present, falling back to title+executable would
+ * confuse two sibling windows from the same executable with the same title.
+ * Legacy descriptors have no instance id, so only those use the older pair.
+ */
+function sameWindowDescriptorIdentity(memberDescriptor, pickedDescriptor) {
+  if (!isPlainObject(memberDescriptor) || !isPlainObject(pickedDescriptor)) return false;
+  if (validWindowInstanceId(pickedDescriptor.windowInstanceId)) {
+    return memberDescriptor.windowInstanceId === pickedDescriptor.windowInstanceId;
+  }
+  return memberDescriptor.title === pickedDescriptor.title
+    && memberDescriptor.executableFingerprint === pickedDescriptor.executableFingerprint;
+}
+
 export function windowLayoutPickForBoundCandidate(members, bound, candidate = null) {
   if (!isPlainObject(bound) || !isPlainObject(bound.descriptor)) return null;
   const descriptor = bound.descriptor;
   const current = Array.isArray(members) ? members : [];
-  const isMember = current.some((member) => member && member.descriptor && member.descriptor.title === descriptor.title && member.descriptor.executableFingerprint === descriptor.executableFingerprint);
+  const isMember = current.some((member) => sameWindowDescriptorIdentity(member?.descriptor, descriptor));
   return isMember
     ? { outcome: 'committed', adds: [], removes: [{ descriptor }] }
     : { outcome: 'committed', adds: [{ descriptor, capability: bound.capability, candidate }], removes: [] };
@@ -63,14 +83,12 @@ export function createWindowLayoutPickApplier({
    */
   function membersMatchingDescriptor(next, layoutId, descriptor) {
     if (!isPlainObject(descriptor)) return [];
-    const fingerprint = descriptor.executableFingerprint;
-    const title = descriptor.title;
-    if (typeof fingerprint !== 'string' || typeof title !== 'string') return [];
+    if (!validWindowInstanceId(descriptor.windowInstanceId)
+      && (typeof descriptor.executableFingerprint !== 'string' || typeof descriptor.title !== 'string')) return [];
     return (next.windowLayouts ?? [])
       .find((layout) => layout.id === layoutId)
       ?.arrangement?.members
-      ?.filter((member) => member.descriptor?.executableFingerprint === fingerprint
-        && member.descriptor?.title === title) ?? [];
+      ?.filter((member) => sameWindowDescriptorIdentity(member?.descriptor, descriptor)) ?? [];
   }
   async function apply(layoutId, result) {
     if (!isPlainObject(result) || result.outcome === 'cancelled') return { outcome: 'cancelled' };

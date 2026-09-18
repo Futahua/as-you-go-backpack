@@ -1578,8 +1578,20 @@ async function windowLayoutToggleRange(layoutId, clickedMemberId, explicitMember
 function uniqueWindowLayoutMemberDescriptors(members) {
   const unique = new Map();
   for (const descriptor of members) {
-    const key = `${descriptor.executableFingerprint ?? ''}|${descriptor.title ?? ''}`;
-    if (!unique.has(key)) unique.set(key, descriptor);
+    if (!descriptor || descriptor.version !== 1
+      || typeof descriptor.title !== 'string'
+      || typeof descriptor.executableFingerprint !== 'string') continue;
+    const key = `${descriptor.executableFingerprint}|${descriptor.title}`;
+    // Papers' current picker-begin preload deliberately accepts only this
+    // legacy three-field shape. Persisted windowInstanceId remains available
+    // for ordinary resolution, but must not widen this page -> preload wire.
+    if (!unique.has(key)) {
+      unique.set(key, {
+        version: 1,
+        title: descriptor.title,
+        executableFingerprint: descriptor.executableFingerprint,
+      });
+    }
   }
   return [...unique.values()];
 }
