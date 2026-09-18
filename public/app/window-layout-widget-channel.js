@@ -726,8 +726,11 @@ export function createWindowLayoutWidgetChannelClient({
       const baseRevision = typeof options.baseRevision === 'number' && Number.isFinite(options.baseRevision)
         ? options.baseRevision : revision;
       const commandId = generateId();
+      // Ordinary commands keep the 3s default. Picker commits explicitly ask
+      // for a longer bound because their authoritative acknowledgement can
+      // include a native observe request plus durable writer persistence.
       const timeoutMs = typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
-        ? Math.max(250, Math.min(10000, Math.trunc(options.timeoutMs))) : 3000;
+        ? Math.max(250, Math.min(30000, Math.trunc(options.timeoutMs))) : 3000;
       return new Promise((resolve) => {
         const pending = { resolve, timer: null };
         pendingCommands.set(commandId, pending);

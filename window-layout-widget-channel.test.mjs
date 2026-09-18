@@ -331,6 +331,40 @@ test('sendCommandAndWait serializes picker-style commands behind their acknowled
   workspace.close();
 });
 
+test('sendCommandAndWait permits the explicit 30s picker acknowledgement budget without changing the default', async () => {
+  const bus = fakeBus();
+  const clientChannel = bus.makeChannel();
+  const peer = bus.makeChannel();
+  const armed = [];
+  const client = createWindowLayoutWidgetChannelClient({
+    channel: clientChannel,
+    layoutId: 'L1',
+    setTimer: (_fn, ms) => { armed.push(ms); return armed.length; },
+    clearTimer: () => undefined,
+  });
+  const pending = client.sendCommandAndWait(
+    { kind: 'member-toggle', memberId: 'm1' },
+    { timeoutMs: 30000 },
+  );
+  assert.equal(armed[0], 30000, 'explicit picker waits are not truncated to the old 10s ceiling');
+  client.close();
+  assert.equal((await pending).code, 'closed');
+
+  const defaultClientChannel = bus.makeChannel();
+  const defaultArmed = [];
+  const defaultClient = createWindowLayoutWidgetChannelClient({
+    channel: defaultClientChannel,
+    layoutId: 'L1',
+    setTimer: (_fn, ms) => { defaultArmed.push(ms); return defaultArmed.length; },
+    clearTimer: () => undefined,
+  });
+  const defaultPending = defaultClient.sendCommandAndWait({ kind: 'member-toggle', memberId: 'm1' });
+  assert.equal(defaultArmed[0], 3000, 'ordinary command acknowledgement budget remains unchanged');
+  defaultClient.close();
+  assert.equal((await defaultPending).code, 'closed');
+  peer.close();
+});
+
 test('the channel workspace never flips the workspace read-only (stays writable)', async () => {
   const layouts = [makeLayout('L1', [])];
   const { workspace, clientChannel } = makeBus(layouts);

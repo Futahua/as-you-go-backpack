@@ -6371,9 +6371,9 @@ function bootstrapWindowLayoutWidget() {
       return false;
     }
     const command = { kind: 'picker-commit', pick };
-    let acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 10000 });
+    let acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 30000 });
     if (acknowledgement?.type === 'stale') {
-      acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 10000 });
+      acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 30000 });
     }
     if (acknowledgement?.type === 'error') {
       setWindowLayoutStatus(layoutId, acknowledgement.message || acknowledgement.code || 'Pick failed');
@@ -6433,13 +6433,13 @@ function bootstrapWindowLayoutWidget() {
       // a missing writer or a revision race cannot silently drop the pick.
       let acknowledgement = await client.sendCommandAndWait(
         { kind: 'picker-commit', pick: result },
-        { timeoutMs: 10000 },
+        { timeoutMs: 30000 },
       );
       if (widgetState.pickAttempt !== pickAttempt) return;
       if (acknowledgement?.type === 'stale') {
         acknowledgement = await client.sendCommandAndWait(
           { kind: 'picker-commit', pick: result },
-          { timeoutMs: 10000 },
+          { timeoutMs: 30000 },
         );
         if (widgetState.pickAttempt !== pickAttempt) return;
       }
