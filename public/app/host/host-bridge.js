@@ -15,6 +15,11 @@ export function createHostBridge(window) {
   const pending = new Map();
   const MAX_PENDING = 64;
   const REQUEST_TIMEOUT_MS = 15000;
+  // The native candidate chooser is intentionally user-interactive: its
+  // request remains pending while the creator searches and previews windows.
+  // Keep it bounded, but do not let the ordinary quick-RPC timeout make a
+  // still-open list silently reject after 15 seconds.
+  const INTERACTIVE_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
   const pickListeners = new Set();
   const detachListeners = new Set();
   // The launcher overlay's invocation (the creator's "Alt+A anywhere", host side). A push, like the detach
@@ -24,7 +29,7 @@ export function createHostBridge(window) {
   const lifecycleListeners = new Set();
   const lifecycleBaselineListeners = new Set();
 
-  function request(type, detail = {}) {
+  function request(type, detail = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
     if (pending.size >= MAX_PENDING) {
       return Promise.reject(new Error('Host request capacity reached.'));
     }
@@ -36,7 +41,7 @@ export function createHostBridge(window) {
         pending.delete(requestId);
         console.warn('[host-bridge] request timed out', { requestId, type });
         reject(new Error('Host request timed out.'));
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
       pending.set(requestId, { resolve, reject, timer, type });
     });
   }
@@ -319,7 +324,8 @@ export function createHostBridge(window) {
     }),
     widgetPreviewHide: () => request('papers:project:widget-preview-hide'),
     widgetContextMenu: () => request('papers:project:widget-context-menu'),
-    windowCandidatePicker: (candidates) => request('papers:project:window-candidate-picker', { candidates }),
+    windowCandidatePicker: (candidates) =>
+      request('papers:project:window-candidate-picker', { candidates }, INTERACTIVE_REQUEST_TIMEOUT_MS),
     windowCandidatePickerClose: () => request('papers:project:window-candidate-picker-close'),
     // 019G: real window thumbnail (Windows-taskbar-like hover preview). Consumes
     // ONLY the exact shared API: page request `papers:project:window-thumbnail`
