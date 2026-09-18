@@ -29,6 +29,16 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+export function windowLayoutPickForBoundCandidate(members, bound, candidate = null) {
+  if (!isPlainObject(bound) || !isPlainObject(bound.descriptor)) return null;
+  const descriptor = bound.descriptor;
+  const current = Array.isArray(members) ? members : [];
+  const isMember = current.some((member) => member && member.descriptor && member.descriptor.title === descriptor.title && member.descriptor.executableFingerprint === descriptor.executableFingerprint);
+  return isMember
+    ? { outcome: 'committed', adds: [], removes: [{ descriptor }] }
+    : { outcome: 'committed', adds: [{ descriptor, capability: bound.capability, candidate }], removes: [] };
+}
+
 export function createWindowLayoutPickApplier({
   getState,
   commitState,
