@@ -50,11 +50,12 @@ export function windowLayoutLegacyDescriptorCount(layout, descriptor) {
 export async function resolveWindowLayoutDescriptorWithFallback({
   descriptor,
   members = null,
+  exactIdentity = descriptor?.windowInstanceId,
   resolveExact,
   resolveFallback,
 }) {
-  const resolved = await resolveExact(descriptor);
-  if (resolved?.outcome !== 'missing' || typeof descriptor?.windowInstanceId !== 'string') {
+  const resolved = await resolveExact(exactIdentity ?? descriptor);
+  if (resolved?.outcome !== 'missing' || typeof exactIdentity !== 'string') {
     return resolved;
   }
   if (Array.isArray(members) && windowLayoutLegacyDescriptorCount(members, descriptor) > 1) {

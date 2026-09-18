@@ -87,16 +87,16 @@ test('production fallback seam rejects widget-shaped duplicate snapshots before 
     version: 1,
     title: 'New Tab - Google Chrome',
     executableFingerprint: 'chrome',
-    windowInstanceId: 'W0123456789abcdef',
   };
   const members = [
-    { id: 'one', descriptor },
-    { id: 'two', descriptor: { ...descriptor, windowInstanceId: 'Wfedcba9876543210' } },
+    { id: 'one', descriptor, windowInstanceId: 'W0123456789abcdef' },
+    { id: 'two', descriptor: { ...descriptor }, windowInstanceId: 'Wfedcba9876543210' },
   ];
   let fallbackCalls = 0;
   const ambiguous = await resolveWindowLayoutDescriptorWithFallback({
     descriptor,
     members,
+    exactIdentity: members[0].windowInstanceId,
     resolveExact: async () => ({ outcome: 'missing' }),
     resolveFallback: async () => { fallbackCalls += 1; return { outcome: 'success', capability: {} }; },
   });
@@ -105,11 +105,19 @@ test('production fallback seam rejects widget-shaped duplicate snapshots before 
   const unique = await resolveWindowLayoutDescriptorWithFallback({
     descriptor,
     members: [members[0]],
+    exactIdentity: members[0].windowInstanceId,
     resolveExact: async () => ({ outcome: 'missing' }),
     resolveFallback: async (value) => ({ outcome: 'success', capability: value }),
   });
   assert.equal(unique.outcome, 'success');
   assert.equal(unique.capability.title, descriptor.title);
+  const legacy = await resolveWindowLayoutDescriptorWithFallback({
+    descriptor,
+    members,
+    resolveExact: async () => ({ outcome: 'missing' }),
+    resolveFallback: async () => ({ outcome: 'success', capability: {} }),
+  });
+  assert.equal(legacy.outcome, 'missing');
 });
 
 test('recording resolution receives its layout id for fail-closed legacy fallback', async () => {

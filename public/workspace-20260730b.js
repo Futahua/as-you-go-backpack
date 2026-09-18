@@ -1019,7 +1019,8 @@ async function resolveWindowLayoutMemberDescriptor(descriptor, layoutId = null, 
   return resolveWindowLayoutDescriptorWithFallback({
     descriptor,
     members,
-    resolveExact: (value) => host.resolveWindowDescriptor(value),
+    exactIdentity: descriptor?.windowInstanceId,
+    resolveExact: () => host.resolveWindowDescriptor(descriptor),
     resolveFallback: (value) => host.resolveWindowDescriptor(value),
   });
 }
@@ -1972,14 +1973,15 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
   const cached = windowLayoutWidgetPreviewCapabilities.get(key);
   if (cached) return Promise.resolve(cached);
   const resolve = typeof member.windowInstanceId === 'string' && typeof host.resolveWindowInstance === 'function'
-    ? host.resolveWindowInstance(member.windowInstanceId)
+    ? resolveWindowLayoutDescriptorWithFallback({
+      descriptor: member.descriptor,
+      exactIdentity: member.windowInstanceId,
+      members: windowLayoutWidgetPreviewSnapshot?.members,
+      resolveExact: (instanceId) => host.resolveWindowInstance(instanceId),
+      resolveFallback: (value) => host.resolveWindowDescriptor(value),
+    })
     : resolveWindowLayoutMemberDescriptor(member.descriptor, layoutId, windowLayoutWidgetPreviewSnapshot?.members);
   return Promise.resolve(resolve).then((resolved) => {
-    if (resolved?.outcome === 'missing' && typeof member.windowInstanceId === 'string') {
-      return resolveWindowLayoutMemberDescriptor(member.descriptor, layoutId, windowLayoutWidgetPreviewSnapshot?.members);
-    }
-    return resolved;
-  }).then((resolved) => {
     if (!resolved || resolved.outcome !== 'success' || !resolved.capability) {
       windowLayoutWidgetPreviewCapabilities.delete(key);
       return null;
