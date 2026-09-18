@@ -37,8 +37,38 @@ export function windowLayoutLegacyDescriptorKey(descriptor) {
 export function windowLayoutLegacyDescriptorCount(layout, descriptor) {
   const key = windowLayoutLegacyDescriptorKey(descriptor);
   if (key === null) return 0;
-  return (layout?.arrangement?.members ?? []).filter((member) =>
+  const members = Array.isArray(layout) ? layout : (layout?.arrangement?.members ?? []);
+  return members.filter((member) =>
     windowLayoutLegacyDescriptorKey(member?.descriptor) === key).length;
+}
+
+/**
+ * Resolve an exact persisted identity, then use the legacy pair only when it
+ * identifies one persisted member in the caller's collection.  Keeping this
+ * seam pure lets attached and compact-widget surfaces share the same guard.
+ */
+export async function resolveWindowLayoutDescriptorWithFallback({
+  descriptor,
+  members = null,
+  resolveExact,
+  resolveFallback,
+}) {
+  const resolved = await resolveExact(descriptor);
+  if (resolved?.outcome !== 'missing' || typeof descriptor?.windowInstanceId !== 'string') {
+    return resolved;
+  }
+  if (Array.isArray(members) && windowLayoutLegacyDescriptorCount(members, descriptor) > 1) {
+    return {
+      outcome: 'ambiguous',
+      error: 'legacy fallback is ambiguous within this persisted layout',
+      reason: 'duplicate persisted title and executable fingerprint',
+    };
+  }
+  return resolveFallback({
+    version: descriptor.version,
+    title: descriptor.title,
+    executableFingerprint: descriptor.executableFingerprint,
+  });
 }
 
 function memberKey(layoutId, memberId) {

@@ -7,6 +7,7 @@ import {
   createWindowLayoutRuntime,
   windowLayoutLegacyDescriptorCount,
   windowLayoutLegacyDescriptorKey,
+  resolveWindowLayoutDescriptorWithFallback,
 } from './public/app/window-layout-runtime.js';
 
 const descriptor = (title) => ({ version: 1, title, executableFingerprint: title.repeat(64).slice(0, 64) });
@@ -76,8 +77,39 @@ test('legacy descriptor fallback is only unique within a persisted layout', () =
   const descriptor = duplicate.arrangement.members[0].descriptor;
   assert.equal(windowLayoutLegacyDescriptorKey(descriptor), 'chrome\u0000New Tab - Google Chrome');
   assert.equal(windowLayoutLegacyDescriptorCount(duplicate, descriptor), 2);
+  assert.equal(windowLayoutLegacyDescriptorCount(duplicate.arrangement.members, descriptor), 2);
   assert.equal(windowLayoutLegacyDescriptorCount({ arrangement: { members: [duplicate.arrangement.members[0]] } }, descriptor), 1);
   assert.equal(windowLayoutLegacyDescriptorCount(duplicate, { title: 'Other', executableFingerprint: 'chrome' }), 0);
+});
+
+test('production fallback seam rejects widget-shaped duplicate snapshots before fallback', async () => {
+  const descriptor = {
+    version: 1,
+    title: 'New Tab - Google Chrome',
+    executableFingerprint: 'chrome',
+    windowInstanceId: 'W0123456789abcdef',
+  };
+  const members = [
+    { id: 'one', descriptor },
+    { id: 'two', descriptor: { ...descriptor, windowInstanceId: 'Wfedcba9876543210' } },
+  ];
+  let fallbackCalls = 0;
+  const ambiguous = await resolveWindowLayoutDescriptorWithFallback({
+    descriptor,
+    members,
+    resolveExact: async () => ({ outcome: 'missing' }),
+    resolveFallback: async () => { fallbackCalls += 1; return { outcome: 'success', capability: {} }; },
+  });
+  assert.equal(ambiguous.outcome, 'ambiguous');
+  assert.equal(fallbackCalls, 0);
+  const unique = await resolveWindowLayoutDescriptorWithFallback({
+    descriptor,
+    members: [members[0]],
+    resolveExact: async () => ({ outcome: 'missing' }),
+    resolveFallback: async (value) => ({ outcome: 'success', capability: value }),
+  });
+  assert.equal(unique.outcome, 'success');
+  assert.equal(unique.capability.title, descriptor.title);
 });
 
 test('recording resolution receives its layout id for fail-closed legacy fallback', async () => {
