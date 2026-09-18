@@ -1249,6 +1249,11 @@ async function openWindowLayoutPicker(layoutId) {
       await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
     }
   } catch (error) {
+    // The list request may still be in flight when the creator clicks the
+    // picker control again to enter live-pick mode.  Its eventual timeout is
+    // stale at that point; never let it overwrite the live-pick status.
+    if (windowLayoutRuntime.pickerOpenFor !== layoutId
+      || windowLayoutRuntime.pickerGeneration !== generation) return;
     setWindowLayoutTransientStatus(
       layoutId,
       error instanceof Error ? error.message : 'List unavailable',
