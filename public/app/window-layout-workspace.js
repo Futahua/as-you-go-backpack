@@ -140,11 +140,38 @@ export function createWindowLayoutPickApplier({
       || iconDeletes.size > 0 || iconSets.size > 0;
     if (hasChanges) {
       if (isReadOnly()) return { outcome: 'superseded' };
-      if (next !== getState()) commitState(next);
+      // The store installs optimistic state synchronously, but the returned
+      // Promise is the durable boundary (including a forwarded writer ACK).
+      // Keep runtime maps aligned immediately, but do not report committed
+      // until that persistence boundary has actually succeeded.
+      let pendingCommit = null;
+      if (next !== getState()) {
+        try {
+          pendingCommit = commitState(next);
+        } catch (error) {
+          return {
+            outcome: 'failed',
+            error: error instanceof Error ? error.message : String(error ?? 'Window layout persistence failed'),
+          };
+        }
+      }
       for (const key of capabilityDeletes) capabilities?.delete(key);
       for (const key of iconDeletes) icons?.delete(key);
       for (const [key, capability] of capabilitySets) capabilities?.set(key, capability);
       for (const [key, icon] of iconSets) icons?.set(key, icon);
+      if (pendingCommit !== null) {
+        try {
+          const committed = await pendingCommit;
+          if (committed === false) {
+            return { outcome: 'failed', error: 'Window layout persistence failed' };
+          }
+        } catch (error) {
+          return {
+            outcome: 'failed',
+            error: error instanceof Error ? error.message : String(error ?? 'Window layout persistence failed'),
+          };
+        }
+      }
     }
     return { outcome: 'committed', added, removed, failures, unmatched, ambiguous };
   }
