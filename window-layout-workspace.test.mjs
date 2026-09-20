@@ -814,6 +814,38 @@ test('attached and detached list picks use bound descriptor identity and the sha
     'a failed durable picker commit is an error ACK, never a false committed result');
 });
 
+test('middle-click splits data unlink from Ctrl+middle-click process close', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const attachedStart = source.indexOf("elements.grid.addEventListener('auxclick', (event) => {");
+  const attachedEnd = source.indexOf('// A press on a member is a CONTROL intent', attachedStart);
+  const attached = source.slice(attachedStart, attachedEnd);
+  assert.match(attached, /if \(event\.ctrlKey\) \{[\s\S]*closeWindowLayoutMember\([\s\S]*\)[\s\S]*\} else \{[\s\S]*handleWindowLayoutUnlink\(/,
+    'the attached card closes only for Ctrl+MMB and unlinks for plain MMB');
+
+  const widgetStart = source.indexOf('  function handleWidgetCardAuxClick(event)');
+  const widgetEnd = source.indexOf('  async function handleWidgetCardContextMenu(event)', widgetStart);
+  const widget = source.slice(widgetStart, widgetEnd);
+  assert.match(widget, /const member = event\.target\.closest\('\[data-wl-member\]'\);/);
+  assert.match(widget, /if \(event\.ctrlKey\) \{[\s\S]*closeWindowLayoutMember\(layoutId, member\.dataset\.wlMember\)[\s\S]*\} else \{[\s\S]*kind: 'remove-member'/,
+    'the widget closes only for Ctrl+MMB and sends a scoped unlink for plain MMB');
+});
+
+test('startup lifecycle reconciliation applies to every layout and does not create implicit tracking', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const baselineStart = source.indexOf('async function reconcileTrackingBaseline()');
+  const baselineEnd = source.indexOf('async function ensureStartupWindowLayoutWidget()', baselineStart);
+  const baseline = source.slice(baselineStart, baselineEnd);
+  assert.match(baseline, /reconcileWindowLayoutsAfterStartup\(state, \[\.\.\.live\]\)/);
+  assert.match(baseline, /const currentTrackingLayout = \(state\.windowLayouts \?\? \[\]\)\.find/);
+
+  const startupStart = source.indexOf('async function ensureStartupWindowLayoutWidget()');
+  const startupEnd = source.indexOf('async function populateTrackingLayout', startupStart);
+  const startup = source.slice(startupStart, startupEnd);
+  assert.doesNotMatch(startup, /createWindowLayout\(/,
+    'startup does not manufacture a tracking layout when automatic tracking was not enabled');
+  assert.match(startup, /tracking\?\.enabled === true/);
+});
+
 test('detached picker re-entry invalidates stale chooser ownership before starting again', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const start = source.indexOf('  let widgetPickerOpen = false;');

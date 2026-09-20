@@ -40,6 +40,7 @@ import {
   addWindowLayoutMember,
   removeWindowLayoutMember,
   removeClosedWindowFromAllLayouts,
+  reconcileWindowLayoutsAfterStartup,
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
   setActiveWindowLayoutId,
@@ -1903,6 +1904,47 @@ test('removeClosedWindowFromAllLayouts retires one closed native window from eve
   assert.throws(() => removeClosedWindowFromAllLayouts(state, { title: 'Shared', executableFingerprint: 'bad' }), /invalid/);
 });
 
+test('startup reconciliation removes dead members and deletes only empty untracked layouts', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'Ordinary' });
+  state = createWindowLayout(state, { name: 'Tracked' });
+  const [ordinary, tracked] = state.windowLayouts;
+  state = setWindowLayoutTracking(state, tracked.id, true);
+  state = addWindowLayoutMember(state, ordinary.id, memberFixture({
+    id: 'ordinary-dead',
+    descriptor: { version: 1, title: 'Closed', executableFingerprint: 'a'.repeat(64), windowInstanceId: 'W0123456789abcdef' },
+  }));
+  state = addWindowLayoutMember(state, tracked.id, memberFixture({
+    id: 'tracked-dead',
+    descriptor: { version: 1, title: 'Closed too', executableFingerprint: 'b'.repeat(64), windowInstanceId: 'Wfedcba9876543210' },
+  }));
+  state = { ...state, activeWindowLayoutId: ordinary.id };
+
+  const next = reconcileWindowLayoutsAfterStartup(state, []);
+  assert.equal(next.windowLayouts.some((layout) => layout.id === ordinary.id), false,
+    'a populated non-tracking layout disappears once every exact member is gone');
+  assert.equal(next.windowLayouts.find((layout) => layout.id === tracked.id).arrangement.members.length, 0,
+    'the tracking owner persists as an empty durable layout');
+  assert.equal(next.activeWindowLayoutId, null, 'deleting the active layout clears its runtime id');
+  assert.equal(next.startupWindowLayoutId, tracked.id, 'the tracking owner remains the startup layout');
+});
+
+test('startup reconciliation preserves live and legacy members', () => {
+  let state = emptyState();
+  state = createWindowLayout(state, { name: 'Keep' });
+  const layoutId = state.windowLayouts[0].id;
+  state = addWindowLayoutMember(state, layoutId, memberFixture({
+    id: 'live',
+    descriptor: { version: 1, title: 'Live', executableFingerprint: 'a'.repeat(64), windowInstanceId: 'W0123456789abcdef' },
+  }));
+  state = addWindowLayoutMember(state, layoutId, memberFixture({
+    id: 'legacy',
+    descriptor: { version: 1, title: 'Legacy', executableFingerprint: 'b'.repeat(64) },
+  }));
+  const next = reconcileWindowLayoutsAfterStartup(state, ['W0123456789abcdef']);
+  assert.deepEqual(next.windowLayouts[0].arrangement.members.map((member) => member.id), ['live', 'legacy']);
+});
+
 test('017I1: activeWindowLayoutId round-trips through normalizeState', () => {
   const { state, l1 } = activeFixtureState();
   const set = setActiveWindowLayoutId(state, l1);
@@ -1950,6 +1992,8 @@ test('tracking has one durable owner and suppression survives reload', () => {
   state = setWindowLayoutInstanceSuppressed(state, b.id, 'W0123456789abcdef', true);
   const reloaded = normalizeState(JSON.parse(JSON.stringify(state)));
   assert.deepEqual(reloaded.windowLayouts.find((entry) => entry.id === b.id).tracking.suppressedInstanceIds, ['W0123456789abcdef']);
+  state = setWindowLayoutTracking(state, b.id, false);
+  assert.equal(state.startupWindowLayoutId, null, 'disabling automatic tracking clears startup resume');
 });
 
 test('017I1: setActiveWindowLayoutId leaves every arrangement byte-stable', () => {

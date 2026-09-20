@@ -46,6 +46,7 @@ import {
   addWindowLayoutMember,
   removeWindowLayoutMember,
   removeClosedWindowFromAllLayouts,
+  reconcileWindowLayoutsAfterStartup,
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
   setWindowLayoutCardSize,
@@ -1323,9 +1324,13 @@ async function closeWindowLayoutCandidate(layoutId, candidateId, candidates) {
 }
 
 async function closeWindowLayoutMember(layoutId, memberId) {
-  const descriptor = WIDGET_SURFACE
-    ? (windowLayoutWidgetPreviewSnapshot?.members ?? []).find((member) => member.id === memberId)?.descriptor
-    : windowLayoutMemberFromState(layoutId, memberId)?.descriptor;
+  const widgetMember = WIDGET_SURFACE
+    ? (windowLayoutWidgetPreviewSnapshot?.members ?? []).find((member) => member.id === memberId)
+    : null;
+  const stateMember = WIDGET_SURFACE ? null : windowLayoutMemberFromState(layoutId, memberId);
+  const descriptor = widgetMember
+    ? { ...widgetMember.descriptor, ...(widgetMember.windowInstanceId ? { windowInstanceId: widgetMember.windowInstanceId } : {}) }
+    : stateMember?.descriptor;
   const capability = WIDGET_SURFACE
     ? await resolveWindowLayoutPreviewCapability(layoutId, memberId)
     : await capabilityForMember(layoutId, memberId);
@@ -2223,7 +2228,6 @@ elements.grid.addEventListener('auxclick', (event) => {
     void host.widgetClose(layoutId).catch(() => undefined);
     return;
   }
-  if (!event.ctrlKey) return;
   const member = event.target.closest('[data-wl-member]');
   if (!member || member.disabled) return;
   event.preventDefault();
@@ -2231,7 +2235,15 @@ elements.grid.addEventListener('auxclick', (event) => {
   cancelWindowLayoutPreviewDwell();
   windowLayoutMemberPopover.hide();
   windowLayoutMemberPreview.cancel();
-  void closeWindowLayoutMember(member.dataset.wlLayout, member.dataset.wlMember);
+  if (event.ctrlKey) {
+    // Ctrl+MMB is the explicit close-process gesture. The close path retires
+    // the member only after Papers confirms that the native window closed.
+    void closeWindowLayoutMember(member.dataset.wlLayout, member.dataset.wlMember);
+  } else {
+    // Plain MMB is data-only: remove this icon from this layout, leaving the
+    // external application running and available to pick again.
+    handleWindowLayoutUnlink(member.dataset.wlLayout, member.dataset.wlMember);
+  }
 });
 // A press on a member is a CONTROL intent, and control must not queue behind
 // cosmetic work. The Papers window helper executes exactly one request at a
@@ -2317,16 +2329,17 @@ let trackingLastSequence = 0;
 async function processTrackingLifecycleEvent(event) {
   if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
   if (!event || typeof event.windowInstanceId !== 'string') return;
-  const trackingLayout = (state.windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true);
-  if (!trackingLayout) return;
   trackingEventInFlight = true;
   try {
     if (event.kind === 'destroy') {
-      const doomed = (trackingLayout.arrangement?.members ?? []).filter((member) =>
-        member.descriptor?.windowInstanceId === event.windowInstanceId);
-      for (const member of doomed) handleWindowLayoutRetireMember({ layoutId: trackingLayout.id, memberId: member.id, descriptor: member.descriptor, reason: 'watcher-destroy' });
+      // A close is global membership truth, not tracking-only state. The same
+      // window may be present in several layouts, so retire every exact
+      // instance match without closing or otherwise touching the process.
+      await retireClosedWindowEverywhere({ version: 1, windowInstanceId: event.windowInstanceId });
       return;
     }
+    const trackingLayout = (state.windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true);
+    if (!trackingLayout) return;
     const existing = (trackingLayout.arrangement?.members ?? []).some((member) => member.descriptor?.windowInstanceId === event.windowInstanceId);
     if (existing || trackingLayout.tracking?.suppressedInstanceIds?.includes(event.windowInstanceId)) return;
     const resolved = await host.resolveWindowInstance(event.windowInstanceId);
@@ -2524,15 +2537,20 @@ async function retireClosedWindowEverywhere(descriptor) {
   if (windowLayoutDetachment.isReadOnly()) return false;
   const removedByLayout = new Map();
   for (const layout of state.windowLayouts ?? []) {
-    const removed = (layout.arrangement?.members ?? []).filter((member) =>
-      member.descriptor.title === descriptor.title
-      && member.descriptor.executableFingerprint.toLowerCase()
-        === descriptor.executableFingerprint.toLowerCase());
+    const removed = (layout.arrangement?.members ?? []).filter((member) => {
+      if (typeof descriptor?.windowInstanceId === 'string') {
+        return member.descriptor?.windowInstanceId === descriptor.windowInstanceId;
+      }
+      return member.descriptor?.title === descriptor?.title
+        && member.descriptor?.executableFingerprint?.toLowerCase()
+          === descriptor?.executableFingerprint?.toLowerCase();
+    });
     if (removed.length > 0) removedByLayout.set(layout.id, removed);
   }
   if (removedByLayout.size === 0) return false;
   const next = removeClosedWindowFromAllLayouts(state, descriptor);
   const persisted = await store.commit(next);
+  if (!persisted) return false;
   for (const [changedLayoutId, removed] of removedByLayout) {
     const removedIds = new Set(removed.map((member) => member.id));
     for (const memberId of removedIds) {
@@ -2883,48 +2901,63 @@ async function reconcileTrackingBaseline() {
   const snapshot = response?.snapshot;
   if (!snapshot || snapshot.complete !== true || !Array.isArray(snapshot.windows)) return;
   const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId).filter((id) => typeof id === 'string'));
-  const layout = (state.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
-  if (!layout) return;
-  let next = state;
-  let changed = false;
-  for (const member of layout.arrangement?.members ?? []) {
-    const id = member.descriptor?.windowInstanceId;
-    if (typeof id === 'string' && !live.has(id)) {
-      next = removeWindowLayoutMember(next, layout.id, member.id);
-      changed = true;
-      windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layout.id, member.id));
-      windowLayoutRuntime.icons.delete(windowLayoutMemberKey(layout.id, member.id));
+  const before = state;
+  let next = reconcileWindowLayoutsAfterStartup(state, [...live]);
+  const trackingLayout = (next.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
+  if (trackingLayout) {
+    const suppressed = (trackingLayout.tracking?.suppressedInstanceIds ?? []).filter((id) => live.has(id));
+    if (suppressed.length !== (trackingLayout.tracking?.suppressedInstanceIds ?? []).length) {
+      next = {
+        ...next,
+        windowLayouts: next.windowLayouts.map((entry) => entry.id === trackingLayout.id
+          ? { ...entry, tracking: { ...entry.tracking, suppressedInstanceIds: suppressed } }
+          : entry),
+      };
     }
   }
-  const suppressed = (layout.tracking?.suppressedInstanceIds ?? []).filter((id) => live.has(id));
-  if (suppressed.length !== (layout.tracking?.suppressedInstanceIds ?? []).length) {
-    next = setWindowLayoutTracking(next, layout.id, true);
-    next = { ...next, windowLayouts: next.windowLayouts.map((entry) => entry.id === layout.id ? { ...entry, tracking: { ...entry.tracking, suppressedInstanceIds: suppressed } } : entry) };
-    changed = true;
-  }
-  if (changed && await store.commit(next)) {
+  if (next !== before && await store.commit(next)) {
+    const after = state;
+    for (const layout of before.windowLayouts ?? []) {
+      const nextLayout = (after.windowLayouts ?? []).find((entry) => entry.id === layout.id);
+      const removedIds = new Set((layout.arrangement?.members ?? [])
+        .filter((member) => !nextLayout?.arrangement?.members?.some((candidate) => candidate.id === member.id))
+        .map((member) => member.id));
+      for (const memberId of removedIds) {
+        const key = windowLayoutMemberKey(layout.id, memberId);
+        windowLayoutRuntime.capabilities.delete(key);
+        windowLayoutRuntime.icons.delete(key);
+        windowLayoutWidgetPreviewCapabilities.delete(key);
+      }
+      if (removedIds.size > 0 || !nextLayout) {
+        const selected = windowLayoutRuntime.selectedMembers.get(layout.id);
+        if (selected) {
+          for (const memberId of removedIds) selected.delete(memberId);
+          if (selected.size === 0) windowLayoutRuntime.selectedMembers.delete(layout.id);
+          syncWindowLayoutMemberSelection(layout.id);
+        }
+        setWindowLayoutStatus(layout.id, '');
+        noteWindowLayoutCommit(layout.id, { reason: 'startup-window-baseline' });
+      }
+    }
+    windowLayoutMemberPreview.cancel();
     saveWorkspaceView();
-    noteWindowLayoutCommit(layout.id);
+    if (before.activeWindowLayoutId !== after.activeWindowLayoutId) {
+      await windowLayoutRuntimeController.reconcileActive();
+    }
   }
-  await populateTrackingLayout(layout.id);
+  const currentTrackingLayout = (state.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
+  if (currentTrackingLayout) await populateTrackingLayout(currentTrackingLayout.id);
 }
 
 async function ensureStartupWindowLayoutWidget() {
   if (DETACHED_SURFACE || windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
-  let startup = (state.windowLayouts ?? []).find((layout) => layout.id === state.startupWindowLayoutId && layout.binned !== true);
-  if (!startup) {
-    const created = createWindowLayout(state, { name: 'Tracked windows' });
-    const createdLayoutId = created.windowLayouts[created.windowLayouts.length - 1]?.id;
-    const enabled = createdLayoutId ? setWindowLayoutTracking(created, createdLayoutId, true) : null;
-    if (enabled) {
-      if (await store.commit(enabled)) {
-        state = enabled;
-        startup = state.windowLayouts.find((layout) => layout.id === state.startupWindowLayoutId);
-        saveWorkspaceView();
-        noteWindowLayoutCommit(startup?.id);
-      }
-    }
-  }
+  // Tracking is an explicit creator choice. A normal layout that became empty
+  // at startup is not replaced by a new implicit tracking layout.
+  const startup = (state.windowLayouts ?? []).find((layout) =>
+    layout.id === state.startupWindowLayoutId
+    && layout.tracking?.enabled === true
+    && layout.binned !== true)
+    ?? (state.windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true && layout.binned !== true);
   if (startup?.id) await host.widgetOpen(startup.id).catch(() => undefined);
 }
 
@@ -6254,6 +6287,21 @@ function bootstrapWindowLayoutWidget() {
 
   function handleWidgetCardAuxClick(event) {
     if (event.button !== 1) return;
+    const member = event.target.closest('[data-wl-member]');
+    if (member && !member.disabled) {
+      event.preventDefault();
+      event.stopPropagation();
+      windowLayoutMemberPreview.cancel();
+      if (event.ctrlKey) {
+        // Ctrl+MMB closes the native window/process, then the confirmed close
+        // retires its exact member identity from every layout.
+        void closeWindowLayoutMember(layoutId, member.dataset.wlMember);
+      } else {
+        // Plain MMB only unlinks the clicked icon from this layout.
+        client.sendCommand({ kind: 'remove-member', memberId: member.dataset.wlMember });
+      }
+      return;
+    }
     const minimizeAll = event.target.closest('[data-wl-min-all]');
     if (!minimizeAll) return;
     event.preventDefault();

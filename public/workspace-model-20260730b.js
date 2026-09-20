@@ -721,7 +721,9 @@ export function setWindowLayoutTracking(state, windowLayoutId, enabled) {
   const nextEnabled = enabled === true;
   return {
     ...state,
-    startupWindowLayoutId: nextEnabled ? windowLayoutId : state.startupWindowLayoutId,
+    startupWindowLayoutId: nextEnabled
+      ? windowLayoutId
+      : state.startupWindowLayoutId === windowLayoutId ? null : state.startupWindowLayoutId,
     windowLayouts: (state.windowLayouts ?? []).map((candidate) => ({
       ...candidate,
       tracking: {
@@ -814,6 +816,54 @@ export function removeClosedWindowFromAllLayouts(state, descriptor) {
       : { ...layout, arrangement: { version: 2, members } };
   });
   return changed ? { ...state, windowLayouts } : state;
+}
+
+/** Reconciles persisted membership against the native window baseline
+ * available when Papers starts. Exact instance identities are the only safe
+ * startup proof: legacy members without one are retained rather than guessed
+ * away. Non-tracking layouts that were populated but are now empty are
+ * removed; the tracking owner remains as the durable home for programs that
+ * start after Papers. */
+export function reconcileWindowLayoutsAfterStartup(state, liveWindowInstanceIds) {
+  if (!Array.isArray(liveWindowInstanceIds)) return state;
+  const live = new Set(liveWindowInstanceIds.filter((id) =>
+    typeof id === 'string' && /^W[0-9a-f]{16}$/i.test(id)));
+  let changed = false;
+  const windowLayouts = [];
+  for (const layout of state.windowLayouts ?? []) {
+    const originalMembers = layout.arrangement?.members ?? [];
+    const exactMembers = originalMembers.filter((member) =>
+      typeof member.descriptor?.windowInstanceId === 'string');
+    const members = originalMembers.filter((member) => {
+      const id = member.descriptor?.windowInstanceId;
+      return typeof id !== 'string' || live.has(id);
+    });
+    const removeEmptyUntracked = layout.tracking?.enabled !== true
+      && exactMembers.length > 0
+      && members.length === 0;
+    if (removeEmptyUntracked) {
+      changed = true;
+      continue;
+    }
+    if (members.length !== originalMembers.length) {
+      changed = true;
+      windowLayouts.push({ ...layout, arrangement: { version: 2, members } });
+    } else {
+      windowLayouts.push(layout);
+    }
+  }
+  const survivingLayoutIds = new Set(windowLayouts.map((layout) => layout.id));
+  const activeWindowLayoutId = survivingLayoutIds.has(state.activeWindowLayoutId)
+    ? state.activeWindowLayoutId : null;
+  const startupCandidate = windowLayouts.find((layout) =>
+    layout.id === state.startupWindowLayoutId && layout.tracking?.enabled === true);
+  const trackingCandidate = windowLayouts.find((layout) => layout.tracking?.enabled === true);
+  const startupWindowLayoutId = startupCandidate?.id ?? trackingCandidate?.id ?? null;
+  if (activeWindowLayoutId !== state.activeWindowLayoutId
+    || startupWindowLayoutId !== state.startupWindowLayoutId) changed = true;
+  return changed
+    ? { ...state, windowLayouts, activeWindowLayoutId, startupWindowLayoutId }
+    : state;
 }
 
 /** Patches one member's saved arrangement (bounds/state) for a layout.
