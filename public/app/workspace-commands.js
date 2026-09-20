@@ -34,6 +34,9 @@ export function createWorkspaceCommands({
   collapsePlacements,
   binSelection,
   graphContextId,
+  scopeRootId = null,
+  isItemInScope = () => true,
+  isDestinationInScope = () => true,
   removeGraphPositions,
   removeGraphRestPositions,
   setGraphPositions,
@@ -57,6 +60,18 @@ export function createWorkspaceCommands({
   render,
   setStatus,
 }) {
+  function scopeAllowsSelection(ids) {
+    if (!scopeRootId || ids.every((id) => isItemInScope(id))) return true;
+    setStatus('That item is outside this project folder.');
+    return false;
+  }
+
+  function scopeAllowsDestination(destinationId) {
+    if (!scopeRootId || isDestinationInScope(destinationId)) return true;
+    setStatus('That destination is outside this project folder.');
+    return false;
+  }
+
   /** Applies click / ctrl-click / shift-click selection rules. Takes plain
    * modifier flags and the ordered visible ids, not a DOM event. */
   function selectItem(itemId, { shiftKey, ctrlKey, visibleItemIds }) {
@@ -272,6 +287,7 @@ export function createWorkspaceCommands({
    * the sequence the Bin control itself uses (bin mode off, drill-down reset to the Bin root), and then
    * navigates the workspace. */
   function goToWorkspaceFolder(folderId) {
+    if (!scopeAllowsDestination(folderId)) return;
     if (store.getSession().binMode) store.setNavigation({ binMode: false, binCurrentId: 'bin' });
     navigateToFolder(folderId);
   }
@@ -438,6 +454,8 @@ export function createWorkspaceCommands({
     const destinations = Array.isArray(parentIds) ? parentIds : [parentIds];
     const clipboard = store.getSession().clipboard;
     if (!clipboard || destinations.length === 0 || destinations.includes('bin')) return;
+    if (!destinations.every((destinationId) => scopeAllowsDestination(destinationId))) return;
+    if (!scopeAllowsSelection(clipboard.ids)) return;
     try {
       const wasCut = clipboard.mode === 'cut';
       let next = store.getSnapshot();
@@ -479,8 +497,14 @@ export function createWorkspaceCommands({
 
   async function moveSelectionToBin() {
     if (store.getSession().selected.size === 0) return;
+    const selected = [...store.getSession().selected];
+    if (!scopeAllowsSelection(selected)) return;
+    if (scopeRootId && selected.includes(scopeRootId)) {
+      setStatus('The project folder cannot be moved to the Bin.');
+      return;
+    }
     await store.commit(
-      binSelection(store.getSnapshot(), resolveBinTargets([...store.getSession().selected])),
+      binSelection(store.getSnapshot(), resolveBinTargets(selected)),
     );
   }
 
@@ -515,6 +539,7 @@ export function createWorkspaceCommands({
   async function dragDropToBin({ itemIds }) {
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
+    if (!scopeAllowsSelection(itemIds)) return;
     const deletable = itemIds.filter((id) => !isAncestorItem(id));
     if (deletable.length === 0) {
       setStatus('The path to this folder cannot be deleted.');
@@ -543,6 +568,7 @@ export function createWorkspaceCommands({
   async function dragDropToFolder({ itemIds, placementIds, folderId }) {
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
+    if (!scopeAllowsSelection(itemIds) || !scopeAllowsDestination(folderId)) return;
     const movable = itemIds.filter((draggedId) => !isAncestorItem(draggedId));
     if (movable.length === 0) {
       setStatus('The path to this folder cannot be moved into another folder.');
@@ -598,6 +624,7 @@ export function createWorkspaceCommands({
   /** Drops a URL into a destination: resolves the web icon, creates the web
    * link, and commits. Reports errors through setStatus. */
   async function dropUrl(url, destination) {
+    if (!scopeAllowsDestination(destination)) return;
     try {
       let name = nameForDroppedUrl(url);
       let icon = null;
@@ -624,6 +651,7 @@ export function createWorkspaceCommands({
   /** Drops files into a destination: resolves targets, creates shortcuts,
    * and commits — or reports that they already exist. */
   async function dropFiles(files, destination) {
+    if (!scopeAllowsDestination(destination)) return;
     try {
       const targets = await host.resolveDroppedTargets(files);
       const next = createDroppedShortcuts(store.getSnapshot(), targets, destination);

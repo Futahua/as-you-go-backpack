@@ -144,12 +144,19 @@ import {
   VIEW_BLOCKED_MESSAGE,
   createDocumentConflictPanel,
 } from './app/components/document-conflict-panel.js';
+import {
+  scopeRootFromUrl,
+  groupInScope,
+  itemInScope,
+  destinationInScope,
+} from './workspace-scope.js';
 
 const host = createHostBridge(window);
 const PROJECT_SURFACE_KEY = (() => {
   const value = new URLSearchParams(window.location.search).get('papers-surface-key');
   return value && value.length <= 128 ? value : null;
 })();
+const SCOPE_ROOT_ID = scopeRootFromUrl(window.location);
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
 
@@ -410,6 +417,7 @@ function visibleParentCountFor(shortcutId) {
 function isAvailableItem(itemId) {
   const candidate = item(itemId);
   if (!candidate || candidate.bin) return false;
+  if (!itemInScope(state, itemId, SCOPE_ROOT_ID)) return false;
   let parent = group(candidate.parentId);
   while (parent) {
     if (parent.bin) return false;
@@ -439,12 +447,17 @@ function restoreWorkspaceView() {
   const requestedCurrent = requestedFromUrl && group(requestedFromUrl)
     ? requestedFromUrl
     : (surfaceLocationFor(state, PROJECT_SURFACE_KEY)?.currentGroupId ?? state.view.currentGroupId);
+  const scopedCurrent = SCOPE_ROOT_ID && group(SCOPE_ROOT_ID)
+    ? (groupInScope(state, requestedCurrent, SCOPE_ROOT_ID) ? requestedCurrent : SCOPE_ROOT_ID)
+    : requestedCurrent;
   store.setNavigation({
     currentId:
-      requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
-        ? requestedCurrent
-        : ROOT_ID,
-    binMode: state.view.binMode,
+      SCOPE_ROOT_ID
+        ? (group(scopedCurrent) && groupInScope(state, scopedCurrent, SCOPE_ROOT_ID) ? scopedCurrent : SCOPE_ROOT_ID)
+        : (requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
+          ? requestedCurrent
+          : ROOT_ID),
+    binMode: SCOPE_ROOT_ID ? false : state.view.binMode,
   });
   store.setGraphExpanded(
     (state.view.graphExpandedGroupIds ?? []).filter((groupId) =>
@@ -484,9 +497,13 @@ function flushWorkspaceSave() {
 function pathTo(groupId) {
   const result = [];
   let cursor = group(groupId);
-  while (cursor) {
+  while (cursor && cursor.id !== SCOPE_ROOT_ID) {
     result.unshift({ id: cursor.id, name: cursor.name });
     cursor = group(cursor.parentId);
+  }
+  if (SCOPE_ROOT_ID) {
+    const root = group(SCOPE_ROOT_ID);
+    return root ? [{ id: root.id, name: root.name }, ...result] : result;
   }
   return [{ id: ROOT_ID, name: 'As you Go' }, ...result];
 }
@@ -4674,6 +4691,10 @@ function applyBackdropOpacity(preferences) {
 function render() {
   applyTheme(state.view?.preferences);
   if (WIDGET_SURFACE) return; // 019C: the widget renders only its own card
+  if (SCOPE_ROOT_ID && session.binMode) {
+    store.setNavigation({ binMode: false, binCurrentId: 'bin' });
+    return render();
+  }
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
     // us (e.g. via the top-level Bin list or "Delete all") — fall back to
@@ -4719,14 +4740,15 @@ function render() {
   syncSelection();
 
   const binCount = binnedItems(state).length;
-  elements.binCount.hidden = binCount === 0;
+  elements.binButton.hidden = Boolean(SCOPE_ROOT_ID);
+  elements.binCount.hidden = binCount === 0 || Boolean(SCOPE_ROOT_ID);
   elements.binCount.textContent = String(binCount);
   elements.binButton.setAttribute('aria-pressed', String(session.binMode));
   elements.binLabel.textContent = session.binMode ? 'Close Bin' : 'Bin';
   elements.binButton.title = session.binMode ? 'Close Bin' : 'Bin';
   const hasSelection = session.binMode && session.selected.size > 0;
-  elements.deleteAllBin.hidden = !session.binMode || binCount === 0;
-  elements.restoreAllBin.hidden = !session.binMode || binCount === 0;
+  elements.deleteAllBin.hidden = Boolean(SCOPE_ROOT_ID) || !session.binMode || binCount === 0;
+  elements.restoreAllBin.hidden = Boolean(SCOPE_ROOT_ID) || !session.binMode || binCount === 0;
   elements.deleteAllBin.classList.toggle('selective', hasSelection);
   elements.restoreAllBin.classList.toggle('selective', hasSelection);
   elements.deleteAllBin.title = hasSelection ? 'Delete selection permanently' : 'Delete all';
@@ -5621,6 +5643,9 @@ const commands = createWorkspaceCommands({
   collapsePlacements,
   binSelection,
   graphContextId,
+  scopeRootId: SCOPE_ROOT_ID,
+  isItemInScope: (id) => itemInScope(state, id, SCOPE_ROOT_ID),
+  isDestinationInScope: (id) => destinationInScope(state, id, SCOPE_ROOT_ID),
   removeGraphPositions,
   setGraphPositions,
   createWebLink,
