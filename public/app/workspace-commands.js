@@ -496,6 +496,10 @@ export function createWorkspaceCommands({
   }
 
   async function moveSelectionToBin() {
+    if (scopeRootId) {
+      setStatus('Delete and Move to Bin are unavailable inside a project folder.');
+      return;
+    }
     if (store.getSession().selected.size === 0) return;
     const selected = [...store.getSession().selected];
     if (!scopeAllowsSelection(selected)) return;
@@ -537,6 +541,10 @@ export function createWorkspaceCommands({
    * placement and clears their graph positions. Ancestors of the current
    * folder are part of the path here — they can never be deleted. */
   async function dragDropToBin({ itemIds }) {
+    if (scopeRootId) {
+      setStatus('Delete and Move to Bin are unavailable inside a project folder.');
+      return;
+    }
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
     if (!scopeAllowsSelection(itemIds)) return;
