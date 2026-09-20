@@ -453,11 +453,15 @@ function restoreWorkspaceView() {
   store.setNavigation({
     currentId:
       SCOPE_ROOT_ID
-        ? (group(scopedCurrent) && groupInScope(state, scopedCurrent, SCOPE_ROOT_ID) ? scopedCurrent : SCOPE_ROOT_ID)
+        // A scoped project is presented from As you Go's synthetic ROOT_ID so
+        // the bound project group itself is visible as the one top-level tile.
+        // The persisted group remains the real SCOPE_ROOT_ID; this is only a
+        // presentation boundary, never a new record or a reparenting.
+        ? ROOT_ID
         : (requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
           ? requestedCurrent
           : ROOT_ID),
-    binMode: SCOPE_ROOT_ID ? false : state.view.binMode,
+    binMode: false,
   });
   store.setGraphExpanded(
     (state.view.graphExpandedGroupIds ?? []).filter((groupId) =>
@@ -3852,6 +3856,9 @@ function createGraphController() {
       // one inherit that path node's depth scale. Ordinary workspace bodies
       // remain exactly 1.
       trailScale: Number.isFinite(vi.trailScale) ? vi.trailScale : 1,
+      // The scoped project boundary is the real persisted group, presented as
+      // a first-class top-level tile without creating a synthetic record.
+      scopeRoot: Boolean(SCOPE_ROOT_ID && vi.id === SCOPE_ROOT_ID),
     };
   }
 
@@ -4064,6 +4071,7 @@ function createGraphController() {
     iconItem.classList.toggle('bin-origin-ghost', isGhost);
     iconItem.classList.toggle('ancestor-item', candidate.ancestor === true);
     iconItem.classList.toggle('trail-item', candidate.trail === true);
+    iconItem.classList.toggle('scope-root-item', candidate.scopeRoot === true);
     node.shell.classList.toggle('bin-origin-ghost', isGhost);
     // 035: the shared card width updates whenever it changes, even when the
     // inner HTML is otherwise unchanged.
@@ -4084,6 +4092,7 @@ function createGraphController() {
       candidate.target ?? '',
       candidate.icon ?? null,
       candidate.linked ?? false,
+      candidate.scopeRoot ?? false,
       isExpanded,
       session.binMode,
       state.view.iconSize,
@@ -4124,7 +4133,7 @@ function createGraphController() {
     shell.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%) scale(${node.visualScale ?? 1})`;
 
     const iconItem = document.createElement('div');
-    iconItem.className = `icon-item${isSelected ? ' selected' : ''}${isGhost ? ' bin-origin-ghost' : ''}${candidate.ancestor ? ' ancestor-item' : ''}${candidate.trail ? ' trail-item' : ''}`;
+    iconItem.className = `icon-item${isSelected ? ' selected' : ''}${isGhost ? ' bin-origin-ghost' : ''}${candidate.ancestor ? ' ancestor-item' : ''}${candidate.trail ? ' trail-item' : ''}${candidate.scopeRoot ? ' scope-root-item' : ''}`;
     applyFolderColor(iconItem, candidate);
     iconItem.dataset.id = candidate.id;
     const semanticKey = isGhost ? null : semanticKeyForItem(candidate);
@@ -4166,6 +4175,7 @@ function createGraphController() {
       candidate.target ?? '',
       candidate.icon ?? null,
       candidate.linked ?? false,
+      candidate.scopeRoot ?? false,
       isExpanded,
       session.binMode,
       state.view.iconSize,
@@ -4691,10 +4701,6 @@ function applyBackdropOpacity(preferences) {
 function render() {
   applyTheme(state.view?.preferences);
   if (WIDGET_SURFACE) return; // 019C: the widget renders only its own card
-  if (SCOPE_ROOT_ID && session.binMode) {
-    store.setNavigation({ binMode: false, binCurrentId: 'bin' });
-    return render();
-  }
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
     // us (e.g. via the top-level Bin list or "Delete all") — fall back to
@@ -4740,15 +4746,15 @@ function render() {
   syncSelection();
 
   const binCount = binnedItems(state).length;
-  elements.binButton.hidden = Boolean(SCOPE_ROOT_ID);
-  elements.binCount.hidden = binCount === 0 || Boolean(SCOPE_ROOT_ID);
+  elements.binButton.hidden = false;
+  elements.binCount.hidden = binCount === 0;
   elements.binCount.textContent = String(binCount);
   elements.binButton.setAttribute('aria-pressed', String(session.binMode));
   elements.binLabel.textContent = session.binMode ? 'Close Bin' : 'Bin';
   elements.binButton.title = session.binMode ? 'Close Bin' : 'Bin';
   const hasSelection = session.binMode && session.selected.size > 0;
-  elements.deleteAllBin.hidden = Boolean(SCOPE_ROOT_ID) || !session.binMode || binCount === 0;
-  elements.restoreAllBin.hidden = Boolean(SCOPE_ROOT_ID) || !session.binMode || binCount === 0;
+  elements.deleteAllBin.hidden = !session.binMode || binCount === 0;
+  elements.restoreAllBin.hidden = !session.binMode || binCount === 0;
   elements.deleteAllBin.classList.toggle('selective', hasSelection);
   elements.restoreAllBin.classList.toggle('selective', hasSelection);
   elements.deleteAllBin.title = hasSelection ? 'Delete selection permanently' : 'Delete all';
@@ -4835,12 +4841,15 @@ function resolveBinTargets(itemIds) {
 
 async function runMenuAction(action) {
   const onlyId = session.selected.size === 1 ? [...session.selected][0] : null;
-  if (action === 'new-folder') return editorDialog.showEditor('group', null, elements.menu.dataset.parent);
-  if (action === 'new-shortcut') return editorDialog.showEditor('shortcut', null, elements.menu.dataset.parent);
-  if (action === 'new-web-link') return editorDialog.showEditor('web', null, elements.menu.dataset.parent);
+  const scopedMutationParent = (parentId) => SCOPE_ROOT_ID && (!parentId || parentId === ROOT_ID)
+    ? SCOPE_ROOT_ID
+    : (parentId ?? session.currentId ?? ROOT_ID);
+  if (action === 'new-folder') return editorDialog.showEditor('group', null, scopedMutationParent(elements.menu.dataset.parent));
+  if (action === 'new-shortcut') return editorDialog.showEditor('shortcut', null, scopedMutationParent(elements.menu.dataset.parent));
+  if (action === 'new-web-link') return editorDialog.showEditor('web', null, scopedMutationParent(elements.menu.dataset.parent));
   if (action === 'new-window-layout') {
     try {
-      const parentId = elements.menu.dataset.parent ?? session.currentId ?? ROOT_ID;
+      const parentId = scopedMutationParent(elements.menu.dataset.parent);
       let committed = await commit(createWindowLayout(state, { parentId }));
       // A freshly restored tab can receive input before its shared-document
       // baseline is ready. The first commit is deliberately refused in that
@@ -4867,7 +4876,7 @@ async function runMenuAction(action) {
     }
     return;
   }
-  if (action === 'paste') return commands.pasteInto(elements.menu.dataset.parent);
+  if (action === 'paste') return commands.pasteInto(scopedMutationParent(elements.menu.dataset.parent));
   if (action === 'open' && onlyId) return commands.activateItem(onlyId);
   if (action === 'open-new-tab' && onlyId && group(onlyId)) {
     closeMenu();
@@ -5784,6 +5793,27 @@ window.__papersFlushBeforeClose = async () => {
   return { ok: true };
 };
 
+/** A newly restored embedded surface can accept the editor click before its
+ * shared-document baseline has settled. Keep the mutation in the editor
+ * layer's normal commit path, but give that transient startup refusal the
+ * same bounded retry as window-layout creation. Other failures stay visible. */
+async function commitWhenWorkspaceReady(next, message) {
+  let committed = await commit(next, message);
+  const needsCoordination = () => coordinationState !== 'ready'
+    || !surfaceCoordinator?.baselineReady;
+  if (committed === false && needsCoordination()) {
+    const deadline = Date.now() + 5000;
+    while (needsCoordination() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (hasDocumentWriteAuthority()) committed = await commit(next, message);
+  }
+  if (committed === false && needsCoordination()) {
+    setStatus('Workspace is still synchronizing; try again in a moment.');
+  }
+  return committed;
+}
+
 const editorDialog = createEditorDialog({
   elements,
   document,
@@ -5795,6 +5825,7 @@ const editorDialog = createEditorDialog({
   compressIconFile,
   hydrateWebPreview,
   commit,
+  commitWhenWorkspaceReady,
   render,
   shortcut,
   isWebLink,

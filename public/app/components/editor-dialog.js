@@ -15,6 +15,7 @@ export function createEditorDialog({
   compressIconFile,
   hydrateWebPreview,
   commit,
+  commitWhenWorkspaceReady = commit,
   render,
   shortcut,
   isWebLink,
@@ -191,7 +192,7 @@ export function createEditorDialog({
         editedShortcutId
         && (!editorIcon || editorMode.item?.target !== elements.target.value.trim()),
       );
-      if (await commit(next, 'Saved.')) {
+      if (await commitWhenWorkspaceReady(next, 'Saved.')) {
         if (refreshTargetIcon) {
           iconCache.delete(editedShortcutId);
           render();

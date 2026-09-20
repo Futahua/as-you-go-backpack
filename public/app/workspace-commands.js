@@ -496,17 +496,14 @@ export function createWorkspaceCommands({
   }
 
   async function moveSelectionToBin() {
-    if (scopeRootId) {
-      setStatus('Delete and Move to Bin are unavailable inside a project folder.');
-      return;
-    }
     if (store.getSession().selected.size === 0) return;
-    const selected = [...store.getSession().selected];
-    if (!scopeAllowsSelection(selected)) return;
-    if (scopeRootId && selected.includes(scopeRootId)) {
+    const selected = [...store.getSession().selected]
+      .filter((id) => id !== scopeRootId);
+    if (selected.length === 0) {
       setStatus('The project folder cannot be moved to the Bin.');
       return;
     }
+    if (!scopeAllowsSelection(selected)) return;
     await store.commit(
       binSelection(store.getSnapshot(), resolveBinTargets(selected)),
     );
@@ -541,16 +538,16 @@ export function createWorkspaceCommands({
    * placement and clears their graph positions. Ancestors of the current
    * folder are part of the path here — they can never be deleted. */
   async function dragDropToBin({ itemIds }) {
-    if (scopeRootId) {
-      setStatus('Delete and Move to Bin are unavailable inside a project folder.');
-      return;
-    }
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
-    if (!scopeAllowsSelection(itemIds)) return;
-    const deletable = itemIds.filter((id) => !isAncestorItem(id));
+    const deletable = itemIds
+      .filter((id) => id !== scopeRootId)
+      .filter((id) => !isAncestorItem(id));
+    if (!scopeAllowsSelection(deletable)) return;
     if (deletable.length === 0) {
-      setStatus('The path to this folder cannot be deleted.');
+      setStatus(scopeRootId
+        ? 'The project folder cannot be moved to the Bin.'
+        : 'The path to this folder cannot be deleted.');
       return;
     }
     try {
