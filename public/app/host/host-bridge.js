@@ -37,7 +37,8 @@ export function createHostBridge(window) {
 
   function parentOrigin() {
     try {
-      const origin = new URL(document.referrer).origin;
+      const parsed = new URL(document.referrer);
+      const origin = parsed.origin === 'null' ? `${parsed.protocol}//${parsed.host}` : parsed.origin;
       return origin && origin !== 'null' ? origin : '*';
     } catch {
       return '*';
