@@ -290,9 +290,10 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
   scrollbar-width: none;
 }
 .icon-item.scope-root-item strong {
-  color: var(--green, var(--accent-strong));
-  text-decoration: underline;
-  text-decoration-color: currentColor;
+  color: var(--green) !important;
+  text-decoration-line: underline !important;
+  text-decoration-color: var(--green) !important;
+  text-decoration-style: solid;
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
