@@ -2326,12 +2326,23 @@ let trackingEventInFlight = false;
 const trackingEventQueue = [];
 let trackingSessionId = null;
 let trackingLastSequence = 0;
+const CLOSED_WINDOW_RECONCILE_INTERVAL_MS = 2000;
+let closedWindowReconcileTimer = null;
+let closedWindowReconcileInFlight = false;
+
+function isWindowLifecycleDestroyEvent(event) {
+  return event?.kind === 'destroy'
+    || event?.kind === 'close'
+    || event?.kind === 'closed'
+    || event?.kind === 'gone';
+}
+
 async function processTrackingLifecycleEvent(event) {
   if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
   if (!event || typeof event.windowInstanceId !== 'string') return;
   trackingEventInFlight = true;
   try {
-    if (event.kind === 'destroy') {
+    if (isWindowLifecycleDestroyEvent(event)) {
       // A close is global membership truth, not tracking-only state. The same
       // window may be present in several layouts, so retire every exact
       // instance match without closing or otherwise touching the process.
@@ -2372,6 +2383,65 @@ async function drainTrackingLifecycleEvents() {
     trackingEventInFlight = false;
   }
 }
+
+/** Lifecycle pushes are the fast path, but a host may miss a close while its
+ * watcher is restarting or while automatic tracking is off. Recheck exact
+ * persisted identities as a safety net. Only an explicit `missing` result is
+ * destructive; helper outages, timeouts, and ambiguity leave the member in
+ * place for a later retry. */
+async function reconcileClosedWindowMembers() {
+  if (closedWindowReconcileInFlight
+    || windowLayoutDetachment.isReadOnly()
+    || !hasDocumentWriteAuthority()
+    || typeof host.resolveWindowInstance !== 'function') return;
+  const candidates = [];
+  const seen = new Set();
+  for (const layout of state.windowLayouts ?? []) {
+    for (const member of layout.arrangement?.members ?? []) {
+      const instanceId = member.descriptor?.windowInstanceId;
+      if (typeof instanceId !== 'string' || seen.has(instanceId)) continue;
+      seen.add(instanceId);
+      candidates.push(instanceId);
+    }
+  }
+  if (candidates.length === 0) return;
+  closedWindowReconcileInFlight = true;
+  try {
+    for (const instanceId of candidates) {
+      let result = null;
+      try {
+        result = await host.resolveWindowInstance(instanceId);
+      } catch {
+        result = null;
+      }
+      if (result?.outcome !== 'missing') continue;
+      await retireClosedWindowEverywhere({ version: 1, windowInstanceId: instanceId });
+    }
+  } finally {
+    closedWindowReconcileInFlight = false;
+  }
+}
+
+function scheduleClosedWindowReconcile() {
+  if (closedWindowReconcileTimer !== null) return;
+  const tick = () => {
+    closedWindowReconcileTimer = null;
+    void reconcileClosedWindowMembers().finally(() => {
+      if (!windowLayoutDetachment.isStopped()) {
+        closedWindowReconcileTimer = window.setTimeout(tick, CLOSED_WINDOW_RECONCILE_INTERVAL_MS);
+      }
+    });
+  };
+  closedWindowReconcileTimer = window.setTimeout(tick, CLOSED_WINDOW_RECONCILE_INTERVAL_MS);
+}
+
+function stopClosedWindowReconcile() {
+  if (closedWindowReconcileTimer !== null) {
+    window.clearTimeout(closedWindowReconcileTimer);
+    closedWindowReconcileTimer = null;
+  }
+}
+
 host.onWindowLifecycleEvent?.((event) => {
   const sequence = Number(event?.sequence);
   const sessionChanged = trackingSessionId !== event?.trackerSessionId;
@@ -2869,7 +2939,10 @@ function teardownWindowLayoutRecording() {
 // would be a duplicate that could race an in-flight transfer).
 window.addEventListener('pagehide', () => windowLayoutDetachment.stop());
 
-window.addEventListener('pagehide', () => teardownWindowLayoutRecording());
+window.addEventListener('pagehide', () => {
+  stopClosedWindowReconcile();
+  void teardownWindowLayoutRecording();
+});
 
 function handleWindowLayoutUnlink(layoutId, memberId) {
   if (windowLayoutDetachment.isReadOnly()) return;
@@ -6889,6 +6962,7 @@ if (WIDGET_SURFACE) {
           }
           void reconcileTrackingBaseline();
           void ensureStartupWindowLayoutWidget();
+          scheduleClosedWindowReconcile();
         }
         render();
       },
@@ -6905,6 +6979,7 @@ if (WIDGET_SURFACE) {
       try {
         await reconcileTrackingBaseline();
         await ensureStartupWindowLayoutWidget();
+        scheduleClosedWindowReconcile();
       } catch (error) {
         console.warn('[AsYouGo] window tracking startup failed; editing remains enabled', error);
       }

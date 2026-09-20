@@ -846,6 +846,21 @@ test('startup lifecycle reconciliation applies to every layout and does not crea
   assert.match(startup, /tracking\?\.enabled === true/);
 });
 
+test('closed-window safety reconciliation removes only positively missing exact instances', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function reconcileClosedWindowMembers()');
+  const end = source.indexOf('function scheduleClosedWindowReconcile()', start);
+  const reconcile = source.slice(start, end);
+  assert.match(reconcile, /host\.resolveWindowInstance\(instanceId\)/);
+  assert.match(reconcile, /result\?\.outcome !== 'missing'/,
+    'helper outages, timeouts, and ambiguous matches are retained');
+  assert.match(reconcile, /retireClosedWindowEverywhere\(\{ version: 1, windowInstanceId: instanceId \}\)/);
+  assert.match(source, /event\?\.kind === 'closed'/,
+    'hosts using close/closed lifecycle vocabulary still retire the exact instance');
+  assert.match(source, /scheduleClosedWindowReconcile\(\);/,
+    'the writer starts a periodic safety check even without automatic tracking');
+});
+
 test('detached picker re-entry invalidates stale chooser ownership before starting again', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const start = source.indexOf('  let widgetPickerOpen = false;');
