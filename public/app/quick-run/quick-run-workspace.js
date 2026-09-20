@@ -23,6 +23,7 @@
  * - **Name the workspace's own command (sections 1.5, 6.4).** Enter hands an item id to
  *   `commands.activateItem` - the same call workspace Enter makes - and Ctrl+Enter follows
  *   `planQuickRunReveal`, which never delegates to the host file manager. No second launcher is grown here.
+ *   Ctrl+Shift+C copies a shortcut or web-link target through the existing host clipboard seam.
  * - **Close on success, stay open on refusal (sections 16.1 and 16.2).** A refusal is something this module
  *   can see - the row is gone, the plan is deferred, no command applies - so it keeps the layer open and
  *   says why. What happens after a hand-off is the host's, and its failures reach the status line where
@@ -37,6 +38,7 @@
 import { mountQuickRun } from './quick-run-surface.js';
 import {
   planQuickRunActivation,
+  planQuickRunCopyPath,
   planQuickRunReveal,
   quickRunWorkspaceItemId,
   revalidateQuickRunRow,
@@ -44,6 +46,17 @@ import {
 
 /** The sentence for a row that the workspace no longer holds (section 16.3), and what was done about it. */
 const GONE = 'Quick Run: that result is no longer in the workspace. The list now shows the current matches.';
+
+function quickRunNotificationTarget(row) {
+  if (typeof row?.target === 'string' && row.target !== '') return row.target;
+  if (row?.type === 'folder') return 'folder';
+  if (row?.type === 'layout-item') return 'window';
+  return 'item';
+}
+
+function quickRunOpeningStatus(row) {
+  return `Quick Run: opening ${row.name} [${quickRunNotificationTarget(row)}]…`;
+}
 
 export function bindQuickRunWorkspace({
   document,
@@ -58,6 +71,7 @@ export function bindQuickRunWorkspace({
   commandSurface = false,
   openFolderSurface = null,
   activateLayoutMember = null,
+  copyText = null,
 }) {
   if (typeof getState !== 'function') {
     throw new TypeError('bindQuickRunWorkspace needs a getState function to re-read the workspace');
@@ -104,6 +118,7 @@ export function bindQuickRunWorkspace({
       const plan = planQuickRunActivation(current.row);
       if (plan?.deferred) {
         if (plan.action === 'activate-window' && typeof activateLayoutMember === 'function') {
+          setStatus(quickRunOpeningStatus(current.row));
           Promise.resolve(activateLayoutMember(plan.target.layoutId, plan.target.memberId))
             .then((result) => {
               if (result?.outcome === 'success') {
@@ -131,10 +146,12 @@ export function bindQuickRunWorkspace({
         // private session would be invisible behind the palette, so hand the
         // folder to a normal project surface when this is the global entry.
         if (commandSurface && typeof openFolderSurface === 'function') {
+          setStatus(quickRunOpeningStatus(current.row));
           Promise.resolve(openFolderSurface(plan.target.groupId)).catch((error) => {
             setStatus(error instanceof Error ? error.message : String(error));
           });
         } else {
+          setStatus(quickRunOpeningStatus(current.row));
           commands.goToWorkspaceFolder(plan.target.groupId);
           closeAfterSuccess();
         }
@@ -145,6 +162,7 @@ export function bindQuickRunWorkspace({
         setStatus('Quick Run: that result has no workspace action.');
         return;
       }
+      setStatus(quickRunOpeningStatus(current.row));
       void commands.activateItem(itemId);
       closeAfterSuccess();
     },
@@ -180,6 +198,28 @@ export function bindQuickRunWorkspace({
       // reveal that had a target to show is a success even when the occurrence shares its record with
       // another placement: the folder navigated to is the occurrence's own.
       closeAfterSuccess();
+    },
+    // Ctrl+Shift+C copies only a shortcut or web-link target. Folders and layout members deliberately do
+    // not claim the gesture, leaving the key available for whatever owns it outside Quick Run.
+    onCopyPath: (resultKey) => {
+      const current = revalidateQuickRunRow(getState(), resultKey);
+      if (!current.ok) {
+        reportGone();
+        return false;
+      }
+      const copy = planQuickRunCopyPath(current.row);
+      if (!copy) return false;
+      if (typeof copyText !== 'function') {
+        setStatus('Quick Run: copying paths is not available here.');
+        return true;
+      }
+      Promise.resolve(copyText(copy.target.path))
+        .then(() => {
+          setStatus(`Quick Run: copied ${current.row.name} [${copy.target.path}].`);
+          closeAfterSuccess();
+        })
+        .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
+      return true;
     },
   });
 

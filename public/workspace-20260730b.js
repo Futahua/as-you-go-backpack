@@ -98,7 +98,7 @@ import {
   windowLayoutPickApplyOutcome,
   windowLayoutPickForBoundCandidate,
 } from './app/window-layout-workspace.js';
-import { windowLayoutControlButton, windowLayoutMemberMarkup } from './app/window-layout-control-icons.js';
+import { windowLayoutControlButton, windowLayoutMemberMarkup, windowLayoutMemberState } from './app/window-layout-control-icons.js';
 import {
   WINDOW_LAYOUT_MEMBER_NOTE_UNCONFIRMED,
   memberNoteForOutcome,
@@ -112,7 +112,7 @@ import { createToolbarController } from './app/components/toolbar-controller.js'
 import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
 import { getBackdropOpacity, getBreadcrumbMiddleScale, getBreadcrumbRootScale, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTrailOpacity, getTransparentBackground, setBackdropOpacity } from './app/hotkeys-model.js';
-import { resolveCopierAction } from './prompt-library-model.js';
+import { collectIncludedPrompts, formatCopyConfirmation, resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
 import { createEditorDialog } from './app/components/editor-dialog.js';
@@ -1190,18 +1190,29 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
 
 function patchWindowLayoutMember(layoutId, memberId, stateValue) {
   // 040: scope the DOM selector by layout+member so a state patch for one
-  // layout can never touch the same-window member of another layout.
-  const button = document.querySelector(
+  // layout can never touch the same-window member of another layout. There
+  // can be two legitimate matches while a compact widget is detached: update
+  // both copies instead of leaving one surface with stale underlines.
+  const stateClass = windowLayoutMemberState({ state: stateValue });
+  const buttons = document.querySelectorAll(
     `[data-wl-layout="${CSS.escape(layoutId)}"] [data-wl-member="${CSS.escape(memberId)}"]`);
-  if (!button) return;
-  button.classList.remove('normal', 'minimized');
-  button.classList.add(stateValue);
-  button.setAttribute('aria-pressed', stateValue === 'minimized' ? 'true' : 'false');
-  button.removeAttribute('title');
-  const marker = button.querySelector('.window-layout-member-state');
-  if (marker) {
-    marker.className = `window-layout-member-state ${stateValue}`;
-    marker.setAttribute('data-wl-member-state', stateValue);
+  for (const button of buttons) {
+    button.classList.remove('normal', 'minimized');
+    button.classList.add(stateClass);
+    button.setAttribute('aria-pressed', stateClass === 'minimized' ? 'true' : 'false');
+    button.removeAttribute('title');
+    const marker = button.querySelector('.window-layout-member-state');
+    if (stateClass === 'normal') {
+      const nextMarker = marker ?? document.createElement('span');
+      nextMarker.className = 'window-layout-member-state normal';
+      nextMarker.setAttribute('data-wl-member-state', 'normal');
+      nextMarker.setAttribute('aria-hidden', 'true');
+      if (!marker) button.append(nextMarker);
+    } else if (marker) {
+      // Minimized members have no marker in the markup at all. Removing it
+      // prevents a later CSS/layout rule from making a stale bar visible.
+      marker.remove();
+    }
   }
 }
 
@@ -2284,6 +2295,10 @@ const windowLayoutRecording = createWindowLayoutRecordingWiring({
   scheduleSave: queueWindowLayoutSave,
   setStatus: setWindowLayoutStatus,
   patchMember: patchWindowLayoutMember,
+  // Bounds observations stay local; a normal/minimized transition is the
+  // state that the detached widget must receive so its underline cannot go
+  // stale while the attached card is already correct.
+  onObservationStateChange: (layoutId) => noteWindowLayoutCommit(layoutId),
   statusText: windowLayoutStatusForOutcome,
   onRetireMember: (intent) => handleWindowLayoutRetireMember(intent),
   // Every member result reaches the card's state, and only a TRANSITION repaints: the cadence runs every few
@@ -5360,18 +5375,23 @@ elements.backdropOpacitySlider.addEventListener('change', async () => {
 
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
-    const selectedTargets = [...session.selected]
+    const selectedCandidates = [...session.selected]
       .map((selectedId) => shortcutByRecordOrPlacementId(selectedId))
-      .filter(Boolean)
-      .map((candidate) => candidate.target);
-    const outcome = resolveCopierAction(selectedTargets, promptLibrary.getSnapshotLibrary());
+      .filter(Boolean);
+    const promptNodes = promptLibrary.getSnapshotLibrary();
+    const selectedTargets = selectedCandidates.map((candidate) => candidate.target);
+    const outcome = resolveCopierAction(selectedTargets, promptNodes);
     if (outcome.kind === 'open') {
       promptLibrary.open({ message: 'Select at least one prompt for batch copying.' });
       return;
     }
     await host.copyText(outcome.text);
-    const noun = outcome.copied === 'paths' ? 'path' : 'prompt';
-    confirmPickupCopy(`Copied ${outcome.count} ${outcome.count === 1 ? noun : `${noun}s`}.`);
+    const copiedNames = outcome.copied === 'paths'
+      ? selectedCandidates.map((candidate) => candidate.name ?? candidate.target)
+      : collectIncludedPrompts(promptNodes)
+        .filter((node) => typeof node.text === 'string' && node.text.trim() !== '')
+        .map((node) => node.title);
+    confirmPickupCopy(formatCopyConfirmation(outcome, copiedNames));
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error));
   }
@@ -5708,6 +5728,10 @@ function openQuickRunFolderSurface(groupId) {
   return host.openNewSurface(nextUrl.toString());
 }
 
+// Keep the host-specific clipboard adapter outside the Quick Run composition region, just like the folder
+// surface adapter above. Quick Run receives a narrow function and remains unaware of Papers messaging.
+const quickRunCopyText = (text) => host.copyText(text);
+
 // Quick Run (STAGE 5). The composition seam lives in its own module so the wiring can be exercised
 // without booting the app: quick-run-workspace.test.mjs drives these same keys on the production markup
 // with a real store and the real command object. What is left here is the element adapter - the registry
@@ -5747,6 +5771,7 @@ const quickRun = bindQuickRunWorkspace({
   commandSurface: commandSurfaceMode === 'overlay',
   openFolderSurface: openQuickRunFolderSurface,
   activateLayoutMember: activateWindowLayoutMember,
+  copyText: quickRunCopyText,
 });
 
 const keyboard = createKeyboardController({

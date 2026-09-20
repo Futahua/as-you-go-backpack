@@ -60,6 +60,15 @@ export function planQuickRunActivation(row) {
   }
 }
 
+/** What Ctrl+Shift+C means: copy a shortcut or web-link target, without opening or revealing it. */
+export function planQuickRunCopyPath(row) {
+  if (!row || !['shortcut', 'link'].includes(row.type) || typeof row.target !== 'string' || row.target === '') return null;
+  return {
+    action: 'copy-shortcut-path',
+    target: { path: row.target, shortcutId: row.shortcutId, placementId: row.placementId },
+  };
+}
+
 
 /**
  * The workspace item id a plan's default action belongs to, in the id space the workspace's own

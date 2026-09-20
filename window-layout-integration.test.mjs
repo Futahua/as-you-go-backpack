@@ -51,6 +51,7 @@ function wiring(overrides = {}) {
   const saves = [];
   const statuses = [];
   const patches = [];
+  const stateChanges = [];
   const intervals = new Map();
   let nextTimer = 1;
   const host = {
@@ -76,6 +77,7 @@ function wiring(overrides = {}) {
     scheduleSave: () => saves.push('save'),
     setStatus: (layoutId, text) => statuses.push([layoutId, text]),
     patchMember: (layoutId, memberId, stateValue) => patches.push([layoutId, memberId, stateValue]),
+    onObservationStateChange: (layoutId, memberId, stateValue) => stateChanges.push([layoutId, memberId, stateValue]),
     setIntervalFn: (callback) => { const id = nextTimer++; intervals.set(id, callback); return id; },
     clearIntervalFn: (id) => intervals.delete(id),
     cadenceMs: 10,
@@ -93,6 +95,7 @@ function wiring(overrides = {}) {
     saves,
     statuses,
     patches,
+    stateChanges,
     intervals,
     applyCalls,
     host,
@@ -163,6 +166,25 @@ test('017I2 every active member is observed and a minimized observation keeps re
   const x2 = h.getState().windowLayouts[1].arrangement.members.find((m) => m.id === 'x2');
   assert.equal(x2.state, 'minimized');
   assert.deepEqual(x2.bounds, BOUNDS_L2_X, 'minimized observation preserves the saved restore bounds');
+});
+
+test('017I2 state transitions notify the detached widget, but bounds-only observations do not', async () => {
+  const h = wiring();
+  await h.recording.ensureRecording('L1');
+  h.host.observeWindowCapability = async () => ({
+    outcome: 'success',
+    observation: { bounds: { x: 8, y: 9, width: 320, height: 220 }, state: 'minimized' },
+  });
+  await h.recording.runtime.observeActiveMembers();
+  assert.deepEqual(h.stateChanges, [['L1', 'x1', 'minimized']]);
+  assert.deepEqual(h.patches.at(-1), ['L1', 'x1', 'minimized']);
+
+  h.host.observeWindowCapability = async () => ({
+    outcome: 'success',
+    observation: { bounds: { x: 10, y: 11, width: 330, height: 230 }, state: 'minimized' },
+  });
+  await h.recording.runtime.observeActiveMembers();
+  assert.deepEqual(h.stateChanges, [['L1', 'x1', 'minimized']], 'moving a minimized window does not rebroadcast its unchanged state');
 });
 
 test('017I2 partial and zero success retain the id; zero runs no timer', async () => {

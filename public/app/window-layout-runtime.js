@@ -506,6 +506,7 @@ export function createWindowLayoutRecordingWiring({
   scheduleSave,
   setStatus,
   patchMember,
+  onObservationStateChange = () => undefined,
   statusText,
   onMemberOutcome,
   onRetireMember,
@@ -524,11 +525,14 @@ export function createWindowLayoutRecordingWiring({
     },
     persistObservation: (layoutId, memberId, patch) => {
       const current = getState();
+      const previousMember = layoutMembers(getLayout(layoutId)).find((candidate) => candidate.id === memberId);
+      const stateChanged = previousMember?.state !== patch.state;
       const next = model.updateWindowLayoutMember(current, layoutId, memberId, patch);
       if (next !== current) {
         replaceState(next);
         const member = layoutMembers(getLayout(layoutId)).find((candidate) => candidate.id === memberId);
         patchMember?.(layoutId, memberId, member?.state ?? 'normal');
+        if (stateChanged) onObservationStateChange(layoutId, memberId, member?.state ?? 'normal');
       }
       scheduleSave();
     },

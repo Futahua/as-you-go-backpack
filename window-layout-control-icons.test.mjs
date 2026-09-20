@@ -9,6 +9,7 @@ import {
   WINDOW_LAYOUT_CONTROL_ORDER,
   windowLayoutControlGlyphMarkup,
   windowLayoutControlButton,
+  windowLayoutMemberState,
   windowLayoutMemberMarkup,
 } from './public/app/window-layout-control-icons.js';
 import { createWindowLayoutIsolateMode } from './public/app/window-layout-isolate-mode.js';
@@ -151,6 +152,18 @@ test('member markup: bottom indicator, accessible name, centered icon, no duplic
   assert.ok(!minimized.includes('data-wl-member-state="minimized"'), 'minimized members omit the running indicator');
   assert.ok(minimized.includes('class="window-layout-member-icon placeholder"'), 'placeholder when no icon');
   assert.ok(!minimized.includes('window-layout-member-state'), 'minimized members have no running bar');
+});
+
+test('member state is independent and fails closed for unknown values', () => {
+  assert.equal(windowLayoutMemberState({ state: 'normal' }), 'normal');
+  assert.equal(windowLayoutMemberState({ state: 'minimized' }), 'minimized');
+  assert.equal(windowLayoutMemberState({ state: 'missing' }), 'minimized');
+  assert.equal(windowLayoutMemberState({}), 'minimized');
+
+  const normal = windowLayoutMemberMarkup('L1', { id: 'normal', descriptor: { title: 'Open' }, state: 'normal' });
+  const minimized = windowLayoutMemberMarkup('L1', { id: 'min', descriptor: { title: 'Minimized' }, state: 'minimized' });
+  assert.equal((normal.match(/window-layout-member-state/g) ?? []).length, 1, 'normal gets one marker');
+  assert.equal(minimized.includes('window-layout-member-state'), false, 'minimized gets no marker at all');
 });
 
 test('member markup handles missing descriptors without throwing', () => {

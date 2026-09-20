@@ -55,6 +55,13 @@ export function windowLayoutControlButton(name, label, attr, value = 'true', opt
   return `<button class="window-layout-control wl-${name}${active ? ` ${escapeHtml(activeClass)}` : ''}" type="button" ${attr}="${escapeHtml(value)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"${toggle ? ` aria-pressed="${active}"` : ''} data-wl-glyph="${escapeHtml(glyph)}">${windowLayoutControlGlyphMarkup(glyph)}</button>`;
 }
 
+/** The underline is a per-member fact. Unknown state must never claim that a
+ * window is open, so it takes the no-indicator branch until observation gives
+ * us an explicit normal state. */
+export function windowLayoutMemberState(member) {
+  return member?.state === 'normal' ? 'normal' : 'minimized';
+}
+
 /** 019F taskbar-like member button: native program artwork centered and never
  * filtered/recolored, NO text inside the strip, and a small BOTTOM running
  * indicator (a Windows-taskbar-style line) driven by the actual known state
@@ -67,7 +74,7 @@ export function windowLayoutMemberMarkup(layoutId, member, icon = null, disabled
   const iconMarkup = icon
     ? `<img class="window-layout-member-icon" src="${escapeHtml(icon)}" alt="" draggable="false" data-wl-member-icon="${escapeHtml(member.id)}">`
     : `<span class="window-layout-member-icon placeholder" data-wl-member-icon="${escapeHtml(member.id)}" aria-hidden="true"></span>`;
-  const stateClass = member.state === 'minimized' ? 'minimized' : 'normal';
+  const stateClass = windowLayoutMemberState(member);
   const title = member.descriptor?.title ?? member.title ?? 'Untitled';
   const runningIndicator = stateClass === 'normal'
     ? `<span class="window-layout-member-state ${stateClass}" data-wl-member-state="${stateClass}" aria-hidden="true"></span>`

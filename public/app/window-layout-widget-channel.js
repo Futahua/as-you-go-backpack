@@ -253,7 +253,7 @@ export function windowLayoutWidgetRenderIdentity(snapshot) {
     snapshot?.tracking?.enabled === true,
     (snapshot?.members ?? []).map((member) => [
       member?.id ?? '',
-      member?.state === 'minimized' ? 'minimized' : 'normal',
+      member?.state === 'normal' ? 'normal' : 'minimized',
       member?.icon ?? '',
       member?.descriptor?.title ?? '',
       member?.descriptor?.version ?? '',
@@ -315,7 +315,10 @@ export function windowLayoutWidgetSnapshot(layout, memberIcon = () => null, memb
     members.push({
       id: member.id,
       descriptor,
-      state: member.state === 'minimized' ? 'minimized' : 'normal',
+      // Preserve the per-member distinction, and fail closed for malformed or
+      // not-yet-confirmed values so an unknown window is never underlined as
+      // if it were known to be open.
+      state: member.state === 'normal' ? 'normal' : 'minimized',
       icon,
       ...(windowInstanceId === null ? {} : { windowInstanceId }),
       // The sentence a member card says when the surface checked and could not confirm its window. It rides

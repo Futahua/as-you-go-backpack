@@ -18,6 +18,7 @@ import {
   clonePromptNodesForPaste,
   insertPromptNodes,
   buildBatchPromptText,
+  formatCopyConfirmation,
   validatePromptLibrary,
   resolveCopierAction,
 } from './public/prompt-library-model.js';
@@ -522,4 +523,19 @@ test('resolveCopierAction counts a single path as one path', () => {
   const outcome = resolveCopierAction(['C:\only'], library);
   assert.equal(outcome.copied, 'paths');
   assert.equal(outcome.count, 1, 'a lone path is not reported as a prompt');
+});
+
+test('formatCopyConfirmation names the copied paths or prompts and bounds long lists', () => {
+  assert.equal(
+    formatCopyConfirmation({ kind: 'copy', copied: 'paths', count: 1 }, ['Obsidia']),
+    'Copied 1 path: Obsidia.',
+  );
+  assert.equal(
+    formatCopyConfirmation({ kind: 'copy', copied: 'prompts', count: 2 }, ['Alpha', 'Beta']),
+    'Copied 2 prompts: Alpha, Beta.',
+  );
+  assert.equal(
+    formatCopyConfirmation({ kind: 'copy', copied: 'paths', count: 6 }, ['A', 'B', 'C', 'D', 'E', 'F']),
+    'Copied 6 paths: A, B, C, D, +2 more.',
+  );
 });

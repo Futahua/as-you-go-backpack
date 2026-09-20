@@ -264,7 +264,10 @@ function wheelPixels(event, { rowHeight, viewportHeight }) {
  * lives here, where a test can drive it with element mocks instead of by launching the app.
  */
 export function mountQuickRun(input) {
-  const { document, elements, getState, onActivate, onReveal, onOpen, onClose, universeNote = null, commandSurface = false, now = () => Date.now() } = input ?? {};
+  const {
+    document, elements, getState, onActivate, onReveal, onCopyPath, onOpen, onClose,
+    universeNote = null, commandSurface = false, now = () => Date.now(),
+  } = input ?? {};
   if (!document || !elements || typeof getState !== 'function') {
     throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
   }
@@ -396,6 +399,12 @@ export function mountQuickRun(input) {
       if (event.preventDefault) event.preventDefault();
       const key = highlighted();
       if (key && typeof onReveal === 'function') onReveal(key);
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key?.toLowerCase() === 'c') {
+      const key = highlighted();
+      const handled = key && typeof onCopyPath === 'function' ? onCopyPath(key) : false;
+      if (handled && event.preventDefault) event.preventDefault();
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {

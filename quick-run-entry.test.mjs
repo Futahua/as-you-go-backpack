@@ -40,6 +40,7 @@ test('the workspace binding hands Quick Run an activation path (STAGE 5, step 4)
   );
   for (const imported of [
     'planQuickRunActivation',
+    'planQuickRunCopyPath',
     'planQuickRunReveal',
     'quickRunWorkspaceItemId',
     'revalidateQuickRunRow',
@@ -118,6 +119,13 @@ test('Ctrl+Enter reveals the occurrence inside the workspace (section 1.6)', () 
     'the workspace own selection command takes the visible ids, supplied by the entry rather than reinvented',
   );
   assert.match(binding, /if \(!reveal\)/, 'a row with no occurrence to reveal says so instead of selecting nothing');
+});
+
+test('Ctrl+Shift+C copies a shortcut path through the existing host clipboard seam', () => {
+  assert.match(binding, /onCopyPath: \(resultKey\) =>/, 'the mount has somewhere to hand the copy key');
+  assert.match(binding, /const copy = planQuickRunCopyPath\(current\.row\)/, 'the copy plan is made from the current row');
+  assert.match(binding, /copyText\(copy\.target\.path\)/, 'the shortcut target path reaches the clipboard seam');
+  assert.match(region, /copyText: quickRunCopyText/, 'the entry passes the host clipboard seam');
 });
 
 test('Quick Run cannot render the workspace or reheat the graph: it holds no reference to either', async () => {

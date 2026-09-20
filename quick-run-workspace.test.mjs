@@ -84,7 +84,7 @@ function initialState() {
 
 function createHarness() {
   let state = initialState();
-  const effects = { launch: [], openWeb: [], reveal: [], status: [], renders: 0 };
+  const effects = { launch: [], openWeb: [], reveal: [], copied: [], status: [], renders: 0 };
   const store = createWorkspaceStore({
     getState: () => state,
     setState: (next) => { state = next; },
@@ -98,6 +98,7 @@ function createHarness() {
       launchShortcut: async (id) => { effects.launch.push(id); },
       openWebLink: async (url) => { effects.openWeb.push(url); },
       revealShortcut: async (id) => { effects.reveal.push(id); },
+      copyText: async (text) => { effects.copied.push(text); },
     },
     graph: { destroyGraphView: () => {}, _getNode: () => null },
     group: (id) => state.groups.find((candidate) => candidate.id === id) ?? null,
@@ -151,6 +152,7 @@ async function boot(options = {}) {
     commandSurface: options.commandSurface === true,
     openFolderSurface: options.openFolderSurface,
     activateLayoutMember: options.activateLayoutMember,
+    copyText: (text) => harness.effects.copied.push(text),
   });
   const type = (query) => {
     elements.input.value = query;
@@ -177,7 +179,7 @@ test('Folder Enter navigates the workspace and closes Quick Run (Definition of D
 
   assert.equal(h.store.getSession().currentId, 'g-a', 'the workspace is now in the folder that was searched for');
   assert.equal(isOpen(h.elements), false, 'section 16.1: a successful navigate closes the layer');
-  assert.deepEqual(h.effects.status, [], 'nothing had to be reported');
+  assert.deepEqual(h.effects.status, ['Quick Run: opening Alpha [folder]…'], 'opening the folder is announced');
   assert.deepEqual(h.effects.launch, [], 'a folder is navigated into, never launched');
 });
 
@@ -194,6 +196,7 @@ test('Folder Enter from the global launcher opens a normal project surface at th
   await Promise.resolve();
 
   assert.deepEqual(opened, ['g-a'], 'the launcher hands the folder to the visible project surface');
+  assert.deepEqual(h.effects.status, ['Quick Run: opening Alpha [folder]…'], 'the launcher announces the hand-off');
   assert.equal(h.store.getSession().currentId, null, 'the private launcher session does not pretend it navigated');
   assert.equal(isOpen(h.elements), true, 'the native launcher owns dismissal when the new surface takes focus');
 });
@@ -210,6 +213,7 @@ test('Shortcut Enter launches that record and closes Quick Run (Definition of Do
   assert.deepEqual(h.effects.launch, ['s-app'], 'the shared record id reached the launcher');
   assert.deepEqual(h.effects.openWeb, [], 'a program shortcut is launched, not opened as a link');
   assert.deepEqual(h.effects.reveal, [], 'launching is not revealing (section 1.6)');
+  assert.deepEqual(h.effects.status, ['Quick Run: opening Editor [C:/Program Files/Editor/editor.exe]…'], 'launching is announced');
   assert.equal(isOpen(h.elements), false, 'section 16.1: a successful launch closes the layer');
   assert.equal(h.store.getSession().currentId, null, 'a launch does not navigate');
 });
@@ -226,6 +230,7 @@ test('Link Enter opens that URL and closes Quick Run (Definition of Done: Action
   assert.deepEqual(h.effects.openWeb, ['https://example.com/docs'], 'the URL reached the host opener');
   assert.deepEqual(h.effects.launch, [], 'a link is opened, not launched as a program');
   assert.deepEqual(h.effects.reveal, [], 'and not revealed through the file manager either');
+  assert.deepEqual(h.effects.status, ['Quick Run: opening Docs [https://example.com/docs]…'], 'opening the link is announced');
   assert.equal(isOpen(h.elements), false, 'section 16.1: a successful open closes the layer');
 });
 
@@ -247,6 +252,42 @@ test('Ctrl+Enter navigates to the occurrence that was asked for and selects it (
   assert.deepEqual(h.effects.reveal, [], 'section 1.6: Ctrl+Enter never invokes the OS reveal');
   assert.deepEqual(h.effects.launch, [], 'and never launches the target');
   assert.equal(isOpen(h.elements), false, 'section 16.1: a successful reveal closes the layer');
+});
+
+test('Ctrl+Shift+C copies a shortcut target path and does not reveal or launch it', async () => {
+  const h = await boot();
+  h.surface.open();
+  h.type('editor');
+  assert.deepEqual(rowKeys(h.elements), ['shortcut:p-a', 'shortcut:p-b']);
+
+  h.key('c', { ctrlKey: true, shiftKey: true });
+  await Promise.resolve();
+
+  assert.deepEqual(h.effects.copied, ['C:/Program Files/Editor/editor.exe']);
+  assert.deepEqual(h.effects.status, ['Quick Run: copied Editor [C:/Program Files/Editor/editor.exe].']);
+  assert.deepEqual(h.effects.reveal, []);
+  assert.deepEqual(h.effects.launch, []);
+  assert.equal(h.store.getSession().currentId, null, 'copying does not navigate inside As you Go');
+  assert.equal(isOpen(h.elements), false, 'a successful copy closes Quick Run');
+});
+
+test('Ctrl+Shift+C copies a web link and leaves folders/layout items alone', async () => {
+  const h = await boot();
+  h.surface.open();
+  h.type('docs');
+  assert.deepEqual(rowKeys(h.elements), ['link:p-link']);
+  h.key('c', { ctrlKey: true, shiftKey: true });
+  await Promise.resolve();
+  assert.deepEqual(h.effects.copied, ['https://example.com/docs']);
+  assert.deepEqual(h.effects.status, ['Quick Run: copied Docs [https://example.com/docs].']);
+  assert.equal(isOpen(h.elements), false);
+
+  const folder = await boot();
+  folder.surface.open();
+  folder.type('alpha');
+  folder.key('c', { ctrlKey: true, shiftKey: true });
+  assert.deepEqual(folder.effects.copied, []);
+  assert.equal(isOpen(folder.elements), true);
 });
 
 test('a row that moved or vanished between render and keypress is re-read, not executed', async () => {

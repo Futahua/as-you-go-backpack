@@ -627,3 +627,18 @@ export function resolveCopierAction(selectedTargets, promptNodes) {
     ).length,
   };
 }
+
+/** Gives the copy toast enough context to identify what reached the clipboard.
+ * Names are deliberately supplied by the caller: this model only knows the
+ * prompt batch or target strings, not the workspace records that named them. */
+export function formatCopyConfirmation(outcome, names = []) {
+  if (!outcome || outcome.kind !== 'copy') return '';
+  const noun = outcome.copied === 'paths' ? 'path' : 'prompt';
+  const countLabel = `${outcome.count} ${outcome.count === 1 ? noun : `${noun}s`}`;
+  const labels = (Array.isArray(names) ? names : [])
+    .filter((name) => typeof name === 'string' && name.trim() !== '')
+    .map((name) => name.trim());
+  const shown = labels.slice(0, 4);
+  if (labels.length > 4) shown.push(`+${labels.length - 4} more`);
+  return `Copied ${countLabel}${shown.length > 0 ? `: ${shown.join(', ')}` : ''}.`;
+}

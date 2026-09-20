@@ -116,6 +116,16 @@ test('snapshot-request is answered; unknown layouts get a typed error', () => {
   missingClient.close();
 });
 
+test('snapshot keeps mixed member states independent and does not underline unknown state', () => {
+  const layout = makeLayout('L1', [
+    { id: 'open', title: 'Open', state: 'normal' },
+    { id: 'min', title: 'Minimized', state: 'minimized' },
+    { id: 'unknown', title: 'Unknown', state: 'missing' },
+  ]);
+  const snapshot = windowLayoutWidgetSnapshot(layout);
+  assert.deepEqual(snapshot.members.map((member) => member.state), ['normal', 'minimized', 'minimized']);
+});
+
 /* A pick that refused is still a COMMITTED command - the layout is unchanged or partly changed and nothing
  * failed - so the widget must not be told it was an error. What it lacked was the sentence: the workspace
  * computes it (windowLayoutPickApplyOutcome) and the detached widget never saw it, so a refusal was silent

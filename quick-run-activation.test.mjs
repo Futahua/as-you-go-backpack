@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { openQuickRunSession, quickRunSessionWithQuery } from './public/app/quick-run/quick-run-session.js';
 import {
   planQuickRunActivation,
+  planQuickRunCopyPath,
   planQuickRunReveal,
   QUICK_RUN_TARGET_GONE,
   revalidateQuickRunRow,
@@ -148,4 +149,22 @@ test('a plan names the workspace item the existing open-selection command takes 
   assert.equal(quickRunWorkspaceItemId(layoutItem), null, 'a deferred Layout Item has no workspace id to hand over');
   assert.equal(quickRunWorkspaceItemId(null), null);
   assert.equal(quickRunWorkspaceItemId({ action: 'launch-shortcut', target: {} }), null);
+});
+
+test('Ctrl+Shift+C plans a shortcut or link target, never another row type', () => {
+  const shortcut = planQuickRunCopyPath({
+    type: 'shortcut', shortcutId: 's-2', placementId: 'p-2', target: 'C:/Program Files/Editor/editor.exe',
+  });
+  assert.deepEqual(shortcut, {
+    action: 'copy-shortcut-path',
+    target: { path: 'C:/Program Files/Editor/editor.exe', shortcutId: 's-2', placementId: 'p-2' },
+  });
+  assert.deepEqual(planQuickRunCopyPath({
+    type: 'link', shortcutId: 's-1', placementId: 'p-1', target: 'https://example.com',
+  }), {
+    action: 'copy-shortcut-path',
+    target: { path: 'https://example.com', shortcutId: 's-1', placementId: 'p-1' },
+  });
+  assert.equal(planQuickRunCopyPath({ type: 'folder', groupId: 'g-1' }), null);
+  assert.equal(planQuickRunCopyPath({ type: 'shortcut', target: '' }), null);
 });
