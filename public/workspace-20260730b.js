@@ -6913,8 +6913,9 @@ if (WIDGET_SURFACE) {
       return;
     }
     let channel;
+    const coordinationNamespace = SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '';
     try {
-      channel = new BroadcastChannel(SURFACE_DOCUMENT_CHANNEL);
+      channel = new BroadcastChannel(`${SURFACE_DOCUMENT_CHANNEL}${coordinationNamespace}`);
     } catch {
       coordinationState = 'unavailable';
       statusToast.show('Shared document coordination failed to start; durable editing is disabled.', { tone: 'error' });
@@ -6952,6 +6953,7 @@ if (WIDGET_SURFACE) {
     };
     surfaceCoordinator = createSurfaceCoordinator({
       lock: webLockAdapter(navigator),
+      lockName: `${SURFACE_DOCUMENT_LOCK}${coordinationNamespace}`,
       channel,
       host: {
         loadVersioned: () => host.loadWorkspaceVersioned(),

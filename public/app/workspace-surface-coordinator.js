@@ -529,6 +529,7 @@ export function webLockAdapter(navigatorRef) {
 /**
  * @param {object} options
  * @param {{ request(name: string): Promise<{ release(): void }> }} options.lock
+ * @param {string} [options.lockName]
  * @param {{ postMessage(value: unknown): void, addEventListener?: Function }} options.channel
  * @param {{ loadVersioned(): Promise<{ state: object, revision: string }>,
  *           saveChecked(state: object, revision: string): Promise<object> }} options.host
@@ -543,6 +544,7 @@ export function webLockAdapter(navigatorRef) {
  */
 export function createSurfaceCoordinator({
   lock,
+  lockName = SURFACE_DOCUMENT_LOCK,
   channel,
   host,
   installDocument,
@@ -1055,7 +1057,7 @@ export function createSurfaceCoordinator({
       if (pendingAcquire) return pendingAcquire;
       pendingAcquire = (async () => {
         await ensureBaseline();
-        held = await lock.request(SURFACE_DOCUMENT_LOCK);
+        held = await lock.request(lockName);
         try {
           return await becomeWriter();
         } catch (error) {
@@ -1264,7 +1266,7 @@ export function createSurfaceCoordinator({
         if (typeof mine !== 'string') return { ok: false, code: 'NO_FROZEN_SNAPSHOT' };
         try {
           await ensureBaseline();
-          held = await lock.request(SURFACE_DOCUMENT_LOCK);
+          held = await lock.request(lockName);
           await becomeWriter();
         } catch {
           held?.release?.();
