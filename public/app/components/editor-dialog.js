@@ -149,50 +149,60 @@ export function createEditorDialog({
   async function commitEditorSave(forkFirst) {
     elements.saveButton.disabled = true;
     elements.saveButton.textContent = 'Saving…';
-    const name = elements.name.value.trim();
     try {
-      let workingState = getState();
-      let editItemId = editorMode.item?.id;
-      if (forkFirst && editItemId) {
-        const representedPlacementId =
-          editorMode.representedPlacementId ?? anyActivePlacementId(editItemId);
-        if (representedPlacementId) {
-          const knownIds = new Set(workingState.shortcuts.map((candidate) => candidate.id));
-          workingState = forkPlacement(workingState, representedPlacementId);
-          const forked = workingState.shortcuts.find((candidate) => !knownIds.has(candidate.id));
-          if (forked) editItemId = forked.id;
+      let built = null;
+      const buildNext = () => {
+        const name = elements.name.value.trim();
+        let workingState = getState();
+        let editItemId = editorMode.item?.id;
+        if (forkFirst && editItemId) {
+          const representedPlacementId =
+            editorMode.representedPlacementId ?? anyActivePlacementId(editItemId);
+          if (representedPlacementId) {
+            const knownIds = new Set(workingState.shortcuts.map((candidate) => candidate.id));
+            workingState = forkPlacement(workingState, representedPlacementId);
+            const forked = workingState.shortcuts.find((candidate) => !knownIds.has(candidate.id));
+            if (forked) editItemId = forked.id;
+          }
         }
-      }
-      let next;
-      if (editorMode.kind === 'group') {
-        next = editorMode.item
-          ? updateGroup(workingState, editorMode.item.id, { name, icon: editorIcon })
-          : createGroup(workingState, name, editorMode.parentId, editorIcon);
-      } else {
-        const isNewShortcut = !editorMode.item && editorMode.kind === 'shortcut';
-        const changes = {
-          name,
-          description: elements.description.value.trim(),
-          target: elements.target.value.trim(),
-          // A newly added shortcut defaults to the target's own Windows icon
-          // (resolved when the target was picked) unless the creator chose a
-          // project-owned image.
-          icon: editorIcon ?? (isNewShortcut ? editorTargetIcon : null),
+        let next;
+        if (editorMode.kind === 'group') {
+          next = editorMode.item
+            ? updateGroup(workingState, editorMode.item.id, { name, icon: editorIcon })
+            : createGroup(workingState, name, editorMode.parentId, editorIcon);
+        } else {
+          const isNewShortcut = !editorMode.item && editorMode.kind === 'shortcut';
+          const changes = {
+            name,
+            description: elements.description.value.trim(),
+            target: elements.target.value.trim(),
+            // A newly added shortcut defaults to the target's own Windows icon
+            // (resolved when the target was picked) unless the creator chose a
+            // project-owned image.
+            icon: editorIcon ?? (isNewShortcut ? editorTargetIcon : null),
+          };
+          next = editorMode.kind === 'web'
+            ? editorMode.item
+              ? updateWebLink(workingState, editItemId, changes)
+              : createWebLink(workingState, { ...changes, parentId: editorMode.parentId })
+            : editorMode.item
+              ? updateShortcut(workingState, editItemId, changes)
+              : createShortcut(workingState, { ...changes, parentId: editorMode.parentId });
+        }
+        const editedShortcutId = editorMode.kind === 'group' ? null : editItemId;
+        built = {
+          next,
+          editedShortcutId,
+          refreshTargetIcon: Boolean(
+            editedShortcutId
+            && (!editorIcon || editorMode.item?.target !== elements.target.value.trim()),
+          ),
         };
-        next = editorMode.kind === 'web'
-          ? editorMode.item
-            ? updateWebLink(workingState, editItemId, changes)
-            : createWebLink(workingState, { ...changes, parentId: editorMode.parentId })
-          : editorMode.item
-            ? updateShortcut(workingState, editItemId, changes)
-            : createShortcut(workingState, { ...changes, parentId: editorMode.parentId });
-      }
-      const editedShortcutId = editorMode.kind === 'group' ? null : editItemId;
-      const refreshTargetIcon = Boolean(
-        editedShortcutId
-        && (!editorIcon || editorMode.item?.target !== elements.target.value.trim()),
-      );
-      if (await commitWhenWorkspaceReady(next, 'Saved.')) {
+        return next;
+      };
+      buildNext();
+      if (await commitWhenWorkspaceReady(() => buildNext(), 'Saved.')) {
+        const { editedShortcutId, refreshTargetIcon } = built;
         if (refreshTargetIcon) {
           iconCache.delete(editedShortcutId);
           render();

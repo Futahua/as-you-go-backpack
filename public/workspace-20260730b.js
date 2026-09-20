@@ -345,6 +345,15 @@ function item(itemId) {
   return group(itemId) ?? windowLayout(itemId) ?? shortcut(itemId);
 }
 
+// The embedded boundary is presented at AYG's synthetic ROOT_ID, but its
+// graph positions belong to the real scoped project group. Keep that mapping
+// local to the embedded surface so standalone AYG's global root context stays
+// unchanged.
+function scopedGraphContextId(currentGroupId, binMode) {
+  if (SCOPE_ROOT_ID && !binMode && currentGroupId === ROOT_ID) return SCOPE_ROOT_ID;
+  return graphContextId(currentGroupId, binMode);
+}
+
 /** A persisted window-layout record by its own id. Window layouts are
  * single-parent entities (like groups): one record, one location, their own
  * identity — never shortcut-style linked placements. */
@@ -3882,7 +3891,10 @@ function createGraphController() {
       if (!byParent.has(key)) byParent.set(key, []);
       byParent.get(key).push(vi);
     }
-    const ctxId = graphContextId(session.currentId, session.binMode);
+    const ctxId = (typeof SCOPE_ROOT_ID !== 'undefined' && SCOPE_ROOT_ID
+      && !session.binMode && session.currentId === ROOT_ID)
+      ? SCOPE_ROOT_ID
+      : graphContextId(session.currentId, session.binMode);
     for (const vi of visibleItems) {
       const parentIds = vi.parentIds ?? [vi.parentId];
       let node = nodes.get(vi.id);
@@ -4591,7 +4603,10 @@ function createGraphController() {
     syncEdges(visible);
     syncOriginEdges(originEdges);
     syncSimulation();
-    const contextId = graphContextId(session.currentId, session.binMode);
+    const contextId = (typeof SCOPE_ROOT_ID !== 'undefined' && SCOPE_ROOT_ID
+      && !session.binMode && session.currentId === ROOT_ID)
+      ? SCOPE_ROOT_ID
+      : graphContextId(session.currentId, session.binMode);
     const layoutKey = JSON.stringify([
       contextId, session.binMode ? session.binCurrentId : null, w, h,
       visible.map((item) => {
@@ -5652,7 +5667,7 @@ const commands = createWorkspaceCommands({
   copySelection,
   collapsePlacements,
   binSelection,
-  graphContextId,
+  graphContextId: scopedGraphContextId,
   scopeRootId: SCOPE_ROOT_ID,
   isItemInScope: (id) => itemInScope(state, id, SCOPE_ROOT_ID),
   isDestinationInScope: (id) => destinationInScope(state, id, SCOPE_ROOT_ID),
@@ -5764,7 +5779,7 @@ graph._setOnDragCancel(() => pointer.cancelDrag());
 // the next save before it ever hit disk.
 graph._setOnRestPositions((positions) => {
   state = store.replace(
-    setGraphRestPositions(state, graphContextId(session.currentId, session.binMode), positions),
+    setGraphRestPositions(state, scopedGraphContextId(session.currentId, session.binMode), positions),
   );
   saveWorkspaceView();
   // Resting coordinates are shared board geometry, not a surface-local view
@@ -5798,7 +5813,8 @@ window.__papersFlushBeforeClose = async () => {
  * layer's normal commit path, but give that transient startup refusal the
  * same bounded retry as window-layout creation. Other failures stay visible. */
 async function commitWhenWorkspaceReady(next, message) {
-  let committed = await commit(next, message);
+  const build = typeof next === 'function' ? next : () => next;
+  let committed = await commit(build(), message);
   const needsCoordination = () => coordinationState !== 'ready'
     || !surfaceCoordinator?.baselineReady;
   if (committed === false && needsCoordination()) {
@@ -5806,7 +5822,7 @@ async function commitWhenWorkspaceReady(next, message) {
     while (needsCoordination() && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    if (hasDocumentWriteAuthority()) committed = await commit(next, message);
+    if (hasDocumentWriteAuthority()) committed = await commit(build(), message);
   }
   if (committed === false && needsCoordination()) {
     setStatus('Workspace is still synchronizing; try again in a moment.');

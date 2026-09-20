@@ -71,6 +71,7 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
       reheat: () => { effects.reheat = (effects.reheat ?? 0) + 1; },
     },
     ...base,
+    scopeRootId: model.scopeRootId ?? null,
     syncSelection: () => { effects.sync += 1; },
     saveWorkspaceView: () => { effects.saves += 1; },
     closeMenu: () => { effects.close += 1; },
@@ -235,6 +236,24 @@ test('moveSelectionToBin bins the resolved targets and commits', async () => {
   await h.commands.moveSelectionToBin();
   assert.deepEqual(h.store.getSnapshot().binned, ['g1', 'p-s1', 'p-s1b']);
   assert.equal(h.store.getSession().selected.size, 0);
+});
+
+test('scoped Bin protects only the project root and normalizes boundary drops', async () => {
+  const h = createHarness({
+    groups: [
+      { id: 'project-root', parentId: 'root', name: 'Project' },
+      { id: 'child', parentId: 'project-root', name: 'Child' },
+    ],
+    model: { scopeRootId: 'project-root' },
+  });
+  h.store.setSelection(['project-root', 'child']);
+  await h.commands.moveSelectionToBin();
+  assert.deepEqual(h.store.getSnapshot().binned, ['child']);
+  await h.commands.dropFiles([{ name: 'note.txt' }], 'root');
+  assert.equal(h.store.getSnapshot().dropped.destination, 'project-root');
+  h.store.setSelection(['project-root']);
+  await h.commands.moveSelectionToBin();
+  assert.equal(h.effects.status.at(-1), 'The project folder cannot be moved to the Bin.');
 });
 
 test('selectedPasteDestinations uses selected folders or the current folder', () => {

@@ -66,8 +66,12 @@ export function createWorkspaceCommands({
     return false;
   }
 
+  function scopedDestination(destinationId) {
+    return scopeRootId && destinationId === 'root' ? scopeRootId : destinationId;
+  }
+
   function scopeAllowsDestination(destinationId) {
-    if (!scopeRootId || isDestinationInScope(destinationId)) return true;
+    if (!scopeRootId || isDestinationInScope(scopedDestination(destinationId))) return true;
     setStatus('That destination is outside this project folder.');
     return false;
   }
@@ -451,7 +455,8 @@ export function createWorkspaceCommands({
   }
 
   async function pasteInto(parentIds) {
-    const destinations = Array.isArray(parentIds) ? parentIds : [parentIds];
+    const destinations = (Array.isArray(parentIds) ? parentIds : [parentIds])
+      .map(scopedDestination);
     const clipboard = store.getSession().clipboard;
     if (!clipboard || destinations.length === 0 || destinations.includes('bin')) return;
     if (!destinations.every((destinationId) => scopeAllowsDestination(destinationId))) return;
@@ -573,7 +578,8 @@ export function createWorkspaceCommands({
   async function dragDropToFolder({ itemIds, placementIds, folderId }) {
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
-    if (!scopeAllowsSelection(itemIds) || !scopeAllowsDestination(folderId)) return;
+    const destination = scopedDestination(folderId);
+    if (!scopeAllowsSelection(itemIds) || !scopeAllowsDestination(destination)) return;
     const movable = itemIds.filter((draggedId) => !isAncestorItem(draggedId));
     if (movable.length === 0) {
       setStatus('The path to this folder cannot be moved into another folder.');
@@ -590,10 +596,10 @@ export function createWorkspaceCommands({
         .filter(Boolean);
       let next = store.getSnapshot();
       if (groupIds.length > 0 || singlePlacementIds.length > 0) {
-        next = moveSelection(next, [...groupIds, ...singlePlacementIds], folderId);
+        next = moveSelection(next, [...groupIds, ...singlePlacementIds], destination);
       }
       for (const shortcutId of wholeShortcutIds) {
-        next = collapsePlacements(next, shortcutId, folderId);
+        next = collapsePlacements(next, shortcutId, destination);
       }
       await store.commit(removeGraphRestPositions(removeGraphPositions(next, ctxId, movable), ctxId, movable));
     } catch (error) {
@@ -629,7 +635,8 @@ export function createWorkspaceCommands({
   /** Drops a URL into a destination: resolves the web icon, creates the web
    * link, and commits. Reports errors through setStatus. */
   async function dropUrl(url, destination) {
-    if (!scopeAllowsDestination(destination)) return;
+    const normalizedDestination = scopedDestination(destination);
+    if (!scopeAllowsDestination(normalizedDestination)) return;
     try {
       let name = nameForDroppedUrl(url);
       let icon = null;
@@ -645,7 +652,7 @@ export function createWorkspaceCommands({
         name,
         target: url,
         icon,
-        parentId: destination,
+        parentId: normalizedDestination,
       });
       await store.commit(next);
     } catch (error) {
@@ -656,10 +663,11 @@ export function createWorkspaceCommands({
   /** Drops files into a destination: resolves targets, creates shortcuts,
    * and commits — or reports that they already exist. */
   async function dropFiles(files, destination) {
-    if (!scopeAllowsDestination(destination)) return;
+    const normalizedDestination = scopedDestination(destination);
+    if (!scopeAllowsDestination(normalizedDestination)) return;
     try {
       const targets = await host.resolveDroppedTargets(files);
-      const next = createDroppedShortcuts(store.getSnapshot(), targets, destination);
+      const next = createDroppedShortcuts(store.getSnapshot(), targets, normalizedDestination);
       if (next.shortcuts.length === store.getSnapshot().shortcuts.length) {
         setStatus('Those shortcuts already exist here.');
         return;
