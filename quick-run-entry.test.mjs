@@ -195,7 +195,6 @@ test('Quick Run activation adds no second launcher and no reveal path (sections 
       'revealSelection',
       'launchShortcut',
       'openWebLink',
-      'host.',
       'setInterval',
       'fetch(',
     ]) {
@@ -206,4 +205,5 @@ test('Quick Run activation adds no second launcher and no reveal path (sections 
       );
     }
   }
+  assert.match(region, /dismissCommandSurface: \(\) => host\.dismissCommandSurface\(\)/);
 });

@@ -154,6 +154,7 @@ async function boot(options = {}) {
     setStatus: (text) => { harness.effects.status.push(text); },
     commandSurface: options.commandSurface === true,
     openFolderSurface: options.openFolderSurface,
+    dismissCommandSurface: options.dismissCommandSurface,
     activateLayoutMember: options.activateLayoutMember,
     copyText: (text) => harness.effects.copied.push(text),
   });
@@ -260,7 +261,8 @@ test('Ctrl+Enter navigates to the occurrence that was asked for and selects it (
 });
 
 test('global command-surface Link Enter uses the same opener and stays host-owned after success', async () => {
-  const h = await boot({ commandSurface: true });
+  let dismissed = 0;
+  const h = await boot({ commandSurface: true, dismissCommandSurface: async () => { dismissed += 1; } });
   h.surface.open();
   h.type('docs');
   h.key('Enter');
@@ -269,6 +271,7 @@ test('global command-surface Link Enter uses the same opener and stays host-owne
 
   assert.deepEqual(h.effects.openWeb, ['https://example.com/docs']);
   assert.deepEqual(h.effects.status, ['Quick Run: opening Docs [https://example.com/docs]…']);
+  assert.equal(dismissed, 1, 'successful action explicitly dismisses the native command surface');
   assert.equal(isOpen(h.elements), true, 'the native command-surface host owns dismissal');
 });
 

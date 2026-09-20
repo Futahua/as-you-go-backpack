@@ -229,6 +229,7 @@ export function createHostBridge(window) {
     launchShortcut: (actionId) => request('papers:project:as-you-go-launch', { actionId }),
     revealShortcut: (actionId) => request('papers:project:as-you-go-reveal', { actionId }),
     openWebLink: (url) => request('papers:project:open-web-link', { url }),
+    dismissCommandSurface: () => request('papers:project:command-surface-dismiss'),
     openNewSurface: (url) => request('papers:project:open-new-surface', { url }),
     pickTarget: (kind) => request('papers:project:as-you-go-pick-target', { kind }),
     shortcutIcon: (detail) => request('papers:project:as-you-go-shortcut-icon', detail),

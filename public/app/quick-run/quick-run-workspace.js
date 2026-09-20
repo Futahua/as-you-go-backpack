@@ -70,6 +70,7 @@ export function bindQuickRunWorkspace({
   universeNote = null,
   commandSurface = false,
   openFolderSurface = null,
+  dismissCommandSurface = null,
   activateLayoutMember = null,
   copyText = null,
   hydrateIcons = null,
@@ -85,10 +86,16 @@ export function bindQuickRunWorkspace({
   // Assigned by the mount below; the callbacks close over it so a successful action can close the layer
   // without the mount having to know what success meant.
   let surface = null;
-  // On the canvas, a successful action closes the surface because the workspace behind it is where the reader
-  // is now going. The global launcher is dismissed by losing focus to the external action (or by opening the
-  // ordinary project surface for a folder), so this callback intentionally remains a canvas-only close.
-  const closeAfterSuccess = () => { if (!commandSurface) surface?.close(); };
+  // Ordinary Quick Run owns its DOM lifetime. The global launcher is a native
+  // window, so it must be dismissed explicitly after the semantic action has
+  // succeeded; native blur is only a focus observation, not a close command.
+  const closeAfterSuccess = async () => {
+    if (commandSurface) {
+      await dismissCommandSurface?.();
+      return;
+    }
+    surface?.close();
+  };
   // A vanished target is reported and the snapshot is rebuilt from the state that refused it, keeping the
   // reader's query and filter and moving the highlight to the nearest survivor (section 5). Without the
   // rebuild the dead row would stay on screen and the next Enter would refuse it again.
@@ -128,7 +135,7 @@ export function bindQuickRunWorkspace({
           Promise.resolve(activateLayoutMember(plan.target.layoutId, plan.target.memberId))
             .then((result) => {
               if (result?.outcome === 'success') {
-                closeAfterSuccess();
+                void closeAfterSuccess().catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
                 return;
               }
               setStatus(result?.message || 'Quick Run: that window could not be activated.');
@@ -153,13 +160,13 @@ export function bindQuickRunWorkspace({
         // folder to a normal project surface when this is the global entry.
         if (commandSurface && typeof openFolderSurface === 'function') {
           setStatus(quickRunOpeningStatus(current.row));
-          Promise.resolve(openFolderSurface(plan.target.groupId)).catch((error) => {
-            setStatus(error instanceof Error ? error.message : String(error));
-          });
+          Promise.resolve(openFolderSurface(plan.target.groupId))
+            .then(() => closeAfterSuccess())
+            .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
         } else {
           setStatus(quickRunOpeningStatus(current.row));
           commands.goToWorkspaceFolder(plan.target.groupId);
-          closeAfterSuccess();
+          void closeAfterSuccess().catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
         }
         return;
       }
@@ -175,7 +182,7 @@ export function bindQuickRunWorkspace({
           if (result?.reported !== true) setStatus(result?.message || 'Quick Run: that item could not be opened.');
           return;
         }
-        closeAfterSuccess();
+        await closeAfterSuccess();
       } catch (error) {
         setStatus(error instanceof Error ? error.message : String(error));
       }
@@ -211,7 +218,7 @@ export function bindQuickRunWorkspace({
       // Section 1.6 puts the reveal inside the workspace and section 16.1 closes the layer on success, so a
       // reveal that had a target to show is a success even when the occurrence shares its record with
       // another placement: the folder navigated to is the occurrence's own.
-      closeAfterSuccess();
+      void closeAfterSuccess().catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
     },
     // Ctrl+Shift+C copies only a shortcut or web-link target. Folders and layout members deliberately do
     // not claim the gesture, leaving the key available for whatever owns it outside Quick Run.
@@ -230,7 +237,7 @@ export function bindQuickRunWorkspace({
       Promise.resolve(copyText(copy.target.path))
         .then(() => {
           setStatus(`Quick Run: copied ${current.row.name} [${copy.target.path}].`);
-          closeAfterSuccess();
+          return closeAfterSuccess();
         })
         .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
       return true;
