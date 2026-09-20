@@ -5886,7 +5886,10 @@ function bootstrapWindowLayoutWidget() {
         widgetState.snapshot = message.snapshot;
         if (message.snapshot.appearance && typeof message.snapshot.appearance === 'object') {
           applyTheme(message.snapshot.appearance);
-          applyWidgetOpacity(Number(message.snapshot.appearance.backdropOpacity) || 0);
+          // A fresh widget should be solid even when the host workspace is
+          // currently transparent. A saved or wheel-adjusted widget opacity
+          // still wins inside applyWidgetOpacity().
+          applyWidgetOpacity(Number(message.snapshot.appearance.backdropOpacity) || 1);
         }
         widgetState.snapshotReceived = true;
         const memberIds = new Set((message.snapshot.members ?? []).map((member) => member.id));

@@ -144,6 +144,13 @@ test('widget render forwards tracking state into the shared card candidate', () 
   assert.match(workspaceSource, /tracking: snapshot\.tracking/);
 });
 
+test('a fresh widget uses an opaque fallback when the host backdrop is transparent', () => {
+  assert.match(
+    workspaceSource,
+    /applyWidgetOpacity\(Number\(message\.snapshot\.appearance\.backdropOpacity\) \|\| 1\)/,
+  );
+});
+
 test('a native instance identity change is render identity even when title and executable stay the same', () => {
   const first = windowLayoutWidgetSnapshot({
     ...BASE,
