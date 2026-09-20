@@ -360,6 +360,8 @@ export function mountQuickRun(input) {
   resizeHandle.tabIndex = -1;
   elements.layer.append?.(resizeHandle);
   let resizeStart = null;
+  let resizePointerId = null;
+  let resizeListenersAttached = false;
   const readLayerSize = () => {
     const rect = elements.layer.getBoundingClientRect?.();
     const width = Number(rect?.width) || Number(elements.layer.offsetWidth) || 680;
@@ -379,13 +381,26 @@ export function mountQuickRun(input) {
       height: Math.min(MAX_QUICK_RUN_HEIGHT, Math.max(MIN_QUICK_RUN_HEIGHT, viewportHeight - 32)),
     };
   };
-  const finishResize = () => {
+  const removeResizeListeners = () => {
+    if (!resizeListenersAttached) return;
+    document.removeEventListener?.('pointermove', handleResizeMove);
+    document.removeEventListener?.('pointerup', finishResize);
+    document.removeEventListener?.('pointercancel', finishResize);
+    resizeListenersAttached = false;
+  };
+  const matchesResizePointer = (event) => (
+    resizePointerId === null || event?.pointerId === undefined || event.pointerId === resizePointerId
+  );
+  const finishResize = (event = null) => {
     if (!resizeStart) return;
+    if (event && !matchesResizePointer(event)) return;
     const size = cardSizeValue({
       width: Number.parseFloat(elements.layer.style?.width) || resizeStart.width,
       height: Number.parseFloat(elements.layer.style?.height) || resizeStart.height,
     });
     resizeStart = null;
+    resizePointerId = null;
+    removeResizeListeners();
     if (!size) return;
     setLayerCardSize(elements.layer, size);
     try {
@@ -395,23 +410,30 @@ export function mountQuickRun(input) {
       // A persistence failure is reported by the owning save callback; the card remains usable.
     }
   };
+  const handleResizeMove = (event) => {
+    if (!resizeStart || commandSurface || !matchesResizePointer(event)) return;
+    const bounds = resizeBounds();
+    const width = Math.min(bounds.width, Math.max(MIN_QUICK_RUN_WIDTH, resizeStart.width + Number(event.clientX || 0) - resizeStart.pointerX));
+    const height = Math.min(bounds.height, Math.max(MIN_QUICK_RUN_HEIGHT, resizeStart.height + Number(event.clientY || 0) - resizeStart.pointerY));
+    // Mark the card as sized as soon as the drag starts so the result list can use the newly available
+    // height while the pointer is still moving, rather than waiting for a pointerup on the tiny grip.
+    setLayerCardSize(elements.layer, { width: Math.round(width), height: Math.round(height) });
+  };
   resizeHandle.addEventListener?.('pointerdown', (event) => {
     if (commandSurface) return;
     const start = readLayerSize();
     resizeStart = { ...start, pointerX: Number(event.clientX) || 0, pointerY: Number(event.clientY) || 0 };
+    resizePointerId = event.pointerId ?? null;
+    setLayerCardSize(elements.layer, start);
+    document.addEventListener?.('pointermove', handleResizeMove);
+    document.addEventListener?.('pointerup', finishResize);
+    document.addEventListener?.('pointercancel', finishResize);
+    resizeListenersAttached = true;
     resizeHandle.setPointerCapture?.(event.pointerId);
     event.preventDefault?.();
   });
-  resizeHandle.addEventListener?.('pointermove', (event) => {
-    if (!resizeStart || commandSurface) return;
-    const bounds = resizeBounds();
-    const width = Math.min(bounds.width, Math.max(MIN_QUICK_RUN_WIDTH, resizeStart.width + Number(event.clientX || 0) - resizeStart.pointerX));
-    const height = Math.min(bounds.height, Math.max(MIN_QUICK_RUN_HEIGHT, resizeStart.height + Number(event.clientY || 0) - resizeStart.pointerY));
-    elements.layer.style.width = `${Math.round(width)}px`;
-    elements.layer.style.height = `${Math.round(height)}px`;
-  });
-  resizeHandle.addEventListener?.('pointerup', finishResize);
-  resizeHandle.addEventListener?.('pointercancel', finishResize);
+  // Pointer capture remains an optimization, but document-level tracking is the correctness path: once the
+  // pointer leaves the 18px grip, Chromium/Electron may retarget the move/up events away from the button.
   const activate = (key) => { if (key && typeof onActivate === 'function') onActivate(key); };
   const highlighted = () => (typeof session.highlightKey === 'string' ? session.highlightKey : null);
   /** A new selection, list or scroll baseline, established by something other than the wheel. */

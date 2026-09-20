@@ -906,19 +906,30 @@ test('hydrated link rows expose the shared favicon request and retain a fixed fa
 
 test('the in-workspace card resize commits bounded geometry for the next open', () => {
   const h = harness();
+  const documentListeners = {};
+  const document = {
+    createElement: (tag) => ({ tag, ...liveElement() }),
+    documentElement: { clientWidth: 1600, clientHeight: 1000 },
+    addEventListener(type, handler) { (documentListeners[type] ??= []).push(handler); },
+    removeEventListener(type, handler) {
+      documentListeners[type] = (documentListeners[type] ?? []).filter((candidate) => candidate !== handler);
+    },
+    fire(type, event) { for (const handler of documentListeners[type] ?? []) handler(event); },
+  };
   h.elements.layer.style = {};
   h.elements.layer.getBoundingClientRect = () => ({ width: 680, height: 320 });
   let saved = null;
   const surface = mountQuickRun({
-    ...h,
+    ...h, document,
     getState: () => state,
     onCardSizeChanged: (size) => { saved = size; },
   });
   const handle = h.elements.layer.children[0];
   surface.open();
   handle.fire('pointerdown', { clientX: 10, clientY: 10, pointerId: 1, preventDefault() {} });
-  handle.fire('pointermove', { clientX: 210, clientY: 160, pointerId: 1 });
-  handle.fire('pointerup', { pointerId: 1 });
+  document.fire('pointermove', { clientX: 210, clientY: 160, pointerId: 1 });
+  assert.equal(h.elements.layer.dataset.quickRunSized, 'true', 'the card becomes sized during the drag');
+  document.fire('pointerup', { pointerId: 1 });
   assert.deepEqual(saved, { width: 880, height: 470 });
   assert.equal(h.elements.layer.style.width, '880px');
   assert.equal(h.elements.layer.style.height, '470px');
