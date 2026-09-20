@@ -277,15 +277,23 @@ export function createWorkspaceCommands({
   }
   async function launchShortcut(itemId) {
     closeMenu();
+    const chosen = shortcut(itemId);
+    if (!chosen) {
+      const message = 'The shortcut is no longer in the workspace.';
+      setStatus(message);
+      return { ok: false, message, reported: true };
+    }
     try {
-      const chosen = shortcut(itemId);
       if (isWebLink(chosen)) {
         await host.openWebLink(chosen.target);
       } else {
         await host.launchShortcut(itemId);
       }
+      return { ok: true };
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(message);
+      return { ok: false, message, reported: true };
     }
   }
 

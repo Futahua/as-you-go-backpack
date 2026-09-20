@@ -41,6 +41,13 @@
  */
 import { quickRunCapNotice, quickRunChipViews, quickRunEmptyNotice, quickRunRowViews } from './quick-run-presentation.js';
 import {
+  MAX_QUICK_RUN_HEIGHT,
+  MAX_QUICK_RUN_WIDTH,
+  MIN_QUICK_RUN_HEIGHT,
+  MIN_QUICK_RUN_WIDTH,
+  normalizeQuickRunCardSize,
+} from '../../workspace-model-20260730b.js';
+import {
   closeQuickRunSession,
   closedQuickRunSession,
   openQuickRunSession,
@@ -63,6 +70,19 @@ const CHIP_CLASS = 'quick-run-chip';
  */
 export const QUICK_RUN_WHEEL_ROW_HEIGHT_PX = 24;
 
+function cardSizeValue(value) {
+  return normalizeQuickRunCardSize(value);
+}
+
+function setLayerCardSize(layer, size) {
+  const normalized = cardSizeValue(size);
+  if (!normalized || !layer?.style) return null;
+  layer.style.width = `${normalized.width}px`;
+  layer.style.height = `${normalized.height}px`;
+  if (layer.dataset) layer.dataset.quickRunSized = 'true';
+  return normalized;
+}
+
 /**
  * The item's own artwork when it is something this list may paint, or null to fall back to the kind glyph.
  *
@@ -84,7 +104,29 @@ function iconGlyphNode(document, iconKind) {
   return glyph;
 }
 
-function rowNode(document, view, onRowClick, clearHover) {
+function hydratedIconNode(document, view) {
+  const imageWithFallback = (attribute, value) => {
+    const image = document.createElement('img');
+    image.className = 'quick-run-icon-art';
+    image.alt = '';
+    image.hidden = true;
+    image.dataset[attribute] = value;
+    image.addEventListener?.('error', () => {
+      image.hidden = true;
+      image.nextElementSibling?.removeAttribute?.('hidden');
+    }, { once: true });
+    return image;
+  };
+  if (view.webIconTarget) {
+    return imageWithFallback('webIcon', view.webIconTarget);
+  }
+  if (view.defaultIconId) {
+    return imageWithFallback('defaultIcon', view.defaultIconId);
+  }
+  return null;
+}
+
+function rowNode(document, view, onRowClick, clearHover, hydrateIcons) {
   const item = document.createElement('li');
   item.className = ROW_CLASS + (view.highlighted ? ' highlighted' : '');
   item.dataset.quickRunKey = view.key;
@@ -98,6 +140,15 @@ function rowNode(document, view, onRowClick, clearHover) {
   const source = usableIconSource(view.icon);
   if (source === null) {
     icon.className = 'quick-run-icon quick-run-icon-' + view.iconKind;
+    if (hydrateIcons) {
+      const image = hydratedIconNode(document, view);
+      if (image) {
+        const fallback = document.createElement('span');
+        fallback.className = 'quick-run-icon-fallback';
+        fallback.setAttribute?.('aria-hidden', 'true');
+        icon.append(image, fallback);
+      }
+    }
   } else {
     // One fixed box, the artwork contained in it. The img is created and given its source, and nothing waits
     // for it: the list is not blocked and not reordered by a picture arriving.
@@ -167,7 +218,7 @@ function revealHighlightedRow(elements) {
  */
 export function paintQuickRunSurface({
   document, elements, session, onRowClick, keepScroll = false, resetScroll = false, reveal = false,
-  loadFailure = null,
+  loadFailure = null, hydrateIcons = false,
 }) {
   elements.layer.hidden = !session.open;
   if (elements.notice) {
@@ -191,7 +242,7 @@ export function paintQuickRunSurface({
   if (session.query === '') elements.input.value = '';
   const chips = quickRunChipViews(session).map((view) => chipNode(document, view));
   elements.chips.replaceChildren(...chips);
-  const rows = quickRunRowViews(session).map((view) => rowNode(document, view, onRowClick, clearHover));
+  const rows = quickRunRowViews(session).map((view) => rowNode(document, view, onRowClick, clearHover, hydrateIcons));
   // Hover is a marker of its own, never the keyboard highlight (sections 6.3 and 6.4): moving the pointer
   // may show where the pointer is, and Enter still runs whatever the keyboard highlighted.
   function clearHover() {
@@ -266,7 +317,8 @@ function wheelPixels(event, { rowHeight, viewportHeight }) {
 export function mountQuickRun(input) {
   const {
     document, elements, getState, onActivate, onReveal, onCopyPath, onOpen, onClose,
-    universeNote = null, commandSurface = false, now = () => Date.now(),
+    universeNote = null, commandSurface = false, now = () => Date.now(), onPaint = null,
+    getCardSize = null, onCardSizeChanged = null,
   } = input ?? {};
   if (!document || !elements || typeof getState !== 'function') {
     throw new TypeError('mountQuickRun needs a document, the four elements and a getState function');
@@ -300,6 +352,66 @@ export function mountQuickRun(input) {
   // that place back. Recorded on open and used on close, and never used to pull focus away from an action
   // that has already moved it somewhere the reader asked for.
   let previousFocus = null;
+  const resizeHandle = document.createElement('button');
+  resizeHandle.type = 'button';
+  resizeHandle.className = 'quick-run-resize-handle';
+  resizeHandle.title = 'Resize Quick Run';
+  resizeHandle.setAttribute?.('aria-label', 'Resize Quick Run');
+  resizeHandle.tabIndex = -1;
+  elements.layer.append?.(resizeHandle);
+  let resizeStart = null;
+  const readLayerSize = () => {
+    const rect = elements.layer.getBoundingClientRect?.();
+    const width = Number(rect?.width) || Number(elements.layer.offsetWidth) || 680;
+    const height = Number(rect?.height) || Number(elements.layer.offsetHeight) || 320;
+    return { width, height };
+  };
+  const applySavedCardSize = () => {
+    if (commandSurface) return;
+    const saved = typeof getCardSize === 'function' ? getCardSize() : null;
+    if (saved) setLayerCardSize(elements.layer, saved);
+  };
+  const resizeBounds = () => {
+    const viewportWidth = Number(document.documentElement?.clientWidth) || MAX_QUICK_RUN_WIDTH;
+    const viewportHeight = Number(document.documentElement?.clientHeight) || MAX_QUICK_RUN_HEIGHT;
+    return {
+      width: Math.min(MAX_QUICK_RUN_WIDTH, Math.max(MIN_QUICK_RUN_WIDTH, viewportWidth - 24)),
+      height: Math.min(MAX_QUICK_RUN_HEIGHT, Math.max(MIN_QUICK_RUN_HEIGHT, viewportHeight - 32)),
+    };
+  };
+  const finishResize = () => {
+    if (!resizeStart) return;
+    const size = cardSizeValue({
+      width: Number.parseFloat(elements.layer.style?.width) || resizeStart.width,
+      height: Number.parseFloat(elements.layer.style?.height) || resizeStart.height,
+    });
+    resizeStart = null;
+    if (!size) return;
+    setLayerCardSize(elements.layer, size);
+    try {
+      const result = onCardSizeChanged?.(size);
+      if (result?.catch) result.catch(() => {});
+    } catch {
+      // A persistence failure is reported by the owning save callback; the card remains usable.
+    }
+  };
+  resizeHandle.addEventListener?.('pointerdown', (event) => {
+    if (commandSurface) return;
+    const start = readLayerSize();
+    resizeStart = { ...start, pointerX: Number(event.clientX) || 0, pointerY: Number(event.clientY) || 0 };
+    resizeHandle.setPointerCapture?.(event.pointerId);
+    event.preventDefault?.();
+  });
+  resizeHandle.addEventListener?.('pointermove', (event) => {
+    if (!resizeStart || commandSurface) return;
+    const bounds = resizeBounds();
+    const width = Math.min(bounds.width, Math.max(MIN_QUICK_RUN_WIDTH, resizeStart.width + Number(event.clientX || 0) - resizeStart.pointerX));
+    const height = Math.min(bounds.height, Math.max(MIN_QUICK_RUN_HEIGHT, resizeStart.height + Number(event.clientY || 0) - resizeStart.pointerY));
+    elements.layer.style.width = `${Math.round(width)}px`;
+    elements.layer.style.height = `${Math.round(height)}px`;
+  });
+  resizeHandle.addEventListener?.('pointerup', finishResize);
+  resizeHandle.addEventListener?.('pointercancel', finishResize);
   const activate = (key) => { if (key && typeof onActivate === 'function') onActivate(key); };
   const highlighted = () => (typeof session.highlightKey === 'string' ? session.highlightKey : null);
   /** A new selection, list or scroll baseline, established by something other than the wheel. */
@@ -325,7 +437,15 @@ export function mountQuickRun(input) {
       // this is the only place the difference between "your project is empty" and "I could not read your
       // project" can be shown - and flattening those two is what hid the creator's failure.
       loadFailure: typeof universeNote === 'function' ? universeNote() : null,
+      hydrateIcons: typeof onPaint === 'function',
     });
+    if (typeof onPaint === 'function') {
+      try {
+        onPaint(elements.layer);
+      } catch {
+        // Icon hydration is best effort; the fixed fallback slot remains usable.
+      }
+    }
     if (keepScroll) listScrolled = true;
     else if (resetScroll) listScrolled = false;
     return drawn;
@@ -472,6 +592,7 @@ export function mountQuickRun(input) {
       previousFocus = document.activeElement ?? null;
       // Told before focus moves, so a modal underneath can freeze before anything about it changes.
       onOpen?.();
+      applySavedCardSize();
       session = openQuickRunSession(getState());
       if (seeded !== '') {
         session = quickRunSessionWithQuery(session, seeded);

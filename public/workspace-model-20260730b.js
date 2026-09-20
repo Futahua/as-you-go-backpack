@@ -6,6 +6,10 @@ export const ROOT_ID = 'root';
 export const DEFAULT_ICON_SIZE = 96;
 export const MIN_ICON_SIZE = 56;
 export const MAX_ICON_SIZE = 176;
+export const MIN_QUICK_RUN_WIDTH = 420;
+export const MAX_QUICK_RUN_WIDTH = 1100;
+export const MIN_QUICK_RUN_HEIGHT = 180;
+export const MAX_QUICK_RUN_HEIGHT = 800;
 const MAX_SURFACE_LOCATIONS = 128;
 
 const id = (kind) => `${kind}-${globalThis.crypto.randomUUID()}`;
@@ -27,6 +31,17 @@ export function normalizeWindowLayoutCardSize(raw) {
   return { width: Math.round(Math.min(2000, width)), height: Math.round(Math.min(2000, height)) };
 }
 
+/** The project-owned Quick Run card geometry. The command-surface window is
+ * host-sized; this preference only controls the in-workspace card. */
+export function normalizeQuickRunCardSize(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  if (!hasNumber(raw.width) || !hasNumber(raw.height)) return null;
+  return {
+    width: Math.round(Math.min(MAX_QUICK_RUN_WIDTH, Math.max(MIN_QUICK_RUN_WIDTH, raw.width))),
+    height: Math.round(Math.min(MAX_QUICK_RUN_HEIGHT, Math.max(MIN_QUICK_RUN_HEIGHT, raw.height))),
+  };
+}
+
 export function emptyState() {
   return {
     schemaVersion: 1,
@@ -41,6 +56,7 @@ export function emptyState() {
     startupWindowLayoutId: null,
     view: {
       iconSize: DEFAULT_ICON_SIZE,
+      quickRunCardSize: null,
       currentGroupId: ROOT_ID,
       expandedGroupIds: [],
       graphExpandedGroupIds: [],
@@ -496,6 +512,7 @@ export function normalizeState(raw) {
     ? raw.groups.map((candidate) => ({ ...candidate, icon: candidate.icon ?? null }))
     : [];
   const windowLayouts = normalizeWindowLayouts(raw?.windowLayouts);
+  const quickRunCardSize = normalizeQuickRunCardSize(raw?.view?.quickRunCardSize);
   const state = {
     schemaVersion: 1,
     groups,
@@ -513,6 +530,7 @@ export function normalizeState(raw) {
         MAX_ICON_SIZE,
         Math.max(MIN_ICON_SIZE, hasNumber(raw?.view?.iconSize) ? raw.view.iconSize : DEFAULT_ICON_SIZE),
       ),
+      ...(quickRunCardSize ? { quickRunCardSize } : {}),
       currentGroupId:
         typeof raw?.view?.currentGroupId === 'string'
           ? raw.view.currentGroupId

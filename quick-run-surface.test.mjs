@@ -21,7 +21,7 @@ const state = {
 
 function fakeElement() {
   return {
-    hidden: false, value: '', textContent: '', className: '', dataset: {}, children: [],
+    hidden: false, value: '', textContent: '', className: '', dataset: {}, style: {}, children: [],
     listeners: {},
     append(...nodes) { this.children.push(...nodes); },
     replaceChildren(...nodes) { this.children = nodes; },
@@ -889,6 +889,39 @@ test('typing never re-reads the world: the snapshot is taken at open and ranked 
     elements.layer.fire('keydown', { key: 'Tab', shiftKey: false, preventDefault() {} });
   }
   assert.equal(reads, 1, 'and nothing a keystroke does reads it again');
+});
+
+test('hydrated link rows expose the shared favicon request and retain a fixed fallback slot', () => {
+  const h = harness();
+  paintQuickRunSurface({
+    ...h,
+    hydrateIcons: true,
+    session: quickRunSessionWithQuery(openQuickRunSession(state), 'docs'),
+  });
+  const icon = h.elements.results.children[0].children[0];
+  assert.equal(icon.children[0].dataset.webIcon, 'https://example.com/docs');
+  assert.equal(icon.children[0].hidden, true, 'the fallback remains visible until hydration succeeds');
+  assert.equal(icon.children[1].className, 'quick-run-icon-fallback');
+});
+
+test('the in-workspace card resize commits bounded geometry for the next open', () => {
+  const h = harness();
+  h.elements.layer.style = {};
+  h.elements.layer.getBoundingClientRect = () => ({ width: 680, height: 320 });
+  let saved = null;
+  const surface = mountQuickRun({
+    ...h,
+    getState: () => state,
+    onCardSizeChanged: (size) => { saved = size; },
+  });
+  const handle = h.elements.layer.children[0];
+  surface.open();
+  handle.fire('pointerdown', { clientX: 10, clientY: 10, pointerId: 1, preventDefault() {} });
+  handle.fire('pointermove', { clientX: 210, clientY: 160, pointerId: 1 });
+  handle.fire('pointerup', { pointerId: 1 });
+  assert.deepEqual(saved, { width: 880, height: 470 });
+  assert.equal(h.elements.layer.style.width, '880px');
+  assert.equal(h.elements.layer.style.height, '470px');
 });
 /* The launcher overlay: the same surface in a 640x220 window with no workspace behind it.
    Three things differ from the canvas, and each one is a decision rather than a drift:

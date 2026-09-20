@@ -82,7 +82,7 @@ function initialState() {
   };
 }
 
-function createHarness() {
+function createHarness(options = {}) {
   let state = initialState();
   const effects = { launch: [], openWeb: [], reveal: [], copied: [], status: [], renders: 0 };
   const store = createWorkspaceStore({
@@ -96,7 +96,10 @@ function createHarness() {
     store,
     host: {
       launchShortcut: async (id) => { effects.launch.push(id); },
-      openWebLink: async (url) => { effects.openWeb.push(url); },
+      openWebLink: async (url) => {
+        effects.openWeb.push(url);
+        if (options.openWebError) throw new Error(options.openWebError);
+      },
       revealShortcut: async (id) => { effects.reveal.push(id); },
       copyText: async (text) => { effects.copied.push(text); },
     },
@@ -140,7 +143,7 @@ function createHarness() {
 
 /** The real binding, on the production markup's elements, over the harness's store and commands. */
 async function boot(options = {}) {
-  const harness = createHarness();
+  const harness = createHarness(options);
   const elements = await productionElements();
   const surface = bindQuickRunWorkspace({
     document: { createElement: (tag) => fakeElement(tag) },
@@ -209,6 +212,7 @@ test('Shortcut Enter launches that record and closes Quick Run (Definition of Do
 
   h.key('Enter');
   await Promise.resolve();
+  await Promise.resolve();
 
   assert.deepEqual(h.effects.launch, ['s-app'], 'the shared record id reached the launcher');
   assert.deepEqual(h.effects.openWeb, [], 'a program shortcut is launched, not opened as a link');
@@ -225,6 +229,7 @@ test('Link Enter opens that URL and closes Quick Run (Definition of Done: Action
   assert.deepEqual(rowKeys(h.elements), ['link:p-link'], 'an https target is indexed as a Link');
 
   h.key('Enter');
+  await Promise.resolve();
   await Promise.resolve();
 
   assert.deepEqual(h.effects.openWeb, ['https://example.com/docs'], 'the URL reached the host opener');
@@ -252,6 +257,35 @@ test('Ctrl+Enter navigates to the occurrence that was asked for and selects it (
   assert.deepEqual(h.effects.reveal, [], 'section 1.6: Ctrl+Enter never invokes the OS reveal');
   assert.deepEqual(h.effects.launch, [], 'and never launches the target');
   assert.equal(isOpen(h.elements), false, 'section 16.1: a successful reveal closes the layer');
+});
+
+test('global command-surface Link Enter uses the same opener and stays host-owned after success', async () => {
+  const h = await boot({ commandSurface: true });
+  h.surface.open();
+  h.type('docs');
+  h.key('Enter');
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(h.effects.openWeb, ['https://example.com/docs']);
+  assert.deepEqual(h.effects.status, ['Quick Run: opening Docs [https://example.com/docs]…']);
+  assert.equal(isOpen(h.elements), true, 'the native command-surface host owns dismissal');
+});
+
+test('global command-surface Link Enter keeps the surface alive when opening fails', async () => {
+  const h = await boot({ commandSurface: true, openWebError: 'browser refused the URL' });
+  h.surface.open();
+  h.type('docs');
+  h.key('Enter');
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(h.effects.openWeb, ['https://example.com/docs']);
+  assert.deepEqual(h.effects.status, [
+    'Quick Run: opening Docs [https://example.com/docs]…',
+    'browser refused the URL',
+  ]);
+  assert.equal(isOpen(h.elements), true, 'a failed activation must not dismiss the global surface');
 });
 
 test('Ctrl+Shift+C copies a shortcut target path and does not reveal or launch it', async () => {
@@ -301,6 +335,7 @@ test('a row that moved or vanished between render and keypress is re-read, not e
   h.mutate((state) => ({ ...state, shortcuts: state.shortcuts.filter((shortcut) => shortcut.id !== 's-app') }));
   h.key('Enter');
   await Promise.resolve();
+  await Promise.resolve();
 
   assert.deepEqual(h.effects.launch, [], 'the stale payload was not launched');
   assert.equal(isOpen(h.elements), true, 'section 16.2: a failure does not silently close the layer');
@@ -320,6 +355,7 @@ test('a row that moved or vanished between render and keypress is re-read, not e
     shortcuts: state.shortcuts.map((shortcut) => (shortcut.id === 's-app' ? { ...shortcut, name: 'Renamed editor' } : shortcut)),
   }));
   h2.key('Enter');
+  await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(h2.effects.launch, ['s-app'], 'the current row was executed, by its stable key');
   assert.equal(isOpen(h2.elements), false);

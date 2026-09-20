@@ -68,6 +68,8 @@ export function quickRunRowViews(session, noted) {
     // invented substitute for an item that has none. This module decides *what* a row shows; whether the
     // bytes are usable is the surface's question, and it answers it by drawing the kind glyph instead.
     icon: typeof row.icon === 'string' && row.icon !== '' ? row.icon : null,
+    defaultIconId: row.type === 'shortcut' && typeof row.shortcutId === 'string' ? row.shortcutId : null,
+    webIconTarget: row.type === 'link' && typeof row.target === 'string' ? row.target : null,
   }));
 }
 

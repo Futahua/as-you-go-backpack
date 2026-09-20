@@ -13,6 +13,7 @@ import {
   itemsIntersectingMarquee,
   moveSelection,
   normalizeState,
+  normalizeQuickRunCardSize,
   renameItem,
   reorderSelection,
   restoreSelection,
@@ -1902,6 +1903,14 @@ test('removeClosedWindowFromAllLayouts retires one closed native window from eve
   assert.deepEqual(next.windowLayouts[1].arrangement.members.map((member) => member.id), ['two-other']);
   assert.equal(removeClosedWindowFromAllLayouts(next, descriptor), next, 'an already-retired descriptor is byte-zero');
   assert.throws(() => removeClosedWindowFromAllLayouts(state, { title: 'Shared', executableFingerprint: 'bad' }), /invalid/);
+});
+
+test('Quick Run card geometry is bounded and survives state normalization', () => {
+  assert.deepEqual(normalizeQuickRunCardSize({ width: 300, height: 120 }), { width: 420, height: 180 });
+  assert.deepEqual(normalizeQuickRunCardSize({ width: 5000, height: 5000 }), { width: 1100, height: 800 });
+  const normalized = normalizeState({ view: { quickRunCardSize: { width: 701.4, height: 333.6 } } });
+  assert.deepEqual(normalized.view.quickRunCardSize, { width: 701, height: 334 });
+  assert.equal(normalizeQuickRunCardSize({ width: 'wide', height: 300 }), null);
 });
 
 test('startup reconciliation removes dead members and deletes only empty untracked layouts', () => {

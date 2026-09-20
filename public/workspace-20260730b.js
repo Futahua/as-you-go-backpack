@@ -5837,6 +5837,14 @@ function openQuickRunFolderSurface(groupId) {
 // Keep the host-specific clipboard adapter outside the Quick Run composition region, just like the folder
 // surface adapter above. Quick Run receives a narrow function and remains unaware of Papers messaging.
 const quickRunCopyText = (text) => host.copyText(text);
+const quickRunHydrateIcons = (shell) => hydrateNodeIcons(shell);
+const quickRunCardSizeChanged = (size) => {
+  state = store.replace({ ...state, view: { ...state.view, quickRunCardSize: size } });
+  return persist(state).catch((error) => {
+    if (!detachSaveGate.isReadOnly()) setStatus(error instanceof Error ? error.message : String(error));
+    throw error;
+  });
+};
 
 // Quick Run (STAGE 5). The composition seam lives in its own module so the wiring can be exercised
 // without booting the app: quick-run-workspace.test.mjs drives these same keys on the production markup
@@ -5878,6 +5886,9 @@ const quickRun = bindQuickRunWorkspace({
   openFolderSurface: openQuickRunFolderSurface,
   activateLayoutMember: activateWindowLayoutMember,
   copyText: quickRunCopyText,
+  hydrateIcons: quickRunHydrateIcons,
+  getCardSize: () => state.view?.quickRunCardSize ?? null,
+  onCardSizeChanged: quickRunCardSizeChanged,
 });
 
 const keyboard = createKeyboardController({

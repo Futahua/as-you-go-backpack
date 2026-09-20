@@ -72,6 +72,9 @@ export function bindQuickRunWorkspace({
   openFolderSurface = null,
   activateLayoutMember = null,
   copyText = null,
+  hydrateIcons = null,
+  getCardSize = null,
+  onCardSizeChanged = null,
 }) {
   if (typeof getState !== 'function') {
     throw new TypeError('bindQuickRunWorkspace needs a getState function to re-read the workspace');
@@ -104,12 +107,15 @@ export function bindQuickRunWorkspace({
     onClose,
     universeNote,
     commandSurface,
+    onPaint: hydrateIcons,
+    getCardSize,
+    onCardSizeChanged,
     // What Enter does (section 1.5). The row is re-read from the current state by its stable key before
     // anything happens (section 5), then the plan is executed by naming the workspace's own
     // open-selection path - activateItem - instead of growing a second launcher (sections 1.5 and 6.4). A
     // row that cannot run yet says so in the status line rather than appearing to do nothing (section 1.6),
     // and only a hand-off closes the layer (section 16.1).
-    onActivate: (resultKey) => {
+    onActivate: async (resultKey) => {
       const current = revalidateQuickRunRow(getState(), resultKey);
       if (!current.ok) {
         reportGone();
@@ -163,8 +169,16 @@ export function bindQuickRunWorkspace({
         return;
       }
       setStatus(quickRunOpeningStatus(current.row));
-      void commands.activateItem(itemId);
-      closeAfterSuccess();
+      try {
+        const result = await commands.activateItem(itemId);
+        if (result === false || result?.ok === false) {
+          if (result?.reported !== true) setStatus(result?.message || 'Quick Run: that item could not be opened.');
+          return;
+        }
+        closeAfterSuccess();
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error));
+      }
     },
     // Ctrl+Enter (section 1.6): reveal the exact occurrence inside the workspace. It navigates to the folder
     // the occurrence lives in and selects the occurrence itself, and it never delegates to the file manager

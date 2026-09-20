@@ -41,6 +41,37 @@
   box-shadow: 0 18px 40px var(--shadow);
 }
 
+.quick-run-layer[data-quick-run-sized='true'] .quick-run-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+/* The host owns the global command-surface window bounds. This handle is for
+ * the project-owned in-workspace card only. */
+.quick-run-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: linear-gradient(135deg, transparent 45%, var(--border-strong) 46%, var(--border-strong) 53%, transparent 54%),
+    linear-gradient(135deg, transparent 60%, var(--border-strong) 61%, var(--border-strong) 68%, transparent 69%);
+  cursor: nwse-resize;
+  opacity: .7;
+  z-index: 1;
+}
+
+.quick-run-resize-handle:hover,
+.quick-run-resize-handle:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
 .quick-run-input {
   width: 100%;
   padding: 12px 16px;
@@ -259,3 +290,4 @@ html[data-papers-surface='command-surface'] .quick-run-results {
   flex: 1 1 auto;
   min-height: 0;
 }
+html[data-papers-surface='command-surface'] .quick-run-resize-handle { display: none; }
