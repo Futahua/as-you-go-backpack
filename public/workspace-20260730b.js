@@ -5574,6 +5574,7 @@ async function reloadWorkspace() {
   }
 }
 host.onCommandSurfaceInvoke((payload) => {
+  if (SCOPE_ROOT_ID) return;
   const plan = planCommandSurfaceInvoke(payload, { loadFailed: workspaceLoad.ok !== true });
   if (plan.kind !== 'focus-and-clear') return;
   quickRun.focusEmptyLine();
@@ -5916,6 +5917,7 @@ const quickRun = bindQuickRunWorkspace({
   getCardSize: () => state.view?.quickRunCardSize ?? null,
   onCardSizeChanged: quickRunCardSizeChanged,
 });
+if (SCOPE_ROOT_ID) elements.quickRunLayer.hidden = true;
 
 const keyboard = createKeyboardController({
   document,
@@ -5945,6 +5947,10 @@ const keyboard = createKeyboardController({
 //
 // Named rather than inline because the overlay's invocation listener above the controller also needs it.
 function openQuickRun(seed) {
+  if (SCOPE_ROOT_ID) {
+    setStatus('Quick Run is unavailable inside a project folder.');
+    return;
+  }
   return typeof seed === 'string' && seed !== '' ? quickRun.open(seed) : quickRun.toggle();
 }
 
@@ -7063,7 +7069,7 @@ if (WIDGET_SURFACE) {
     // from and no second way in. It cannot be opened at mount time, and the first attempt proved why: mount
     // runs during module evaluation, so `onOpen` reached the prompt library before it was constructed, the
     // boot died there, and the overlay came up with no rows to search.
-    if (commandSurfaceMode === 'overlay') quickRun.open();
+    if (commandSurfaceMode === 'overlay' && !SCOPE_ROOT_ID) quickRun.open();
     if (commandSurfaceMode === 'overlay' && workspaceLoad.ok !== true) {
       // A launcher window is created and shown in the same breath as its page loads, so the first read of the
       // project's items can lose that race. One bounded retry, in this mode only and only while nothing has

@@ -35,13 +35,22 @@ export function createHostBridge(window) {
   const lifecycleListeners = new Set();
   const lifecycleBaselineListeners = new Set();
 
+  function parentOrigin() {
+    try {
+      const origin = new URL(document.referrer).origin;
+      return origin && origin !== 'null' ? origin : '*';
+    } catch {
+      return '*';
+    }
+  }
+
   function request(type, detail = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
     if (pending.size >= MAX_PENDING) {
       return Promise.reject(new Error('Host request capacity reached.'));
     }
     const requestId = crypto.randomUUID();
     if (type === 'papers:project:window-pick-begin') console.info('[045-direct-pick] host-request', requestId);
-    window.parent.postMessage({ type, requestId, ...detail }, '*');
+    window.parent.postMessage({ type, requestId, ...detail }, parentOrigin());
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(requestId);
