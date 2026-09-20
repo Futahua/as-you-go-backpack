@@ -7,7 +7,7 @@ function fakeNode() {
   return { hidden: true };
 }
 
-function createHarness({ binMode = false, initialState = null, membershipMode = null, activeElement = null } = {}) {
+function createHarness({ binMode = false, initialState = null, membershipMode = null, activeElement = null, commandSurface = false } = {}) {
   const listeners = [];
   const documentMock = {
     activeElement,
@@ -67,6 +67,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     setMembershipMode: membershipMode,
     setStatus: (text) => { called.status.push(text); },
     beginSetRename: () => { called.beginRename += 1; return true; },
+    commandSurface,
     openQuickRun: (seed) => { called.quickRun += 1; called.quickRunSeeds.push(seed); return true; },
   });
   controller.mount();
@@ -575,4 +576,10 @@ test('the two editable selectors are the shapes they claim to be', () => {
     assert.equal(TEXT_ENTRY_SELECTOR.includes(`[type="${excluded}"]`), true, `${excluded} is excluded`);
   }
   assert.equal(EDITABLE_SELECTOR, 'input, textarea, [contenteditable="true"], .set-name-editor', 'the wider guard is unchanged');
+});
+
+test('the global command surface does not let the host Alt+A keydown toggle Quick Run closed', () => {
+  const h = createHarness({ commandSurface: true });
+  h.listeners[0].handler(key({ key: 'a', altKey: true }));
+  assert.equal(h.called.quickRun, 0);
 });

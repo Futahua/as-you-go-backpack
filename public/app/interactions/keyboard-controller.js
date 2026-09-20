@@ -45,6 +45,7 @@ export function createKeyboardController({
   setMembershipMode = null,
   setStatus = () => {},
   beginSetRename = () => false,
+  commandSurface = false,
   // Quick Run (STAGE 5). The controller reports the chord and nothing more: opening the
   // surface is the entry file's job, so this stays inert until something passes a callback.
   openQuickRun = () => false,
@@ -54,6 +55,11 @@ export function createKeyboardController({
   function mount() {
     abortController = new AbortController();
     document.addEventListener('keydown', (event) => {
+      // Alt+A is owned by the Papers host while this renderer is the global
+      // command surface. The native accelerator opened this page and the
+      // Quick Run surface is already visible; letting the same keydown reach
+      // the workspace controller would toggle it closed immediately.
+      if (commandSurface) return;
       const session = store.getSession();
       const preferences = store.getSnapshot?.()?.view?.preferences?.hotkeys ?? {};
       const matches = (actionId) => bindingMatchesAction(actionId, event, preferences, HOTKEY_CATALOG);

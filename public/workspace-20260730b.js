@@ -5903,6 +5903,7 @@ const keyboard = createKeyboardController({
   setMembershipMode,
   setStatus,
   beginSetRename,
+  commandSurface: commandSurfaceMode === 'overlay',
   openQuickRun,
 });
 
