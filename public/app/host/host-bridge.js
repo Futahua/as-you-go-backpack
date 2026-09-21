@@ -55,7 +55,7 @@ export function createHostBridge(window) {
     return new Promise((resolve, reject) => {
       const timer = timeoutMs == null ? null : setTimeout(() => {
         pending.delete(requestId);
-        console.warn('[host-bridge] request timed out', { requestId, type });
+        console.warn(`[host-bridge] request timed out: ${type} ${requestId}`);
         reject(new Error('Host request timed out.'));
       }, timeoutMs);
       pending.set(requestId, { resolve, reject, timer, type });
