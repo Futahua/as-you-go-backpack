@@ -53,7 +53,7 @@ export function createHostBridge(window) {
     if (type === 'papers:project:window-pick-begin') console.info('[045-direct-pick] host-request', requestId);
     window.parent.postMessage({ type, requestId, ...detail }, parentOrigin());
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = timeoutMs == null ? null : setTimeout(() => {
         pending.delete(requestId);
         console.warn('[host-bridge] request timed out', { requestId, type });
         reject(new Error('Host request timed out.'));
@@ -106,7 +106,7 @@ export function createHostBridge(window) {
     const task = pending.get(event.data.requestId);
     if (!task) return;
     pending.delete(event.data.requestId);
-    clearTimeout(task.timer);
+    if (task.timer !== null) clearTimeout(task.timer);
     if (!event.data.ok) {
       task.reject(new Error(event.data.error || 'The request could not be completed.'));
       return;
@@ -240,7 +240,7 @@ export function createHostBridge(window) {
       state: encodeWorkspaceState(state),
       revision,
     }).then((payload) => payload.stateSave),
-    acquireWorkspaceWriterLease: () => request('papers:project:workspace-writer-lease-acquire'),
+    acquireWorkspaceWriterLease: () => request('papers:project:workspace-writer-lease-acquire', {}, null),
     releaseWorkspaceWriterLease: (token) => request('papers:project:workspace-writer-lease-release', { token }),
     launchShortcut: (actionId) => request('papers:project:as-you-go-launch', { actionId }),
     revealShortcut: (actionId) => request('papers:project:as-you-go-reveal', { actionId }),

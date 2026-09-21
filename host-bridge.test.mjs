@@ -378,6 +378,21 @@ test('host bridge carries the Papers writer lease envelope and release token', a
   await release;
 });
 
+test('writer lease acquisition is allowed to wait beyond ordinary RPC timing', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const pending = host.acquireWorkspaceWriterLease();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const request = mock.parent.messages[0].message;
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: request.requestId,
+    ok: true,
+    writerLease: { token: 'lease-long-lived' },
+  });
+  assert.deepEqual(await pending, { token: 'lease-long-lived' });
+});
+
 test('host bridge can request a new Papers surface without naming a project id', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);
