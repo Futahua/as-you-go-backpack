@@ -4,8 +4,25 @@ import test from 'node:test';
 import {
   SURFACE_ROLE,
   createSurfaceCoordinator,
+  hostWriterLeaseAdapter,
   mergeSurfaceSnapshots,
 } from './public/app/workspace-surface-coordinator.js';
+
+test('host writer lease adapter acquires and releases through Papers', async () => {
+  const calls = [];
+  const adapter = hostWriterLeaseAdapter({
+    acquireWorkspaceWriterLease: async () => {
+      calls.push('acquire');
+      return { token: 'lease-1' };
+    },
+    releaseWorkspaceWriterLease: async (token) => calls.push(`release:${token}`),
+  });
+  assert.equal(adapter.available, true);
+  const held = await adapter.request('ignored-by-host');
+  held.release();
+  await new Promise((resolve) => queueMicrotask(resolve));
+  assert.deepEqual(calls, ['acquire', 'release:lease-1']);
+});
 
 test('per-tab folder locations merge independently instead of replacing a peer tab', () => {
   const base = { view: { surfaceLocations: { a: { currentGroupId: 'root' }, b: { currentGroupId: 'root' } } } };

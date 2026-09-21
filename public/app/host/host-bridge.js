@@ -122,6 +122,10 @@ export function createHostBridge(window) {
       task.resolve({ stateSave: event.data.stateSave });
       return;
     }
+    if ('writerLease' in event.data) {
+      task.resolve(event.data.writerLease);
+      return;
+    }
     if (task.type === 'papers:project:window-thumbnail') {
       // 019GR: the compact hover preview consumes ONLY the exact shared result.
       // Success is exactly { outcome, imageUrl, width, height }; a fallback is
@@ -236,6 +240,8 @@ export function createHostBridge(window) {
       state: encodeWorkspaceState(state),
       revision,
     }).then((payload) => payload.stateSave),
+    acquireWorkspaceWriterLease: () => request('papers:project:workspace-writer-lease-acquire'),
+    releaseWorkspaceWriterLease: (token) => request('papers:project:workspace-writer-lease-release', { token }),
     launchShortcut: (actionId) => request('papers:project:as-you-go-launch', { actionId }),
     revealShortcut: (actionId) => request('papers:project:as-you-go-reveal', { actionId }),
     openWebLink: (url) => request('papers:project:open-web-link', { url }),

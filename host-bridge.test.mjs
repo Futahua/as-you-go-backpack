@@ -352,6 +352,32 @@ test('host bridge preserves the checked-save result envelope', async () => {
   assert.deepEqual(await promise, { ok: true, revision: 'b'.repeat(64) });
 });
 
+test('host bridge carries the Papers writer lease envelope and release token', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const acquire = host.acquireWorkspaceWriterLease();
+  const acquireRequest = mock.parent.messages[0].message;
+  assert.equal(acquireRequest.type, 'papers:project:workspace-writer-lease-acquire');
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: acquireRequest.requestId,
+    ok: true,
+    writerLease: { token: 'lease-1' },
+  });
+  assert.deepEqual(await acquire, { token: 'lease-1' });
+
+  const release = host.releaseWorkspaceWriterLease('lease-1');
+  const releaseRequest = mock.parent.messages[1].message;
+  assert.equal(releaseRequest.type, 'papers:project:workspace-writer-lease-release');
+  assert.equal(releaseRequest.token, 'lease-1');
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: releaseRequest.requestId,
+    ok: true,
+  });
+  await release;
+});
+
 test('host bridge can request a new Papers surface without naming a project id', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);

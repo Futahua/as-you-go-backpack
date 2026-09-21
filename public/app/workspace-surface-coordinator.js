@@ -527,6 +527,27 @@ export function webLockAdapter(navigatorRef) {
 }
 
 /**
+ * Uses Papers' main-process lease service when a custom WebContents does not
+ * expose the Web Locks API. The coordinator still owns VIEW forwarding and
+ * ACK/CAS handling; Papers only arbitrates the single durable writer.
+ */
+export function hostWriterLeaseAdapter(host) {
+  const available = typeof host?.acquireWorkspaceWriterLease === 'function'
+    && typeof host?.releaseWorkspaceWriterLease === 'function';
+  return {
+    available,
+    request() {
+      if (!available) return Promise.reject(new Error('Host writer lease unavailable.'));
+      return Promise.resolve(host.acquireWorkspaceWriterLease()).then(({ token }) => ({
+        release() {
+          void Promise.resolve(host.releaseWorkspaceWriterLease(token)).catch(() => undefined);
+        },
+      }));
+    },
+  };
+}
+
+/**
  * @param {object} options
  * @param {{ request(name: string): Promise<{ release(): void }> }} options.lock
  * @param {string} [options.lockName]

@@ -138,6 +138,7 @@ import {
   SURFACE_DOCUMENT_CHANNEL,
   SURFACE_ROLE,
   createSurfaceCoordinator,
+  hostWriterLeaseAdapter,
   webLockAdapter,
 } from './app/workspace-surface-coordinator.js';
 import {
@@ -6953,7 +6954,10 @@ if (WIDGET_SURFACE) {
   }
 
   function startSurfaceCoordination() {
-    if (typeof navigator === 'undefined' || !navigator.locks || typeof BroadcastChannel !== 'function') {
+    const lock = typeof host.acquireWorkspaceWriterLease === 'function'
+      ? hostWriterLeaseAdapter(host)
+      : webLockAdapter(navigator);
+    if (!lock.available || typeof BroadcastChannel !== 'function') {
       coordinationState = 'unavailable';
       statusToast.show('Shared document coordination is unavailable; durable editing is disabled.', { tone: 'error' });
       reportCoordinationUnavailableToWidgets('Workspace coordination unavailable');
@@ -6999,7 +7003,7 @@ if (WIDGET_SURFACE) {
       render();
     };
     surfaceCoordinator = createSurfaceCoordinator({
-      lock: webLockAdapter(navigator),
+      lock,
       lockName: `${SURFACE_DOCUMENT_LOCK}${coordinationNamespace}`,
       channel,
       host: {
