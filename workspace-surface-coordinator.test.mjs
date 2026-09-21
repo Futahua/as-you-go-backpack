@@ -148,6 +148,31 @@ test('a local writer edit rebases after an external document refresh', async () 
   assert.deepEqual(disk.state.groups.map((group) => group.id).sort(), ['external', 'local']);
 });
 
+test('a background position save rebases once when a hand edit wins the CAS race', async () => {
+  const initial = { schemaVersion: 1, groups: [], shortcuts: [], view: { graphRestPositions: {} } };
+  const disk = fakeDisk(initial);
+  let injected = false;
+  const host = {
+    loadVersioned: () => disk.loadVersioned(),
+    async saveChecked(serialized, expected) {
+      if (!injected) {
+        injected = true;
+        disk.externalWrite({ ...initial, groups: [{ id: 'hand-edit' }] });
+      }
+      return disk.saveChecked(serialized, expected);
+    },
+  };
+  const writer = surface(fakeLock(), host, 'writer');
+  await writer.coordinator.start();
+  const result = await writer.coordinator.saveSerialized(
+    ser({ ...initial, view: { graphRestPositions: { root: { a: { x: 1, y: 2 } } } } }),
+    { baseSerialized: ser(initial), rebaseExternalPositionSave: true },
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(disk.state.groups, [{ id: 'hand-edit' }]);
+  assert.deepEqual(disk.state.view.graphRestPositions.root.a, { x: 1, y: 2 });
+});
+
 test('the first surface becomes the writer and a second stays a view', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();

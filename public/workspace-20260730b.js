@@ -5790,7 +5790,7 @@ graph._setOnRestPositions((positions) => {
   // preference. Persist them without adding an Undo history entry so reopening
   // seeds from the latest coordinates, and let the coordinator broadcast the same
   // last-writer-wins positions to every open surface.
-  pendingRestSave = store.save(state).catch((error) => {
+  pendingRestSave = store.save(state, { rebaseExternalPositionSave: true }).catch((error) => {
     setStatus(error instanceof Error ? error.message : String(error));
   });
 });

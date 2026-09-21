@@ -1221,8 +1221,23 @@ export function createSurfaceCoordinator({
               payload = serialized;
             }
           }
-          const parentRevision = revision;
-          const result = await host.saveChecked(payload, parentRevision);
+          let parentRevision = revision;
+          let result = await host.saveChecked(payload, parentRevision);
+          if (result?.code === 'STALE_REVISION' && metadata.rebaseExternalPositionSave === true) {
+            // The graph's background rest-position save can race a direct
+            // state.json edit. Rebase that placement-only write once rather
+            // than freezing the document on an automatic save.
+            try {
+              const loaded = await host.loadVersioned();
+              payload = JSON.stringify(mergeSurfaceSnapshots(
+                JSON.parse(baseSerialized ?? lastSerialized),
+                JSON.parse(serialized),
+                loaded.state,
+              ));
+              parentRevision = loaded.revision;
+              result = await host.saveChecked(payload, parentRevision);
+            } catch { /* preserve the original conflict outcome */ }
+          }
           if (result && result.ok === true) {
             revision = result.revision;
             lastSerialized = payload;
