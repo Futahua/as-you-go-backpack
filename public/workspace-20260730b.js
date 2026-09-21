@@ -88,7 +88,7 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
-import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v9';
+import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v10';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
@@ -141,7 +141,7 @@ import {
   createSurfaceCoordinator,
   hostWriterLeaseAdapter,
   webLockAdapter,
-} from './app/workspace-surface-coordinator.js?build=coordination-v9';
+} from './app/workspace-surface-coordinator.js?build=coordination-v10';
 import {
   VIEW_BLOCKED_MESSAGE,
   createDocumentConflictPanel,
@@ -3055,7 +3055,9 @@ async function reconcileTrackingBaseline() {
 }
 
 async function ensureStartupWindowLayoutWidget() {
-  if (DETACHED_SURFACE || windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
+  if (windowLayoutDetachment.getState().mode === 'detached'
+    || windowLayoutDetachment.isReadOnly()
+    || !hasDocumentWriteAuthority()) return;
   // Tracking is an explicit creator choice. A normal layout that became empty
   // at startup is not replaced by a new implicit tracking layout.
   const startup = (state.windowLayouts ?? []).find((layout) =>
@@ -7090,6 +7092,22 @@ if (WIDGET_SURFACE) {
     channel.addEventListener('message', (event) => {
       if (surfaceCoordinator.receive(event.data)) render();
     });
+    // Scoped views receive different host projections and therefore cannot
+    // exchange document snapshots directly. A versioned authority read also
+    // detects hand-edits to state.json. Keep it active in unfocused windows.
+    let refreshFailed = false;
+    const refreshExternalDocument = async () => {
+      try {
+        await surfaceCoordinator.refreshFromHost();
+        refreshFailed = false;
+      } catch (error) {
+        if (!refreshFailed) console.warn('[AsYouGo] external document refresh failed', error);
+        refreshFailed = true;
+      } finally {
+        setTimeout(refreshExternalDocument, 2000);
+      }
+    };
+    setTimeout(refreshExternalDocument, 2000);
     void surfaceCoordinator.start().then(async () => {
       // Writer election is the durable-editing gate. Tracking/widget refresh
       // is an optional window capability and must not be allowed to turn a

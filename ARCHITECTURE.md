@@ -65,6 +65,15 @@ number itself.
 
 ## Multi-window document behavior
 
+Papers projects a scoped workspace from the same `state.json` and merges its
+checked saves back into that file. Scoped and full surfaces therefore retain
+separate channels and writer locks: their snapshots have different shapes.
+Each ordinary surface reads its own versioned host projection every two seconds,
+including while unfocused. A changed revision is installed as an external
+generation; the writer broadcasts it within its scope. This also makes direct
+edits to `state.json` visible without treating a file change as an unchecked
+save. The host revision remains the CAS authority across every scope.
+
 Every open As you Go surface accepts document actions. One surface remains the
 durable writer, while other surfaces apply the action optimistically and send a
 bounded snapshot over the same-origin channel. The writer merges entity edits

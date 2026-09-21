@@ -1047,6 +1047,34 @@ export function createSurfaceCoordinator({
     get baselineReady() { return baselineReady; },
     get frozen() { return frozenSnapshot; },
     get transferSuspended() { return transferSuspended; },
+    /** Refresh a document changed outside this coordination channel, including
+     * a hand-edit to state.json or a save from another scoped view. The host
+     * projects each scope independently, so reload from its own authority. */
+    async refreshFromHost() {
+      if (!baselineReady || role === SURFACE_ROLE.CONFLICT) return { changed: false };
+      const refresh = async () => {
+        const startedEpoch = authoritativeEpoch;
+        const loaded = await host.loadVersioned();
+        if (!loaded || loaded.revision === revision || startedEpoch !== authoritativeEpoch
+          || role === SURFACE_ROLE.CONFLICT) return { changed: false };
+        const parentRevision = revision;
+        try { installExternalPreservingPending(loaded.state); } catch (error) {
+          onHydrationFailed('install', 'model-install-failed', loaded.revision);
+          throw error;
+        }
+        revision = loaded.revision;
+        lastSerialized = JSON.stringify(loaded.state);
+        authoritativeEpoch += 1;
+        onHydrated(loaded.state, revision);
+        if (role === SURFACE_ROLE.WRITER) publish(lastSerialized, revision, null, parentRevision);
+        return { changed: true, revision };
+      };
+      // A writer's external read follows already queued saves. Later local
+      // snapshots then rebase against the newly observed revision.
+      if (role !== SURFACE_ROLE.WRITER) return refresh();
+      mutationQueue = mutationQueue.catch(() => undefined).then(refresh);
+      return mutationQueue;
+    },
     retirePendingGeneration(generation, latestLocal = null) {
       clearPendingGeneration(generation);
       if (!generationsNeedingRestore.delete(generation) || !lastSerialized) return;

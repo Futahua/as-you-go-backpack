@@ -73,6 +73,11 @@ function fakeDisk(initial = { schemaVersion: 1, groups: [], shortcuts: [] }) {
     },
     get state() { return state; },
     get revision() { return revision; },
+    externalWrite(next) {
+      state = next;
+      counter += 1;
+      revision = `r${counter}`;
+    },
   };
 }
 
@@ -103,6 +108,45 @@ function surface(lock, disk, name, { latestQueued = null, ackTimeoutMs } = {}) {
 }
 
 const ser = (value) => JSON.stringify(value);
+
+test('a hand-edited document refreshes the writer and its same-scope peers', async () => {
+  const disk = fakeDisk();
+  const writer = surface(fakeLock(), disk, 'writer');
+  await writer.coordinator.start();
+  const edit = { schemaVersion: 1, groups: [{ id: 'external' }], shortcuts: [] };
+  disk.externalWrite(edit);
+  assert.deepEqual(await writer.coordinator.refreshFromHost(), { changed: true, revision: 'r1' });
+  assert.deepEqual(writer.installed.at(-1), edit);
+  assert.equal(writer.channel.sent.at(-1).revision, 'r1');
+  assert.deepEqual(await writer.coordinator.refreshFromHost(), { changed: false });
+});
+
+test('a scoped view reloads its own host projection after another scope writes', async () => {
+  const disk = fakeDisk();
+  const view = surface(fakeLock(), disk, 'scoped-view');
+  await view.coordinator.saveSerialized(ser(disk.state)); // establishes its baseline
+  const sentBefore = view.channel.sent.length;
+  const projection = { schemaVersion: 1, groups: [{ id: 'scoped' }], shortcuts: [] };
+  disk.externalWrite(projection);
+  assert.deepEqual(await view.coordinator.refreshFromHost(), { changed: true, revision: 'r1' });
+  assert.deepEqual(view.installed.at(-1), projection);
+  assert.equal(view.channel.sent.length, sentBefore, 'a view does not publish a new authority frame');
+});
+
+test('a local writer edit rebases after an external document refresh', async () => {
+  const initial = { schemaVersion: 1, groups: [], shortcuts: [] };
+  const disk = fakeDisk(initial);
+  const writer = surface(fakeLock(), disk, 'writer');
+  await writer.coordinator.start();
+  disk.externalWrite({ ...initial, groups: [{ id: 'external' }] });
+  await writer.coordinator.refreshFromHost();
+  const result = await writer.coordinator.saveSerialized(
+    ser({ ...initial, groups: [{ id: 'local' }] }),
+    { baseSerialized: ser(initial) },
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(disk.state.groups.map((group) => group.id).sort(), ['external', 'local']);
+});
 
 test('the first surface becomes the writer and a second stays a view', async () => {
   const lock = fakeLock();
