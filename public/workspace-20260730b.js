@@ -6954,9 +6954,17 @@ if (WIDGET_SURFACE) {
   }
 
   function startSurfaceCoordination() {
-    const lock = typeof host.acquireWorkspaceWriterLease === 'function'
+    // Prefer the renderer's native Web Locks when this WebContents provides
+    // them.  They are reclaimed automatically when the page dies, which is
+    // essential during a remount: a queued main-process lease from an older
+    // frame must never strand the only visible workspace behind "syncing".
+    // Papers' lease remains the fallback for custom surfaces where Web Locks
+    // are genuinely unavailable.
+    const rendererLock = webLockAdapter(navigator);
+    const hostLock = typeof host.acquireWorkspaceWriterLease === 'function'
       ? hostWriterLeaseAdapter(host)
-      : webLockAdapter(navigator);
+      : null;
+    const lock = rendererLock.available ? rendererLock : hostLock;
     if (!lock.available || typeof BroadcastChannel !== 'function') {
       coordinationState = 'unavailable';
       statusToast.show('Shared document coordination is unavailable; durable editing is disabled.', { tone: 'error' });
