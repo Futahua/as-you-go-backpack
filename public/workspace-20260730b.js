@@ -88,7 +88,7 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
-import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v12';
+import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v13';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
@@ -141,7 +141,7 @@ import {
   createSurfaceCoordinator,
   hostWriterLeaseAdapter,
   webLockAdapter,
-} from './app/workspace-surface-coordinator.js?build=coordination-v12';
+} from './app/workspace-surface-coordinator.js?build=coordination-v13';
 import {
   VIEW_BLOCKED_MESSAGE,
   createDocumentConflictPanel,
@@ -3872,9 +3872,14 @@ function createGraphController() {
       // one inherit that path node's depth scale. Ordinary workspace bodies
       // remain exactly 1.
       trailScale: Number.isFinite(vi.trailScale) ? vi.trailScale : 1,
-      // The scoped project boundary is the real persisted group, presented as
-      // a first-class top-level tile without creating a synthetic record.
-      scopeRoot: Boolean(SCOPE_ROOT_ID && vi.id === SCOPE_ROOT_ID),
+      // A Proxima-bound project root keeps its green underlined label in
+      // every view, scoped or full: the host names these groups
+      // `group-proxima-<hash>`, so the boundary is recognizable without a
+      // host round-trip. Scoped surfaces additionally land inside it.
+      scopeRoot: Boolean(
+        (SCOPE_ROOT_ID && vi.id === SCOPE_ROOT_ID)
+        || (typeof vi.id === 'string' && vi.id.startsWith('group-proxima-')),
+      ),
     };
   }
 

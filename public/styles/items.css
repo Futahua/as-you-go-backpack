@@ -293,7 +293,7 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
   color: var(--green) !important;
   text-decoration-line: underline !important;
   text-decoration-color: var(--green) !important;
-  text-decoration-style: solid;
+  text-decoration-style: solid !important;
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
