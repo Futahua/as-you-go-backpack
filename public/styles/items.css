@@ -297,6 +297,12 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
 }
+.icon-item.scope-root-item .folder-expander.scope-expander {
+  color: var(--green) !important;
+}
+.icon-item.scope-root-item .folder-expander.scope-expander.expanded {
+  transform: none;
+}
 /* The tracking toggle is a widget-only state control. Keep it out of the
    taskbar row and pin it to the card's lower-right corner so the three action
    controls retain a stable centered order. */
