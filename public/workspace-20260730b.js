@@ -88,7 +88,7 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
-import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v10';
+import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v11';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
@@ -141,7 +141,7 @@ import {
   createSurfaceCoordinator,
   hostWriterLeaseAdapter,
   webLockAdapter,
-} from './app/workspace-surface-coordinator.js?build=coordination-v10';
+} from './app/workspace-surface-coordinator.js?build=coordination-v11';
 import {
   VIEW_BLOCKED_MESSAGE,
   createDocumentConflictPanel,
@@ -494,7 +494,7 @@ function saveWorkspaceView({ persistSurfaceLocation = false } = {}) {
   // store save or coordinator mutation request is generated.
   state = store.replace(captureWorkspaceView());
   if (persistSurfaceLocation && PROJECT_SURFACE_KEY) {
-    pendingSurfaceLocationSave = store.save(state).catch((error) => {
+    pendingSurfaceLocationSave = store.save(state, { rebaseAutomaticSave: true }).catch((error) => {
       setStatus(error instanceof Error ? error.message : String(error));
     });
   }
@@ -793,7 +793,7 @@ const windowLayoutCardResizeObserver = typeof ResizeObserver === 'function'
         try { next = setWindowLayoutCardSize(state, layoutId, width, height); } catch { return; }
         if (next === state) return;
         store.replace(next);
-        void store.save(next).catch(() => undefined);
+        void store.save(next, { rebaseAutomaticSave: true }).catch(() => undefined);
       }, 180));
     }
   })
@@ -2750,7 +2750,9 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
     }
     if (next === state) return;
     store.replace(next);
-    void store.save(next).catch(() => undefined);
+    void store.save(next, { rebaseAutomaticSave: true }).catch(() => undefined);
+  },
+  applyCommand: async (layoutId, command) => {
   },
   applyCommand: async (layoutId, command) => {
     if (windowLayoutDetachment.isReadOnly()) return { ok: false, error: 'read-only' };
@@ -4817,8 +4819,8 @@ function hydrateNodeIcons(shell) {
   );
 }
 
-async function persist(nextState = state) {
-  return store.save(nextState);
+async function persist(nextState = state, metadata) {
+  return store.save(nextState, metadata);
 }
 
 async function commit(nextState, options = {}) {
@@ -5446,7 +5448,7 @@ elements.explorer.addEventListener('wheel', (event) => {
   state = store.replace(setIconSize(state, state.view.iconSize + (event.deltaY < 0 ? 12 : -12)));
   render();
   clearTimeout(zoomTimer);
-  zoomTimer = setTimeout(() => persist().catch((error) => {
+  zoomTimer = setTimeout(() => persist(state, { rebaseAutomaticSave: true }).catch((error) => {
     // 018X6: a delayed persistence error must not paint status over the
     // handoff if read-only began before this catch ran.
     if (detachSaveGate.isReadOnly()) return;
@@ -5790,7 +5792,7 @@ graph._setOnRestPositions((positions) => {
   // preference. Persist them without adding an Undo history entry so reopening
   // seeds from the latest coordinates, and let the coordinator broadcast the same
   // last-writer-wins positions to every open surface.
-  pendingRestSave = store.save(state, { rebaseExternalPositionSave: true }).catch((error) => {
+  pendingRestSave = store.save(state, { rebaseAutomaticSave: true }).catch((error) => {
     setStatus(error instanceof Error ? error.message : String(error));
   });
 });
@@ -5802,7 +5804,7 @@ window.__papersFlushBeforeClose = async () => {
   graph._saveRestPositionsNow();
   if (PROJECT_SURFACE_KEY && !detachSaveGate.isReadOnly()) {
     state = store.replace(captureWorkspaceView());
-    pendingSurfaceLocationSave = store.save(state).catch((error) => {
+    pendingSurfaceLocationSave = store.save(state, { rebaseAutomaticSave: true }).catch((error) => {
       setStatus(error instanceof Error ? error.message : String(error));
     });
   }
@@ -5917,7 +5919,7 @@ const quickRunCopyText = (text) => host.copyText(text);
 const quickRunHydrateIcons = (shell) => hydrateNodeIcons(shell);
 const quickRunCardSizeChanged = (size) => {
   state = store.replace({ ...state, view: { ...state.view, quickRunCardSize: size } });
-  return persist(state).catch((error) => {
+  return persist(state, { rebaseAutomaticSave: true }).catch((error) => {
     if (!detachSaveGate.isReadOnly()) setStatus(error instanceof Error ? error.message : String(error));
     throw error;
   });

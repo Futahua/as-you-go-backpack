@@ -1223,10 +1223,11 @@ export function createSurfaceCoordinator({
           }
           let parentRevision = revision;
           let result = await host.saveChecked(payload, parentRevision);
-          if (result?.code === 'STALE_REVISION' && metadata.rebaseExternalPositionSave === true) {
-            // The graph's background rest-position save can race a direct
-            // state.json edit. Rebase that placement-only write once rather
-            // than freezing the document on an automatic save.
+          if (result?.code === 'STALE_REVISION' && metadata.rebaseAutomaticSave === true) {
+            // An automatic save (graph rest positions, surface locations,
+            // icon and card sizes) can race a peer commit or a direct
+            // state.json edit. Rebase that non-creator-intent write once
+            // rather than freezing the document on an automatic save.
             try {
               const loaded = await host.loadVersioned();
               payload = JSON.stringify(mergeSurfaceSnapshots(

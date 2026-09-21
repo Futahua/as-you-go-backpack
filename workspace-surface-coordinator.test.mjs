@@ -166,7 +166,7 @@ test('a background position save rebases once when a hand edit wins the CAS race
   await writer.coordinator.start();
   const result = await writer.coordinator.saveSerialized(
     ser({ ...initial, view: { graphRestPositions: { root: { a: { x: 1, y: 2 } } } } }),
-    { baseSerialized: ser(initial), rebaseExternalPositionSave: true },
+    { baseSerialized: ser(initial), rebaseAutomaticSave: true },
   );
   assert.equal(result.ok, true);
   assert.deepEqual(disk.state.groups, [{ id: 'hand-edit' }]);

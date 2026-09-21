@@ -158,3 +158,17 @@ test('every coordinator name the entry uses is imported (no dead reference)', as
     assert.ok(exported.includes(name), `entry imports ${name} but coordinator does not export it`);
   }
 });
+
+test('every direct store save carries metadata so background saves rebase instead of freezing', async () => {
+  // A background save (rest positions, surface locations, icon and card
+  // sizes) that loses a CAS race with a peer commit must rebase once, not
+  // freeze the surface into CONFLICT with refresh disabled. Only explicit
+  // creator saves may freeze. The coordinator rebases saves flagged with
+  // rebaseAutomaticSave; explicit paths pass metadata through instead.
+  const script = await read('public/workspace-20260730b.js');
+  const calls = [...script.matchAll(/store\.save\(([^)]*)\)/g)].map((match) => match[1]);
+  assert.ok(calls.length > 0, 'entry has direct store saves');
+  for (const args of calls) {
+    assert.ok(args.includes(','), `store.save(${args}) must carry metadata`);
+  }
+});
