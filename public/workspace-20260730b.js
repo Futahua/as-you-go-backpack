@@ -88,7 +88,7 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
-import { createHostBridge } from './app/host/host-bridge.js?build=lease-wait-v2';
+import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v4';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
@@ -140,7 +140,7 @@ import {
   createSurfaceCoordinator,
   hostWriterLeaseAdapter,
   webLockAdapter,
-} from './app/workspace-surface-coordinator.js?build=lease-wait-v2';
+} from './app/workspace-surface-coordinator.js?build=coordination-v4';
 import {
   VIEW_BLOCKED_MESSAGE,
   createDocumentConflictPanel,
@@ -6964,23 +6964,30 @@ if (WIDGET_SURFACE) {
     const hostLock = typeof host.acquireWorkspaceWriterLease === 'function'
       ? hostWriterLeaseAdapter(host)
       : null;
-    const lock = rendererLock.available ? rendererLock : hostLock;
-    if (!lock.available || typeof BroadcastChannel !== 'function') {
-      coordinationState = 'unavailable';
-      statusToast.show('Shared document coordination is unavailable; durable editing is disabled.', { tone: 'error' });
-      reportCoordinationUnavailableToWidgets('Workspace coordination unavailable');
-      return;
-    }
+    // A single surface must remain usable even on a custom protocol runtime
+    // that exposes neither Web Locks nor the new Papers lease bridge. The
+    // local writer still saves through revision-checked CAS, so a later second
+    // surface cannot silently overwrite it; it will surface a conflict until
+    // the host-backed multi-view coordinator is available.
+    const localCasWriterLock = {
+      available: true,
+      async request() { return { release() {} }; },
+    };
+    const lock = rendererLock.available
+      ? rendererLock
+      : (hostLock?.available ? hostLock : localCasWriterLock);
     let channel;
     const coordinationNamespace = SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '';
-    try {
-      channel = new BroadcastChannel(`${SURFACE_DOCUMENT_CHANNEL}${coordinationNamespace}`);
-    } catch {
-      coordinationState = 'unavailable';
-      statusToast.show('Shared document coordination failed to start; durable editing is disabled.', { tone: 'error' });
-      reportCoordinationUnavailableToWidgets('Workspace coordination unavailable');
-      return;
+    if (typeof BroadcastChannel === 'function') {
+      try {
+        channel = new BroadcastChannel(`${SURFACE_DOCUMENT_CHANNEL}${coordinationNamespace}`);
+      } catch { /* use the CAS-protected single-surface channel below */ }
     }
+    channel ??= {
+      postMessage() {},
+      addEventListener() {},
+      close() {},
+    };
     const conflictPanel = createDocumentConflictPanel({
       document,
       onUseLatest: () => surfaceCoordinator.useLatest().then(render),
