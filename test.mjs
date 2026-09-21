@@ -172,3 +172,15 @@ test('every direct store save carries metadata so background saves rebase instea
     assert.ok(args.includes(','), `store.save(${args}) must carry metadata`);
   }
 });
+
+test('every folder expander render path stars the scope root', async () => {
+  // The graph has two tile markup paths (create and update). Starring only
+  // one leaves the other drawing a plain chevron for project roots forever,
+  // and no unit suite executes either path. Both must branch on scopeRoot.
+  const script = await read('public/workspace-20260730b.js');
+  const renderers = script.split('\n').filter((line) => line.includes('folder-expander ${'));
+  assert.ok(renderers.length >= 2, 'both tile markup paths present');
+  for (const line of renderers) {
+    assert.ok(line.includes('scope-expander'), 'expander markup must handle the scope root');
+  }
+});

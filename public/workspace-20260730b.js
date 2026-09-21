@@ -88,7 +88,7 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
-import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v14';
+import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v15';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
@@ -141,7 +141,7 @@ import {
   createSurfaceCoordinator,
   hostWriterLeaseAdapter,
   webLockAdapter,
-} from './app/workspace-surface-coordinator.js?build=coordination-v14';
+} from './app/workspace-surface-coordinator.js?build=coordination-v15';
 import {
   VIEW_BLOCKED_MESSAGE,
   createDocumentConflictPanel,
@@ -4171,7 +4171,7 @@ function createGraphController() {
     iconItem.setAttribute('tabindex', '-1');
     iconItem.setAttribute('aria-label', `${candidate.ancestor ? 'Go to ' : ''}${escapeHtml(candidate.name)}`);
     iconItem.innerHTML =
-      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">›</button>` : ''}`
+      `${canExpand ? `<button class="folder-expander ${isExpanded ? 'expanded' : ''}${candidate.scopeRoot === true ? ' scope-expander' : ''}" data-expand="${candidate.id}" type="button" aria-label="${isExpanded ? 'Collapse' : 'Expand'} ${escapeHtml(candidate.name)}">${candidate.scopeRoot === true ? '★' : '›'}</button>` : ''}`
       + `${linkMarkup(candidate)}`
       + (candidate.kind === 'window-layout'
         ? windowLayoutCardMarkup(candidate, { detached: detachedWidgets.has(candidate.id) })
