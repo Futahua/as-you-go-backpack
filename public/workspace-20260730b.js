@@ -464,11 +464,12 @@ function restoreWorkspaceView() {
   store.setNavigation({
     currentId:
       SCOPE_ROOT_ID
-        // A scoped project is presented from As you Go's synthetic ROOT_ID so
-        // the bound project group itself is visible as the one top-level tile.
-        // The persisted group remains the real SCOPE_ROOT_ID; this is only a
-        // presentation boundary, never a new record or a reparenting.
-        ? ROOT_ID
+        // A scoped surface opens inside its scope root, never one level
+        // above it: the boundary guard (breadcrumbs, navigation, adds) holds
+        // from the first paint instead of only after drilling in. There is
+        // no lone-tile outer canvas where the project sits alone and
+        // root-level adds are offered.
+        ? (group(SCOPE_ROOT_ID) ? scopedCurrent : ROOT_ID)
         : (requestedCurrent === ROOT_ID || (group(requestedCurrent) && isAvailableItem(requestedCurrent))
           ? requestedCurrent
           : ROOT_ID),
