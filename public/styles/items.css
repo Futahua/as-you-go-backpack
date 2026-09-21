@@ -291,11 +291,11 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
 }
 .icon-item.scope-root-item strong {
   color: var(--green) !important;
-  text-decoration-line: underline !important;
-  text-decoration-color: var(--green) !important;
-  text-decoration-style: solid !important;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 3px;
+  /* text-decoration-line does not paint on -webkit-line-clamp boxes in this
+     Chromium: a bottom border draws the same green underline reliably. */
+  text-decoration: none !important;
+  border-bottom: 2px solid var(--green) !important;
+  padding-bottom: 1px;
 }
 .icon-item.scope-root-item .folder-expander.scope-expander {
   color: var(--green) !important;
