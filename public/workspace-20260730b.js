@@ -88,7 +88,7 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
-import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v7';
+import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v8';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
@@ -136,11 +136,12 @@ import { createDropController } from './app/interactions/drop-controller.js';
 import { createPointerController } from './app/interactions/pointer-controller.js';
 import {
   SURFACE_DOCUMENT_CHANNEL,
+  SURFACE_DOCUMENT_LOCK,
   SURFACE_ROLE,
   createSurfaceCoordinator,
   hostWriterLeaseAdapter,
   webLockAdapter,
-} from './app/workspace-surface-coordinator.js?build=coordination-v7';
+} from './app/workspace-surface-coordinator.js?build=coordination-v8';
 import {
   VIEW_BLOCKED_MESSAGE,
   createDocumentConflictPanel,

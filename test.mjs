@@ -131,3 +131,30 @@ test('the stylesheet entry aggregates local files in a stable order', async () =
     assert.ok(concatenated.includes(selector), `missing interaction selector: ${selector}`);
   }
 });
+
+test('every coordinator name the entry uses is imported (no dead reference)', async () => {
+  // A used-but-unimported name throws ReferenceError when that line runs.
+  // Inside startSurfaceCoordination it leaves coordination unsettled forever
+  // and every save refusing behind the settle poll, while unit suites import
+  // modules directly and never execute the entry. This scan is the guard.
+  const [entry, coordinator] = await Promise.all([
+    read('public/workspace-20260730b.js'),
+    read('public/app/workspace-surface-coordinator.js'),
+  ]);
+  const block = entry.match(/import \{([^}]*)\} from '\.\/app\/workspace-surface-coordinator\.js[^']*';/);
+  assert.ok(block, 'entry coordinator import block present');
+  const imported = new Set(block[1].split(',').map((name) => name.trim()).filter(Boolean));
+  const exported = [...coordinator.matchAll(/export (?:const|function|class) ([A-Za-z0-9_]+)/g)]
+    .map((match) => match[1]);
+  assert.ok(exported.length > 0, 'coordinator exports names');
+  const word = (text, name) => new RegExp(`\\b${name}\\b`).test(text);
+  const entryWithoutImports = entry.replace(/import \{[^}]*\} from '[^']*';/g, '');
+  for (const name of exported) {
+    if (word(entryWithoutImports, name)) {
+      assert.ok(imported.has(name), `entry uses ${name} but does not import it from the coordinator`);
+    }
+  }
+  for (const name of imported) {
+    assert.ok(exported.includes(name), `entry imports ${name} but coordinator does not export it`);
+  }
+});
