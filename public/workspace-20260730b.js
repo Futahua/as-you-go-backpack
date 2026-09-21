@@ -88,7 +88,7 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
-import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v5';
+import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v6';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
@@ -139,7 +139,7 @@ import {
   SURFACE_ROLE,
   createSurfaceCoordinator,
   webLockAdapter,
-} from './app/workspace-surface-coordinator.js?build=coordination-v5';
+} from './app/workspace-surface-coordinator.js?build=coordination-v6';
 import {
   VIEW_BLOCKED_MESSAGE,
   createDocumentConflictPanel,
@@ -6976,6 +6976,9 @@ if (WIDGET_SURFACE) {
     // take local writer authority immediately and let Papers' revision-checked
     // save be the concurrency boundary. Do not queue on the broken host lease.
     const lock = rendererLock.available ? rendererLock : localCasWriterLock;
+    const localPersistence = !rendererLock.available;
+    let localRevisionSequence = 0;
+    const nextLocalRevision = () => `local-single-writer:${++localRevisionSequence}`;
     let channel;
     const coordinationNamespace = SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '';
     if (typeof BroadcastChannel === 'function') {
@@ -7022,8 +7025,26 @@ if (WIDGET_SURFACE) {
       lockName: `${SURFACE_DOCUMENT_LOCK}${coordinationNamespace}`,
       channel,
       host: {
-        loadVersioned: () => host.loadWorkspaceVersioned(),
-        saveChecked: (serialized, revision) => host.saveWorkspaceChecked(serialized, revision),
+        // The deployed host's versioned bridge and writer lease are one broken
+        // path: both can remain pending forever. In the local single-writer
+        // recovery mode, use the same unversioned load/save calls that already
+        // bootstrap this canvas successfully. The renderer is the only writer
+        // in this mode, so the coordinator's revision is local bookkeeping.
+        loadVersioned: localPersistence
+          ? async () => {
+            const loaded = await host.loadWorkspace();
+            return {
+              state: typeof loaded === 'string' ? JSON.parse(loaded) : loaded,
+              revision: nextLocalRevision(),
+            };
+          }
+          : () => host.loadWorkspaceVersioned(),
+        saveChecked: localPersistence
+          ? async (serialized) => {
+            await host.saveWorkspace(JSON.parse(serialized));
+            return { ok: true, revision: nextLocalRevision() };
+          }
+          : (serialized, revision) => host.saveWorkspaceChecked(serialized, revision),
       },
       // Installs the document only. This surface's navigation is deliberately
       // preserved, so two windows keep showing different places. Trail
