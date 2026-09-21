@@ -378,19 +378,58 @@ test('host bridge carries the Papers writer lease envelope and release token', a
   await release;
 });
 
-test('writer lease acquisition is allowed to wait beyond ordinary RPC timing', async () => {
-  const mock = createMockWindow();
-  const host = createHostBridge(mock);
-  const pending = host.acquireWorkspaceWriterLease();
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  const request = mock.parent.messages[0].message;
-  mock.dispatchMessage({
-    type: 'papers:host:result',
-    requestId: request.requestId,
-    ok: true,
-    writerLease: { token: 'lease-long-lived' },
-  });
-  assert.deepEqual(await pending, { token: 'lease-long-lived' });
+test('writer lease acquisition still waits past the ordinary 15s RPC timeout', async () => {
+  // Proves the lifecycle-bound acquisition: with controllable timers advanced
+  // a full second past the ordinary 15s RPC timeout, the request must still be
+  // pending (not rejected), and a later grant must still resolve it. The old
+  // implementation would reject at 15s and forget the requestId.
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  let now = 0;
+  let sequence = 0;
+  const timers = new Map();
+  globalThis.setTimeout = (callback, delay = 0, ...args) => {
+    const id = ++sequence;
+    timers.set(id, { callback, at: now + delay, args });
+    return id;
+  };
+  globalThis.clearTimeout = (id) => { timers.delete(id); };
+  const advance = (ms) => {
+    const end = now + ms;
+    for (;;) {
+      let next = null;
+      for (const [id, timer] of timers) {
+        if (timer.at <= end && (!next || timer.at < next.timer.at)) next = { id, timer };
+      }
+      if (!next) break;
+      timers.delete(next.id);
+      now = next.timer.at;
+      next.timer.callback(...next.timer.args);
+    }
+    now = end;
+  };
+  try {
+    const mock = createMockWindow();
+    const host = createHostBridge(mock);
+    let settled = false;
+    const pending = host.acquireWorkspaceWriterLease().then((lease) => {
+      settled = lease;
+      return lease;
+    });
+    advance(16000);
+    assert.equal(settled, false, 'lease acquisition must not time out after 16s');
+    const request = mock.parent.messages[0].message;
+    mock.dispatchMessage({
+      type: 'papers:host:result',
+      requestId: request.requestId,
+      ok: true,
+      writerLease: { token: 'lease-long-lived' },
+    });
+    assert.deepEqual(await pending, { token: 'lease-long-lived' });
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
 });
 
 test('host bridge can request a new Papers surface without naming a project id', async () => {

@@ -138,6 +138,7 @@ import {
   SURFACE_DOCUMENT_CHANNEL,
   SURFACE_ROLE,
   createSurfaceCoordinator,
+  hostWriterLeaseAdapter,
   webLockAdapter,
 } from './app/workspace-surface-coordinator.js?build=coordination-v6';
 import {
@@ -6960,6 +6961,9 @@ if (WIDGET_SURFACE) {
     // Papers' lease remains the fallback for custom surfaces where Web Locks
     // are genuinely unavailable.
     const rendererLock = webLockAdapter(navigator);
+    const hostLock = typeof host.acquireWorkspaceWriterLease === 'function'
+      ? hostWriterLeaseAdapter(host)
+      : null;
     // A single surface must remain usable even on a custom protocol runtime
     // that exposes neither Web Locks nor the new Papers lease bridge. The
     // local writer still saves through revision-checked CAS, so a later second
@@ -6969,16 +6973,15 @@ if (WIDGET_SURFACE) {
       available: true,
       async request() { return { release() {} }; },
     };
-    // Recovery mode for the currently deployed Papers runtime: its advertised
-    // host lease call can remain pending forever, which leaves an otherwise
-    // healthy single surface as a VIEW with no writer to acknowledge edits.
-    // Use a renderer lock only when Chromium actually provides one; otherwise
-    // take local writer authority immediately and let Papers' revision-checked
-    // save be the concurrency boundary. Do not queue on the broken host lease.
-    const lock = rendererLock.available ? rendererLock : localCasWriterLock;
-    const localPersistence = !rendererLock.available;
-    let localRevisionSequence = 0;
-    const nextLocalRevision = () => `local-single-writer:${++localRevisionSequence}`;
+    // Arbitration order is load-bearing: native Web Locks first (reclaimed
+    // automatically when a page dies), then the now-fixed Papers writer lease
+    // (lifecycle-bound acquisition with no RPC timeout), and only then the
+    // local CAS writer. The fixed host lease must not be bypassed: without it,
+    // every lockless surface would become an unchecked writer. Persistence
+    // stays on the versioned CAS path whenever a real lock arbitrates.
+    const lock = rendererLock.available
+      ? rendererLock
+      : (hostLock?.available ? hostLock : localCasWriterLock);
     let channel;
     const coordinationNamespace = SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '';
     if (typeof BroadcastChannel === 'function') {
@@ -7025,26 +7028,8 @@ if (WIDGET_SURFACE) {
       lockName: `${SURFACE_DOCUMENT_LOCK}${coordinationNamespace}`,
       channel,
       host: {
-        // The deployed host's versioned bridge and writer lease are one broken
-        // path: both can remain pending forever. In the local single-writer
-        // recovery mode, use the same unversioned load/save calls that already
-        // bootstrap this canvas successfully. The renderer is the only writer
-        // in this mode, so the coordinator's revision is local bookkeeping.
-        loadVersioned: localPersistence
-          ? async () => {
-            const loaded = await host.loadWorkspace();
-            return {
-              state: typeof loaded === 'string' ? JSON.parse(loaded) : loaded,
-              revision: nextLocalRevision(),
-            };
-          }
-          : () => host.loadWorkspaceVersioned(),
-        saveChecked: localPersistence
-          ? async (serialized) => {
-            await host.saveWorkspace(JSON.parse(serialized));
-            return { ok: true, revision: nextLocalRevision() };
-          }
-          : (serialized, revision) => host.saveWorkspaceChecked(serialized, revision),
+        loadVersioned: () => host.loadWorkspaceVersioned(),
+        saveChecked: (serialized, revision) => host.saveWorkspaceChecked(serialized, revision),
       },
       // Installs the document only. This surface's navigation is deliberately
       // preserved, so two windows keep showing different places. Trail

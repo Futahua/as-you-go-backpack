@@ -46,8 +46,8 @@ test('the local project owns its exact interface, pickup prompt and prepared act
   assert.ok(csp, 'a Content-Security-Policy meta tag is required');
   assert.match(csp[1], /script-src\s+'self'/i);
   assert.doesNotMatch(csp[1], /'unsafe-inline'|'unsafe-eval'/i);
-  assert.match(html, /<script type="module" src="workspace-20260730b\.js"><\/script>/);
-  assert.match(html, /<link rel="stylesheet" href="workspace-20260730b\.css" \/>/);
+  assert.match(html, /<script type="module" src="workspace-20260730b\.js(\?build=[^"]+)?"><\/script>/);
+  assert.match(html, /<link rel="stylesheet" href="workspace-20260730b\.css(\?build=[^"]+)?" \/>/);
   assert.doesNotMatch(html, /<(script|link)[^>]+(src|href)="https?:/i);
 
   // Accessibility landmarks and the interactive surfaces the app drives.
