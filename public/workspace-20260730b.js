@@ -88,7 +88,7 @@ import { createDragTrailController } from './drag-trail-model.js';
 import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
-import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v4';
+import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v5';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
@@ -138,9 +138,8 @@ import {
   SURFACE_DOCUMENT_CHANNEL,
   SURFACE_ROLE,
   createSurfaceCoordinator,
-  hostWriterLeaseAdapter,
   webLockAdapter,
-} from './app/workspace-surface-coordinator.js?build=coordination-v4';
+} from './app/workspace-surface-coordinator.js?build=coordination-v5';
 import {
   VIEW_BLOCKED_MESSAGE,
   createDocumentConflictPanel,
@@ -6961,9 +6960,6 @@ if (WIDGET_SURFACE) {
     // Papers' lease remains the fallback for custom surfaces where Web Locks
     // are genuinely unavailable.
     const rendererLock = webLockAdapter(navigator);
-    const hostLock = typeof host.acquireWorkspaceWriterLease === 'function'
-      ? hostWriterLeaseAdapter(host)
-      : null;
     // A single surface must remain usable even on a custom protocol runtime
     // that exposes neither Web Locks nor the new Papers lease bridge. The
     // local writer still saves through revision-checked CAS, so a later second
@@ -6973,9 +6969,13 @@ if (WIDGET_SURFACE) {
       available: true,
       async request() { return { release() {} }; },
     };
-    const lock = rendererLock.available
-      ? rendererLock
-      : (hostLock?.available ? hostLock : localCasWriterLock);
+    // Recovery mode for the currently deployed Papers runtime: its advertised
+    // host lease call can remain pending forever, which leaves an otherwise
+    // healthy single surface as a VIEW with no writer to acknowledge edits.
+    // Use a renderer lock only when Chromium actually provides one; otherwise
+    // take local writer authority immediately and let Papers' revision-checked
+    // save be the concurrency boundary. Do not queue on the broken host lease.
+    const lock = rendererLock.available ? rendererLock : localCasWriterLock;
     let channel;
     const coordinationNamespace = SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '';
     if (typeof BroadcastChannel === 'function') {
