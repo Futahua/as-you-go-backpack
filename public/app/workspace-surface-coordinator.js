@@ -1262,10 +1262,12 @@ export function createSurfaceCoordinator({
             publish(payload, revision, null, parentRevision);
             return { ok: true, revision, serialized: payload };
           }
-          if (result?.code === 'STALE_REVISION' && metadata.rebaseAutomaticSave === true) {
-            // Still racing after bounded retries: drop this cosmetic write
-            // instead of freezing. Positions and view state are rewritten on
-            // the next rest anyway; the document never freezes over them.
+          if ((result?.code === 'STALE_REVISION' || result?.code === 'SCOPE_VIOLATION') && metadata.rebaseAutomaticSave === true) {
+            // Still racing after bounded retries, or shaped against a scope
+            // that moved underneath: drop this cosmetic write instead of
+            // freezing. Positions and view state are rewritten on the next
+            // rest anyway; the document never freezes over them. The host
+            // already refused the write, so the boundary holds regardless.
             // Fast-forward the revision bookkeeping to the latest observed
             // authority so the next save starts from a fresh base instead of
             // freezing on this stale one. The visible state converges through
@@ -1288,10 +1290,10 @@ export function createSurfaceCoordinator({
           const latestLocal = invalidatePendingSaves();
           frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : payload;
           try {
-            console.warn(`[AsYouGo] freeze cause=writer-stale revision=${revision} hostRevision=${result && result.revision} generation=${metadata.generation ?? 'none'} sequence=${metadata.sequence ?? 'none'} automatic=${metadata.rebaseAutomaticSave === true}`);
+            console.warn(`[AsYouGo] freeze cause=writer-stale revision=${revision} hostRevision=${result && result.revision} code=${result && result.code} generation=${metadata.generation ?? 'none'} sequence=${metadata.sequence ?? 'none'} automatic=${metadata.rebaseAutomaticSave === true}`);
           } catch { /* freeze trail is diagnostic-only */ }
           setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
-          return { ok: false, code: 'STALE_REVISION' };
+          return { ok: false, code: result?.code ?? 'STALE_REVISION' };
         })
         .finally(() => {
           const pendingIndex = pendingLocalSnapshots.indexOf(localPending);

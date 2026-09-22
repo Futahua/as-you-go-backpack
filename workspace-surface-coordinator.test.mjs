@@ -230,6 +230,46 @@ test('an automatic save drops quietly under perpetual contention instead of free
   assert.deepEqual(disk.state.view.graphRestPositions.root.b, { x: 9, y: 9 });
 });
 
+test('an automatic save drops quietly on scope violation instead of freezing', async () => {
+  const initial = { schemaVersion: 1, groups: [], shortcuts: [], view: { graphRestPositions: {} } };
+  const disk = fakeDisk(initial);
+  const host = {
+    loadVersioned: () => disk.loadVersioned(),
+    async saveChecked(serialized) {
+      const loaded = await disk.loadVersioned();
+      return { ok: false, code: 'SCOPE_VIOLATION', revision: loaded.revision };
+    },
+  };
+  const writer = surface(fakeLock(), host, 'writer');
+  await writer.coordinator.start();
+  const result = await writer.coordinator.saveSerialized(
+    ser({ ...initial, view: { graphRestPositions: { root: { a: { x: 1, y: 2 } } } } }),
+    { baseSerialized: ser(initial), rebaseAutomaticSave: true },
+  );
+  assert.equal(result.ok, true, 'a refused cosmetic write still reports ok');
+  assert.deepEqual(disk.state.groups, [], 'nothing was written through the refused save');
+});
+
+test('an explicit save still freezes on scope violation', async () => {
+  const initial = { schemaVersion: 1, groups: [], shortcuts: [] };
+  const disk = fakeDisk(initial);
+  const host = {
+    loadVersioned: () => disk.loadVersioned(),
+    async saveChecked(serialized) {
+      const loaded = await disk.loadVersioned();
+      return { ok: false, code: 'SCOPE_VIOLATION', revision: loaded.revision };
+    },
+  };
+  const writer = surface(fakeLock(), host, 'writer');
+  await writer.coordinator.start();
+  const result = await writer.coordinator.saveSerialized(
+    ser({ ...initial, groups: [{ id: 'mine' }] }),
+    { baseSerialized: ser(initial) },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'SCOPE_VIOLATION');
+});
+
 test('the first surface becomes the writer and a second stays a view', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();

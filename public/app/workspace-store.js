@@ -18,6 +18,8 @@ function humanSaveRefusal(outcome) {
   switch (outcome?.code) {
     case 'STALE_REVISION':
       return 'This board changed somewhere else before your change could save. Use the latest version or keep your version below.';
+    case 'SCOPE_VIOLATION':
+      return 'This change reaches outside the project scope and was refused. Nothing was saved.';
     case 'WRITER_ACK_TIMEOUT':
       return 'The editing view did not answer in time. Your change was not saved; try again.';
     case 'WRITER_DIED':
