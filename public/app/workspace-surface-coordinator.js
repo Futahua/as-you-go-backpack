@@ -1231,6 +1231,12 @@ export function createSurfaceCoordinator({
           }
           let parentRevision = revision;
           let result = await host.saveChecked(payload, parentRevision);
+          if (result && result.ok !== true) {
+            try {
+              const parsed = JSON.parse(payload);
+              console.warn(`[AsYouGo] host refused save code=${result && result.code} hostRevision=${result && result.revision} groups=[${(Array.isArray(parsed.groups) ? parsed.groups : []).map((group) => `${group?.id ?? '?'}^${group?.parentId ?? '?'}`).join(',')}]`);
+            } catch { /* refusal trail is diagnostic-only */ }
+          }
           // An automatic save (graph rest positions, surface locations,
           // icon and card sizes) can lose several CAS races in a row while
           // two writers persist around it. Retry it boundedly rather than
