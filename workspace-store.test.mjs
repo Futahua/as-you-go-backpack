@@ -83,7 +83,8 @@ test('commit reports failure when persistence resolves an explicit refusal', asy
   });
   const ok = await store.commit({ items: ['x'] }, {});
   assert.equal(ok, false);
-  assert.match(statuses.at(-1), /STALE_REVISION/);
+  assert.match(statuses.at(-1), /changed somewhere else/);
+  assert.doesNotMatch(statuses.at(-1), /STALE_REVISION/);
 });
 
 test('a failed follower acknowledgement invalidates dependent queued edits', async () => {
@@ -107,7 +108,8 @@ test('a failed follower acknowledgement invalidates dependent queued edits', asy
   rejectAck({ ok: false, code: 'WRITER_ACK_TIMEOUT' });
   assert.equal(await first, false);
   assert.equal(await second, false, 'a dependent queued edit must not report success after its base fails');
-  assert.match(statuses.at(-1), /superseded|WRITER_ACK_TIMEOUT/);
+  assert.match(statuses.at(-1), /superseded|did not answer in time/);
+  assert.doesNotMatch(statuses.at(-1), /WRITER_ACK_TIMEOUT/);
 });
 
 test('an authoritative install becomes the immediate base for the next save', async () => {
@@ -365,9 +367,9 @@ test('flush preserves a failed generation behind a superseded later save', async
   await new Promise((resolve) => setTimeout(resolve, 0));
   const pendingFlush = store.flush();
   rejectAck({ ok: false, code: 'WRITER_DIED' });
-  await assert.rejects(first, /WRITER_DIED/);
+  await assert.rejects(first, /went away before confirming/);
   await later;
-  await assert.rejects(pendingFlush, /WRITER_DIED/);
+  await assert.rejects(pendingFlush, /went away before confirming/);
 });
 
 test('set selection is independent of item selection', () => {

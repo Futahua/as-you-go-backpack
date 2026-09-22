@@ -12,6 +12,28 @@
  * It never reached persistence. */
 export const SUPERSEDED_SAVE = Object.freeze({ superseded: true });
 
+/** User-visible sentence for a save refusal. Machine-readable codes stay on
+ * the result objects; no raw code may reach status text or toasts. */
+function humanSaveRefusal(outcome) {
+  switch (outcome?.code) {
+    case 'STALE_REVISION':
+      return 'This board changed somewhere else before your change could save. Use the latest version or keep your version below.';
+    case 'WRITER_ACK_TIMEOUT':
+      return 'The editing view did not answer in time. Your change was not saved; try again.';
+    case 'WRITER_DIED':
+      return 'The editing view went away before confirming your change. Nothing was overwritten; try again.';
+    case 'MUTATION_UNCERTAIN':
+      return 'Your change could not be confirmed. Nothing was overwritten; try again.';
+    case 'MUTATION_CANCELLATION_PENDING':
+      return 'A previous change is still settling. Wait a moment and try again.';
+    default:
+      return typeof outcome?.message === 'string' && outcome.message
+        ? outcome.message
+        : 'The document was not committed.';
+  }
+}
+
+
 export function createWorkspaceStore({
   getState,
   setState,
@@ -134,7 +156,7 @@ export function createWorkspaceStore({
             if (result?.forwarded && generation === saveGeneration) {
               invalidateGeneration(generation);
             }
-            throw new Error(acknowledgement?.code ?? 'Writer did not commit the mutation.');
+            throw new Error(humanSaveRefusal(acknowledgement));
           }
           result = { ...result, ...acknowledgement };
         }
@@ -142,7 +164,7 @@ export function createWorkspaceStore({
           if (result?.forwarded && generation === saveGeneration) {
             invalidateGeneration(generation);
           }
-          throw new Error(result.code ?? 'The document was not committed.');
+          throw new Error(humanSaveRefusal(result));
         }
         // Forwarded view saves are only optimistic; their committed broadcast
         // (installExternal) is the durable acknowledgement. A writer save is
