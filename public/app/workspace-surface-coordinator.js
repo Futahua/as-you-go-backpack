@@ -749,6 +749,9 @@ export function createSurfaceCoordinator({
     frozenSnapshot = pending?.serialized ?? lastSerialized;
     conflictGeneration = pending?.generation ?? null;
     conflictNeedsLock = !held;
+    try {
+      console.warn(`[AsYouGo] freeze cause=authority-validation revision=${revision} generation=${pending?.generation ?? 'none'} sequence=${pending?.sequence ?? 'none'} hasLock=${Boolean(held)}`);
+    } catch { /* freeze trail is diagnostic-only */ }
     setRole(SURFACE_ROLE.CONFLICT, { revision });
   }
   function retrySuccessfulAckAuthority(requestId, pending, outcome, attempt = 0) {
@@ -837,7 +840,7 @@ export function createSurfaceCoordinator({
     if (role === next) return;
     if (next === SURFACE_ROLE.CONFLICT || role === SURFACE_ROLE.CONFLICT) {
       try {
-        console.warn('[AsYouGo] role transition', { from: role, to: next, revision, detail: detail && typeof detail === 'object' ? { ...detail, serialized: undefined, baseSerialized: undefined } : detail });
+        console.warn(`[AsYouGo] role transition from=${role} to=${next} revision=${revision} detail=${JSON.stringify(detail && typeof detail === 'object' ? { ...detail, serialized: undefined, baseSerialized: undefined } : detail) ?? ''}`);
       } catch { /* role trail is diagnostic-only */ }
     }
     role = next;
@@ -1263,6 +1266,9 @@ export function createSurfaceCoordinator({
           clearPendingGeneration(conflictGeneration);
           const latestLocal = invalidatePendingSaves();
           frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : payload;
+          try {
+            console.warn(`[AsYouGo] freeze cause=writer-stale revision=${revision} hostRevision=${result && result.revision} generation=${metadata.generation ?? 'none'} sequence=${metadata.sequence ?? 'none'} automatic=${metadata.rebaseAutomaticSave === true}`);
+          } catch { /* freeze trail is diagnostic-only */ }
           setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
           return { ok: false, code: 'STALE_REVISION' };
         })
