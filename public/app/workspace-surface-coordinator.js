@@ -835,6 +835,11 @@ export function createSurfaceCoordinator({
 
   function setRole(next, detail = {}) {
     if (role === next) return;
+    if (next === SURFACE_ROLE.CONFLICT || role === SURFACE_ROLE.CONFLICT) {
+      try {
+        console.warn('[AsYouGo] role transition', { from: role, to: next, revision, detail: detail && typeof detail === 'object' ? { ...detail, serialized: undefined, baseSerialized: undefined } : detail });
+      } catch { /* role trail is diagnostic-only */ }
+    }
     role = next;
     onRoleChange(role, detail);
   }
