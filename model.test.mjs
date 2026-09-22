@@ -271,6 +271,21 @@ test('a group cannot move into itself or one of its descendants', () => {
   assert.throws(() => moveSelection(state, [parent.id], child.id), /inside itself/);
 });
 
+test('a bound project root cannot move below the top level', () => {
+  let state = createGroup(emptyState(), 'Elsewhere');
+  const other = state.groups[0];
+  state = {
+    ...state,
+    groups: [...state.groups, { id: 'group-proxima-abc123', name: 'Bound', parentId: 'root', order: 1 }],
+  };
+  assert.throws(
+    () => moveSelection(state, ['group-proxima-abc123'], other.id),
+    /stay at the top level/,
+  );
+  const kept = moveSelection(state, ['group-proxima-abc123'], 'root');
+  assert.equal(kept.groups.find((group) => group.id === 'group-proxima-abc123').parentId, 'root');
+});
+
 test('rename applies to either a group or shortcut', () => {
   let state = createGroup(emptyState(), 'Old');
   const group = state.groups[0];

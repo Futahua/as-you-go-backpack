@@ -1141,6 +1141,13 @@ export function moveSelection(state, ids, destinationId = ROOT_ID) {
       if (selectedGroup.id === destinationId || isDescendant(state, destinationId, selectedGroup.id)) {
         throw new Error('A group cannot be moved inside itself.');
       }
+      // A Proxima-bound project root anchors scoped views: the host refuses
+      // any scoped save once the root leaves the top level, which freezes
+      // those views with no in-app recovery. Keep bound roots at the top.
+      if (typeof selectedGroup.id === 'string' && selectedGroup.id.startsWith('group-proxima-')
+        && destinationId !== ROOT_ID) {
+        throw new Error('Project folders stay at the top level so their views keep working.');
+      }
       selectedGroupIds.add(selectedId);
     } else if (windowLayout(state, selectedId)) {
       selectedWindowLayoutIds.add(selectedId);
