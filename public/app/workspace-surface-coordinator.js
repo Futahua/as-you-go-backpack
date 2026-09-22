@@ -1236,11 +1236,13 @@ export function createSurfaceCoordinator({
           // two writers persist around it. Retry it boundedly rather than
           // freezing the document on a write nobody intended: live rest-save
           // churn means one retry is not always enough.
+          let lastObserved = null;
           for (let attempt = 0;
             result?.code === 'STALE_REVISION' && metadata.rebaseAutomaticSave === true && attempt < 3;
             attempt += 1) {
             try {
               const loaded = await host.loadVersioned();
+              lastObserved = loaded;
               payload = JSON.stringify(mergeSurfaceSnapshots(
                 JSON.parse(baseSerialized ?? lastSerialized),
                 JSON.parse(serialized),
@@ -1259,6 +1261,22 @@ export function createSurfaceCoordinator({
             try { installDocument(JSON.parse(overlayPendingSnapshots(payload)), payload); } catch { /* host bytes are already committed */ }
             publish(payload, revision, null, parentRevision);
             return { ok: true, revision, serialized: payload };
+          }
+          if (result?.code === 'STALE_REVISION' && metadata.rebaseAutomaticSave === true) {
+            // Still racing after bounded retries: drop this cosmetic write
+            // instead of freezing. Positions and view state are rewritten on
+            // the next rest anyway; the document never freezes over them.
+            // Fast-forward the revision bookkeeping to the latest observed
+            // authority so the next save starts from a fresh base instead of
+            // freezing on this stale one. The visible state converges through
+            // the normal refresh; nothing is published because nothing here
+            // was committed.
+            if (lastObserved) {
+              revision = lastObserved.revision;
+              lastSerialized = JSON.stringify(lastObserved.state);
+              authoritativeEpoch += 1;
+            }
+            return { ok: true, revision, serialized: lastSerialized, dropped: true };
           }
           // Fail closed, synchronously enough that no further durable mutation
           // is accepted: the role changes before this returns. Queued saves from

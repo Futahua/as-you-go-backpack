@@ -198,6 +198,38 @@ test('an automatic save survives two consecutive CAS races without freezing', as
   assert.deepEqual(disk.state.view.graphRestPositions.root.a, { x: 1, y: 2 });
 });
 
+test('an automatic save drops quietly under perpetual contention instead of freezing', async () => {
+  const initial = { schemaVersion: 1, groups: [], shortcuts: [], view: { graphRestPositions: {} } };
+  const disk = fakeDisk(initial);
+  let racing = true;
+  const host = {
+    loadVersioned: () => disk.loadVersioned(),
+    async saveChecked(serialized, expected) {
+      if (racing) {
+        disk.externalWrite({ ...disk.state, groups: [...disk.state.groups, { id: `racer-${expected}` }] });
+      }
+      return disk.saveChecked(serialized, expected);
+    },
+  };
+  const writer = surface(fakeLock(), host, 'writer');
+  await writer.coordinator.start();
+  const result = await writer.coordinator.saveSerialized(
+    ser({ ...initial, view: { graphRestPositions: { root: { a: { x: 1, y: 2 } } } } }),
+    { baseSerialized: ser(initial), rebaseAutomaticSave: true },
+  );
+  assert.equal(result.ok, true, 'a dropped cosmetic write still reports ok');
+  assert.ok(!disk.state.view.graphRestPositions.root, 'positions were dropped, not forced in');
+  // The surface must still be usable, not frozen: another automatic save
+  // rebases against whatever won and commits.
+  racing = false;
+  const followup = await writer.coordinator.saveSerialized(
+    ser({ ...initial, view: { graphRestPositions: { root: { b: { x: 9, y: 9 } } } } }),
+    { baseSerialized: ser(initial), rebaseAutomaticSave: true },
+  );
+  assert.equal(followup.ok, true);
+  assert.deepEqual(disk.state.view.graphRestPositions.root.b, { x: 9, y: 9 });
+});
+
 test('the first surface becomes the writer and a second stays a view', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();
