@@ -1290,7 +1290,12 @@ export function createSurfaceCoordinator({
           const latestLocal = invalidatePendingSaves();
           frozenSnapshot = typeof latestLocal === 'string' ? latestLocal : payload;
           try {
-            console.warn(`[AsYouGo] freeze cause=writer-stale revision=${revision} hostRevision=${result && result.revision} code=${result && result.code} generation=${metadata.generation ?? 'none'} sequence=${metadata.sequence ?? 'none'} automatic=${metadata.rebaseAutomaticSave === true}`);
+            let inventory = '';
+            try {
+              const parsed = JSON.parse(payload);
+              inventory = ` groups=[${(Array.isArray(parsed.groups) ? parsed.groups : []).map((group) => `${group?.id ?? '?'}^${group?.parentId ?? '?'}`).join(',')}]`;
+            } catch { /* inventory is diagnostic-only */ }
+            console.warn(`[AsYouGo] freeze cause=writer-stale revision=${revision} hostRevision=${result && result.revision} code=${result && result.code} generation=${metadata.generation ?? 'none'} sequence=${metadata.sequence ?? 'none'} automatic=${metadata.rebaseAutomaticSave === true}${inventory}`);
           } catch { /* freeze trail is diagnostic-only */ }
           setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
           return { ok: false, code: result?.code ?? 'STALE_REVISION' };
