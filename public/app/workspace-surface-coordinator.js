@@ -1231,11 +1231,14 @@ export function createSurfaceCoordinator({
           }
           let parentRevision = revision;
           let result = await host.saveChecked(payload, parentRevision);
-          if (result?.code === 'STALE_REVISION' && metadata.rebaseAutomaticSave === true) {
-            // An automatic save (graph rest positions, surface locations,
-            // icon and card sizes) can race a peer commit or a direct
-            // state.json edit. Rebase that non-creator-intent write once
-            // rather than freezing the document on an automatic save.
+          // An automatic save (graph rest positions, surface locations,
+          // icon and card sizes) can lose several CAS races in a row while
+          // two writers persist around it. Retry it boundedly rather than
+          // freezing the document on a write nobody intended: live rest-save
+          // churn means one retry is not always enough.
+          for (let attempt = 0;
+            result?.code === 'STALE_REVISION' && metadata.rebaseAutomaticSave === true && attempt < 3;
+            attempt += 1) {
             try {
               const loaded = await host.loadVersioned();
               payload = JSON.stringify(mergeSurfaceSnapshots(
@@ -1245,7 +1248,7 @@ export function createSurfaceCoordinator({
               ));
               parentRevision = loaded.revision;
               result = await host.saveChecked(payload, parentRevision);
-            } catch { /* preserve the original conflict outcome */ }
+            } catch { break; /* preserve the original conflict outcome */ }
           }
           if (result && result.ok === true) {
             revision = result.revision;

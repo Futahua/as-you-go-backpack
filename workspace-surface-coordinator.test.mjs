@@ -173,6 +173,31 @@ test('a background position save rebases once when a hand edit wins the CAS race
   assert.deepEqual(disk.state.view.graphRestPositions.root.a, { x: 1, y: 2 });
 });
 
+test('an automatic save survives two consecutive CAS races without freezing', async () => {
+  const initial = { schemaVersion: 1, groups: [], shortcuts: [], view: { graphRestPositions: {} } };
+  const disk = fakeDisk(initial);
+  let races = 0;
+  const host = {
+    loadVersioned: () => disk.loadVersioned(),
+    async saveChecked(serialized, expected) {
+      if (races < 2) {
+        races += 1;
+        disk.externalWrite({ ...disk.state, groups: [...disk.state.groups, { id: `racer-${races}` }] });
+      }
+      return disk.saveChecked(serialized, expected);
+    },
+  };
+  const writer = surface(fakeLock(), host, 'writer');
+  await writer.coordinator.start();
+  const result = await writer.coordinator.saveSerialized(
+    ser({ ...initial, view: { graphRestPositions: { root: { a: { x: 1, y: 2 } } } } }),
+    { baseSerialized: ser(initial), rebaseAutomaticSave: true },
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(disk.state.groups.map((group) => group.id), ['racer-1', 'racer-2']);
+  assert.deepEqual(disk.state.view.graphRestPositions.root.a, { x: 1, y: 2 });
+});
+
 test('the first surface becomes the writer and a second stays a view', async () => {
   const lock = fakeLock();
   const disk = fakeDisk();
