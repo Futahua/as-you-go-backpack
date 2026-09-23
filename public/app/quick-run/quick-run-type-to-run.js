@@ -103,9 +103,10 @@ function composing(event) {
  * Shift is part of the question - a bare `G` and a `Shift+G` are different bindings and either can be the
  * one that is held.
  */
-function bindingClaimsKey(event, preferences, catalog) {
+function bindingClaimsKey(event, preferences, catalog, blockedBindings = null) {
   const binding = canonicalizeBinding(event);
   if (binding === null) return false;
+  if (blockedBindings && blockedBindings.includes(binding)) return true;
   for (const action of catalog) {
     if (action.scope !== HOTKEY_SCOPE_WORKSPACE) continue;
     if (effectiveBindings(action.id, preferences, catalog).includes(binding)) return true;
@@ -128,6 +129,7 @@ export function planQuickRunTypeToRun(event, context = {}) {
     paletteOpen = false,
     editingTarget = false,
     renameLive = false,
+    blockedBindings = null,
   } = context ?? {};
   const pass = (reason) => ({ kind: 'pass', reason });
   if (!event || typeof event !== 'object') return pass(QUICK_RUN_TYPE_TO_RUN_PASS.notPrintable);
@@ -147,7 +149,7 @@ export function planQuickRunTypeToRun(event, context = {}) {
   // nothing - so opening on it would take a live gesture to show an empty palette.
   if (event.key === ' ') return pass(QUICK_RUN_TYPE_TO_RUN_PASS.space);
   if (!printableCharacter(event.key)) return pass(QUICK_RUN_TYPE_TO_RUN_PASS.notPrintable);
-  if (bindingClaimsKey(event, preferences, catalog)) return pass(QUICK_RUN_TYPE_TO_RUN_PASS.bound);
+  if (bindingClaimsKey(event, preferences, catalog, blockedBindings)) return pass(QUICK_RUN_TYPE_TO_RUN_PASS.bound);
 
   // The seed is the character itself, so Shift has already done its work: `key` is the capital the reader
   // asked for. Exactly one character goes into the line, and the caller prevents the browser's own

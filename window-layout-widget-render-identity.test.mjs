@@ -144,10 +144,12 @@ test('widget render forwards tracking state into the shared card candidate', () 
   assert.match(workspaceSource, /tracking: snapshot\.tracking/);
 });
 
-test('a fresh widget uses an opaque fallback when the host backdrop is transparent', () => {
+test('widget opacity comes from its local preference, with an opaque default', () => {
+  assert.match(workspaceSource, /function applyWidgetOpacity\(\)/);
+  assert.match(workspaceSource, /applyWidgetOpacity\(\);/);
   assert.match(
     workspaceSource,
-    /applyWidgetOpacity\(Number\(message\.snapshot\.appearance\.backdropOpacity\) \|\| 1\)/,
+    /let widgetOpacity = Number\.isFinite\(parsedWidgetOpacity\)[\s\S]{0,120}: 1/,
   );
 });
 

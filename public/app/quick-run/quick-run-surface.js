@@ -675,6 +675,19 @@ export function mountQuickRun(input) {
       elements.input.focus?.();
       return true;
     },
+    appendText(text) {
+      if (!session.open || typeof text !== 'string' || [...text].length !== 1
+        || new TextEncoder().encode(text).length > 8) return false;
+      const next = `${session.query}${text}`;
+      if (new TextEncoder().encode(next).length > 512) return false;
+      newBaseline();
+      session = quickRunSessionWithQuery(session, next);
+      elements.input.value = next;
+      paint();
+      elements.input.focus?.();
+      try { elements.input.setSelectionRange?.(next.length, next.length); } catch { /* non-text test doubles */ }
+      return true;
+    },
     /**
      * Rebuild the snapshot from the current state, keeping the query and the filter (section 5).
      *

@@ -79,6 +79,18 @@ test('an invocation asks for the items again when the boot load did not land', (
   );
 });
 
+test('hover capture opens on its verified first character and appends later keys without reopening', () => {
+  assert.deepEqual(planCommandSurfaceInvoke({
+    reason: 'hover-type-to-run', initialText: 'v', captureId: '101',
+  }), { kind: 'open-seeded', seed: 'v' });
+  assert.deepEqual(planCommandSurfaceInvoke({
+    reason: 'hover-type-to-run-append', appendText: 'i', captureId: '102',
+  }), { kind: 'append-text', text: 'i' });
+  assert.equal(planCommandSurfaceInvoke({
+    reason: 'hover-type-to-run', initialText: 'vi', captureId: '101',
+  }).kind, 'ignore', 'only one bounded captured key can seed the command surface');
+});
+
 test('the ids do not decide it, because a receiving surface cannot verify them', () => {
   // Measured on the host's own payload: `surfaceId` is host-generated (`sf-...`) and appears nowhere in the
   // surface's URL, which carries a different uuid. The overlay is a window the host opened for this project,

@@ -114,7 +114,7 @@ import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
 import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
-import { getBackdropOpacity, getBreadcrumbMiddleScale, getBreadcrumbRootScale, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTrailOpacity, getTransparentBackground, setBackdropOpacity } from './app/hotkeys-model.js';
+import { HOTKEY_CATALOG, HOTKEY_SCOPE_WORKSPACE, effectiveBindings, getBackdropOpacity, getBreadcrumbMiddleScale, getBreadcrumbRootScale, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTrailOpacity, getTransparentBackground, setBackdropOpacity } from './app/hotkeys-model.js';
 import { collectIncludedPrompts, formatCopyConfirmation, resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
@@ -133,6 +133,7 @@ import {
   commandSurfaceModeFromUrl,
   planCommandSurfaceInvoke,
 } from './app/quick-run/quick-run-command-surface.js';
+import { planQuickRunTypeToRun } from './app/quick-run/quick-run-type-to-run.js';
 import { createMarqueeController } from './app/interactions/marquee-controller.js';
 import { createDropController } from './app/interactions/drop-controller.js';
 import { createPointerController } from './app/interactions/pointer-controller.js';
@@ -2721,6 +2722,17 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
     && coordinationState === 'ready'
     && surfaceCoordinator?.role === SURFACE_ROLE.WRITER,
   getLayout: windowLayoutFromState,
+  getHoverPolicy: () => {
+    const preferences = state.view?.preferences?.hotkeys ?? {};
+    const blockedBindings = [];
+    for (const action of HOTKEY_CATALOG) {
+      if (action.scope !== HOTKEY_SCOPE_WORKSPACE) continue;
+      for (const binding of effectiveBindings(action.id, preferences, HOTKEY_CATALOG)) {
+        if (/^(?:Shift\+)?[^+\t\r\n]+$/.test(binding)) blockedBindings.push(binding);
+      }
+    }
+    return { enabled: true, blockedBindings: [...new Set(blockedBindings)].slice(0, 256) };
+  },
   snapshot: (layout, memberIcon, memberNote) => ({
     ...windowLayoutWidgetSnapshot(layout, memberIcon, memberNote),
     // The compact surface does not load the whole workspace state. Carry only
@@ -5697,6 +5709,14 @@ async function reloadWorkspace() {
 host.onCommandSurfaceInvoke((payload) => {
   if (SCOPE_ROOT_ID) return;
   const plan = planCommandSurfaceInvoke(payload, { loadFailed: workspaceLoad.ok !== true });
+  if (plan.kind === 'open-seeded') {
+    openQuickRun(plan.seed);
+    return;
+  }
+  if (plan.kind === 'append-text') {
+    quickRun.appendText(plan.text);
+    return;
+  }
   if (plan.kind !== 'focus-and-clear') return;
   quickRun.focusEmptyLine();
   // The creator is here, looking at an empty launcher: if the boot load did not land, ask again now rather
@@ -6007,6 +6027,7 @@ function openQuickRunFolderSurface(groupId) {
 // Keep the host-specific clipboard adapter outside the Quick Run composition region, just like the folder
 // surface adapter above. Quick Run receives a narrow function and remains unaware of Papers messaging.
 const quickRunCopyText = (text) => host.copyText(text);
+const quickRunDismissCommandSurface = (options) => host.dismissCommandSurface(options);
 const quickRunHydrateIcons = (shell) => hydrateNodeIcons(shell);
 const quickRunCardSizeChanged = (size) => {
   state = store.replace({ ...state, view: { ...state.view, quickRunCardSize: size } });
@@ -6054,7 +6075,7 @@ const quickRun = bindQuickRunWorkspace({
   universeNote: () => (workspaceLoad.ok === false ? workspaceLoad.error : null),
   commandSurface: commandSurfaceMode === 'overlay',
   openFolderSurface: openQuickRunFolderSurface,
-  dismissCommandSurface: (options) => host.dismissCommandSurface(options),
+  dismissCommandSurface: quickRunDismissCommandSurface,
   activateLayoutMember: activateWindowLayoutMember,
   copyText: quickRunCopyText,
   hydrateIcons: quickRunHydrateIcons,
@@ -6149,6 +6170,8 @@ function bootstrapWindowLayoutWidget() {
     // 035: true once a real workspace snapshot has been received (the restore
     // below must never run against the empty initial default snapshot).
     snapshotReceived: false,
+    blockedHotkeyBindings: [],
+    hoverPolicyReceived: false,
   };
   // 035: the widget restores its window size EXACTLY ONCE after the first real
   // snapshot; every later resize is user-owned and only reported for persistence.
@@ -6167,6 +6190,17 @@ function bootstrapWindowLayoutWidget() {
   }
 
   function handleWidgetMessage(message) {
+    if (message.type === 'hover-policy') {
+      if (typeof message.enabled !== 'boolean'
+        || !Array.isArray(message.blockedBindings) || message.blockedBindings.length > 256
+        || message.blockedBindings.some((binding) => typeof binding !== 'string' || binding.length > 64)) return;
+      const modalOpen = [...document.querySelectorAll('[role="dialog"], dialog')]
+        .some((dialog) => !dialog.hidden && dialog.getClientRects().length > 0);
+      widgetState.blockedHotkeyBindings = message.blockedBindings;
+      widgetState.hoverPolicyReceived = true;
+      void host.setWidgetHoverPolicy(message.enabled && !modalOpen, message.blockedBindings).catch(() => undefined);
+      return;
+    }
     if (message.type === 'snapshot' || message.type === 'committed' || message.type === 'stale') {
       if (typeof message.revision !== 'number') return;
       // A committed response may carry one short sentence about what actually happened (a pick whose
@@ -6860,6 +6894,7 @@ function bootstrapWindowLayoutWidget() {
   });
 
   window.addEventListener('pagehide', () => {
+    if (hoverPolicyTimer !== null) clearInterval(hoverPolicyTimer);
     const hadActivePick = Boolean(widgetState.pickAttempt || widgetState.pickUnsubscribe);
     widgetState.pickAttempt = null;
     widgetState.pickUnsubscribe?.();
@@ -6909,6 +6944,26 @@ function bootstrapWindowLayoutWidget() {
     onMessage: handleWidgetMessage,
   });
   windowLayoutWidgetClient = client;
+  let hoverPolicyTimer = setInterval(() => client.requestHoverPolicy(), 400);
+  client.requestHoverPolicy();
+  window.addEventListener('keydown', (event) => {
+    if (!widgetState.hoverPolicyReceived || widgetState.pickUnsubscribe || event.defaultPrevented) return;
+    const target = event.target;
+    const editingTarget = target instanceof Element
+      && target.matches('input, textarea, select, [contenteditable="true"], .set-name-editor');
+    const modalOpen = [...document.querySelectorAll('[role="dialog"], dialog')]
+      .some((dialog) => !dialog.hidden && dialog.getClientRects().length > 0);
+    const plan = planQuickRunTypeToRun(event, {
+      modalOpen,
+      paletteOpen: quickRun.session().open,
+      editingTarget,
+      blockedBindings: widgetState.blockedHotkeyBindings,
+    });
+    if (plan.kind !== 'open') return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    quickRun.open(plan.seed);
+  }, { capture: true });
   // 040: the widget card's member context menu (`Remove from this layout`) is
   // the SHARED context menu component; it must be mounted in the widget surface
   // too (the workspace bootstrap does this, but the widget never runs it).

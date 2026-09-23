@@ -891,6 +891,19 @@ test('typing never re-reads the world: the snapshot is taken at open and ranked 
   assert.equal(reads, 1, 'and nothing a keystroke does reads it again');
 });
 
+test('captured hover keystrokes append to the already-open query in order', () => {
+  const document = { createElement: (tag) => ({ tag, ...liveElement() }) };
+  const elements = { layer: liveElement(), input: liveElement(), chips: liveElement(), results: liveElement() };
+  const quickRun = mountQuickRun({ document, elements, getState: () => state });
+  quickRun.open('v');
+  assert.equal(quickRun.appendText('i'), true);
+  assert.equal(elements.input.value, 'vi');
+  assert.equal(quickRun.session().query, 'vi');
+  assert.deepEqual(elements.input.selection, { start: 2, end: 2 });
+  quickRun.close();
+  assert.equal(quickRun.appendText('x'), false, 'closed surfaces do not receive stale native input');
+});
+
 test('hydrated link rows expose the shared favicon request and retain a fixed fallback slot', () => {
   const h = harness();
   paintQuickRunSurface({

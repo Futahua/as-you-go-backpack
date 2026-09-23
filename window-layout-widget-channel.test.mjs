@@ -323,8 +323,8 @@ test('the widget client exposes NO store/save/commit/recording surface', () => {
   assert.deepEqual(
     Object.keys(client).sort(),
     // 035: the client also reports its live window content size and its close,
-    // still without any store/save/commit surface.
-    ['close', 'dispose', 'ready', 'requestSnapshot', 'revision', 'sendCardSize', 'sendCommand', 'sendCommandAndWait'].sort(),
+    // still without any store/save/commit surface. Its bounded hover-policy request is intent-only.
+    ['close', 'dispose', 'ready', 'requestHoverPolicy', 'requestSnapshot', 'revision', 'sendCardSize', 'sendCommand', 'sendCommandAndWait'].sort(),
   );
   workspace.close();
   client.close();

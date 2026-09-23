@@ -419,6 +419,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
    * hydrate the ones it is missing itself: another surface resolving them can
    * no longer publish, and the writer may not even be displaying that layout. */
   onAuthoritativeWidgetOpen,
+  getHoverPolicy,
   // Answered fresh on every protocol effect: is THIS surface the one authority
   // for the layout right now? A project may be open in several workspace
   // surfaces (the multi-tab feature), and every one of them constructs a
@@ -487,6 +488,16 @@ export function createWindowLayoutWidgetChannelWorkspace({
       }
       post({ type: 'snapshot', layoutId, clientId, revision: revisionOf(layoutId), snapshot: buildSnapshot(layout) });
       onAuthoritativeWidgetOpen?.(layoutId);
+      return;
+    }
+    if (message.type === 'hover-policy-request') {
+      if (!exactKeys(message, ['type', 'layoutId', 'clientId'])) return;
+      if (!boundedString(message.layoutId, 'layoutId') || !boundedString(message.clientId, 'clientId')) return;
+      if (!isAuthoritative()) return;
+      const policy = getHoverPolicy?.(message.layoutId);
+      if (!policy || !Array.isArray(policy.blockedBindings) || policy.blockedBindings.length > 256) return;
+      post({ type: 'hover-policy', layoutId: message.layoutId, clientId: message.clientId,
+        enabled: policy.enabled === true, blockedBindings: policy.blockedBindings });
       return;
     }
     // 035: a live widget reports its window content size so the workspace
@@ -644,6 +655,7 @@ export function createWindowLayoutWidgetChannelClient({
     const message = event.data;
     if (!isPlainObject(message) || typeof message.type !== 'string') return;
     if (message.layoutId !== layoutId) return;
+    if (message.type === 'hover-policy' && message.clientId !== clientId) return;
     if (message.type === 'snapshot' || message.type === 'committed' || message.type === 'stale') {
       if (typeof message.revision === 'number' && Number.isFinite(message.revision)) revision = message.revision;
     }
@@ -706,6 +718,7 @@ export function createWindowLayoutWidgetChannelClient({
   channel.addEventListener('message', listener);
   return {
     ready: () => send({ type: 'widget-ready' }),
+    requestHoverPolicy: () => send({ type: 'hover-policy-request' }),
     requestSnapshot: () => send({ type: 'snapshot-request' }),
     /** 035: the live widget reports its window content size (debounced by the
      * page) so the workspace persists the shared card geometry. Bounded to the

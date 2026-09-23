@@ -182,6 +182,17 @@ test('a binding from another scope is not in force on the canvas', () => {
   assert.deepEqual(decide({ key: 'x' }, { catalog }), { kind: 'open', seed: 'x' });
 });
 
+test('a native hover policy blocks only its effective bare-key bindings', () => {
+  assert.deepEqual(
+    planQuickRunTypeToRun(press({ key: 'g' }), { blockedBindings: ['G', 'Shift+X'] }),
+    { kind: 'pass', reason: QUICK_RUN_TYPE_TO_RUN_PASS.bound },
+  );
+  assert.deepEqual(
+    planQuickRunTypeToRun(press({ key: 'x' }), { blockedBindings: ['G', 'Shift+X'] }),
+    { kind: 'open', seed: 'x' },
+  );
+});
+
 test('the decision reads the event and changes nothing', () => {
   const event = press({ key: 'a' });
   const before = JSON.stringify(event);

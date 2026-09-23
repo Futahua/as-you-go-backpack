@@ -111,6 +111,22 @@ export function planCommandSurfaceInvoke(payload, { loadFailed = false } = {}) {
   if (!payload || typeof payload !== 'object') {
     return { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.malformed };
   }
+  if (payload.reason === 'hover-type-to-run') {
+    if (typeof payload.initialText !== 'string' || [...payload.initialText].length !== 1
+      || new TextEncoder().encode(payload.initialText).length > 8
+      || typeof payload.captureId !== 'string' || !/^\d{1,20}$/.test(payload.captureId)) {
+      return { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.malformed };
+    }
+    return { kind: 'open-seeded', seed: payload.initialText };
+  }
+  if (payload.reason === 'hover-type-to-run-append') {
+    if (typeof payload.appendText !== 'string' || [...payload.appendText].length !== 1
+      || new TextEncoder().encode(payload.appendText).length > 8
+      || typeof payload.captureId !== 'string' || !/^\d{1,20}$/.test(payload.captureId)) {
+      return { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.malformed };
+    }
+    return { kind: 'append-text', text: payload.appendText };
+  }
   if (payload.reason !== COMMAND_SURFACE_INVOKE_REASON) {
     return { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.reason };
   }
