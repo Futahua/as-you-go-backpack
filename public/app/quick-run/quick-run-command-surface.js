@@ -73,6 +73,14 @@ export const QUICK_RUN_INVOKE_IGNORE = Object.freeze({
 /** The only `reason` the host sends for this event, and therefore the only one acted on. */
 export const COMMAND_SURFACE_INVOKE_REASON = 'global-accelerator';
 
+function validCaptureId(value) {
+  // Native hook ids are decimal, while the host's ordered OPEN/APPEND handoff
+  // ids are namespaced (`papers-<time>-<sequence>`). The receiver only needs
+  // to validate a bounded opaque correlation token; requiring digits here
+  // silently discarded the seeded first character from host-originated input.
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
 /**
  * Which surface this page is, read from its own URL.
  *
@@ -114,7 +122,7 @@ export function planCommandSurfaceInvoke(payload, { loadFailed = false } = {}) {
   if (payload.reason === 'hover-type-to-run') {
     if (typeof payload.initialText !== 'string' || [...payload.initialText].length !== 1
       || new TextEncoder().encode(payload.initialText).length > 8
-      || typeof payload.captureId !== 'string' || !/^\d{1,20}$/.test(payload.captureId)) {
+      || !validCaptureId(payload.captureId)) {
       return { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.malformed };
     }
     return { kind: 'open-seeded', seed: payload.initialText };
@@ -122,7 +130,7 @@ export function planCommandSurfaceInvoke(payload, { loadFailed = false } = {}) {
   if (payload.reason === 'hover-type-to-run-append') {
     if (typeof payload.appendText !== 'string' || [...payload.appendText].length !== 1
       || new TextEncoder().encode(payload.appendText).length > 8
-      || typeof payload.captureId !== 'string' || !/^\d{1,20}$/.test(payload.captureId)) {
+      || !validCaptureId(payload.captureId)) {
       return { kind: 'ignore', reason: QUICK_RUN_INVOKE_IGNORE.malformed };
     }
     return { kind: 'append-text', text: payload.appendText };

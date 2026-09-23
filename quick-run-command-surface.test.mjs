@@ -91,6 +91,21 @@ test('hover capture opens on its verified first character and appends later keys
   }).kind, 'ignore', 'only one bounded captured key can seed the command surface');
 });
 
+test('host-namespaced capture ids preserve the first key and ordered follow-up keys', () => {
+  assert.deepEqual(planCommandSurfaceInvoke({
+    reason: 'hover-type-to-run', initialText: 'a', captureId: 'papers-1790193380123-1',
+  }), { kind: 'open-seeded', seed: 'a' });
+  assert.deepEqual(planCommandSurfaceInvoke({
+    reason: 'hover-type-to-run-append', appendText: 'g', captureId: 'papers-1790193380124-2',
+  }), { kind: 'append-text', text: 'g' });
+  assert.deepEqual(planCommandSurfaceInvoke({
+    reason: 'hover-type-to-run-append', appendText: 'h', captureId: 'papers-1790193380124-3',
+  }), { kind: 'append-text', text: 'h' });
+  assert.equal(planCommandSurfaceInvoke({
+    reason: 'hover-type-to-run', initialText: 'a', captureId: 'bad id',
+  }).kind, 'ignore', 'correlation ids remain bounded and protocol-safe');
+});
+
 test('the ids do not decide it, because a receiving surface cannot verify them', () => {
   // Measured on the host's own payload: `surfaceId` is host-generated (`sf-...`) and appears nowhere in the
   // surface's URL, which carries a different uuid. The overlay is a window the host opened for this project,

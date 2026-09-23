@@ -604,11 +604,12 @@ test('018V2 detachReady posts the exact two-sided-latch request and resolves on 
   assert.deepEqual(await ready, undefined);
 });
 
-test('019C widgetOpen/Focus/Close post exact bounded layout-key requests', async () => {
+test('019C widgetOpen/Focus/Minimize/Close post exact bounded layout-key requests', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);
   host.widgetOpen('layout-a');
   host.widgetFocus('layout-a');
+  host.widgetMinimize('layout-a');
   host.widgetClose('layout-a');
   host.widgetCloseSelf();
   host.widgetReady();
@@ -616,6 +617,7 @@ test('019C widgetOpen/Focus/Close post exact bounded layout-key requests', async
   assert.deepEqual(sent.map((message) => message.type), [
     'papers:project:widget-open',
     'papers:project:widget-focus',
+    'papers:project:widget-minimize',
     'papers:project:widget-close',
     'papers:project:widget-close',
     'papers:project:widget-ready',
@@ -623,8 +625,9 @@ test('019C widgetOpen/Focus/Close post exact bounded layout-key requests', async
   assert.equal(sent[0].layoutKey, 'layout-a');
   assert.equal(sent[1].layoutKey, 'layout-a');
   assert.equal(sent[2].layoutKey, 'layout-a');
-  assert.equal('layoutKey' in sent[3], false, 'the widget self-close is token-attached by the preload');
-  assert.equal('layoutKey' in sent[4], false, 'widget-ready is detail-free');
+  assert.equal(sent[3].layoutKey, 'layout-a');
+  assert.equal('layoutKey' in sent[4], false, 'the widget self-close is token-attached by the preload');
+  assert.equal('layoutKey' in sent[5], false, 'widget-ready is detail-free');
   // Resolve every request so no 15s timeout timer outlives the test.
   for (const entry of mock.parent.messages) {
     mock.dispatchMessage({ type: 'papers:host:result', requestId: entry.message.requestId, ok: true });

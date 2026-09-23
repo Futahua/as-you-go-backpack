@@ -2791,7 +2791,13 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
     if (command.kind === 'dock-widget-to-pill') {
       const next = setWindowLayoutPill(state, layoutId, true);
       if (next !== state && !(await store.commit(next))) return { ok: false, error: 'dock persistence failed' };
-      await host.widgetClose(layoutId).catch(() => undefined);
+      const minimized = await host.widgetMinimize(layoutId).catch(() => null);
+      if (!minimized || minimized.ok !== true) {
+        const restored = setWindowLayoutPill(state, layoutId, false);
+        if (restored !== state) await store.commit(restored);
+        return { ok: false, error: 'widget minimize failed' };
+      }
+      if (detachedWidgets.delete(layoutId)) render();
       return { ok: true };
     }
     if (command.kind === 'delete-layout') {
@@ -4871,7 +4877,10 @@ async function reopenWindowLayoutWidget(layoutId) {
     setStatus('Could not open this layout widget.');
     const docked = setWindowLayoutPill(state, layoutId, true);
     if (docked !== state) await store.commit(docked);
+    return;
   }
+  detachedWidgets.add(layoutId);
+  render();
 }
 
 windowLayoutPillTray?.addEventListener('click', (event) => {

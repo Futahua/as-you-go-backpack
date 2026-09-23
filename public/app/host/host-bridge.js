@@ -345,12 +345,13 @@ export function createHostBridge(window) {
     },
     acknowledgeWidgetQuickRunSeal: (generation) => request('papers:project:widget-quick-run-seal-ack', { generation }),
     // 019C: compact widget surface (one native widget per layout). open/focus/
-    // close are workspace requests carrying the opaque bounded layout key;
+    // minimize/close are workspace requests carrying the opaque bounded key;
     // widgetCloseSelf is the WIDGET page's token-attached self-close; ready is
     // the two-sided-latch page request the preload answers with the hidden
     // token (019B).
     widgetOpen: (layoutKey) => request('papers:project:widget-open', { layoutKey }),
     widgetFocus: (layoutKey) => request('papers:project:widget-focus', { layoutKey }),
+    widgetMinimize: (layoutKey) => request('papers:project:widget-minimize', { layoutKey }),
     widgetClose: (layoutKey) => request('papers:project:widget-close', { layoutKey }),
     widgetCloseSelf: () => request('papers:project:widget-close'),
     widgetReady: () => request('papers:project:widget-ready'),
