@@ -343,6 +343,7 @@ export function createHostBridge(window) {
     widgetCloseSelf: () => request('papers:project:widget-close'),
     widgetReady: () => request('papers:project:widget-ready'),
     setWidgetHoverPolicy: (enabled, blockedBindings) => request('papers:project:widget-hover-policy', { enabled, blockedBindings }),
+    widgetQuickRunInput: (phase, text, captureId) => request('papers:project:widget-quick-run-input', { phase, text, captureId }),
     // 024: the compact-widget page reports its bounded card content size after
     // each render so the host refits the frameless window to the compact card.
     widgetReportSize: (width, height) => request('papers:project:widget-report-size', { width, height }),

@@ -191,6 +191,25 @@ test('a native hover policy blocks only its effective bare-key bindings', () => 
     planQuickRunTypeToRun(press({ key: 'x' }), { blockedBindings: ['G', 'Shift+X'] }),
     { kind: 'open', seed: 'x' },
   );
+  assert.deepEqual(
+    planQuickRunTypeToRun(press({ key: 'g' }), { blockedBindings: [] }),
+    { kind: 'open', seed: 'g' },
+    'an authoritative widget policy can free a default letter through a creator override',
+  );
+});
+
+test('while a seeded surface is opening, ordinary printable characters append before shortcut arbitration', () => {
+  assert.deepEqual(
+    planQuickRunTypeToRun(press({ key: 'g' }), { opening: true, blockedBindings: ['G'] }),
+    { kind: 'append', text: 'g' },
+  );
+  assert.deepEqual(
+    planQuickRunTypeToRun(press({ key: ' ' }), { opening: true }),
+    { kind: 'append', text: ' ' },
+  );
+  assert.equal(planQuickRunTypeToRun(press({ key: 'g', altKey: true }), { opening: true }).kind, 'pass');
+  assert.equal(planQuickRunTypeToRun(press({ key: 'g', repeat: true }), { opening: true }).kind, 'pass');
+  assert.equal(planQuickRunTypeToRun(press({ key: 'g', isComposing: true }), { opening: true }).kind, 'pass');
 });
 
 test('the decision reads the event and changes nothing', () => {

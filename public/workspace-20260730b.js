@@ -6946,6 +6946,8 @@ function bootstrapWindowLayoutWidget() {
   windowLayoutWidgetClient = client;
   let hoverPolicyTimer = setInterval(() => client.requestHoverPolicy(), 400);
   client.requestHoverPolicy();
+  let widgetQuickRunOpening = false;
+  let widgetQuickRunCaptureId = 0;
   window.addEventListener('keydown', (event) => {
     if (!widgetState.hoverPolicyReceived || widgetState.pickUnsubscribe || event.defaultPrevented) return;
     const target = event.target;
@@ -6958,11 +6960,24 @@ function bootstrapWindowLayoutWidget() {
       paletteOpen: quickRun.session().open,
       editingTarget,
       blockedBindings: widgetState.blockedHotkeyBindings,
+      opening: widgetQuickRunOpening,
     });
-    if (plan.kind !== 'open') return;
+    if (plan.kind !== 'open' && plan.kind !== 'append') return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    quickRun.open(plan.seed);
+    const captureId = String(++widgetQuickRunCaptureId);
+    if (plan.kind === 'open') {
+      widgetQuickRunOpening = true;
+      void host.widgetQuickRunInput('open', plan.seed, captureId).then((result) => {
+        if (result?.ok !== true) setWindowLayoutStatus(layoutId, 'Quick Run could not open from this widget.');
+      }).catch((error) => {
+        setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : 'Quick Run could not open from this widget.');
+      }).finally(() => { widgetQuickRunOpening = false; });
+      return;
+    }
+    void host.widgetQuickRunInput('append', plan.text, captureId).then((result) => {
+      if (result?.ok !== true) setWindowLayoutStatus(layoutId, 'A character could not be added to Quick Run.');
+    }).catch(() => setWindowLayoutStatus(layoutId, 'A character could not be added to Quick Run.'));
   }, { capture: true });
   // 040: the widget card's member context menu (`Remove from this layout`) is
   // the SHARED context menu component; it must be mounted in the widget surface

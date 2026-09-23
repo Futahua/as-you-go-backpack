@@ -106,7 +106,10 @@ function composing(event) {
 function bindingClaimsKey(event, preferences, catalog, blockedBindings = null) {
   const binding = canonicalizeBinding(event);
   if (binding === null) return false;
-  if (blockedBindings && blockedBindings.includes(binding)) return true;
+  // A supplied list is the owning workspace's complete effective binding set,
+  // not an additive deny-list. The compact widget cannot reconstruct creator
+  // overrides from its intentionally partial snapshot.
+  if (Array.isArray(blockedBindings)) return blockedBindings.includes(binding);
   for (const action of catalog) {
     if (action.scope !== HOTKEY_SCOPE_WORKSPACE) continue;
     if (effectiveBindings(action.id, preferences, catalog).includes(binding)) return true;
@@ -130,6 +133,7 @@ export function planQuickRunTypeToRun(event, context = {}) {
     editingTarget = false,
     renameLive = false,
     blockedBindings = null,
+    opening = false,
   } = context ?? {};
   const pass = (reason) => ({ kind: 'pass', reason });
   if (!event || typeof event !== 'object') return pass(QUICK_RUN_TYPE_TO_RUN_PASS.notPrintable);
@@ -144,6 +148,7 @@ export function planQuickRunTypeToRun(event, context = {}) {
   if (modifierHeld(event)) return pass(QUICK_RUN_TYPE_TO_RUN_PASS.modifiers);
   if (composing(event)) return pass(QUICK_RUN_TYPE_TO_RUN_PASS.composing);
   if (event.repeat === true) return pass(QUICK_RUN_TYPE_TO_RUN_PASS.repeat);
+  if (opening && printableCharacter(event.key)) return { kind: 'append', text: event.key };
   // Narrower than "printable", and the only place this module is: Space is already an activation key in
   // the window-picking flow, whose handler is on the same document, and a one-space query normalises to
   // nothing - so opening on it would take a live gesture to show an empty palette.

@@ -207,3 +207,10 @@ test('Quick Run activation adds no second launcher and no reveal path (sections 
   }
   assert.match(region, /dismissCommandSurface: quickRunDismissCommandSurface/);
 });
+
+test('focused compact-widget typing routes to the owning project command surface, not widget-local empty state', () => {
+  assert.match(source, /host\.widgetQuickRunInput\('open', plan\.seed, captureId\)/);
+  assert.match(source, /host\.widgetQuickRunInput\('append', plan\.text, captureId\)/);
+  assert.match(source, /opening: widgetQuickRunOpening/);
+  assert.doesNotMatch(source, /quickRun\.open\(plan\.seed\)/);
+});
