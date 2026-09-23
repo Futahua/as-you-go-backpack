@@ -6120,13 +6120,14 @@ const promptLibrary = createPromptLibraryDialog({
 function bootstrapWindowLayoutWidget() {
   const { layoutId } = WIDGET_SURFACE;
   const widgetOpacityStorageKey = `papers-window-layout-widget-opacity:${layoutId}`;
-  const storedWidgetOpacity = Number(localStorage.getItem(widgetOpacityStorageKey));
-  let widgetOpacity = Number.isFinite(storedWidgetOpacity)
-    ? Math.max(0, Math.min(1, storedWidgetOpacity))
-    : null;
+  const storedWidgetOpacity = localStorage.getItem(widgetOpacityStorageKey);
+  const parsedWidgetOpacity = storedWidgetOpacity === null ? Number.NaN : Number(storedWidgetOpacity);
+  let widgetOpacity = Number.isFinite(parsedWidgetOpacity)
+    ? Math.max(0, Math.min(1, parsedWidgetOpacity))
+    : 1;
 
-  function applyWidgetOpacity(fallback = 1) {
-    const opacity = widgetOpacity ?? fallback;
+  function applyWidgetOpacity() {
+    const opacity = widgetOpacity;
     document.documentElement.style.setProperty('--workspace-backdrop-opacity', String(opacity));
     document.documentElement.style.setProperty(
       '--workspace-backdrop-opacity-percent',
@@ -6180,10 +6181,9 @@ function bootstrapWindowLayoutWidget() {
         widgetState.snapshot = message.snapshot;
         if (message.snapshot.appearance && typeof message.snapshot.appearance === 'object') {
           applyTheme(message.snapshot.appearance);
-          // A fresh widget should be solid even when the host workspace is
-          // currently transparent. A saved or wheel-adjusted widget opacity
-          // still wins inside applyWidgetOpacity().
-          applyWidgetOpacity(Number(message.snapshot.appearance.backdropOpacity) || 1);
+          // Widget opacity is independent of workspace opacity. A fresh widget
+          // is solid; only this widget's own saved/wheel-adjusted value applies.
+          applyWidgetOpacity();
         }
         widgetState.snapshotReceived = true;
         const memberIds = new Set((message.snapshot.members ?? []).map((member) => member.id));
@@ -6926,11 +6926,10 @@ function bootstrapWindowLayoutWidget() {
     // wheel itself is the stable input contract here (Ctrl+wheel still works).
     event.preventDefault();
     event.stopImmediatePropagation();
-    const hostOpacity = Number(widgetState.snapshot.appearance?.backdropOpacity) || 0;
-    const current = widgetOpacity ?? hostOpacity;
+    const current = widgetOpacity;
     widgetOpacity = Math.max(0, Math.min(1, Math.round((current + (event.deltaY < 0 ? 0.05 : -0.05)) * 100) / 100));
     localStorage.setItem(widgetOpacityStorageKey, String(widgetOpacity));
-    applyWidgetOpacity(hostOpacity);
+    applyWidgetOpacity();
   }, { capture: true, passive: false });
   function suppressNextWidgetMemberClick() {
     widgetDragJustMoved = true;

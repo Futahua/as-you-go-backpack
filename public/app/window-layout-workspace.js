@@ -96,7 +96,6 @@ export function createWindowLayoutPickApplier({
     if (isReadOnly()) return { outcome: 'superseded' };
     const adds = Array.isArray(result.adds) ? result.adds : [];
     const removes = Array.isArray(result.removes) ? result.removes : [];
-    let next = getState();
     let removed = 0;
     let added = 0;
     let failures = 0;
@@ -113,26 +112,7 @@ export function createWindowLayoutPickApplier({
     const iconDeletes = new Set();
     const capabilitySets = new Map();
     const iconSets = new Map();
-    for (const remove of removes) {
-      const matches = membersMatchingDescriptor(next, layoutId, remove?.descriptor);
-      if (matches.length === 0) {
-        // No member carries this descriptor: the window was retitled, or it is not in this layout at all.
-        // Removing nothing is the only safe answer - the pick cannot name a member it did not match.
-        unmatched += 1;
-        continue;
-      }
-      if (matches.length > 1) {
-        // More than one member carries it, so the pick does not say which; refusing beats removing the wrong
-        // window, and beats removing both.
-        ambiguous += 1;
-        continue;
-      }
-      const existing = matches[0];
-      next = model.removeWindowLayoutMember(next, layoutId, existing.id);
-      capabilityDeletes.add(memberKey(layoutId, existing.id));
-      iconDeletes.add(memberKey(layoutId, existing.id));
-      removed += 1;
-    }
+    const stagedAdds = [];
     for (const add of adds) {
       if (!isPlainObject(add) || !isPlainObject(add.descriptor) || !isPlainObject(add.capability)) {
         failures += 1;
@@ -155,25 +135,62 @@ export function createWindowLayoutPickApplier({
         bounds: observed.observation.bounds ?? null,
         state: observed.observation.state === 'minimized' ? 'minimized' : 'normal',
       };
-      next = model.addWindowLayoutMember(next, layoutId, member);
-      capabilitySets.set(memberKey(layoutId, memberId), add.capability);
-      if (add.candidate?.icon) iconSets.set(memberKey(layoutId, memberId), add.candidate.icon);
+      stagedAdds.push({ member, capability: add.capability, icon: add.candidate?.icon ?? null });
+    }
+    // Host observations above may take long enough for another surface or
+    // lifecycle writer to install a newer document. Rebase every requested
+    // add/remove onto that latest state; never commit the pre-await snapshot.
+    const baseState = getState();
+    let next = baseState;
+    for (const remove of removes) {
+      const matches = membersMatchingDescriptor(next, layoutId, remove?.descriptor);
+      if (matches.length === 0) {
+        // No member carries this descriptor: the window was retitled, or it is not in this layout at all.
+        // Removing nothing is the only safe answer - the pick cannot name a member it did not match.
+        unmatched += 1;
+        continue;
+      }
+      if (matches.length > 1) {
+        // More than one member carries it, so the pick does not say which; refusing beats removing the wrong
+        // window, and beats removing both.
+        ambiguous += 1;
+        continue;
+      }
+      const existing = matches[0];
+      next = model.removeWindowLayoutMember(next, layoutId, existing.id);
+      capabilityDeletes.add(memberKey(layoutId, existing.id));
+      iconDeletes.add(memberKey(layoutId, existing.id));
+      removed += 1;
+    }
+    for (const { member, capability, icon } of stagedAdds) {
+      // A peer may have committed the same pick while our host observation
+      // was pending. Treat that as idempotent rather than overwriting the
+      // peer's newer member list or adding a duplicate.
+      if (membersMatchingDescriptor(next, layoutId, member.descriptor).length > 0) continue;
+      try {
+        next = model.addWindowLayoutMember(next, layoutId, member);
+      } catch {
+        failures += 1;
+        continue;
+      }
+      capabilitySets.set(memberKey(layoutId, member.id), capability);
+      if (icon) iconSets.set(memberKey(layoutId, member.id), icon);
       added += 1;
     }
     // 019DR2 transactional boundary: re-check read-only, THEN commit state and
     // apply the staged runtime-map changes as one accepted path. A superseded
     // apply must leave state, capabilities and icons untouched.
-    const hasChanges = next !== getState()
+    const hasChanges = next !== baseState
       || capabilityDeletes.size > 0 || capabilitySets.size > 0
       || iconDeletes.size > 0 || iconSets.size > 0;
     if (hasChanges) {
       if (isReadOnly()) return { outcome: 'superseded' };
       // The store installs optimistic state synchronously, but the returned
       // Promise is the durable boundary (including a forwarded writer ACK).
-      // Keep runtime maps aligned immediately, but do not report committed
-      // until that persistence boundary has actually succeeded.
+      // Do not mutate ephemeral capability/icon maps until that boundary has
+      // succeeded, or a failed save leaves runtime and durable membership apart.
       let pendingCommit = null;
-      if (next !== getState()) {
+      if (next !== baseState) {
         try {
           pendingCommit = commitState(next);
         } catch (error) {
@@ -183,10 +200,6 @@ export function createWindowLayoutPickApplier({
           };
         }
       }
-      for (const key of capabilityDeletes) capabilities?.delete(key);
-      for (const key of iconDeletes) icons?.delete(key);
-      for (const [key, capability] of capabilitySets) capabilities?.set(key, capability);
-      for (const [key, icon] of iconSets) icons?.set(key, icon);
       if (pendingCommit !== null) {
         try {
           const committed = await pendingCommit;
@@ -200,6 +213,10 @@ export function createWindowLayoutPickApplier({
           };
         }
       }
+      for (const key of capabilityDeletes) capabilities?.delete(key);
+      for (const key of iconDeletes) icons?.delete(key);
+      for (const [key, capability] of capabilitySets) capabilities?.set(key, capability);
+      for (const [key, icon] of iconSets) icons?.set(key, icon);
     }
     return { outcome: 'committed', added, removed, failures, unmatched, ambiguous };
   }

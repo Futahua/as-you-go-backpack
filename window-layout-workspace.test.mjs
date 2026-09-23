@@ -79,7 +79,15 @@ function makeHarness({ observe = async () => ({ outcome: 'success', observation:
     capabilities,
     icons,
   });
-  return { getState: () => state, countCommits: () => commits, pickApplier, retirementWriter, capabilities, icons };
+  return {
+    getState: () => state,
+    installState: (next) => { state = next; },
+    countCommits: () => commits,
+    pickApplier,
+    retirementWriter,
+    capabilities,
+    icons,
+  };
 }
 
 function capabilityFor(title) {
@@ -724,9 +732,11 @@ test('040 two layouts referencing the SAME window stay cache- and state-isolated
 });
 
 test('picker apply waits for the durable workspace commit and reports persistence failure', async () => {
-  let state = makeState([makeLayout('L1', [])]);
+  let state = makeState([makeLayout('L1', [{ id: 'kept', title: 'Notepad' }])]);
   let releaseCommit;
   const durable = new Promise((resolve) => { releaseCommit = resolve; });
+  const capabilities = new Map([[windowLayoutMemberKey('L1', 'kept'), capabilityFor('Notepad')]]);
+  const icons = new Map([[windowLayoutMemberKey('L1', 'kept'), 'data:notepad']]);
   const applier = createWindowLayoutPickApplier({
     getState: () => state,
     commitState: (next) => { state = next; return durable; },
@@ -748,8 +758,8 @@ test('picker apply waits for the durable workspace commit and reports persistenc
           : layout),
       }),
     },
-    capabilities: new Map(),
-    icons: new Map(),
+    capabilities,
+    icons,
   });
   const pending = applier.apply('L1', {
     outcome: 'committed',
@@ -758,7 +768,7 @@ test('picker apply waits for the durable workspace commit and reports persistenc
       capability: capabilityFor('Chrome'),
       candidate: { icon: 'data:image/png;base64,AAAA' },
     }],
-    removes: [],
+    removes: [{ descriptor: descriptor('Notepad') }],
   });
   let settled = false;
   void pending.then(() => { settled = true; });
@@ -768,6 +778,10 @@ test('picker apply waits for the durable workspace commit and reports persistenc
   const applied = await pending;
   assert.equal(applied.outcome, 'failed');
   assert.match(applied.error, /persistence/i);
+  assert.equal(capabilities.has(windowLayoutMemberKey('L1', 'kept')), true, 'failed persistence keeps the existing capability');
+  assert.equal(icons.get(windowLayoutMemberKey('L1', 'kept')), 'data:notepad', 'failed persistence keeps the existing icon');
+  assert.equal(capabilities.size, 1, 'failed persistence does not install staged capabilities');
+  assert.equal(icons.size, 1, 'failed persistence does not install staged icons');
 });
 
 test('bound list-pick identity treats same title on another executable as an add', () => {
@@ -814,6 +828,39 @@ test('attached and detached list picks use bound descriptor identity and the sha
     'a failed durable picker commit is an error ACK, never a false committed result');
 });
 
+test('a delayed add rebases on the latest state instead of dropping concurrent widget members', async () => {
+  let releaseObservation;
+  const waiting = new Promise((resolve) => { releaseObservation = resolve; });
+  const h = makeHarness({
+    observe: async () => {
+      await waiting;
+      return { outcome: 'success', observation: { bounds: null, state: 'normal' } };
+    },
+  });
+  const pending = h.pickApplier.apply('L1', {
+    outcome: 'committed',
+    adds: [{ descriptor: descriptor('Paint'), capability: capabilityFor('Paint') }],
+    removes: [],
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const concurrent = addWindowLayoutMember(h.getState(), 'L1', {
+    id: 'peer-added',
+    descriptor: descriptor('Peer window'),
+    bounds: null,
+    state: 'normal',
+  });
+  h.installState(concurrent);
+  releaseObservation();
+
+  const result = await pending;
+  assert.equal(result.added, 1);
+  assert.deepEqual(
+    h.getState().windowLayouts[0].arrangement.members.map((member) => member.descriptor.title),
+    ['Notepad', 'Calculator', 'Peer window', 'Paint'],
+    'the awaited add preserves every member installed while observation was in flight',
+  );
+});
+
 test('middle-click splits data unlink from Ctrl+middle-click process close', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const attachedStart = source.indexOf("elements.grid.addEventListener('auxclick', (event) => {");
@@ -849,6 +896,19 @@ test('startup opens non-docked layouts by default without creating implicit trac
     'every other durable layout opens as a native widget');
   assert.doesNotMatch(startup, /tracking\?\.enabled === true/,
     'automatic widget startup no longer depends on tracking being enabled');
+});
+
+test('a fresh compact widget defaults to fully opaque independent of workspace appearance', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const start = source.indexOf('function bootstrapWindowLayoutWidget()');
+  const end = source.indexOf('// 019C: the compact-widget surface never runs', start);
+  const widget = source.slice(start, end);
+  assert.match(widget, /storedWidgetOpacity === null \? Number\.NaN : Number\(storedWidgetOpacity\)/,
+    'an absent localStorage entry is not interpreted as numeric zero');
+  assert.match(widget, /: 1;\s*\n\s*function applyWidgetOpacity\(\) \{\s*const opacity = widgetOpacity;/,
+    'a fresh widget starts fully opaque and applies only its widget-specific opacity');
+  assert.doesNotMatch(widget, /applyWidgetOpacity\(Number\(message\.snapshot\.appearance\.backdropOpacity\)/,
+    'workspace transparency does not leak into a fresh widget');
 });
 
 test('closed-window safety reconciliation removes only positively missing exact instances', async () => {
