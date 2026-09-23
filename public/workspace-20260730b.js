@@ -5709,19 +5709,27 @@ async function reloadWorkspace() {
 host.onCommandSurfaceInvoke((payload) => {
   if (SCOPE_ROOT_ID) return;
   const plan = planCommandSurfaceInvoke(payload, { loadFailed: workspaceLoad.ok !== true });
-  if (plan.kind === 'open-seeded') {
-    openQuickRun(plan.seed);
-    return;
+  try {
+    if (plan.kind === 'open-seeded') {
+      openQuickRun(plan.seed);
+    } else if (plan.kind === 'append-text') {
+      if (!quickRun.appendText(plan.text)) throw new Error('Quick Run did not accept the captured character.');
+    } else if (plan.kind === 'focus-and-clear') {
+      quickRun.focusEmptyLine();
+      // The creator is here, looking at an empty launcher: if the boot load did not land, ask again now rather
+      // than making them close and reopen it. Bounded to one attempt per invocation.
+      if (plan.reload) void reloadWorkspace();
+    } else {
+      return;
+    }
+    if (typeof payload?.captureId === 'string') {
+      void host.acknowledgeCommandSurfaceInput(payload.captureId).catch((error) => {
+        setStatus(error instanceof Error ? error.message : 'Quick Run input acknowledgement failed.');
+      });
+    }
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Quick Run could not accept captured input.');
   }
-  if (plan.kind === 'append-text') {
-    quickRun.appendText(plan.text);
-    return;
-  }
-  if (plan.kind !== 'focus-and-clear') return;
-  quickRun.focusEmptyLine();
-  // The creator is here, looking at an empty launcher: if the boot load did not land, ask again now rather
-  // than making them close and reopen it. Bounded to one attempt per invocation.
-  if (plan.reload) void reloadWorkspace();
 });
 
 const toolbar = createToolbarController({
@@ -6947,7 +6955,16 @@ function bootstrapWindowLayoutWidget() {
   let hoverPolicyTimer = setInterval(() => client.requestHoverPolicy(), 400);
   client.requestHoverPolicy();
   let widgetQuickRunOpening = false;
-  let widgetQuickRunCaptureId = 0;
+  const widgetQuickRunAppends = new Set();
+  host.onWidgetQuickRunSealRequest(async ({ generation } = {}) => {
+    if (!Number.isSafeInteger(generation) || generation < 1) return;
+    try {
+      await Promise.all([...widgetQuickRunAppends]);
+      await host.acknowledgeWidgetQuickRunSeal(generation);
+    } catch (error) {
+      setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : 'Quick Run input handoff failed.');
+    }
+  });
   window.addEventListener('keydown', (event) => {
     if (!widgetState.hoverPolicyReceived || widgetState.pickUnsubscribe || event.defaultPrevented) return;
     const target = event.target;
@@ -6965,19 +6982,21 @@ function bootstrapWindowLayoutWidget() {
     if (plan.kind !== 'open' && plan.kind !== 'append') return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const captureId = String(++widgetQuickRunCaptureId);
     if (plan.kind === 'open') {
       widgetQuickRunOpening = true;
-      void host.widgetQuickRunInput('open', plan.seed, captureId).then((result) => {
+      void host.widgetQuickRunInput('open', plan.seed).then((result) => {
         if (result?.ok !== true) setWindowLayoutStatus(layoutId, 'Quick Run could not open from this widget.');
       }).catch((error) => {
         setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : 'Quick Run could not open from this widget.');
       }).finally(() => { widgetQuickRunOpening = false; });
       return;
     }
-    void host.widgetQuickRunInput('append', plan.text, captureId).then((result) => {
+    const request = host.widgetQuickRunInput('append', plan.text);
+    widgetQuickRunAppends.add(request);
+    void request.then((result) => {
       if (result?.ok !== true) setWindowLayoutStatus(layoutId, 'A character could not be added to Quick Run.');
-    }).catch(() => setWindowLayoutStatus(layoutId, 'A character could not be added to Quick Run.'));
+    }).catch(() => setWindowLayoutStatus(layoutId, 'A character could not be added to Quick Run.'))
+      .finally(() => widgetQuickRunAppends.delete(request));
   }, { capture: true });
   // 040: the widget card's member context menu (`Remove from this layout`) is
   // the SHARED context menu component; it must be mounted in the widget surface
