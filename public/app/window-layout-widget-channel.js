@@ -40,7 +40,7 @@ export const WINDOW_LAYOUT_WIDGET_MAX_ICON_BYTES = 262144;
 // Bounded like the member note it appears next to.
 export const WINDOW_LAYOUT_WIDGET_MAX_STATUS_CHARS = 160;
 
-const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window', 'toggle-tracking']);
+const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window', 'toggle-tracking', 'dock-widget-to-pill', 'delete-layout']);
 const GROUP_ACTIONS = new Set(['minimize', 'restore', 'isolate']);
 
 function isPlainObject(value) {
@@ -156,6 +156,10 @@ export function windowLayoutWidgetParseCommand(raw) {
   if (raw.kind === 'toggle-tracking') {
     if (!exactKeys(raw, ['kind'])) return null;
     return { kind: 'toggle-tracking' };
+  }
+  if (raw.kind === 'dock-widget-to-pill' || raw.kind === 'delete-layout') {
+    if (!exactKeys(raw, ['kind'])) return null;
+    return { kind: raw.kind };
   }
   if (raw.kind === 'group-action') {
     if (!exactKeys(raw, ['kind', 'action', 'memberIds'])) return null;
@@ -549,6 +553,11 @@ export function createWindowLayoutWidgetChannelWorkspace({
       }
       const freshLayout = getLayout(layoutId);
       if (!freshLayout) {
+        if (command.kind === 'delete-layout' && result.deleted === true) {
+          const revision = revisionOf(layoutId) === startingRevision ? bump(layoutId) : revisionOf(layoutId);
+          post({ type: 'committed', layoutId, clientId, commandId, commandKind: command.kind, revision, deleted: true });
+          return;
+        }
         post({ type: 'error', layoutId, clientId, commandId, code: 'unknown-layout', message: 'layout disappeared during the apply' });
         return;
       }

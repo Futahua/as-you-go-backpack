@@ -48,6 +48,7 @@ export function emptyState() {
     groups: [],
     shortcuts: [],
     windowLayouts: [],
+    windowLayoutPillIds: [],
     // 017: the persisted active-recording layout id, independent of layout
     // contents. Defaults to null (no layout records); only one id is ever
     // stored and normalization keeps it only when it names an existing,
@@ -513,7 +514,7 @@ export function normalizeState(raw) {
     : [];
   const windowLayouts = normalizeWindowLayouts(raw?.windowLayouts);
   const quickRunCardSize = normalizeQuickRunCardSize(raw?.view?.quickRunCardSize);
-  const state = {
+  let state = {
     schemaVersion: 1,
     groups,
     shortcuts: Array.isArray(raw?.shortcuts)
@@ -523,6 +524,10 @@ export function normalizeState(raw) {
         })
       : [],
     windowLayouts,
+    // Layout widgets are native surfaces by default. This list records only
+    // the layouts the user explicitly docked back into the AYG pill tray.
+    windowLayoutPillIds: [...new Set(stringIds(raw?.windowLayoutPillIds))]
+      .filter((layoutId) => windowLayouts.some((layout) => layout.id === layoutId)),
     activeWindowLayoutId: normalizeActiveWindowLayoutId(raw?.activeWindowLayoutId, windowLayouts, groups),
     startupWindowLayoutId: normalizeActiveWindowLayoutId(raw?.startupWindowLayoutId, windowLayouts, groups),
     view: {
@@ -593,6 +598,16 @@ export function normalizeState(raw) {
     ...state.shortcuts.map((candidate) => candidate.id),
     ...state.windowLayouts.map((candidate) => candidate.id),
   ]);
+  // A layout is a widget rather than a graph body. Retire legacy canvas pins
+  // and rest positions so it has no hidden spatial influence. Set membership
+  // remains valid model metadata, but is inert because layouts are not graph
+  // nodes.
+  state = forgetRestPositionsEverywhere(state, state.windowLayouts.map((layout) => layout.id));
+  const layoutIds = new Set(state.windowLayouts.map((layout) => layout.id));
+  state.view.graphPositions = Object.fromEntries(Object.entries(state.view.graphPositions ?? {}).flatMap(([contextId, positions]) => {
+    const kept = Object.fromEntries(Object.entries(positions).filter(([id]) => !layoutIds.has(id)));
+    return Object.keys(kept).length > 0 ? [[contextId, kept]] : [];
+  }));
   // Per-view trail expansion is pruned once every folder id is known: ids
   // that are no longer valid folders are dropped, the `root` and `bin`
   // pseudo heads are preserved, and unrelated view fields are untouched.
@@ -834,6 +849,42 @@ export function removeClosedWindowFromAllLayouts(state, descriptor) {
       : { ...layout, arrangement: { version: 2, members } };
   });
   return changed ? { ...state, windowLayouts } : state;
+}
+
+/** A layout's X is a direct, non-Bin deletion. It also clears native-surface
+ * presentation state and stale graph coordinates so the deleted widget cannot
+ * reappear through a remembered canvas position. */
+export function deleteWindowLayout(state, windowLayoutId) {
+  const layout = windowLayout(state, windowLayoutId);
+  if (!layout) return state;
+  let next = forgetRestPositionsEverywhere(state, [windowLayoutId]);
+  const graphPositions = {};
+  for (const [contextId, positions] of Object.entries(next.view?.graphPositions ?? {})) {
+    const kept = Object.fromEntries(Object.entries(positions).filter(([id]) => id !== windowLayoutId));
+    if (Object.keys(kept).length > 0) graphPositions[contextId] = kept;
+  }
+  const itemSets = (next.view?.itemSets ?? []).map((set) => ({
+    ...set,
+    memberIds: (set.memberIds ?? []).filter((id) => id !== windowLayoutId),
+  })).filter((set) => set.memberIds.length > 0);
+  next = { ...next, view: { ...next.view, graphPositions, itemSets } };
+  return {
+    ...next,
+    windowLayouts: (state.windowLayouts ?? []).filter((candidate) => candidate.id !== windowLayoutId),
+    windowLayoutPillIds: (state.windowLayoutPillIds ?? []).filter((id) => id !== windowLayoutId),
+    activeWindowLayoutId: state.activeWindowLayoutId === windowLayoutId ? null : state.activeWindowLayoutId,
+    startupWindowLayoutId: state.startupWindowLayoutId === windowLayoutId ? null : state.startupWindowLayoutId,
+  };
+}
+
+/** Record whether a layout is represented by its native widget or by the
+ * reopen pill inside AYG. */
+export function setWindowLayoutPill(state, windowLayoutId, docked) {
+  if (!windowLayout(state, windowLayoutId)) return state;
+  const current = new Set(state.windowLayoutPillIds ?? []);
+  if (docked === true) current.add(windowLayoutId);
+  else current.delete(windowLayoutId);
+  return { ...state, windowLayoutPillIds: [...current] };
 }
 
 /** Reconciles persisted membership against the native window baseline

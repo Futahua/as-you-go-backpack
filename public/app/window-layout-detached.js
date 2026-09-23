@@ -219,6 +219,34 @@ export function createWindowLayoutGroupActionRunner({ isReadOnly, host }) {
   return { runMember, aborted };
 }
 
+/** Per-member icon toggle. Unlike the helper's low-latency toggle command,
+ * restoring follows the same saved-bounds + restore path used by the working
+ * Restore all control, so the exact window is shown in front at its remembered
+ * location. The caller serializes repeated clicks for one member. */
+export async function toggleWindowLayoutMemberVisibility({ host, capability, member, isReadOnly }) {
+  const aborted = () => isReadOnly() ? 'superseded' : null;
+  if (aborted()) return { outcome: 'superseded' };
+  const observed = await host.observeWindowCapability(capability);
+  if (aborted()) return { outcome: 'superseded' };
+  if (observed.outcome !== 'success' || !observed.observation) return observed;
+  const action = observed.observation.state === 'minimized' ? 'restore' : 'minimize';
+  let result;
+  if (action === 'restore') {
+    if (member.bounds) {
+      result = await host.applyWindowCapability(capability, member.bounds);
+      if (aborted()) return { outcome: 'superseded' };
+      if (result.outcome !== 'success') return result;
+    }
+    result = await host.restoreWindowCapability(capability);
+  } else {
+    result = await host.minimizeWindowCapability(capability);
+  }
+  if (aborted()) return { outcome: 'superseded' };
+  return result.outcome === 'success'
+    ? { ...result, observation: observed.observation, action }
+    : result;
+}
+
 /**
  * 018X3 read-only input guards. While a layout controller is detached the
  * workspace is read-only: capture-phase key/beforeinput/pointer events are

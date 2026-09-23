@@ -1196,7 +1196,7 @@ test('018V4 two fresh cycles each report READY and ACK ACTIVATE exactly (dedupe 
   assert.equal(workspace.isReadOnly(), false);
   assert.equal(wEvents.filter((entry) => entry === 'start').length, 2, 'one controller start per resume');
 });
-test('018V5 the real persisted reattach state keeps the layout visible at root', () => {
+test('018V5 the real persisted reattach state keeps the layout durable but out of the spatial graph', () => {
   const persisted = {
     schemaVersion: 1,
     groups: [],
@@ -1218,10 +1218,8 @@ test('018V5 the real persisted reattach state keeps the layout visible at root',
   assert.equal(state.windowLayouts.length, 1, 'the layout survives normalize');
   assert.equal(state.activeWindowLayoutId, persisted.activeWindowLayoutId, 'active id survives normalize');
   const visible = visibleGraphItems(state, ROOT_ID, new Set(), false, 'bin', [], new Set());
-  assert.ok(
-    visible.some((candidate) => candidate.id === persisted.windowLayouts[0].id && candidate.kind === 'window-layout'),
-    'the persisted layout is visible at root after resume',
-  );
+  assert.ok(!visible.some((candidate) => candidate.id === persisted.windowLayouts[0].id),
+    'the persisted widget does not resume as a physics-affected graph node');
 });
 test('018V7R decodeResumeState parses host-shaped strings, passes objects through, and lets malformed JSON throw', () => {
   assert.deepEqual(decodeResumeState(JSON.stringify({ a: 1 })), { a: 1 }, 'a host string is parsed');

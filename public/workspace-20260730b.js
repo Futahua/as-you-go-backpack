@@ -41,6 +41,8 @@ import {
   setItemSets,
   setTrailExpandedByContext,
   createWindowLayout,
+  deleteWindowLayout,
+  setWindowLayoutPill,
   setWindowLayoutTracking,
   setWindowLayoutInstanceSuppressed,
   addWindowLayoutMember,
@@ -90,7 +92,7 @@ import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
-import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
+import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, toggleWindowLayoutMemberVisibility, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
 import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, windowLayoutWidgetRenderIdentity, windowLayoutWidgetCommittedStatus, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
 import {
@@ -175,6 +177,7 @@ My request:
 [Describe what you want to experience.]`;
 
 const elements = getWorkspaceElements(document);
+const windowLayoutPillTray = document.getElementById('window-layout-pills');
 const statusToast = createStatusToast({ element: elements.status });
 
 // 019C: the compact-widget surface is the SAME project entry loaded by the
@@ -663,11 +666,12 @@ function windowLayoutBodyMarkup(candidate, options = {}) {
     ? windowLayoutControlButton('tracking', candidate.tracking?.enabled === true ? 'Stop automatic window tracking' : 'Start automatic window tracking', 'data-wl-track', candidate.id, { toggle: true, active: candidate.tracking?.enabled === true, activeClass: 'tracking-enabled' })
     : '';
   return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" aria-label="Window group">
+    ${widgetSurface ? `<button class="window-layout-delete" type="button" data-wl-delete="${escapeHtml(candidate.id)}" title="Delete this layout" aria-label="Delete this layout">×</button>` : ''}
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
     ${trackingControl}
     <div class="window-layout-controls">
       ${windowLayoutControlButton('list', 'Live-pick an onscreen window (hover for the list)', 'data-wl-list', candidate.id, { glyph: 'pick' })}
-      ${windowLayoutControlButton('min-all', widgetSurface ? 'Minimize all members; middle-click to reattach widget' : 'Minimize all members; right-click to toggle isolate mode', 'data-wl-min-all', candidate.id, { toggle: true, active: windowLayoutRuntime.isolateMode.isActive(candidate.id) })}
+      ${windowLayoutControlButton('min-all', widgetSurface ? 'Minimize all members; middle-click to dock as an AYG pill' : 'Minimize all members; right-click to toggle isolate mode', 'data-wl-min-all', candidate.id, { toggle: true, active: windowLayoutRuntime.isolateMode.isActive(candidate.id) })}
       ${windowLayoutControlButton('restore-all', widgetSurface ? 'Restore/open all members' : 'Restore/open all members; middle-click to undock widget', 'data-wl-restore-all', candidate.id)}
     </div>
     <div class="window-layout-picker" data-wl-picker="${escapeHtml(candidate.id)}"></div>
@@ -731,6 +735,7 @@ const windowLayoutRuntime = {
   isolateMode: createWindowLayoutIsolateMode(), // ephemeral; right-click minimize toggles it
   pickUnsubscribe: null,
 };
+const windowLayoutMemberToggleTails = new Map();
 
 const WINDOW_LAYOUT_SAVE_DEBOUNCE_MS = 300;
 const WINDOW_LAYOUT_LIST_DWELL_MS = 200;
@@ -1124,6 +1129,24 @@ function isActiveRecordingContext(layoutId) {
   return windowLayoutRuntimeController.getSnapshot().activeLayoutId === layoutId;
 }
 
+async function toggleWindowLayoutMember(layoutId, memberId, capability, member) {
+  const key = windowLayoutMemberKey(layoutId, memberId);
+  const previous = windowLayoutMemberToggleTails.get(key) ?? Promise.resolve();
+  const operation = previous.catch(() => undefined).then(() =>
+    toggleWindowLayoutMemberVisibility({
+      host,
+      capability,
+      member,
+      isReadOnly: () => windowLayoutDetachment.isReadOnly(),
+    }));
+  windowLayoutMemberToggleTails.set(key, operation);
+  try {
+    return await operation;
+  } finally {
+    if (windowLayoutMemberToggleTails.get(key) === operation) windowLayoutMemberToggleTails.delete(key);
+  }
+}
+
 async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false, shiftKey = false) {
   if (windowLayoutDetachment.isReadOnly()) return;
   const member = windowLayoutMemberFromState(layoutId, memberId);
@@ -1184,13 +1207,11 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
   // entered during that microtask must abort before observe.
   if (windowLayoutDetachment.isReadOnly()) return;
   if (!capability) return;
-  // ONE host request. This used to observe, carry the answer back across IPC to
-  // this renderer, decide the direction here, and then go back to mutate - a
-  // full round trip between deciding and acting, on a helper that runs one
-  // request at a time. It also raced: two fast clicks could both read the same
-  // pre-mutation state and issue the same absolute action. The helper now reads
-  // the live state and acts on it, and tells us which way it went.
-  const result = await host.toggleWindowCapability(capability);
+  // Restore through the same bounds+restore path as Restore all, which brings
+  // the exact minimized member back into view. Serialize rapid clicks per
+  // member so two queued clicks cannot both act on the same observation.
+  const result = await toggleWindowLayoutMember(layoutId, memberId, capability, member);
+  if (result.outcome === 'superseded') return;
   // 018X4: abort immediately after the await, before success OR failure handling.
   if (windowLayoutDetachment.isReadOnly()) return;
   if (result.outcome !== 'success' || !result.observation || !result.action) {
@@ -2754,9 +2775,31 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
     void store.save(next, { rebaseAutomaticSave: true }).catch(() => undefined);
   },
   applyCommand: async (layoutId, command) => {
-  },
-  applyCommand: async (layoutId, command) => {
     if (windowLayoutDetachment.isReadOnly()) return { ok: false, error: 'read-only' };
+    if (command.kind === 'dock-widget-to-pill') {
+      const next = setWindowLayoutPill(state, layoutId, true);
+      if (next !== state && !(await store.commit(next))) return { ok: false, error: 'dock persistence failed' };
+      await host.widgetClose(layoutId).catch(() => undefined);
+      return { ok: true };
+    }
+    if (command.kind === 'delete-layout') {
+      const wasActive = isActiveRecordingContext(layoutId);
+      const next = deleteWindowLayout(state, layoutId);
+      if (next === state || !(await store.commit(next))) return { ok: false, error: 'delete persistence failed' };
+      const prefix = `${layoutId}\u0000`;
+      for (const key of [...windowLayoutRuntime.capabilities.keys()]) {
+        if (key.startsWith(prefix)) windowLayoutRuntime.capabilities.delete(key);
+      }
+      for (const cache of [windowLayoutRuntime.icons, windowLayoutWidgetPreviewCapabilities]) {
+        for (const key of [...cache.keys()]) if (key.startsWith(prefix)) cache.delete(key);
+      }
+      windowLayoutRuntime.selectedMembers.delete(layoutId);
+      windowLayoutRuntime.selectionAnchor.delete(layoutId);
+      detachedWidgets.delete(layoutId);
+      if (wasActive) await windowLayoutRuntimeController.reconcileActive();
+      await host.widgetClose(layoutId).catch(() => undefined);
+      return { ok: true, deleted: true };
+    }
     if (command.kind === 'member-toggle') {
       await handleWindowLayoutMemberClick(layoutId, command.memberId);
       return { ok: true };
@@ -3061,14 +3104,15 @@ async function ensureStartupWindowLayoutWidget() {
   if (windowLayoutDetachment.getState().mode === 'detached'
     || windowLayoutDetachment.isReadOnly()
     || !hasDocumentWriteAuthority()) return;
-  // Tracking is an explicit creator choice. A normal layout that became empty
-  // at startup is not replaced by a new implicit tracking layout.
-  const startup = (state.windowLayouts ?? []).find((layout) =>
-    layout.id === state.startupWindowLayoutId
-    && layout.tracking?.enabled === true
-    && layout.binned !== true)
-    ?? (state.windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true && layout.binned !== true);
-  if (startup?.id) await host.widgetOpen(startup.id).catch(() => undefined);
+  // Every layout is a native widget by default. Only layouts explicitly
+  // middle-clicked into the AYG pill tray stay docked across startup.
+  const docked = new Set(state.windowLayoutPillIds ?? []);
+  const layouts = (state.windowLayouts ?? []).filter((layout) =>
+    layout.binned !== true
+      && !layout.bin
+      && !docked.has(layout.id)
+      && itemsIn(state, layout.parentId).some((candidate) => candidate.id === layout.id));
+  for (const layout of layouts) await host.widgetOpen(layout.id).catch(() => undefined);
 }
 
 async function populateTrackingLayout(layoutId) {
@@ -4728,6 +4772,7 @@ function applyBackdropOpacity(preferences) {
 function render() {
   applyTheme(state.view?.preferences);
   if (WIDGET_SURFACE) return; // 019C: the widget renders only its own card
+  renderWindowLayoutPills();
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
     // us (e.g. via the top-level Bin list or "Delete all") — fall back to
@@ -4751,7 +4796,7 @@ function render() {
     // ancestor tile navigating to the root leaves currentId null, and
     // itemsIn(null) is empty, which would show the "folder is empty" line
     // over a workspace that is not empty.
-    : itemsIn(state, session.currentId ?? ROOT_ID);
+    : itemsIn(state, session.currentId ?? ROOT_ID).filter((candidate) => candidate.kind !== 'window-layout');
   elements.grid.dataset.blankParent = session.binMode ? session.binCurrentId : (session.currentId ?? ROOT_ID);
   elements.grid.dataset.view = 'graph';
   elements.grid.classList.toggle('bin-canvas', session.binMode);
@@ -4789,6 +4834,38 @@ function render() {
 
   hydrateIcons();
 }
+
+function renderWindowLayoutPills() {
+  if (!windowLayoutPillTray) return;
+  const layouts = (state.windowLayoutPillIds ?? [])
+    .map((layoutId) => windowLayoutFromState(layoutId))
+    .filter((layout) => layout && !layout.bin);
+  windowLayoutPillTray.innerHTML = layouts.map((layout) =>
+    `<button class="window-layout-pill" type="button" data-layout-widget-pill="${escapeHtml(layout.id)}" title="Open ${escapeHtml(layout.name)}">${escapeHtml(layout.name)}</button>`,
+  ).join('');
+  windowLayoutPillTray.hidden = layouts.length === 0;
+}
+
+async function reopenWindowLayoutWidget(layoutId) {
+  if (windowLayoutDetachment.isReadOnly()) return;
+  const next = setWindowLayoutPill(state, layoutId, false);
+  if (next !== state && !(await store.commit(next))) {
+    setStatus('Could not reopen this layout widget.');
+    return;
+  }
+  const result = await host.widgetOpen(layoutId).catch(() => null);
+  if (!result || result.ok === false || result.widget?.ok === false
+    || result.outcome === 'failed' || result.outcome === 'error') {
+    setStatus('Could not open this layout widget.');
+    const docked = setWindowLayoutPill(state, layoutId, true);
+    if (docked !== state) await store.commit(docked);
+  }
+}
+
+windowLayoutPillTray?.addEventListener('click', (event) => {
+  const pill = event.target.closest('[data-layout-widget-pill]');
+  if (pill) void reopenWindowLayoutWidget(pill.dataset.layoutWidgetPill);
+});
 
 function syncSelection() {
   if (graph.isAttached) {
@@ -4877,7 +4954,13 @@ async function runMenuAction(action) {
   if (action === 'new-window-layout') {
     try {
       const parentId = scopedMutationParent(elements.menu.dataset.parent);
-      let committed = await commit(createWindowLayout(state, { parentId }));
+      let createdLayout = null;
+      const nextLayoutState = () => {
+        const next = createWindowLayout(state, { parentId });
+        createdLayout = next.windowLayouts.at(-1) ?? null;
+        return next;
+      };
+      let committed = await commit(nextLayoutState());
       // A freshly restored tab can receive input before its shared-document
       // baseline is ready. The first commit is deliberately refused in that
       // short interval; retry once after coordination settles instead of
@@ -4890,13 +4973,15 @@ async function runMenuAction(action) {
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
         if (hasDocumentWriteAuthority()) {
-          committed = await commit(createWindowLayout(state, { parentId }));
+          committed = await commit(nextLayoutState());
         }
       }
       if (committed === false) {
         setStatus(windowLayoutDetachment.isReadOnly()
           ? 'Reattach the window layout before creating another layout.'
           : 'Workspace is still synchronizing; try again in a moment.');
+      } else if (createdLayout?.id) {
+        await host.widgetOpen(createdLayout.id);
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -6382,6 +6467,12 @@ function bootstrapWindowLayoutWidget() {
 
   function handleWidgetCardClick(event) {
     event.stopPropagation();
+    const deleteButton = event.target.closest('[data-wl-delete]');
+    if (deleteButton) {
+      event.preventDefault();
+      client.sendCommand({ kind: 'delete-layout' });
+      return;
+    }
     const member = event.target.closest('[data-wl-member]');
     if (member) {
       if (widgetDragJustMoved) {
@@ -6482,8 +6573,7 @@ function bootstrapWindowLayoutWidget() {
     if (!minimizeAll) return;
     event.preventDefault();
     event.stopPropagation();
-    client.dispose();
-    void host.widgetCloseSelf().catch(() => undefined);
+    client.sendCommand({ kind: 'dock-widget-to-pill' });
   }
 
   async function handleWidgetCardContextMenu(event) {

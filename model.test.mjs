@@ -38,6 +38,8 @@ import {
   trailContextKey,
   setTrailExpandedByContext,
   createWindowLayout,
+  deleteWindowLayout,
+  setWindowLayoutPill,
   addWindowLayoutMember,
   removeWindowLayoutMember,
   removeClosedWindowFromAllLayouts,
@@ -94,6 +96,42 @@ test('per-surface locations preserve independent last folders and bound untruste
     valid: { currentGroupId: 'folder' }, malformed: { currentGroupId: 1 }, ['x'.repeat(129)]: { currentGroupId: 'nope' },
   } } });
   assert.deepEqual(normalized.view.surfaceLocations, { valid: { currentGroupId: 'folder' } });
+});
+
+test('window layouts stay durable but are not emitted as physics graph nodes', () => {
+  let state = createWindowLayout(emptyState());
+  const layout = state.windowLayouts[0];
+  assert.equal(itemsIn(state, ROOT_ID).some((candidate) => candidate.id === layout.id), true);
+  assert.equal(visibleGraphItems(state, ROOT_ID, new Set()).some((candidate) => candidate.id === layout.id), false);
+  const normalized = normalizeState({
+    ...state,
+    windowLayoutPillIds: [layout.id, 'missing-layout'],
+    view: {
+      ...state.view,
+      graphPositions: { root: { [layout.id]: { x: 90, y: 120 } } },
+      graphRestPositions: { root: { [layout.id]: { x: 90, y: 120 } } },
+    },
+  });
+  assert.deepEqual(normalized.windowLayoutPillIds, [layout.id]);
+  assert.deepEqual(normalized.view.graphPositions, {});
+  assert.deepEqual(normalized.view.graphRestPositions, {});
+});
+
+test('docking a layout is persisted and its widget X deletes directly, not to Bin', () => {
+  let state = createWindowLayout(emptyState());
+  const layoutId = state.windowLayouts[0].id;
+  state = setWindowLayoutPill(state, layoutId, true);
+  assert.deepEqual(state.windowLayoutPillIds, [layoutId]);
+  const deleted = deleteWindowLayout({
+    ...state,
+    activeWindowLayoutId: layoutId,
+    startupWindowLayoutId: layoutId,
+  }, layoutId);
+  assert.deepEqual(deleted.windowLayouts, []);
+  assert.deepEqual(deleted.windowLayoutPillIds, []);
+  assert.equal(deleted.activeWindowLayoutId, null);
+  assert.equal(deleted.startupWindowLayoutId, null);
+  assert.equal(binnedItems(deleted).some((candidate) => candidate.id === layoutId), false);
 });
 
 test('a drag marquee selects every visible item rectangle it crosses', () => {
@@ -1720,7 +1758,7 @@ test('normalization rejects runtime identity and malformed members, preserving l
   assert.deepEqual(reloaded.windowLayouts[0].arrangement, normalized.windowLayouts[0].arrangement, 'member save/reload round trip');
 });
 
-test('window-layout ids are valid set members and trail provenance follows 005', () => {
+test('window-layout set membership remains durable but layouts are no longer spatial nodes', () => {
   let state = emptyState();
   state = createWindowLayout(state, { name: 'Studio', parentId: ROOT_ID });
   const wl = state.windowLayouts[0];
@@ -1730,21 +1768,22 @@ test('window-layout ids are valid set members and trail provenance follows 005',
   assert.deepEqual(withSets.view.itemSets[0].memberIds, [wl.id], 'membership survives setItemSets');
   const reloaded = normalizeState(JSON.parse(JSON.stringify(withSets)));
   assert.deepEqual(reloaded.view.itemSets[0].memberIds, [wl.id], 'and survives reload');
-  assert.ok(setEligibleItems(visibleGraphItems(reloaded, ROOT_ID, new Set(), false))
-    .some((i) => i.id === wl.id), 'an ordinary instance is set-eligible');
+  assert.ok(!visibleGraphItems(reloaded, ROOT_ID, new Set(), false)
+    .some((i) => i.id === wl.id), 'a widget layout is absent from the spatial graph');
 
-  // A window layout revealed beneath an expanded ancestor is a trail item,
-  // so 005 excludes it from the set system for that view only.
+  // An item revealed beneath an expanded ancestor is a trail item, so 005
+  // excludes it from the set system for that view only. Use a real graph body
+  // here because widget layouts no longer participate in the spatial graph.
   let s2 = createGroup(emptyState(), 'F1');
   const f1 = s2.groups[0].id;
-  s2 = createWindowLayout(s2, { name: 'Trail layout', parentId: f1 });
+  s2 = createGroup(s2, 'Trail folder', f1);
   s2 = createGroup(s2, 'F2', f1);
   const f2 = s2.groups.at(-1).id;
   const trailItems = visibleGraphItems(s2, f2, new Set(), false, 'bin',
     [{ id: ROOT_ID, name: 'As you Go' }, { id: f1, name: 'F1' }], new Set([f1]));
-  const trailWl = trailItems.find((i) => i.kind === 'window-layout');
-  assert.ok(trailWl?.trail === true, 'revealed under an expanded ancestor, it is trail');
-  assert.ok(!setEligibleItems(trailItems).some((i) => i.id === trailWl?.id),
+  const trailGroup = trailItems.find((i) => i.id === s2.groups.find((g) => g.name === 'Trail folder')?.id);
+  assert.ok(trailGroup?.trail === true, 'revealed under an expanded ancestor, it is trail');
+  assert.ok(!setEligibleItems(trailItems).some((i) => i.id === trailGroup?.id),
     'and excluded from sets in that view');
 });
 

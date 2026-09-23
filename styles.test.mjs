@@ -247,3 +247,15 @@ test('tracking toggle reserves only its own corner footprint', () => {
   const toggleRule = itemsCss.match(/\.icon-grid > \.window-layout-card \.wl-tracking\s*\{[^}]*\}/)?.[0] ?? '';
   assert.match(toggleRule, /bottom:\s*4px/, 'toggle remains inset into the lower-right corner');
 });
+
+test('widget delete affordance is top-right and revealed only at its own hover target', () => {
+  const buttonRule = itemsCss.match(/\.window-layout-delete\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(buttonRule, /right:\s*3px/, 'delete button is anchored at the card top-right');
+  assert.doesNotMatch(buttonRule, /left:/, 'delete button is not anchored on the left');
+  assert.match(buttonRule, /opacity:\s*0/, 'delete starts hidden');
+  assert.match(buttonRule, /pointer-events:\s*auto/, 'its exact invisible footprint remains hoverable');
+  assert.match(itemsCss, /\.window-layout-delete:hover,\s*\.window-layout-delete:focus-visible\s*\{[^}]*opacity:\s*1/,
+    'only hovering or keyboard-focusing the button reveals it');
+  assert.doesNotMatch(itemsCss, /\.window-layout-card:hover\s+\.window-layout-delete/,
+    'hovering elsewhere on the widget does not reveal the button');
+});

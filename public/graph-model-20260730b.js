@@ -244,7 +244,7 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
   const visitedFolders = new Set();
   const ancestorIds = new Set(ancestors.map((entry) => entry.id));
   const visibleBranchCount = createVisibleBranchCountResolver(
-    (folderId) => itemsIn(state, folderId),
+    (folderId) => itemsIn(state, folderId).filter((item) => item.kind !== 'window-layout'),
     expanded,
   );
 
@@ -266,7 +266,10 @@ function collectVisible(state, parentId, expanded, ancestors = [], trailExpanded
   function walk(folderId, depth, trailBranch, trailScale = 1, branchCount = 1) {
     if (visitedFolders.has(folderId)) return;
     visitedFolders.add(folderId);
-    const children = itemsIn(state, folderId);
+    // Window layouts are native widgets now, not spatial graph bodies. Keep
+    // their durable records in the model/Quick Run, but never feed them into
+    // graph physics, spacing, selection, or graph-position persistence.
+    const children = itemsIn(state, folderId).filter((item) => item.kind !== 'window-layout');
     children.forEach((child, siblingIndex) => {
       // An ancestor's children include the folder we are standing in —
       // that is the whole point of the chain — but the current folder

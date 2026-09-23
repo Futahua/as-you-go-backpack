@@ -830,7 +830,7 @@ test('middle-click splits data unlink from Ctrl+middle-click process close', asy
     'the widget closes only for Ctrl+MMB and sends a scoped unlink for plain MMB');
 });
 
-test('startup lifecycle reconciliation applies to every layout and does not create implicit tracking', async () => {
+test('startup opens non-docked layouts by default without creating implicit tracking', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const baselineStart = source.indexOf('async function reconcileTrackingBaseline()');
   const baselineEnd = source.indexOf('async function ensureStartupWindowLayoutWidget()', baselineStart);
@@ -843,7 +843,12 @@ test('startup lifecycle reconciliation applies to every layout and does not crea
   const startup = source.slice(startupStart, startupEnd);
   assert.doesNotMatch(startup, /createWindowLayout\(/,
     'startup does not manufacture a tracking layout when automatic tracking was not enabled');
-  assert.match(startup, /tracking\?\.enabled === true/);
+  assert.match(startup, /const docked = new Set\(state\.windowLayoutPillIds \?\? \[\]\)/,
+    'only layouts explicitly docked into the AYG pill tray stay out of widget startup');
+  assert.match(startup, /await host\.widgetOpen\(layout\.id\)/,
+    'every other durable layout opens as a native widget');
+  assert.doesNotMatch(startup, /tracking\?\.enabled === true/,
+    'automatic widget startup no longer depends on tracking being enabled');
 });
 
 test('closed-window safety reconciliation removes only positively missing exact instances', async () => {

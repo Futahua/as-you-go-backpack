@@ -408,6 +408,9 @@ test('the client rejects invalid commands before sending', () => {
 test('windowLayoutWidgetParseCommand bounds the exact vocabulary', () => {
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'member-toggle', memberId: 'm1' }), { kind: 'member-toggle', memberId: 'm1' });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'toggle-tracking' }), { kind: 'toggle-tracking' });
+  assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'dock-widget-to-pill' }), { kind: 'dock-widget-to-pill' });
+  assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'delete-layout' }), { kind: 'delete-layout' });
+  assert.equal(windowLayoutWidgetParseCommand({ kind: 'delete-layout', extra: true }), null);
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'toggle-tracking', extra: true }), null);
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'group-action', action: 'isolate', memberIds: ['m1'] }), { kind: 'group-action', action: 'isolate', memberIds: ['m1'] });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'group-action', action: 'minimize', memberIds: [] }), { kind: 'group-action', action: 'minimize', memberIds: [] });

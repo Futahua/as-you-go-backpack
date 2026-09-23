@@ -5,6 +5,34 @@
   cursor: default;
   touch-action: auto;
 }
+.window-layout-pill-tray {
+  position: fixed;
+  z-index: 24;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: min(70vw, 640px);
+  pointer-events: none;
+}
+.window-layout-pill {
+  pointer-events: auto;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 7px 12px;
+  border: 1px solid var(--border-soft, var(--text-faint));
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface-raised);
+  box-shadow: 0 4px 16px var(--shadow);
+  cursor: pointer;
+}
+.window-layout-pill:hover { border-color: var(--focus); }
+:root[data-widget-surface="true"] .window-layout-pill-tray { display: none !important; }
 .toolbar-float.toolbar-dragging {
   z-index: 20;
   cursor: grabbing;

@@ -191,6 +191,32 @@
   padding: 6px 8px;
   text-align: center;
 }
+.window-layout-delete {
+  position: absolute;
+  z-index: 2;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text);
+  background: var(--surface-raised);
+  opacity: 0;
+  /* Keep the invisible hit target limited to the button itself: hovering the
+     rest of the card must not reveal the delete affordance. */
+  pointer-events: auto;
+  cursor: pointer;
+  transition: opacity 100ms ease;
+}
+.window-layout-delete:hover,
+.window-layout-delete:focus-visible {
+  opacity: 1;
+}
+:root[data-widget-surface="true"] .window-layout-card { padding-top: 10px; }
 /* The attached card lives inside the graph node; the node shell/icon-item stay
    as a thin selection/drag wrapper. 036: the wrapper carries NO padding AND NO
    border for window layouts so the attached card's outer (border-box) width

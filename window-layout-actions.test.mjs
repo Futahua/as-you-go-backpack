@@ -11,9 +11,58 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { runBoundedConcurrent } from './public/app/window-layout-actions.js';
-import { createWindowLayoutGroupActionRunner } from './public/app/window-layout-detached.js';
+import { createWindowLayoutGroupActionRunner, toggleWindowLayoutMemberVisibility } from './public/app/window-layout-detached.js';
 
 const never = () => false;
+
+test('member icon restores at saved bounds through the same restore operation as Restore all', async () => {
+  const calls = [];
+  const host = {
+    observeWindowCapability: async () => {
+      calls.push('observe');
+      return { outcome: 'success', observation: { state: 'minimized', bounds: null } };
+    },
+    applyWindowCapability: async (_capability, bounds) => {
+      calls.push(['apply', bounds]);
+      return { outcome: 'success' };
+    },
+    restoreWindowCapability: async () => {
+      calls.push('restore');
+      return { outcome: 'success' };
+    },
+    minimizeWindowCapability: async () => {
+      calls.push('minimize');
+      return { outcome: 'success' };
+    },
+  };
+  const bounds = { x: 10, y: 20, width: 800, height: 600 };
+  const result = await toggleWindowLayoutMemberVisibility({
+    host,
+    capability: { version: 1, bindingId: 'member-capability' },
+    member: { bounds },
+    isReadOnly: never,
+  });
+  assert.equal(result.action, 'restore');
+  assert.deepEqual(calls, ['observe', ['apply', bounds], 'restore']);
+});
+
+test('member icon minimizes a live window instead of restoring it', async () => {
+  const calls = [];
+  const host = {
+    observeWindowCapability: async () => ({ outcome: 'success', observation: { state: 'normal', bounds: null } }),
+    applyWindowCapability: async () => { calls.push('apply'); return { outcome: 'success' }; },
+    restoreWindowCapability: async () => { calls.push('restore'); return { outcome: 'success' }; },
+    minimizeWindowCapability: async () => { calls.push('minimize'); return { outcome: 'success' }; },
+  };
+  const result = await toggleWindowLayoutMemberVisibility({
+    host,
+    capability: { version: 1, bindingId: 'member-capability' },
+    member: { bounds: null },
+    isReadOnly: never,
+  });
+  assert.equal(result.action, 'minimize');
+  assert.deepEqual(calls, ['minimize']);
+});
 
 test('runs every item and returns results in item order', async () => {
   const calls = [];
