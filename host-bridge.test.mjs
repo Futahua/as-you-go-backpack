@@ -45,6 +45,18 @@ test('host bridge posts the protocol request and resolves a plain state response
   assert.deepEqual(await promise, { hello: 'world' });
 });
 
+test('command-surface dismissal carries the explicit destination to Papers', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+
+  const promise = host.dismissCommandSurface({ destination: 'papers' });
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:command-surface-dismiss');
+  assert.equal(sent.destination, 'papers');
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sent.requestId, ok: true });
+  await promise;
+});
+
 test('host bridge rejects when the host reports an error', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);

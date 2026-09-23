@@ -89,9 +89,9 @@ export function bindQuickRunWorkspace({
   // Ordinary Quick Run owns its DOM lifetime. The global launcher is a native
   // window, so it must be dismissed explicitly after the semantic action has
   // succeeded; native blur is only a focus observation, not a close command.
-  const closeAfterSuccess = async () => {
+  const closeAfterSuccess = async (destination = 'restore') => {
     if (commandSurface) {
-      await dismissCommandSurface?.();
+      await dismissCommandSurface?.({ destination });
       return;
     }
     surface?.close();
@@ -135,7 +135,7 @@ export function bindQuickRunWorkspace({
           Promise.resolve(activateLayoutMember(plan.target.layoutId, plan.target.memberId))
             .then((result) => {
               if (result?.outcome === 'success') {
-                void closeAfterSuccess().catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
+                void closeAfterSuccess('external').catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
                 return;
               }
               setStatus(result?.message || 'Quick Run: that window could not be activated.');
@@ -161,7 +161,7 @@ export function bindQuickRunWorkspace({
         if (commandSurface && typeof openFolderSurface === 'function') {
           setStatus(quickRunOpeningStatus(current.row));
           Promise.resolve(openFolderSurface(plan.target.groupId))
-            .then(() => closeAfterSuccess())
+            .then(() => closeAfterSuccess('papers'))
             .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
         } else {
           setStatus(quickRunOpeningStatus(current.row));
@@ -182,7 +182,7 @@ export function bindQuickRunWorkspace({
           if (result?.reported !== true) setStatus(result?.message || 'Quick Run: that item could not be opened.');
           return;
         }
-        await closeAfterSuccess();
+        await closeAfterSuccess('external');
       } catch (error) {
         setStatus(error instanceof Error ? error.message : String(error));
       }

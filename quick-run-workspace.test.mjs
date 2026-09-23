@@ -223,6 +223,20 @@ test('Shortcut Enter launches that record and closes Quick Run (Definition of Do
   assert.equal(h.store.getSession().currentId, null, 'a launch does not navigate');
 });
 
+test('global command-surface Shortcut Enter keeps the launched app in front', async () => {
+  const dismissed = [];
+  const h = await boot({ commandSurface: true, dismissCommandSurface: async (request) => { dismissed.push(request); } });
+  h.surface.open();
+  h.type('editor');
+  h.key('Enter');
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(h.effects.launch, ['s-app']);
+  assert.deepEqual(dismissed, [{ destination: 'external' }]);
+  assert.equal(isOpen(h.elements), true, 'the native command-surface host owns dismissal');
+});
+
 test('Link Enter opens that URL and closes Quick Run (Definition of Done: Actions)', async () => {
   const h = await boot();
   h.surface.open();
@@ -261,8 +275,8 @@ test('Ctrl+Enter navigates to the occurrence that was asked for and selects it (
 });
 
 test('global command-surface Link Enter uses the same opener and stays host-owned after success', async () => {
-  let dismissed = 0;
-  const h = await boot({ commandSurface: true, dismissCommandSurface: async () => { dismissed += 1; } });
+  const dismissed = [];
+  const h = await boot({ commandSurface: true, dismissCommandSurface: async (request) => { dismissed.push(request); } });
   h.surface.open();
   h.type('docs');
   h.key('Enter');
@@ -271,7 +285,26 @@ test('global command-surface Link Enter uses the same opener and stays host-owne
 
   assert.deepEqual(h.effects.openWeb, ['https://example.com/docs']);
   assert.deepEqual(h.effects.status, ['Quick Run: opening Docs [https://example.com/docs]…']);
-  assert.equal(dismissed, 1, 'successful action explicitly dismisses the native command surface');
+  assert.deepEqual(dismissed, [{ destination: 'external' }], 'successful link handoff dismisses without restoring over the browser');
+  assert.equal(isOpen(h.elements), true, 'the native command-surface host owns dismissal');
+});
+
+test('global command-surface Folder Enter opens Papers and requests a Papers-window handoff', async () => {
+  const opened = [];
+  const dismissed = [];
+  const h = await boot({
+    commandSurface: true,
+    openFolderSurface: async (groupId) => { opened.push(groupId); },
+    dismissCommandSurface: async (request) => { dismissed.push(request); },
+  });
+  h.surface.open();
+  h.type('alpha');
+  h.key('Enter');
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(opened, ['g-a']);
+  assert.deepEqual(dismissed, [{ destination: 'papers' }]);
   assert.equal(isOpen(h.elements), true, 'the native command-surface host owns dismissal');
 });
 

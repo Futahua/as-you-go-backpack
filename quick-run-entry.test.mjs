@@ -205,5 +205,5 @@ test('Quick Run activation adds no second launcher and no reveal path (sections 
       );
     }
   }
-  assert.match(region, /dismissCommandSurface: \(\) => host\.dismissCommandSurface\(\)/);
+  assert.match(region, /dismissCommandSurface: \(options\) => host\.dismissCommandSurface\(options\)/);
 });

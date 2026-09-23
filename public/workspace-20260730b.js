@@ -5969,7 +5969,7 @@ const quickRun = bindQuickRunWorkspace({
   universeNote: () => (workspaceLoad.ok === false ? workspaceLoad.error : null),
   commandSurface: commandSurfaceMode === 'overlay',
   openFolderSurface: openQuickRunFolderSurface,
-  dismissCommandSurface: () => host.dismissCommandSurface(),
+  dismissCommandSurface: (options) => host.dismissCommandSurface(options),
   activateLayoutMember: activateWindowLayoutMember,
   copyText: quickRunCopyText,
   hydrateIcons: quickRunHydrateIcons,
