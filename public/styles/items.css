@@ -377,11 +377,6 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
 :root[data-widget-surface="true"] .icon-grid {
   background: transparent !important;
 }
-/* Status strings are useful on the full workspace, but are transient warnings
-   with no interaction value on the compact widget. Keep them out of that UI. */
-:root[data-widget-surface="true"] .window-layout-status {
-  display: none !important;
-}
 /* Interactive descendants must never be swallowed by the native drag region;
    Ctrl+drag member reorder, hover previews, menus and controls remain normal. */
 .icon-grid > .window-layout-card .window-layout-member,

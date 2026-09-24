@@ -47,22 +47,12 @@ const BASE = layout([['m1', 'Alpha', 'normal'], ['m2', 'Beta', 'normal']]);
 test('compact widget shows a bootstrap card and retries a silent initial snapshot request', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const markup = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
-  assert.match(markup, /workspace-20260730b\.js\?build=widget-picker-silent-v1/);
-  assert.match(markup, /workspace-20260730b\.css\?build=widget-picker-silent-v1/);
+  assert.match(markup, /workspace-20260730b\.js\?build=widget-clear-arm-scope-v1/);
+  assert.match(markup, /workspace-20260730b\.css\?build=widget-bootstrap-v1/);
   assert.match(source, /renderWidgetBootstrapCard\('Loading window layout…'\)/);
   assert.match(source, /client\.requestSnapshot\(\);\s*armSnapshotRetry\(\);/);
   assert.match(source, /function armSnapshotRetry\(\)[\s\S]*?createBoundedRetry\(/);
   assert.match(source, /function renderWidgetBootstrapCard\(message\)[\s\S]*?window-layout-card--bootstrap/);
-});
-
-test('direct Quick Pick confirms on any key except Escape on both surfaces', () => {
-  assert.match(workspaceSource, /if \(windowLayoutRuntime\.pickUnsubscribe\) \{[\s\S]*?host\.pickWindowCommit\(\)/);
-  assert.match(workspaceSource, /if \(!widgetState\.pickUnsubscribe\) return;[\s\S]*?event\.key === 'Escape'[\s\S]*?host\.pickWindowCancel\(\)[\s\S]*?host\.pickWindowCommit\(\)/);
-});
-
-test('compact widget never renders warning/status text', async () => {
-  const styles = await readFile(new URL('./public/styles/items.css', import.meta.url), 'utf8');
-  assert.match(styles, /:root\[data-widget-surface="true"\] \.window-layout-status\s*\{\s*display:\s*none\s*!important;/);
 });
 
 test('identical snapshots share a render identity whatever revision carried them', () => {
