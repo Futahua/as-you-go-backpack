@@ -40,7 +40,7 @@ export const WINDOW_LAYOUT_WIDGET_MAX_ICON_BYTES = 262144;
 // Bounded like the member note it appears next to.
 export const WINDOW_LAYOUT_WIDGET_MAX_STATUS_CHARS = 160;
 
-const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window', 'toggle-tracking', 'dock-widget-to-pill', 'delete-layout']);
+const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window', 'toggle-tracking', 'dock-widget-to-pill', 'delete-layout', 'clear-layout']);
 const GROUP_ACTIONS = new Set(['minimize', 'restore', 'isolate']);
 
 function isPlainObject(value) {
@@ -157,7 +157,7 @@ export function windowLayoutWidgetParseCommand(raw) {
     if (!exactKeys(raw, ['kind'])) return null;
     return { kind: 'toggle-tracking' };
   }
-  if (raw.kind === 'dock-widget-to-pill' || raw.kind === 'delete-layout') {
+  if (raw.kind === 'dock-widget-to-pill' || raw.kind === 'delete-layout' || raw.kind === 'clear-layout') {
     if (!exactKeys(raw, ['kind'])) return null;
     return { kind: raw.kind };
   }
