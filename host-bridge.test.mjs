@@ -308,6 +308,28 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
     picker: { ok: true },
   });
   assert.deepEqual(await closePicker, { action: 'cancel', candidateId: null });
+
+  const terminatePicker = host.windowCandidatePicker([{ id: 'c1', title: 'Window A', icon: null, current: false }]);
+  const sentTerminatePicker = mock.parent.messages[5].message;
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sentTerminatePicker.requestId, ok: true,
+    picker: { action: 'terminate', candidateId: 'c1', retiredWindowInstanceIds: ['W0123456789abcdef'] },
+  });
+  assert.deepEqual(await terminatePicker, {
+    action: 'terminate', candidateId: 'c1', retiredWindowInstanceIds: ['W0123456789abcdef'],
+  });
+});
+
+test('host bridge surfaces bounded Quick Run host detail instead of a generic error', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const promise = host.widgetQuickRunInput('start', 'agh');
+  const sent = mock.parent.messages[0].message;
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sent.requestId, ok: false,
+    detail: 'Quick Run could not open from this widget because no host window is available.',
+  });
+  await assert.rejects(promise, /Quick Run could not open from this widget/);
 });
 
 test('direct-pick begin has its own bounded startup timeout instead of the short RPC or human chooser timeout', async () => {

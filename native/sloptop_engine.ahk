@@ -424,7 +424,7 @@ StartPickerInputHook() {
     if IsObject(pickerInputHook)
         try pickerInputHook.Stop()
     pickerInputHook := InputHook("L0")
-    pickerInputHook.KeyOpt("{All}", "S")
+    pickerInputHook.KeyOpt("{All}", "SN")
     pickerInputHook.OnKeyDown := PickerConfirmOnAnyKey
     pickerInputHook.Start()
 }
