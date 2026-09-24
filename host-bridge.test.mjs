@@ -520,7 +520,6 @@ test('host bridge window observation/control methods carry the capability and un
     outcome: 'missing', error: 'no visible window matches',
   });
   assert.deepEqual(await resolved, { outcome: 'missing', observation: null, error: 'no visible window matches' });
-
 });
 
 test('host bridge surfaces window capability failures as rejected outcomes, never as commands', async () => {

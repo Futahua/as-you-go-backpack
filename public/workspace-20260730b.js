@@ -668,7 +668,6 @@ function windowLayoutBodyMarkup(candidate, options = {}) {
     : '';
   return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" aria-label="Window group">
     ${widgetSurface ? `<button class="window-layout-delete" type="button" data-wl-delete="${escapeHtml(candidate.id)}" title="Delete this layout" aria-label="Delete this layout">×</button>` : ''}
-    ${widgetSurface ? windowLayoutControlButton('clear', 'Click twice to clear all windows from this layout', 'data-wl-clear', candidate.id) : ''}
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
     ${trackingControl}
     <div class="window-layout-controls">
@@ -1310,11 +1309,6 @@ async function openWindowLayoutPicker(layoutId) {
         || windowLayoutRuntime.pickerGeneration !== generation) return;
       if (picked.action === 'close' && picked.candidateId) {
         await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
-        continue;
-      }
-      if (picked.action === 'terminate' && picked.candidateId) {
-        if (picked.descriptor) await retireClosedWindowEverywhere(picked.descriptor);
-        setWindowLayoutTransientStatus(layoutId, 'Process ended', 1200);
         continue;
       }
       if (picked.action === 'direct-pick') {
@@ -2823,35 +2817,6 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       if (wasActive) await windowLayoutRuntimeController.reconcileActive();
       await host.widgetClose(layoutId).catch(() => undefined);
       return { ok: true, deleted: true };
-    }
-    if (command.kind === 'clear-layout') {
-      const layout = windowLayoutFromState(layoutId);
-      if (!layout) return { ok: false, error: 'unknown layout' };
-      const members = [...(layout.arrangement?.members ?? [])];
-      if (members.length === 0) return { ok: true };
-      const wasActive = isActiveRecordingContext(layoutId);
-      let next = state;
-      for (const member of members) {
-        next = removeWindowLayoutMember(next, layoutId, member.id);
-        const instanceId = member.descriptor?.windowInstanceId;
-        if (layout.tracking?.enabled === true && typeof instanceId === 'string') {
-          next = setWindowLayoutInstanceSuppressed(next, layoutId, instanceId, true);
-        }
-      }
-      if (!(await store.commit(next))) return { ok: false, error: 'clear persistence failed' };
-      for (const member of members) {
-        const key = windowLayoutMemberKey(layoutId, member.id);
-        windowLayoutRuntime.capabilities.delete(key);
-        windowLayoutRuntime.icons.delete(key);
-        windowLayoutWidgetPreviewCapabilities.delete(key);
-      }
-      windowLayoutRuntime.selectedMembers.delete(layoutId);
-      windowLayoutRuntime.selectionAnchor.delete(layoutId);
-      windowLayoutMemberPreview.cancel();
-      noteWindowLayoutCommit(layoutId, { reason: 'members-cleared' });
-      if (wasActive) await windowLayoutRuntimeController.reconcileActive();
-      setWindowLayoutStatus(layoutId, 'Layout cleared', 1200);
-      return { ok: true };
     }
     if (command.kind === 'member-toggle') {
       await handleWindowLayoutMemberClick(layoutId, command.memberId);
@@ -6213,8 +6178,6 @@ function bootstrapWindowLayoutWidget() {
   const channel = createSafeBroadcastChannel(WINDOW_LAYOUT_WIDGET_CHANNEL);
   const widgetState = {
     selection: new Set(),
-    clearArmed: false,
-    clearArmTimer: null,
     anchor: new Map(),
     snapshot: { id: layoutId, name: layoutId, tracking: { enabled: false }, members: [] },
     candidates: null,
@@ -6564,19 +6527,6 @@ function bootstrapWindowLayoutWidget() {
       client.sendCommand({ kind: 'delete-layout' });
       return;
     }
-    const clearButton = event.target.closest('[data-wl-clear]');
-    if (clearButton) {
-      event.preventDefault();
-      if (widgetState.clearArmed) {
-        resetWidgetClearArm();
-        client.sendCommand({ kind: 'clear-layout' });
-      } else {
-        widgetState.clearArmed = true;
-        clearButton.classList.add('is-clear-armed');
-        widgetState.clearArmTimer = setTimeout(resetWidgetClearArm, 900);
-      }
-      return;
-    }
     const member = event.target.closest('[data-wl-member]');
     if (member) {
       if (widgetDragJustMoved) {
@@ -6655,19 +6605,6 @@ function bootstrapWindowLayoutWidget() {
       clearWidgetSelection();
     }
   }
-
-  function resetWidgetClearArm() {
-    clearTimeout(widgetState.clearArmTimer);
-    widgetState.clearArmTimer = null;
-    widgetState.clearArmed = false;
-    card.querySelector('[data-wl-clear]')?.classList.remove('is-clear-armed');
-  }
-
-  card.addEventListener('pointerout', (event) => {
-    if (event.target.closest('[data-wl-clear]')
-      && !event.relatedTarget?.closest?.('[data-wl-clear]')) resetWidgetClearArm();
-  });
-  window.addEventListener('blur', resetWidgetClearArm);
 
   function handleWidgetCardAuxClick(event) {
     if (event.button !== 1) return;
@@ -6782,12 +6719,6 @@ function bootstrapWindowLayoutWidget() {
         if (!ownsPicker()) return;
         if (picked.action === 'close' && picked.candidateId) {
           await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
-          if (!ownsPicker()) return;
-          continue;
-        }
-        if (picked.action === 'terminate' && picked.candidateId) {
-          if (picked.descriptor) await retireClosedWindowEverywhere(picked.descriptor);
-          setWindowLayoutStatus(layoutId, 'Process ended');
           if (!ownsPicker()) return;
           continue;
         }
@@ -7066,12 +6997,7 @@ function bootstrapWindowLayoutWidget() {
     if (plan.kind === 'open') {
       widgetQuickRunOpening = true;
       void host.widgetQuickRunInput('open', plan.seed).then((result) => {
-        if (result?.ok !== true) setWindowLayoutStatus(
-          layoutId,
-          typeof result?.detail === 'string' && result.detail.trim() !== ''
-            ? `Quick Run could not open: ${result.detail}`
-            : 'Quick Run could not open from this widget.',
-        );
+        if (result?.ok !== true) setWindowLayoutStatus(layoutId, 'Quick Run could not open from this widget.');
       }).catch((error) => {
         setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : 'Quick Run could not open from this widget.');
       }).finally(() => { widgetQuickRunOpening = false; });

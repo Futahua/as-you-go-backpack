@@ -410,8 +410,6 @@ test('windowLayoutWidgetParseCommand bounds the exact vocabulary', () => {
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'toggle-tracking' }), { kind: 'toggle-tracking' });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'dock-widget-to-pill' }), { kind: 'dock-widget-to-pill' });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'delete-layout' }), { kind: 'delete-layout' });
-  assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'clear-layout' }), { kind: 'clear-layout' });
-  assert.equal(windowLayoutWidgetParseCommand({ kind: 'clear-layout', extra: true }), null);
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'delete-layout', extra: true }), null);
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'toggle-tracking', extra: true }), null);
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'group-action', action: 'isolate', memberIds: ['m1'] }), { kind: 'group-action', action: 'isolate', memberIds: ['m1'] });

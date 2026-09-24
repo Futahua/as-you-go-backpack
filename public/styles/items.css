@@ -216,21 +216,6 @@
 .window-layout-delete:focus-visible {
   opacity: 1;
 }
-.window-layout-control.wl-clear {
-  position: absolute;
-  z-index: 2;
-  left: 1px;
-  bottom: 0;
-  width: 22px;
-  height: 20px;
-  opacity: 0;
-  color: var(--text-muted);
-  pointer-events: auto;
-  transition: opacity 100ms ease, color 100ms ease, background 100ms ease;
-}
-.window-layout-control.wl-clear:hover,
-.window-layout-control.wl-clear:focus-visible { opacity: 1; }
-.window-layout-control.wl-clear.is-clear-armed { opacity: 1; color: #ff5555; }
 :root[data-widget-surface="true"] .window-layout-card { padding-top: 10px; }
 /* The attached card lives inside the graph node; the node shell/icon-item stay
    as a thin selection/drag wrapper. 036: the wrapper carries NO padding AND NO
