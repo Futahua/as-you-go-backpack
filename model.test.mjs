@@ -1955,22 +1955,6 @@ test('removeClosedWindowFromAllLayouts retires one closed native window from eve
   assert.throws(() => removeClosedWindowFromAllLayouts(state, { title: 'Shared', executableFingerprint: 'bad' }), /invalid/);
 });
 
-test('exact instance-only retirement preserves same-title siblings', () => {
-  let state = emptyState();
-  state = createWindowLayout(state, { name: 'Windows' });
-  const [layoutId] = state.windowLayouts.map((layout) => layout.id);
-  const shared = { version: 1, title: 'Shared', executableFingerprint: 'a'.repeat(64) };
-  state = addWindowLayoutMember(state, layoutId, memberFixture({
-    id: 'instance-a', descriptor: { ...shared, windowInstanceId: 'Waaaaaaaaaaaaaaaa' },
-  }));
-  state = addWindowLayoutMember(state, layoutId, memberFixture({
-    id: 'instance-b', descriptor: { ...shared, windowInstanceId: 'Wbbbbbbbbbbbbbbbb' },
-  }));
-
-  const next = removeClosedWindowFromAllLayouts(state, { version: 1, windowInstanceId: 'Waaaaaaaaaaaaaaaa' });
-  assert.deepEqual(next.windowLayouts[0].arrangement.members.map((member) => member.id), ['instance-b']);
-});
-
 test('Quick Run card geometry is bounded and survives state normalization', () => {
   assert.deepEqual(normalizeQuickRunCardSize({ width: 300, height: 120 }), { width: 420, height: 180 });
   assert.deepEqual(normalizeQuickRunCardSize({ width: 5000, height: 5000 }), { width: 1100, height: 800 });

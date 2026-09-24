@@ -109,17 +109,6 @@ function parseDescriptorLike(raw) {
   };
 }
 
-function parseRetirementDescriptor(raw) {
-  if (isPlainObject(raw)
-    && exactKeys(raw, ['version', 'windowInstanceId'])
-    && raw.version === 1
-    && typeof raw.windowInstanceId === 'string'
-    && /^W[0-9a-f]{16}$/i.test(raw.windowInstanceId)) {
-    return { version: 1, windowInstanceId: raw.windowInstanceId };
-  }
-  return parseDescriptorLike(raw);
-}
-
 /** 019DR2: exact Papers capability schema — keys version,bindingId; version 1;
  * non-empty UTF-8 <= 512 bytes. Returns a copied capability or null. */
 function parseCapabilityLike(raw) {
@@ -161,7 +150,7 @@ export function windowLayoutWidgetParseCommand(raw) {
   }
   if (raw.kind === 'retire-closed-window') {
     if (!exactKeys(raw, ['kind', 'descriptor'])) return null;
-    const descriptor = parseRetirementDescriptor(raw.descriptor);
+    const descriptor = parseDescriptorLike(raw.descriptor);
     return descriptor ? { kind: 'retire-closed-window', descriptor } : null;
   }
   if (raw.kind === 'toggle-tracking') {
