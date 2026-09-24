@@ -47,7 +47,7 @@ const BASE = layout([['m1', 'Alpha', 'normal'], ['m2', 'Beta', 'normal']]);
 test('compact widget shows a bootstrap card and retries a silent initial snapshot request', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const markup = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
-  assert.match(markup, /workspace-20260730b\.js\?build=widget-silent-snapshot-v1/);
+  assert.match(markup, /workspace-20260730b\.js\?build=widget-clear-arm-scope-v1/);
   assert.match(markup, /workspace-20260730b\.css\?build=widget-bootstrap-v1/);
   assert.match(source, /renderWidgetBootstrapCard\('Loading window layout…'\)/);
   assert.match(source, /client\.requestSnapshot\(\);\s*armSnapshotRetry\(\);/);
