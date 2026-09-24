@@ -5597,13 +5597,11 @@ document.addEventListener('keydown', (event) => {
     void cancelWindowLayoutPick();
     return;
   }
-  if (windowLayoutRuntime.pickUnsubscribe && (event.key === ' ' || event.key === 'Enter')) {
+  if (windowLayoutRuntime.pickUnsubscribe) {
     event.preventDefault();
     event.stopPropagation();
     const activePickLayout = windowLayoutRuntime.pickLayoutId;
-    const request = event.key === ' '
-      ? host.pickWindowStage()
-      : host.pickWindowCommit();
+    const request = host.pickWindowCommit();
     void request.catch((error) => setWindowLayoutStatus(
       activePickLayout ?? 'active',
       error instanceof Error ? error.message : String(error),
@@ -7035,10 +7033,10 @@ function bootstrapWindowLayoutWidget() {
       event.preventDefault();
       event.stopPropagation();
       void host.pickWindowCancel();
-    } else if (event.key === ' ' || event.key === 'Enter') {
+    } else {
       event.preventDefault();
       event.stopPropagation();
-      void (event.key === ' ' ? host.pickWindowStage() : host.pickWindowCommit());
+      void host.pickWindowCommit();
     }
   });
 
