@@ -1313,9 +1313,7 @@ async function openWindowLayoutPicker(layoutId) {
         continue;
       }
       if (picked.action === 'terminate' && picked.candidateId) {
-        for (const windowInstanceId of picked.retiredWindowInstanceIds ?? []) {
-          await retireClosedWindowEverywhere({ version: 1, windowInstanceId });
-        }
+        if (picked.descriptor) await retireClosedWindowEverywhere(picked.descriptor);
         setWindowLayoutTransientStatus(layoutId, 'Process ended', 1200);
         continue;
       }
@@ -2829,40 +2827,14 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
     if (command.kind === 'clear-layout') {
       const layout = windowLayoutFromState(layoutId);
       if (!layout) return { ok: false, error: 'unknown layout' };
-      let members = [...(layout.arrangement?.members ?? [])];
+      const members = [...(layout.arrangement?.members ?? [])];
       if (members.length === 0) return { ok: true };
-      const suppressedInstances = new Set();
-      if (layout.tracking?.enabled === true) {
-        for (const member of members) {
-          const existingInstanceId = member.descriptor?.windowInstanceId;
-          if (typeof existingInstanceId === 'string') {
-            suppressedInstances.add(existingInstanceId);
-            continue;
-          }
-          const resolved = await resolveWindowLayoutMemberDescriptor(member.descriptor, layoutId, members);
-          if (windowLayoutDetachment.isReadOnly()) return { ok: false, error: 'clear refused: this surface is read-only' };
-          if (resolved.outcome === 'missing') continue;
-          const resolvedInstanceId = resolved.descriptor?.windowInstanceId;
-          if (resolved.outcome !== 'success' || typeof resolvedInstanceId !== 'string') {
-            return { ok: false, error: 'clear refused: a live window could not be identified safely' };
-          }
-          suppressedInstances.add(resolvedInstanceId);
-        }
-        // Rebase after potentially slow host resolution so concurrent additions
-        // are not silently overwritten by this clear operation.
-        members = [...(windowLayoutFromState(layoutId)?.arrangement?.members ?? [])];
-      }
       const wasActive = isActiveRecordingContext(layoutId);
       let next = state;
       for (const member of members) {
         next = removeWindowLayoutMember(next, layoutId, member.id);
         const instanceId = member.descriptor?.windowInstanceId;
-        if (layout.tracking?.enabled === true) {
-          if (typeof instanceId === 'string') suppressedInstances.add(instanceId);
-        }
-      }
-      if (layout.tracking?.enabled === true) {
-        for (const instanceId of suppressedInstances) {
+        if (layout.tracking?.enabled === true && typeof instanceId === 'string') {
           next = setWindowLayoutInstanceSuppressed(next, layoutId, instanceId, true);
         }
       }
@@ -6814,9 +6786,7 @@ function bootstrapWindowLayoutWidget() {
           continue;
         }
         if (picked.action === 'terminate' && picked.candidateId) {
-          for (const windowInstanceId of picked.retiredWindowInstanceIds ?? []) {
-            await retireClosedWindowEverywhere({ version: 1, windowInstanceId });
-          }
+          if (picked.descriptor) await retireClosedWindowEverywhere(picked.descriptor);
           setWindowLayoutStatus(layoutId, 'Process ended');
           if (!ownsPicker()) return;
           continue;

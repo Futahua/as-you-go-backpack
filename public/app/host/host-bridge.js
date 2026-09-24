@@ -114,9 +114,7 @@ export function createHostBridge(window) {
     pending.delete(event.data.requestId);
     if (task.timer !== null) clearTimeout(task.timer);
     if (!event.data.ok) {
-      const detail = typeof event.data.error === 'string' ? event.data.error.slice(0, 256)
-        : typeof event.data.detail === 'string' ? event.data.detail.slice(0, 256) : '';
-      task.reject(new Error(detail || 'The request could not be completed.'));
+      task.reject(new Error(event.data.error || 'The request could not be completed.'));
       return;
     }
     if (task.type === 'papers:project:state-load-versioned') {
@@ -210,13 +208,10 @@ export function createHostBridge(window) {
     if ('picker' in event.data) {
       const action = event.data.picker?.action;
       task.resolve({
-        action: action === 'select' || action === 'close' || action === 'terminate' || action === 'direct-pick'
+        action: action === 'select' || action === 'close' || action === 'direct-pick'
           ? action
           : 'cancel',
         candidateId: event.data.picker?.candidateId ?? null,
-        ...(Array.isArray(event.data.picker?.retiredWindowInstanceIds)
-          ? { retiredWindowInstanceIds: event.data.picker.retiredWindowInstanceIds.filter((id) => typeof id === 'string' && /^W[0-9a-f]{16}$/i.test(id)).slice(0, 64) }
-          : {}),
       });
       return;
     }
