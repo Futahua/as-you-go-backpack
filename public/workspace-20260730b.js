@@ -6718,10 +6718,10 @@ function bootstrapWindowLayoutWidget() {
     clearTimeout(widgetState.clearArmTimer);
     widgetState.clearArmTimer = null;
     widgetState.clearArmed = false;
-    card.querySelector('[data-wl-clear]')?.classList.remove('is-clear-armed');
+    elements.grid.querySelector('.window-layout-card [data-wl-clear]')?.classList.remove('is-clear-armed');
   }
 
-  card.addEventListener('pointerout', (event) => {
+  elements.grid.addEventListener('pointerout', (event) => {
     if (event.target.closest('[data-wl-clear]')
       && !event.relatedTarget?.closest?.('[data-wl-clear]')) resetWidgetClearArm();
   });
