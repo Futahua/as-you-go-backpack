@@ -87,6 +87,30 @@ test('commit reports failure when persistence resolves an explicit refusal', asy
   assert.doesNotMatch(statuses.at(-1), /STALE_REVISION/);
 });
 
+test('durable automatic commits propagate rebase metadata and reject dropped saves', async () => {
+  let state = { items: ['root'] };
+  let receivedMetadata = null;
+  const statuses = [];
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async (_snapshot, metadata) => {
+      receivedMetadata = metadata;
+      return { ok: true, dropped: true, revision: 'r2' };
+    },
+    normalizeState: (value) => value,
+    setStatus: (text) => statuses.push(text),
+  });
+  const ok = await store.commit({ items: ['auto-member'] }, {
+    saveMetadata: { rebaseAutomaticSave: true },
+    requireDurable: true,
+  });
+  assert.equal(ok, false, 'a coordinator drop is not durable success for an Auto membership');
+  assert.equal(receivedMetadata.rebaseAutomaticSave, true);
+  assert.deepEqual(state, { items: ['auto-member'] }, "commit keeps its optimistic state for the tracker's targeted retry");
+  assert.notEqual(statuses.at(-1), '', 'a dropped automatic save is not announced as persisted');
+});
+
 test('a failed follower acknowledgement invalidates dependent queued edits', async () => {
   let state = { items: ['root'] };
   let rejectAck;

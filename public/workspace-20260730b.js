@@ -3204,13 +3204,16 @@ const windowLayoutAutoTracker = createWindowLayoutAutoTracker({
   resolveWindowInstance: (windowInstanceId) => host.resolveWindowInstance(windowInstanceId),
   observeWindowCapability: (capability) => host.observeWindowCapability(capability),
   addMember: addWindowLayoutMember,
-  commitState: (next) => store.commit(next),
+  commitState: (next) => store.commit(next, {
+    saveMetadata: { rebaseAutomaticSave: true },
+    requireDurable: true,
+  }),
   cacheCapability: (layoutId, memberId, capability) => {
     windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(layoutId, memberId), capability);
   },
   persistState: async (current) => {
-    await store.save(current, { rebaseAutomaticSave: true });
-    return true;
+    const result = await store.save(current, { rebaseAutomaticSave: true });
+    return result?.ok === true && result.dropped !== true && result.superseded !== true;
   },
   afterCommit: async (layoutId) => {
     saveWorkspaceView();

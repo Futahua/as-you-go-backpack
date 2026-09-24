@@ -5,6 +5,8 @@ import {
   createWindowLayoutAutoTracker,
   windowLayoutTrackingTransitions,
 } from './public/app/window-layout-auto-tracking.js';
+import { createWorkspaceStore } from './public/app/workspace-store.js';
+import { createSurfaceCoordinator, SURFACE_ROLE } from './public/app/workspace-surface-coordinator.js';
 
 const W = 'W0000000000000001';
 
@@ -134,38 +136,100 @@ test('a transient exact-resolution failure is retried while the identity stays v
   assert.equal(h.calls.commit, 1);
 });
 
-test('an optimistic failed Auto commit retries persistence without losing other edits', async () => {
-  let failPersistence = true;
-  const h = makeTracker({ dependencies: {
-    commitState: async (next) => {
-      h.calls.commit += 1;
-      h.setState(next); // Mirrors workspace-store.commit installing before save settles.
-      return false;
-    },
-    persistState: async (current) => {
-      h.calls.persist += 1;
-      assert.equal(current.windowLayouts[0].arrangement.members[0].id, 'member-new');
-      if (failPersistence) {
-        failPersistence = false;
-        throw new Error('temporary persistence failure');
-      }
-      return true;
-    },
-  } });
-  assert.equal(await h.tracker.addVisibleInstance('layout-a', W), false);
-  assert.deepEqual(h.calls.cache, []);
-  const concurrent = {
-    ...h.getState(),
-    unrelated: 'kept',
+test('Auto membership retries after real store/coordinator CAS drops and preserves a peer edit', async () => {
+  const initial = {
+    schemaVersion: 1,
+    groups: [],
+    shortcuts: [],
+    windowLayouts: state().windowLayouts,
+    view: {},
   };
-  h.setState(concurrent);
-  assert.deepEqual(await h.tracker.refresh(), { outcome: 'success', added: 0 });
-  assert.deepEqual(h.calls.cache, []);
-  assert.deepEqual(await h.tracker.refresh(), { outcome: 'success', added: 1 });
-  assert.equal(h.getState().unrelated, 'kept');
-  assert.equal(h.calls.persist, 2);
-  assert.equal(h.calls.commit, 1);
-  assert.equal(h.calls.cache.length, 1);
+  let live = structuredClone(initial);
+  let diskState = structuredClone(initial);
+  let revision = 'r0';
+  let revisionNumber = 0;
+  let raceWrites = true;
+  let racingWrites = 0;
+  const host = {
+    async loadVersioned() { return { state: structuredClone(diskState), revision }; },
+    async saveChecked(serialized, expectedRevision) {
+      if (raceWrites) {
+        racingWrites += 1;
+        diskState = { ...diskState, groups: [...diskState.groups, { id: `racer-${racingWrites}` }] };
+        revision = `r${++revisionNumber}`;
+      }
+      if (expectedRevision !== revision) return { ok: false, code: 'STALE_REVISION', revision };
+      diskState = JSON.parse(serialized);
+      revision = `r${++revisionNumber}`;
+      return { ok: true, revision };
+    },
+  };
+  const coordinator = createSurfaceCoordinator({
+    lock: { async request() { return { release() {} }; } },
+    channel: { postMessage() {}, addEventListener() {}, removeEventListener() {} },
+    host,
+    installDocument: (next) => { live = next; },
+    invalidatePendingSaves: () => null,
+    newClientId: () => 'auto-test-writer',
+  });
+  await coordinator.start();
+  let store;
+  const cache = [];
+  const tracker = createWindowLayoutAutoTracker({
+    getState: () => live,
+    isWriter: () => coordinator.role === SURFACE_ROLE.WRITER,
+    isReadOnly: () => false,
+    getOperationToken: () => 'writer-1',
+    readSnapshot: async () => ({
+      outcome: 'success',
+      snapshot: { complete: false, windows: [{ windowInstanceId: W }] },
+    }),
+    resolveWindowInstance: async (windowInstanceId) => ({
+      outcome: 'success',
+      capability: { runtimeToken: 'cap-1' },
+      descriptor: { version: 1, title: 'Notepad', windowInstanceId },
+    }),
+    observeWindowCapability: async () => ({ outcome: 'success', observation: { state: 'normal' } }),
+    addMember: (latest, layoutId, member) => ({
+      ...latest,
+      windowLayouts: latest.windowLayouts.map((layout) => layout.id === layoutId
+        ? { ...layout, arrangement: { ...layout.arrangement, members: [...layout.arrangement.members, member] } }
+        : layout),
+    }),
+    commitState: (next) => store.commit(next, {
+      saveMetadata: { rebaseAutomaticSave: true },
+      requireDurable: true,
+    }),
+    persistState: async (current) => {
+      const result = await store.save(current, { rebaseAutomaticSave: true });
+      return result?.ok === true && result.dropped !== true && result.superseded !== true;
+    },
+    cacheCapability: (...args) => cache.push(args),
+    afterCommit: async () => {},
+    createMemberId: () => 'auto-member-1',
+  });
+  store = createWorkspaceStore({
+    getState: () => live,
+    setState: (next) => { live = next; },
+    persist: (serialized, metadata) => coordinator.saveSerialized(serialized, metadata),
+    normalizeState: (next) => next,
+  });
+
+  assert.equal(await tracker.addVisibleInstance('layout-a', W), false);
+  assert.equal(coordinator.role, SURFACE_ROLE.WRITER, 'bounded automatic CAS contention does not freeze the writer');
+  assert.ok(racingWrites >= 4, 'the initial CAS and bounded rebase retries all raced');
+  assert.equal(diskState.windowLayouts[0].arrangement.members.length, 0, 'the dropped membership was not durable');
+  assert.equal(live.windowLayouts[0].arrangement.members[0].id, 'auto-member-1', 'store commit installed the optimistic member');
+  assert.deepEqual(cache, [], 'a dropped member is not given a live capability');
+
+  raceWrites = false;
+  diskState = { ...diskState, groups: [...diskState.groups, { id: 'peer-edit' }] };
+  revision = `r${++revisionNumber}`;
+  assert.deepEqual(await tracker.refresh(), { outcome: 'success', added: 1 });
+  assert.ok(diskState.groups.some((group) => group.id === 'peer-edit'), 'retry rebases without losing the unrelated disk edit');
+  assert.equal(diskState.windowLayouts[0].arrangement.members[0].descriptor.windowInstanceId, W);
+  assert.equal(cache.length, 1, 'capability is cached only after the retried write is accepted');
+  coordinator.release();
 });
 
 test('peer document installation reports Auto enable transitions for writer-side population', () => {

@@ -196,7 +196,12 @@ export function createWorkspaceStore({
     return operation;
   }
 
-  function commit(nextState, { isUndo = false, isRedo = false } = {}) {
+  function commit(nextState, {
+    isUndo = false,
+    isRedo = false,
+    saveMetadata,
+    requireDurable = false,
+  } = {}) {
     if (!canMutateDocument()) {
       // Refused before the history stacks or the document are touched, so a
       // blocked edit leaves nothing behind to resurface later.
@@ -220,9 +225,13 @@ export function createWorkspaceStore({
     if (prepare) final = normalizeState(prepare(final, session) ?? final);
     setState(final);
     afterCommit?.();
-    return save(final)
+    return save(final, saveMetadata)
       .then((result) => {
         if (result?.superseded) throw new Error('The document save was superseded by a failed queued mutation.');
+        // Some automatic/cosmetic writes deliberately resolve as dropped after
+        // bounded CAS retries. Callers that add durable document members need
+        // to distinguish that result from an acknowledged save.
+        if (requireDurable && (result?.ok !== true || result?.dropped === true)) return false;
         setStatus?.('');
         return true;
       })
