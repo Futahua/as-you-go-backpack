@@ -1045,14 +1045,13 @@ async function capabilityForMember(layoutId, memberId) {
   return resolved.capability;
 }
 
-/** Resolve a persisted member by its exact native identity first. A descriptor
- * that carries a stable windowInstanceId is exact for this caller too: the
- * helper returns its 'missing' (or any inconclusive outcome) as-is, so a live
- * sibling sharing the title and executable fingerprint can never be bound in
- * its place. The legacy title + fingerprint fallback therefore reaches only
- * pre-identity descriptors, which carry no id at all, and the host still
- * requires one unique match. Duplicate Chrome windows remain ambiguous and are
- * never guessed. */
+/** Resolve a persisted member by its exact native identity first. Papers-owned
+ * windows are recreated when Papers itself restarts, so that opaque identity
+ * can legitimately be gone while the same unique window is alive again. A
+ * fallback without the identity is therefore allowed only after an explicit
+ * `missing` result, and the host still requires one unique
+ * executable-fingerprint + title match. Duplicate Chrome windows remain
+ * ambiguous and are never guessed. */
 async function resolveWindowLayoutMemberDescriptor(descriptor, layoutId = null, memberCollection = null) {
   const layout = layoutId === null ? null : windowLayoutFromState(layoutId);
   const members = Array.isArray(memberCollection)

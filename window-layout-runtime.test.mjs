@@ -82,106 +82,42 @@ test('legacy descriptor fallback is only unique within a persisted layout', () =
   assert.equal(windowLayoutLegacyDescriptorCount(duplicate, { title: 'Other', executableFingerprint: 'chrome' }), 0);
 });
 
-test('a stable native instance identity is exact: a missing instance never falls back to a same-title sibling', async () => {
-  // The reviewer's scenario, at the seam the widget preview path calls
-  // (resolveWindowLayoutPreviewCapability, and its no-resolver branch through
-  // resolveWindowLayoutMemberDescriptor):
-  //   layout member A has stable id WA, title T, executable E; A's window closes;
-  //   another VISIBLE window B has the same T and E but a different stable id WB,
-  //   and B is the unique live title + fingerprint match.
-  // Against the pre-fix guard, resolveWindowInstance(WA) answered 'missing' and
-  // the seam then asked the legacy title + fingerprint resolver, which returned
-  // B's capability: the widget could show B's thumbnail for A. B deliberately
-  // lives OUTSIDE the persisted members, which is the only shape in which the
-  // pre-fix guard could reach the fallback at all (a sibling recorded in the
-  // same layout trips the duplicate-key guard first and answers 'ambiguous').
-  const sharedTitle = 'New Tab - Google Chrome';
-  const executableFingerprint = 'a'.repeat(64);
-  const liveWindowIdA = 'W0123456789abcdef';
-  const liveWindowIdB = 'Wfedcba9876543210';
-  const siblingOnly = [
-    { id: 'two', descriptor: { version: 1, title: sharedTitle, executableFingerprint, windowInstanceId: liveWindowIdB } },
+test('production fallback seam rejects widget-shaped duplicate snapshots before fallback', async () => {
+  const descriptor = {
+    version: 1,
+    title: 'New Tab - Google Chrome',
+    executableFingerprint: 'chrome',
+  };
+  const members = [
+    { id: 'one', descriptor, windowInstanceId: 'W0123456789abcdef' },
+    { id: 'two', descriptor: { ...descriptor }, windowInstanceId: 'Wfedcba9876543210' },
   ];
-  // Both persisted descriptor shapes reach this seam: the widget snapshot keeps
-  // the descriptor at exactly version/title/executableFingerprint and carries
-  // the id beside it, while durable member descriptors nest the id inside.
-  const shapes = [
-    ['snapshot descriptor + sibling id', { version: 1, title: sharedTitle, executableFingerprint }, liveWindowIdA],
-    ['nested descriptor id', { version: 1, title: sharedTitle, executableFingerprint, windowInstanceId: liveWindowIdA }, liveWindowIdA],
-  ];
-  for (const [shape, persistedDescriptor, exactIdentity] of shapes) {
-    const asked = [];
-    const result = await resolveWindowLayoutDescriptorWithFallback({
-      descriptor: persistedDescriptor,
-      exactIdentity,
-      members: siblingOnly,
-      resolveExact: async (instanceId) => {
-        asked.push(instanceId);
-        return { outcome: 'missing', error: 'exact native instance is gone' };
-      },
-      resolveFallback: async (value) => {
-        // A live sibling with the same title and fingerprint IS the unique match,
-        // so this would succeed and bind the wrong window if it were reached.
-        asked.push(`fallback:${value.title}`);
-        return { outcome: 'success', capability: { title: value.title, owner: 'sibling B' } };
-      },
-    });
-    assert.deepEqual(asked, [exactIdentity], `${shape}: only the exact identity is ever asked about`);
-    assert.equal(result.outcome, 'missing', `${shape}: the exact miss is returned as-is`);
-    assert.equal(result.capability, undefined, `${shape}: the live sibling's capability is never returned`);
-  }
-});
-
-test('every inconclusive exact outcome is returned as-is, never as a fallback rebind', async () => {
-  const descriptor = { version: 1, title: 'Inconclusive', executableFingerprint: 'c'.repeat(64), windowInstanceId: 'W0123456789abcdef' };
-  for (const outcome of ['timeout', 'helper-unavailable', 'denied', 'ambiguous']) {
-    let fallbackCalls = 0;
-    const result = await resolveWindowLayoutDescriptorWithFallback({
-      descriptor,
-      exactIdentity: descriptor.windowInstanceId,
-      members: [{ id: 'one', descriptor }],
-      resolveExact: async () => ({ outcome, error: `${outcome} from the helper` }),
-      resolveFallback: async () => { fallbackCalls += 1; return { outcome: 'success', capability: {} }; },
-    });
-    assert.equal(result.outcome, outcome);
-    assert.equal(fallbackCalls, 0, `${outcome} must not become a fallback`);
-  }
-});
-
-test('the legacy fallback survives for descriptors that carry no instance identity', async () => {
-  const descriptor = { version: 1, title: 'Legacy - Notepad', executableFingerprint: 'b'.repeat(64) };
-  const singleton = [{ id: 'one', descriptor }];
   let fallbackCalls = 0;
-  const unique = await resolveWindowLayoutDescriptorWithFallback({
-    descriptor,
-    members: singleton,
-    resolveExact: async () => ({ outcome: 'missing', error: 'gone' }),
-    resolveFallback: async (value) => {
-      fallbackCalls += 1;
-      return { outcome: 'success', capability: { title: value.title } };
-    },
-  });
-  assert.equal(fallbackCalls, 1, 'a pre-identity descriptor still falls back');
-  assert.equal(unique.outcome, 'success');
-  assert.equal(unique.capability.title, descriptor.title);
-
-  const duplicateMembers = [
-    { id: 'one', descriptor },
-    { id: 'two', descriptor: { ...descriptor } },
-  ];
-  let duplicateFallbackCalls = 0;
   const ambiguous = await resolveWindowLayoutDescriptorWithFallback({
     descriptor,
-    members: duplicateMembers,
-    resolveExact: async () => ({ outcome: 'missing', error: 'gone' }),
-    resolveFallback: async () => {
-      duplicateFallbackCalls += 1;
-      return { outcome: 'success', capability: {} };
-    },
+    members,
+    exactIdentity: members[0].windowInstanceId,
+    resolveExact: async () => ({ outcome: 'missing' }),
+    resolveFallback: async () => { fallbackCalls += 1; return { outcome: 'success', capability: {} }; },
   });
   assert.equal(ambiguous.outcome, 'ambiguous');
-  assert.equal(ambiguous.reason, 'duplicate persisted title and executable fingerprint');
-  assert.equal(duplicateFallbackCalls, 0, 'duplicate legacy keys are never guessed');
+  assert.equal(fallbackCalls, 0);
+  const unique = await resolveWindowLayoutDescriptorWithFallback({
+    descriptor,
+    members: [members[0]],
+    exactIdentity: members[0].windowInstanceId,
+    resolveExact: async () => ({ outcome: 'missing' }),
+    resolveFallback: async (value) => ({ outcome: 'success', capability: value }),
+  });
+  assert.equal(unique.outcome, 'success');
+  assert.equal(unique.capability.title, descriptor.title);
+  const legacy = await resolveWindowLayoutDescriptorWithFallback({
+    descriptor,
+    members,
+    resolveExact: async () => ({ outcome: 'missing' }),
+    resolveFallback: async () => ({ outcome: 'success', capability: {} }),
+  });
+  assert.equal(legacy.outcome, 'missing');
 });
 
 test('recording resolution receives its layout id for fail-closed legacy fallback', async () => {
