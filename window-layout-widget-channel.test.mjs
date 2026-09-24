@@ -895,37 +895,6 @@ test('021 createBoundedRetry retries up to attempts then stops, honoring cancel'
   assert.equal(cancelledFired.length, 1, 'no further request after cancel');
 });
 
-test('compact-widget retry recovers when the first snapshot requests receive no response', async () => {
-  let requests = 0;
-  let snapshotReceived = false;
-  const timers = [];
-  let finalCalls = 0;
-  const retry = createBoundedRetry({
-    attempts: 3,
-    delayMs: 10,
-    request: () => {
-      requests += 1;
-      // Model a writer that becomes ready after the first silent request.
-      if (requests === 2) snapshotReceived = true;
-      return undefined;
-    },
-    shouldRetry: () => !snapshotReceived,
-    onResult: () => { finalCalls += 1; },
-    setTimer: (fn) => { timers.push(fn); return timers.length; },
-    clearTimer: (id) => { timers[id - 1] = null; },
-  });
-
-  retry.start();
-  await Promise.resolve();
-  assert.equal(requests, 1);
-  assert.equal(timers.length, 1, 'silence still schedules another snapshot request');
-  timers[0]();
-  await Promise.resolve();
-  assert.equal(requests, 2, 'retry reaches the writer once it becomes ready');
-  assert.equal(timers.length, 1, 'successful arrival stops further retries');
-  assert.equal(finalCalls, 1);
-});
-
 // ---- 035: detached-widget lifecycle + shared card geometry ------------------
 function makeBusWithHooks(layouts, hooks) {
   const bus = fakeBus();

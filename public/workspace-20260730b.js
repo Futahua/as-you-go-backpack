@@ -6264,57 +6264,15 @@ function bootstrapWindowLayoutWidget() {
   let windowRestoredOnce = false;
   // 019G/021: bounded snapshot re-request for a transient unknown-layout.
   let snapshotRetry = null;
-  let snapshotRetryCooldownTimer = null;
   const MAX_SNAPSHOT_RETRY_ARMINGS = 3;
   let snapshotRetryArmings = 0;
-  function renderWidgetBootstrapCard(message) {
-    const card = document.createElement('div');
-    card.className = 'window-layout-card window-layout-card--bootstrap';
-    card.setAttribute('role', 'status');
-    card.setAttribute('aria-live', 'polite');
-    card.textContent = message;
-    elements.grid.replaceChildren(card);
-  }
   /** A resolved open ends the cold-open episode: stop any running retry and let
    * a LATER unresolved open arm a fresh budget rather than inheriting a spent
    * one from this widget's whole lifetime. */
   function cancelSnapshotRetry() {
     snapshotRetry?.cancel?.();
     snapshotRetry = null;
-    if (snapshotRetryCooldownTimer !== null) clearTimeout(snapshotRetryCooldownTimer);
-    snapshotRetryCooldownTimer = null;
     snapshotRetryArmings = 0;
-  }
-
-  /** A cold widget can miss the first BroadcastChannel request before its
-   * workspace writer is ready. Unlike an explicit unknown-layout response,
-   * that race is silent, so retry a small bounded number of times and leave a
-   * compact, understandable surface instead of exposing the whole Backpack
-   * shell or remaining blank forever. */
-  function armSnapshotRetry() {
-    if (widgetState.snapshotReceived || snapshotRetry || snapshotRetryCooldownTimer !== null
-      || snapshotRetryArmings >= MAX_SNAPSHOT_RETRY_ARMINGS) return;
-    snapshotRetryArmings += 1;
-    snapshotRetry = createBoundedRetry({
-      attempts: 3,
-      delayMs: 250,
-      request: () => { client.requestSnapshot(); return null; },
-      shouldRetry: () => !widgetState.snapshotReceived,
-      onResult: () => {
-        snapshotRetry = null;
-        if (widgetState.snapshotReceived) return;
-        renderWidgetBootstrapCard(snapshotRetryArmings >= MAX_SNAPSHOT_RETRY_ARMINGS
-          ? 'Could not load this window layout. Reopen the widget from As You Go.'
-          : 'Waiting for the window layout…');
-        if (snapshotRetryArmings < MAX_SNAPSHOT_RETRY_ARMINGS) {
-          snapshotRetryCooldownTimer = setTimeout(() => {
-            snapshotRetryCooldownTimer = null;
-            armSnapshotRetry();
-          }, 500);
-        }
-      },
-    });
-    snapshotRetry.start();
   }
 
   function handleWidgetMessage(message) {
@@ -6372,12 +6330,25 @@ function bootstrapWindowLayoutWidget() {
     }
     if (message.type === 'error') {
       if (message.code === 'unknown-layout') {
-        armSnapshotRetry();
-        return;
-      }
-      if (!widgetState.snapshotReceived) {
-        renderWidgetBootstrapCard(message.message || 'The window layout is not available yet.');
-        armSnapshotRetry();
+        // 019G/021: the workspace may still be loading durable state. Bounded
+        // re-request so the first open is never stuck on the empty card.
+        // The retry does not await a reply, so `onResult` clears it as soon as
+        // the third request is SENT: a late unknown-layout then arms a fresh
+        // three, forever. The cold-open stall this recovers from is finite, so
+        // cap the number of re-arms rather than letting a persistently absent
+        // layout drive an unbounded request loop.
+        if (snapshotRetryArmings >= MAX_SNAPSHOT_RETRY_ARMINGS) return;
+        if (!snapshotRetry) {
+          snapshotRetryArmings += 1;
+          snapshotRetry = createBoundedRetry({
+            attempts: 3,
+            delayMs: 250,
+            request: () => client.requestSnapshot(),
+            shouldRetry: () => true,
+            onResult: () => { snapshotRetry = null; },
+          });
+          snapshotRetry.start();
+        }
         return;
       }
       setWindowLayoutStatus(layoutId, message.message || message.code || 'Command failed');
@@ -7049,7 +7020,8 @@ function bootstrapWindowLayoutWidget() {
     widgetState.pickUnsubscribe?.();
     widgetState.pickUnsubscribe = null;
     if (hadActivePick) void host.pickWindowCancel().catch(() => undefined);
-    cancelSnapshotRetry();
+    snapshotRetry?.cancel();
+    snapshotRetry = null;
     if (cardSizeTimer !== null) {
       clearTimeout(cardSizeTimer);
       cardSizeTimer = null;
@@ -7092,7 +7064,6 @@ function bootstrapWindowLayoutWidget() {
     onMessage: handleWidgetMessage,
   });
   windowLayoutWidgetClient = client;
-  renderWidgetBootstrapCard('Loading window layout…');
   let hoverPolicyTimer = setInterval(() => client.requestHoverPolicy(), 400);
   client.requestHoverPolicy();
   let widgetQuickRunOpening = false;
@@ -7253,7 +7224,6 @@ function bootstrapWindowLayoutWidget() {
   return host.widgetReady().then(() => {
     client.ready();
     client.requestSnapshot();
-    armSnapshotRetry();
   });
 }
 
