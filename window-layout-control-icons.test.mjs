@@ -36,6 +36,14 @@ test('each control maps to the exact requested shape', () => {
   assert.match(WINDOW_LAYOUT_CONTROL_GLYPHS.detach.path, /<rect x="6" y="10\.5" width="12" height="10"/);
 });
 
+test('clear affordance has a Backspace-shaped glyph and exact double-clear label', () => {
+  assert.match(WINDOW_LAYOUT_CONTROL_GLYPHS.clear.path, /M9 5H20v14H9L3\.5 12 9 5z/);
+  assert.match(WINDOW_LAYOUT_CONTROL_GLYPHS.clear.path, /m12 9 5 6m0-6-5 6/);
+  const button = windowLayoutControlButton('clear', 'Click twice to clear all windows from this layout', 'data-wl-clear', 'layout-1');
+  assert.match(button, /data-wl-clear="layout-1"/);
+  assert.match(button, /aria-label="Click twice to clear all windows from this layout"/);
+});
+
 test('detach is an UNLOCKED padlock and reattach a LOCKED padlock', () => {
   const detach = WINDOW_LAYOUT_CONTROL_GLYPHS.detach.path;
   const reattach = WINDOW_LAYOUT_CONTROL_GLYPHS.reattach.path;
