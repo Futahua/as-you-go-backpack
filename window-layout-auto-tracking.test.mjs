@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createWindowLayoutAutoTracker } from './public/app/window-layout-auto-tracking.js';
+import {
+  createWindowLayoutAutoTracker,
+  windowLayoutTrackingTransitions,
+} from './public/app/window-layout-auto-tracking.js';
 
 const W = 'W0000000000000001';
 
@@ -18,7 +21,7 @@ function makeTracker(overrides = {}) {
   let writer = true;
   let readOnly = false;
   let token = '1:0';
-  const calls = { read: 0, resolve: 0, observe: 0, commit: 0, cache: [], after: [] };
+  const calls = { read: 0, resolve: 0, observe: 0, commit: 0, persist: 0, cache: [], after: [] };
   const tracker = createWindowLayoutAutoTracker({
     getState: () => current,
     isWriter: () => writer,
@@ -45,6 +48,10 @@ function makeTracker(overrides = {}) {
     commitState: async (next) => {
       calls.commit += 1;
       current = next;
+      return true;
+    },
+    persistState: async () => {
+      calls.persist += 1;
       return true;
     },
     cacheCapability: (...args) => calls.cache.push(args),
@@ -127,8 +134,49 @@ test('a transient exact-resolution failure is retried while the identity stays v
   assert.equal(h.calls.commit, 1);
 });
 
-test('failed durable commit never installs a runtime capability', async () => {
-  const h = makeTracker({ dependencies: { commitState: async () => { h.calls.commit += 1; return false; } } });
+test('an optimistic failed Auto commit retries persistence without losing other edits', async () => {
+  let failPersistence = true;
+  const h = makeTracker({ dependencies: {
+    commitState: async (next) => {
+      h.calls.commit += 1;
+      h.setState(next); // Mirrors workspace-store.commit installing before save settles.
+      return false;
+    },
+    persistState: async (current) => {
+      h.calls.persist += 1;
+      assert.equal(current.windowLayouts[0].arrangement.members[0].id, 'member-new');
+      if (failPersistence) {
+        failPersistence = false;
+        throw new Error('temporary persistence failure');
+      }
+      return true;
+    },
+  } });
   assert.equal(await h.tracker.addVisibleInstance('layout-a', W), false);
   assert.deepEqual(h.calls.cache, []);
+  const concurrent = {
+    ...h.getState(),
+    unrelated: 'kept',
+  };
+  h.setState(concurrent);
+  assert.deepEqual(await h.tracker.refresh(), { outcome: 'success', added: 0 });
+  assert.deepEqual(h.calls.cache, []);
+  assert.deepEqual(await h.tracker.refresh(), { outcome: 'success', added: 1 });
+  assert.equal(h.getState().unrelated, 'kept');
+  assert.equal(h.calls.persist, 2);
+  assert.equal(h.calls.commit, 1);
+  assert.equal(h.calls.cache.length, 1);
+});
+
+test('peer document installation reports Auto enable transitions for writer-side population', () => {
+  const previous = state({ enabled: false });
+  const next = state({ enabled: true });
+  assert.deepEqual(windowLayoutTrackingTransitions(previous, next), {
+    enabled: ['layout-a'],
+    disabled: [],
+  });
+  assert.deepEqual(windowLayoutTrackingTransitions(next, state({ enabled: false })), {
+    enabled: [],
+    disabled: ['layout-a'],
+  });
 });

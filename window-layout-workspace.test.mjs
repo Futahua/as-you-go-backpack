@@ -997,4 +997,8 @@ test('Auto tracking polls Papers identity snapshots and adds newly visible exact
     'Auto never calls the nonexistent legacy candidate-list method');
   assert.match(source, /windowLayoutAutoTracker\.refresh\(layoutId\)/,
     'enabling Auto uses the shared retryable exact-identity tracker');
+  assert.match(source, /const installPeerDocument = \(document_, authoritativeSerialized\) => \{[\s\S]*?syncTrackingAfterDocumentInstall\(previousState, state\)/,
+    'the writer synchronizes Auto when it installs a forwarded peer document');
+  assert.match(source, /installDocument: \(document_, authoritativeSerialized\) => \{[\s\S]*?syncTrackingAfterDocumentInstall\(previousState, state\)/,
+    'the elected writer also synchronizes Auto on normal accepted document installs');
 });
