@@ -283,16 +283,17 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
     error: null,
   });
 
-  const picker = host.windowCandidatePicker([{ id: 'c1', title: 'Window A', icon: null, current: false }]);
+  const picker = host.windowCandidatePicker(['Window A']);
   const sentPicker = mock.parent.messages[2].message;
   assert.equal(sentPicker.type, 'papers:project:window-candidate-picker');
+  assert.deepEqual(sentPicker.currentTitles, ['Window A']);
   mock.dispatchMessage({
     type: 'papers:host:result', requestId: sentPicker.requestId, ok: true,
     picker: { action: 'select', candidateId: 'c1' },
   });
   assert.deepEqual(await picker, { action: 'select', candidateId: 'c1' });
 
-  const directPicker = host.windowCandidatePicker([{ id: 'c1', title: 'Window A', icon: null, current: false }]);
+  const directPicker = host.windowCandidatePicker(['Window A']);
   const sentDirectPicker = mock.parent.messages[3].message;
   mock.dispatchMessage({
     type: 'papers:host:result', requestId: sentDirectPicker.requestId, ok: true,
@@ -309,15 +310,6 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
   });
   assert.deepEqual(await closePicker, { action: 'cancel', candidateId: null });
 
-  const terminatePicker = host.windowCandidatePicker([{ id: 'c1', title: 'Window A', icon: null, current: false }]);
-  const sentTerminatePicker = mock.parent.messages[5].message;
-  mock.dispatchMessage({
-    type: 'papers:host:result', requestId: sentTerminatePicker.requestId, ok: true,
-    picker: { action: 'terminate', candidateId: 'c1', retiredWindowInstanceIds: ['W0123456789abcdef'] },
-  });
-  assert.deepEqual(await terminatePicker, {
-    action: 'terminate', candidateId: 'c1', retiredWindowInstanceIds: ['W0123456789abcdef'],
-  });
 });
 
 test('host bridge surfaces bounded Quick Run host detail instead of a generic error', async () => {
@@ -342,7 +334,7 @@ test('direct-pick begin has its own bounded startup timeout instead of the short
     'direct-pick begin uses the dedicated bounded setup timeout');
   assert.match(
     source,
-    /windowCandidatePicker: \(candidates\) =>[\s\S]*?INTERACTIVE_REQUEST_TIMEOUT_MS/,
+    /windowCandidatePicker: \(currentTitles\) =>[\s\S]*?INTERACTIVE_REQUEST_TIMEOUT_MS/,
     'the human-search chooser keeps its separate interactive timeout');
 });
 
