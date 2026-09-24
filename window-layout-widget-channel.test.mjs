@@ -428,6 +428,11 @@ test('windowLayoutWidgetParseCommand bounds the exact vocabulary', () => {
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'retire-closed-window', descriptor: closedDescriptor }), {
     kind: 'retire-closed-window', descriptor: closedDescriptor,
   });
+  const exactClosed = { version: 1, windowInstanceId: 'W0123456789abcdef' };
+  assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'retire-closed-window', descriptor: exactClosed }), {
+    kind: 'retire-closed-window', descriptor: exactClosed,
+  });
+  assert.equal(windowLayoutWidgetParseCommand({ kind: 'retire-closed-window', descriptor: { version: 1, windowInstanceId: 'not-an-id' } }), null);
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'retire-closed-window', descriptor: { ...closedDescriptor, executableFingerprint: 'bad' } }), null);
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'retire-closed-window', descriptor: closedDescriptor, extra: true }), null);
   // 019DR2 exact schemas: missing memberIds, extra keys and wrong shapes reject.
