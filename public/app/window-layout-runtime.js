@@ -55,7 +55,10 @@ export async function resolveWindowLayoutDescriptorWithFallback({
   resolveFallback,
 }) {
   const resolved = await resolveExact(exactIdentity ?? descriptor);
-  if (resolved?.outcome !== 'missing' || typeof exactIdentity !== 'string') {
+  // Stable native identities are exact: if the instance is gone or no longer
+  // matches, never let a legacy title/fingerprint lookup bind a same-title
+  // sibling. Fallback exists only for pre-identity persisted descriptors.
+  if (typeof exactIdentity === 'string' || resolved?.outcome !== 'missing') {
     return resolved;
   }
   if (Array.isArray(members) && windowLayoutLegacyDescriptorCount(members, descriptor) > 1) {
