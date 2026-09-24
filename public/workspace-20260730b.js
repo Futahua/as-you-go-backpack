@@ -3130,7 +3130,10 @@ async function ensureStartupWindowLayoutWidget() {
       && !layout.bin
       && !docked.has(layout.id)
       && itemsIn(state, layout.parentId).some((candidate) => candidate.id === layout.id));
-  for (const layout of layouts) await host.widgetOpen(layout.id).catch(() => undefined);
+  // Writer handoff can happen when a new AYG tab opens. Reconcile widgets
+  // without activating every existing native window and disturbing taskbar
+  // order/focus; direct user opens retain the normal activate behavior.
+  for (const layout of layouts) await host.widgetOpen(layout.id, { activate: false }).catch(() => undefined);
 }
 
 async function populateTrackingLayout(layoutId) {

@@ -892,8 +892,8 @@ test('startup opens non-docked layouts by default without creating implicit trac
     'startup does not manufacture a tracking layout when automatic tracking was not enabled');
   assert.match(startup, /const docked = new Set\(state\.windowLayoutPillIds \?\? \[\]\)/,
     'only layouts explicitly docked into the AYG pill tray stay out of widget startup');
-  assert.match(startup, /await host\.widgetOpen\(layout\.id\)/,
-    'every other durable layout opens as a native widget');
+  assert.match(startup, /await host\.widgetOpen\(layout\.id, \{ activate: false \}\)/,
+    'startup ensures every other durable layout widget without stealing focus');
   assert.doesNotMatch(startup, /tracking\?\.enabled === true/,
     'automatic widget startup no longer depends on tracking being enabled');
 });

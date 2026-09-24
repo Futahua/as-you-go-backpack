@@ -349,7 +349,7 @@ export function createHostBridge(window) {
     // widgetCloseSelf is the WIDGET page's token-attached self-close; ready is
     // the two-sided-latch page request the preload answers with the hidden
     // token (019B).
-    widgetOpen: (layoutKey) => request('papers:project:widget-open', { layoutKey }),
+    widgetOpen: (layoutKey, options = {}) => request('papers:project:widget-open', { layoutKey, ...options }),
     widgetFocus: (layoutKey) => request('papers:project:widget-focus', { layoutKey }),
     widgetMinimize: (layoutKey) => request('papers:project:widget-minimize', { layoutKey }),
     widgetClose: (layoutKey) => request('papers:project:widget-close', { layoutKey }),
