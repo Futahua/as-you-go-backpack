@@ -130,6 +130,14 @@ export function createHostBridge(window) {
       task.resolve({ stateSave: event.data.stateSave });
       return;
     }
+    if (task.type === 'papers:project:window-lifecycle-snapshot') {
+      task.resolve({
+        outcome: event.data.outcome,
+        snapshot: event.data.snapshot ?? null,
+        error: event.data.error ?? null,
+      });
+      return;
+    }
     if ('writerLease' in event.data) {
       task.resolve(event.data.writerLease);
       return;
@@ -210,7 +218,7 @@ export function createHostBridge(window) {
     if ('picker' in event.data) {
       const action = event.data.picker?.action;
       task.resolve({
-        action: action === 'select' || action === 'close' || action === 'terminate' || action === 'direct-pick'
+        action: action === 'select' || action === 'remove' || action === 'close' || action === 'terminate' || action === 'direct-pick'
           ? action
           : 'cancel',
         candidateId: event.data.picker?.candidateId ?? null,
@@ -370,8 +378,8 @@ export function createHostBridge(window) {
     }),
     widgetPreviewHide: () => request('papers:project:widget-preview-hide'),
     widgetContextMenu: () => request('papers:project:widget-context-menu'),
-    windowCandidatePicker: (currentTitles) =>
-      request('papers:project:window-candidate-picker', { currentTitles }, INTERACTIVE_REQUEST_TIMEOUT_MS),
+    windowCandidatePicker: (currentWindowInstanceIds) =>
+      request('papers:project:window-candidate-picker', { currentWindowInstanceIds }, INTERACTIVE_REQUEST_TIMEOUT_MS),
     windowCandidatePickerClose: () => request('papers:project:window-candidate-picker-close'),
     // 019G: real window thumbnail (Windows-taskbar-like hover preview). Consumes
     // ONLY the exact shared API: page request `papers:project:window-thumbnail`

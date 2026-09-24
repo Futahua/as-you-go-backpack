@@ -11,6 +11,7 @@ import {
   createWindowLayoutRetirementWriter,
   windowLayoutPickApplyOutcome,
   windowLayoutPickForBoundCandidate,
+  windowLayoutRemoveForBoundCandidate,
 } from './public/app/window-layout-workspace.js';
 import { windowLayoutMemberKey } from './public/app/window-layout-runtime.js';
 import { windowLayoutWidgetCommittedStatus } from './public/app/window-layout-widget-channel.js';
@@ -813,10 +814,12 @@ test('attached and detached list picks use bound descriptor identity and the sha
   assert.doesNotMatch(attached, /store\.commit\(|saveWorkspaceView\(|descriptor\.title\s*===\s*row\.title/,
     'attached list picking has no title-only or side-channel persistence path');
 
-  const widgetStart = source.indexOf('  async function handleWidgetListCandidate(candidateId)');
+  const widgetStart = source.indexOf('  async function handleWidgetListCandidate(candidateId, intent = \'toggle\')');
   const widgetEnd = source.indexOf('  async function beginWidgetDirectPick()', widgetStart);
   const widget = source.slice(widgetStart, widgetEnd);
   assert.match(widget, /windowLayoutPickForBoundCandidate\(/);
+  assert.match(widget, /intent === 'remove'[\s\S]*?windowLayoutRemoveForBoundCandidate\(/,
+    'widget plain-middle-click removal is explicitly remove-only');
   assert.doesNotMatch(widget, /selectedOverride|descriptor\.title\s*===\s*bound\.descriptor\.title/,
     'detached list picking decides add/remove only after binding the persisted descriptor pair');
 
@@ -952,7 +955,7 @@ test('detached picker re-entry invalidates stale chooser ownership before starti
     'late native replies are scoped to the current chooser attempt');
   assert.doesNotMatch(widgetPicker, /host\.windowCandidates\(\)/,
     'the chooser avoids a duplicate candidate enumeration before Papers builds its authoritative list');
-  assert.match(widgetPicker, /const picked = await host\.windowCandidatePicker\(\[\.\.\.currentTitles\]\);\s*if \(!ownsPicker\(\)\) return;/,
+  assert.match(widgetPicker, /const picked = await host\.windowCandidatePicker\(\[\.\.\.currentWindowInstanceIds\]\);\s*if \(!ownsPicker\(\)\) return;/,
     'a late chooser result cannot mutate a retired attempt');
   assert.match(widgetPicker, /widgetPickerOpen = false;\s*widgetPickerGeneration \+= 1;\s*if \(pickerHost\) pickerHost\.innerHTML = '';/,
     'close synchronously clears ownership before awaiting native dismissal');
@@ -960,17 +963,38 @@ test('detached picker re-entry invalidates stale chooser ownership before starti
     'the owning finally block performs one cleanup and retired attempts do not duplicate it');
 });
 
+test('explicit list removal never turns a stale or same-title sibling row into an add', () => {
+  const current = [{ id: 'member-a', descriptor: descriptorInstance('Untitled', 'W0000000000000001') }];
+  const sameTitleSibling = {
+    descriptor: descriptorInstance('Untitled', 'W0000000000000002'),
+    capability: capabilityFor('Untitled'),
+  };
+  assert.deepEqual(windowLayoutRemoveForBoundCandidate(current, sameTitleSibling), {
+    outcome: 'committed', adds: [], removes: [],
+  });
+  assert.deepEqual(windowLayoutRemoveForBoundCandidate([], {
+    descriptor: descriptorInstance('Untitled', 'W0000000000000001'),
+    capability: capabilityFor('Untitled'),
+  }), { outcome: 'committed', adds: [], removes: [] }, 'a stale removal after another surface removed the member is a no-op');
+  assert.deepEqual(windowLayoutRemoveForBoundCandidate(current, {
+    descriptor: descriptorInstance('Untitled', 'W0000000000000001'),
+    capability: capabilityFor('Untitled'),
+  }).removes, [{ descriptor: descriptorInstance('Untitled', 'W0000000000000001') }]);
+});
+
 test('Auto tracking polls Papers identity snapshots and adds newly visible exact identities', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const start = source.indexOf('const TRACKING_LIFECYCLE_POLL_MS = 2000;');
   const end = source.indexOf('async function ensureStartupWindowLayoutWidget()', start);
   const trackingPoll = source.slice(start, end);
-  assert.match(trackingPoll, /host\.windowLifecycleSnapshot\?\./,
-    'the polling bridge reads Papers-owned identity-only snapshots');
-  assert.match(trackingPoll, /if \(!snapshot \|\| !Array\.isArray\(snapshot\.windows\)\) return;/,
-    'the poll consumes positive observations without inferring closes from bounded omissions');
-  assert.match(trackingPoll, /processTrackingLifecycleEvent\(\{ kind: 'create', windowInstanceId \}\)/,
-    'new exact identities flow through the established observe-and-persist path');
-  assert.match(trackingPoll, /hasDocumentWriteAuthority\(\)/,
+  assert.match(trackingPoll, /await windowLayoutAutoTracker\.refresh\(\)/,
+    'the poll refreshes Auto layouts from Papers-owned identity-only snapshots');
+  assert.match(trackingPoll, /isCurrentDocumentWriter\(\)/,
     'only the current document writer may poll and persist Auto additions');
+  assert.match(source, /surfaceCoordinator\?\.role === SURFACE_ROLE\.WRITER/,
+    'a VIEW role cannot pass the writer guard via broad document write authority');
+  assert.doesNotMatch(source, /host\.listWindowCandidates\(/,
+    'Auto never calls the nonexistent legacy candidate-list method');
+  assert.match(source, /windowLayoutAutoTracker\.refresh\(layoutId\)/,
+    'enabling Auto uses the shared retryable exact-identity tracker');
 });

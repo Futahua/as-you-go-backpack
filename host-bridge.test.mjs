@@ -283,17 +283,17 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
     error: null,
   });
 
-  const picker = host.windowCandidatePicker(['Window A']);
+  const picker = host.windowCandidatePicker(['W0000000000000001']);
   const sentPicker = mock.parent.messages[2].message;
   assert.equal(sentPicker.type, 'papers:project:window-candidate-picker');
-  assert.deepEqual(sentPicker.currentTitles, ['Window A']);
+  assert.deepEqual(sentPicker.currentWindowInstanceIds, ['W0000000000000001']);
   mock.dispatchMessage({
     type: 'papers:host:result', requestId: sentPicker.requestId, ok: true,
-    picker: { action: 'select', candidateId: 'c1' },
+    picker: { action: 'remove', candidateId: 'c1' },
   });
-  assert.deepEqual(await picker, { action: 'select', candidateId: 'c1' });
+  assert.deepEqual(await picker, { action: 'remove', candidateId: 'c1' });
 
-  const directPicker = host.windowCandidatePicker(['Window A']);
+  const directPicker = host.windowCandidatePicker(['W0000000000000001']);
   const sentDirectPicker = mock.parent.messages[3].message;
   mock.dispatchMessage({
     type: 'papers:host:result', requestId: sentDirectPicker.requestId, ok: true,
@@ -310,6 +310,19 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
   });
   assert.deepEqual(await closePicker, { action: 'cancel', candidateId: null });
 
+});
+
+test('host bridge preserves the lifecycle snapshot payload instead of dropping it with the outcome', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const pending = host.windowLifecycleSnapshot();
+  const sent = mock.parent.messages[0].message;
+  const snapshot = { complete: false, windows: [{ windowInstanceId: 'W0000000000000001' }] };
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sent.requestId, ok: true,
+    outcome: 'success', snapshot,
+  });
+  assert.deepEqual(await pending, { outcome: 'success', snapshot, error: null });
 });
 
 test('host bridge surfaces bounded Quick Run host detail instead of a generic error', async () => {
@@ -334,7 +347,7 @@ test('direct-pick begin has its own bounded startup timeout instead of the short
     'direct-pick begin uses the dedicated bounded setup timeout');
   assert.match(
     source,
-    /windowCandidatePicker: \(currentTitles\) =>[\s\S]*?INTERACTIVE_REQUEST_TIMEOUT_MS/,
+    /windowCandidatePicker: \(currentWindowInstanceIds\) =>[\s\S]*?INTERACTIVE_REQUEST_TIMEOUT_MS/,
     'the human-search chooser keeps its separate interactive timeout');
 });
 

@@ -100,7 +100,9 @@ import {
   createWindowLayoutRetirementWriter,
   windowLayoutPickApplyOutcome,
   windowLayoutPickForBoundCandidate,
+  windowLayoutRemoveForBoundCandidate,
 } from './app/window-layout-workspace.js';
+import { createWindowLayoutAutoTracker } from './app/window-layout-auto-tracking.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup, windowLayoutMemberState } from './app/window-layout-control-icons.js';
 import {
   WINDOW_LAYOUT_MEMBER_NOTE_UNCONFIRMED,
@@ -255,6 +257,14 @@ function hasDocumentWriteAuthority() {
   if (!surfaceCoordinator.baselineReady) return false;
   if (surfaceCoordinator.role === SURFACE_ROLE.CONFLICT) return false;
   return true;
+}
+
+/** Automatic host tracking is not an optimistic user mutation: only the
+ * single elected writer may discover and add windows for Auto layouts. */
+function isCurrentDocumentWriter() {
+  return hasDocumentWriteAuthority()
+    && !windowLayoutDetachment.isReadOnly()
+    && surfaceCoordinator?.role === SURFACE_ROLE.WRITER;
 }
 
 const store = createWorkspaceStore({
@@ -1289,17 +1299,22 @@ async function openWindowLayoutPicker(layoutId) {
   try {
     while (windowLayoutRuntime.pickerOpenFor === layoutId
       && windowLayoutRuntime.pickerGeneration === generation) {
-      const currentTitles = new Set((windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
-        .map((member) => member.descriptor.title));
+      const currentWindowInstanceIds = new Set((windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
+        .map((member) => member.descriptor?.windowInstanceId)
+        .filter((id) => typeof id === 'string' && /^W[0-9a-f]{16}$/i.test(id)));
       // Papers owns the authoritative candidate list and enriches each row
       // with its native icon. Sending a pre-enumerated list here caused the
       // exact same windows/icons to be enumerated a second time in Papers.
-      const picked = await host.windowCandidatePicker([...currentTitles]);
+      const picked = await host.windowCandidatePicker([...currentWindowInstanceIds]);
       if (windowLayoutDetachment.isReadOnly()) return;
       if (windowLayoutRuntime.pickerOpenFor !== layoutId
         || windowLayoutRuntime.pickerGeneration !== generation) return;
       if (picked.action === 'close' && picked.candidateId) {
         await closeWindowLayoutCandidate(layoutId, picked.candidateId);
+        continue;
+      }
+      if (picked.action === 'remove' && picked.candidateId) {
+        await handleWindowLayoutRemoveCandidate(layoutId, picked.candidateId);
         continue;
       }
       if (picked.action === 'direct-pick') {
@@ -1451,6 +1466,25 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     pick,
     { activateOnMutation: !removing },
   );
+  return applied.outcome === 'committed' && windowLayoutPickApplyOutcome(applied).mutated;
+}
+
+async function handleWindowLayoutRemoveCandidate(layoutId, candidateId) {
+  if (windowLayoutDetachment.isReadOnly()) return false;
+  const row = (windowLayoutRuntime.pickerCandidates ?? []).find((candidate) => candidate.id === candidateId);
+  const picked = await bindWindowLayoutPickerCandidate(candidateId, row);
+  if (windowLayoutDetachment.isReadOnly()) return false;
+  const bound = picked.bound;
+  if (bound?.outcome !== 'success') {
+    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(bound?.outcome));
+    return false;
+  }
+  // This explicit remove intent is not a toggle. Re-read after the host await;
+  // if the exact W was removed on another surface, this becomes a no-op.
+  const currentLayout = windowLayoutFromState(layoutId);
+  const pick = windowLayoutRemoveForBoundCandidate(currentLayout?.arrangement?.members ?? [], bound);
+  if (!pick || pick.removes.length === 0) return false;
+  const applied = await applyWindowLayoutPickSet(layoutId, pick, { activateOnMutation: false });
   return applied.outcome === 'committed' && windowLayoutPickApplyOutcome(applied).mutated;
 }
 
@@ -2382,7 +2416,7 @@ function isWindowLifecycleDestroyEvent(event) {
 }
 
 async function processTrackingLifecycleEvent(event) {
-  if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
+  if (!isCurrentDocumentWriter()) return;
   if (!event || typeof event.windowInstanceId !== 'string') return;
   trackingEventInFlight = true;
   try {
@@ -2393,26 +2427,10 @@ async function processTrackingLifecycleEvent(event) {
       await retireClosedWindowEverywhere({ version: 1, windowInstanceId: event.windowInstanceId });
       return;
     }
-    const trackingLayout = (state.windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true);
-    if (!trackingLayout) return;
-    const existing = (trackingLayout.arrangement?.members ?? []).some((member) => member.descriptor?.windowInstanceId === event.windowInstanceId);
-    if (existing || trackingLayout.tracking?.suppressedInstanceIds?.includes(event.windowInstanceId)) return;
-    const resolved = await host.resolveWindowInstance(event.windowInstanceId);
-    if (resolved?.outcome !== 'success' || !resolved.capability || !resolved.descriptor) return;
-    const observed = await host.observeWindowCapability(resolved.capability);
-    if (observed?.outcome !== 'success') return;
-    const member = {
-      id: crypto.randomUUID(),
-      descriptor: resolved.descriptor,
-      bounds: observed.observation?.bounds ?? event.observation?.bounds ?? null,
-      state: observed.observation?.state === 'minimized' ? 'minimized' : 'normal',
-    };
-    const next = addWindowLayoutMember(state, trackingLayout.id, member);
-    windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(trackingLayout.id, member.id), resolved.capability);
-    if (await store.commit(next)) {
-      saveWorkspaceView();
-      noteWindowLayoutCommit(trackingLayout.id);
-      await windowLayoutRecording.ensureRecording(trackingLayout.id);
+    for (const layoutId of (state.windowLayouts ?? [])
+      .filter((layout) => layout.tracking?.enabled === true)
+      .map((layout) => layout.id)) {
+      await windowLayoutAutoTracker.addVisibleInstance(layoutId, event.windowInstanceId);
     }
   } finally {
     trackingEventInFlight = false;
@@ -3110,7 +3128,9 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
 }
 
 async function reconcileTrackingBaseline() {
+  if (!isCurrentDocumentWriter()) return;
   const response = await host.windowLifecycleSnapshot?.().catch(() => null);
+  if (!isCurrentDocumentWriter()) return;
   const snapshot = response?.snapshot;
   if (!snapshot || snapshot.complete !== true || !Array.isArray(snapshot.windows)) return;
   const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId).filter((id) => typeof id === 'string'));
@@ -3165,55 +3185,53 @@ async function reconcileTrackingBaseline() {
 const TRACKING_LIFECYCLE_POLL_MS = 2000;
 let trackingLifecyclePollTimer = null;
 let trackingLifecyclePollInFlight = false;
-let trackingLifecycleKnownInstances = null;
+let trackingWriterEpoch = 0;
+const trackingLayoutEpochs = new Map();
+
+function trackingOperationToken(layoutId) {
+  return `${trackingWriterEpoch}:${layoutId === null ? '' : trackingLayoutEpochs.get(layoutId) ?? 0}`;
+}
+
+const windowLayoutAutoTracker = createWindowLayoutAutoTracker({
+  getState: () => state,
+  isWriter: isCurrentDocumentWriter,
+  isReadOnly: () => windowLayoutDetachment.isReadOnly(),
+  getOperationToken: trackingOperationToken,
+  readSnapshot: () => host.windowLifecycleSnapshot?.(),
+  resolveWindowInstance: (windowInstanceId) => host.resolveWindowInstance(windowInstanceId),
+  observeWindowCapability: (capability) => host.observeWindowCapability(capability),
+  addMember: addWindowLayoutMember,
+  commitState: (next) => store.commit(next),
+  cacheCapability: (layoutId, memberId, capability) => {
+    windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(layoutId, memberId), capability);
+  },
+  afterCommit: async (layoutId) => {
+    saveWorkspaceView();
+    noteWindowLayoutCommit(layoutId);
+    await windowLayoutRecording.ensureRecording(layoutId);
+  },
+});
 
 async function pollTrackingLifecycleSnapshot() {
-  if (trackingLifecyclePollInFlight || windowLayoutDetachment.isReadOnly()
-    || !hasDocumentWriteAuthority()) return;
+  if (trackingLifecyclePollInFlight || !isCurrentDocumentWriter()) return;
   trackingLifecyclePollInFlight = true;
   try {
-    const response = await host.windowLifecycleSnapshot?.().catch(() => null);
-    const snapshot = response?.snapshot;
-    if (!snapshot || !Array.isArray(snapshot.windows)) return;
-    // A truncated snapshot still proves each included identity is present.
-    // This path only adds exact positive sightings; it never infers closes
-    // from omitted identities (the complete startup baseline owns that).
-    const current = new Set(snapshot.windows
-      .map((entry) => entry?.windowInstanceId)
-      .filter((id) => typeof id === 'string' && /^W[0-9a-f]{16}$/i.test(id)));
-    if (trackingLifecycleKnownInstances === null) {
-      trackingLifecycleKnownInstances = current;
-      // Populate only identities the completed one-shot baseline did not see.
-      // This covers a window opened during the baseline without repeating work
-      // for every already tracked window.
-      const trackingLayout = (state.windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true);
-      const knownMembers = new Set((trackingLayout?.arrangement?.members ?? [])
-        .map((member) => member.descriptor?.windowInstanceId)
-        .filter((id) => typeof id === 'string'));
-      for (const windowInstanceId of current) {
-        if (knownMembers.has(windowInstanceId)) continue;
-        await processTrackingLifecycleEvent({ kind: 'create', windowInstanceId });
-      }
-      return;
-    }
-    const newlyVisible = [...current].filter((id) => !trackingLifecycleKnownInstances.has(id));
-    trackingLifecycleKnownInstances = current;
-    for (const windowInstanceId of newlyVisible) {
-      await processTrackingLifecycleEvent({ kind: 'create', windowInstanceId });
-    }
+    // Every identity in even an incomplete snapshot is positive evidence.
+    // The tracker derives work from live-visible minus current members each
+    // time, so transient resolution failures are retried on the next poll.
+    await windowLayoutAutoTracker.refresh();
   } finally {
     trackingLifecyclePollInFlight = false;
   }
 }
 
 function scheduleTrackingLifecyclePoll() {
-  if (trackingLifecyclePollTimer !== null) return;
+  if (trackingLifecyclePollTimer !== null || !isCurrentDocumentWriter()
+    || !(state.windowLayouts ?? []).some((layout) => layout.tracking?.enabled === true)) return;
   const tick = async () => {
     trackingLifecyclePollTimer = null;
-    if (windowLayoutDetachment.isStopped() || windowLayoutDetachment.isReadOnly()
-      || !hasDocumentWriteAuthority()
+    if (windowLayoutDetachment.isStopped() || !isCurrentDocumentWriter()
       || !(state.windowLayouts ?? []).some((layout) => layout.tracking?.enabled === true)) {
-      trackingLifecycleKnownInstances = null;
       return;
     }
     try {
@@ -3221,10 +3239,18 @@ function scheduleTrackingLifecyclePoll() {
     } catch (error) {
       console.warn('[AsYouGo] window lifecycle snapshot failed', error);
     } finally {
-      trackingLifecyclePollTimer = window.setTimeout(tick, TRACKING_LIFECYCLE_POLL_MS);
+      if (isCurrentDocumentWriter()
+        && (state.windowLayouts ?? []).some((layout) => layout.tracking?.enabled === true)) {
+        trackingLifecyclePollTimer = window.setTimeout(tick, TRACKING_LIFECYCLE_POLL_MS);
+      }
     }
   };
   trackingLifecyclePollTimer = window.setTimeout(tick, TRACKING_LIFECYCLE_POLL_MS);
+}
+
+function stopTrackingLifecyclePoll() {
+  if (trackingLifecyclePollTimer !== null) window.clearTimeout(trackingLifecyclePollTimer);
+  trackingLifecyclePollTimer = null;
 }
 
 async function ensureStartupWindowLayoutWidget() {
@@ -3246,44 +3272,8 @@ async function ensureStartupWindowLayoutWidget() {
 }
 
 async function populateTrackingLayout(layoutId) {
-  const layout = windowLayoutFromState(layoutId);
-  if (!layout || layout.tracking?.enabled !== true) return;
-  const existingIds = new Set((layout.arrangement?.members ?? [])
-    .map((member) => member.descriptor?.windowInstanceId)
-    .filter((value) => typeof value === 'string'));
-  const suppressed = new Set(layout.tracking?.suppressedInstanceIds ?? []);
-  const listed = await host.listWindowCandidates();
-  if (listed.outcome !== 'success') {
-    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(listed.outcome));
-    return;
-  }
-  let next = state;
-  let added = 0;
-  for (const candidate of listed.candidates ?? []) {
-    const bound = await host.bindWindowCandidate(candidate.id);
-    if (bound.outcome !== 'success') continue;
-    const instanceId = bound.descriptor?.windowInstanceId;
-    if (typeof instanceId !== 'string' || existingIds.has(instanceId) || suppressed.has(instanceId)) continue;
-    const observed = await host.observeWindowCapability(bound.capability);
-    if (observed.outcome !== 'success') continue;
-    const member = {
-      id: crypto.randomUUID(),
-      descriptor: bound.descriptor,
-      bounds: observed.observation?.bounds ?? null,
-      state: observed.observation?.state === 'minimized' ? 'minimized' : 'normal',
-    };
-    next = addWindowLayoutMember(next, layoutId, member);
-    existingIds.add(instanceId);
-    windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(layoutId, member.id), bound.capability);
-    added += 1;
-  }
-  if (added === 0) return;
-  const persisted = await store.commit(next);
-  if (persisted) {
-    saveWorkspaceView();
-    noteWindowLayoutCommit(layoutId);
-    await windowLayoutRecording.ensureRecording(layoutId);
-  }
+  const result = await windowLayoutAutoTracker.refresh(layoutId);
+  if (result.outcome === 'unavailable') setWindowLayoutStatus(layoutId, 'Window list unavailable');
 }
 
 async function handleWindowLayoutTrackingToggle(layoutId) {
@@ -3291,6 +3281,7 @@ async function handleWindowLayoutTrackingToggle(layoutId) {
   const layout = windowLayoutFromState(layoutId);
   if (!layout) return false;
   const nextEnabled = layout.tracking?.enabled !== true;
+  trackingLayoutEpochs.set(layoutId, (trackingLayoutEpochs.get(layoutId) ?? 0) + 1);
   const next = setWindowLayoutTracking(state, layoutId, nextEnabled);
   const persisted = await store.commit(next);
   if (!persisted) return false;
@@ -3300,7 +3291,6 @@ async function handleWindowLayoutTrackingToggle(layoutId) {
   // additions and deliberately keeps its current members.
   if (nextEnabled) {
     void windowLayoutRecording.ensureRecording(layoutId);
-    trackingLifecycleKnownInstances = null;
     void populateTrackingLayout(layoutId).finally(() => scheduleTrackingLifecyclePoll());
   }
   return true;
@@ -6867,12 +6857,18 @@ function bootstrapWindowLayoutWidget() {
         // The chooser stays open while searching/selecting. Recompute its
         // presentation state after every authoritative command acknowledgement.
         // Papers builds the authoritative icon-enriched candidate set once.
-        const currentTitles = new Set((widgetState.snapshot.members ?? [])
-          .map((member) => member.descriptor.title));
-        const picked = await host.windowCandidatePicker([...currentTitles]);
+        const currentWindowInstanceIds = new Set((widgetState.snapshot.members ?? [])
+          .map((member) => member.descriptor?.windowInstanceId)
+          .filter((id) => typeof id === 'string' && /^W[0-9a-f]{16}$/i.test(id)));
+        const picked = await host.windowCandidatePicker([...currentWindowInstanceIds]);
         if (!ownsPicker()) return;
         if (picked.action === 'close' && picked.candidateId) {
           await closeWindowLayoutCandidate(layoutId, picked.candidateId);
+          if (!ownsPicker()) return;
+          continue;
+        }
+        if (picked.action === 'remove' && picked.candidateId) {
+          await handleWidgetListCandidate(picked.candidateId, 'remove');
           if (!ownsPicker()) return;
           continue;
         }
@@ -6893,9 +6889,10 @@ function bootstrapWindowLayoutWidget() {
   }
 
   function windowLayoutWidgetPickerMarkup(candidates) {
-    const currentTitles = new Set((widgetState.snapshot.members ?? []).map((member) => member.descriptor.title));
     const rows = candidates.map((candidate) => {
-      const isCurrent = currentTitles.has(candidate.title);
+      const isCurrent = typeof candidate.windowInstanceId === 'string'
+        && (widgetState.snapshot.members ?? []).some((member) =>
+          member.descriptor?.windowInstanceId === candidate.windowInstanceId);
       return `<button class="window-layout-pick-candidate${isCurrent ? ' current-member' : ''}" data-wl-pick-candidate="${escapeHtml(candidate.id)}" type="button" title="${escapeHtml(candidate.title)}">
         ${candidate.icon
           ? `<img class="window-layout-pick-icon" src="${escapeHtml(candidate.icon)}" alt="">`
@@ -6930,7 +6927,7 @@ function bootstrapWindowLayoutWidget() {
     return wasOpen ? host.windowCandidatePickerClose().catch(() => undefined) : Promise.resolve();
   }
 
-  async function handleWidgetListCandidate(candidateId) {
+  async function handleWidgetListCandidate(candidateId, intent = 'toggle') {
     const picked = await bindWindowLayoutPickerCandidate(candidateId, null);
     const bound = picked.bound;
     if (bound.outcome !== 'success') {
@@ -6940,15 +6937,18 @@ function bootstrapWindowLayoutWidget() {
     // Candidate current-state is presentation-only: it has no persisted
     // executable fingerprint. After bind, exact descriptor identity decides
     // whether this candidate is an add or a removal.
-    const pick = windowLayoutPickForBoundCandidate(
-      widgetState.snapshot.members ?? [],
-      bound,
-      picked.row ?? bound.candidate ?? null,
-    );
+    const pick = intent === 'remove'
+      ? windowLayoutRemoveForBoundCandidate(widgetState.snapshot.members ?? [], bound)
+      : windowLayoutPickForBoundCandidate(
+        widgetState.snapshot.members ?? [],
+        bound,
+        picked.row ?? bound.candidate ?? null,
+      );
     if (!pick) {
       setWindowLayoutStatus(layoutId, 'Pick failed');
       return false;
     }
+    if (intent === 'remove' && pick.removes.length === 0) return false;
     const command = { kind: 'picker-commit', pick };
     let acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 30000 });
     if (acknowledgement?.type === 'stale') {
@@ -7429,6 +7429,7 @@ if (WIDGET_SURFACE) {
       onHydrationFailed: (stage, code, revision) => visualObservability.hydrationFailed(stage, code, revision),
       invalidatePendingSaves: () => store.invalidatePendingSaves(),
       onRoleChange: (role) => {
+        trackingWriterEpoch += 1;
         conflictPanel.syncToRole(role, elements.explorer);
         // On takeover, hand every open widget an authoritative snapshot at once
         // instead of leaving it on the dead writer's last revision until it
@@ -7437,10 +7438,11 @@ if (WIDGET_SURFACE) {
           for (const layout of state.windowLayouts ?? []) {
             windowLayoutWidgetChannelWorkspace.broadcast(layout.id);
           }
-          trackingLifecycleKnownInstances = null;
           void reconcileTrackingBaseline().finally(() => scheduleTrackingLifecyclePoll());
           void ensureStartupWindowLayoutWidget();
           scheduleClosedWindowReconcile();
+        } else {
+          stopTrackingLifecyclePoll();
         }
         render();
       },
@@ -7472,7 +7474,6 @@ if (WIDGET_SURFACE) {
       // helper is unavailable or still restarting.
       try {
         await reconcileTrackingBaseline();
-        trackingLifecycleKnownInstances = null;
         scheduleTrackingLifecyclePoll();
         await ensureStartupWindowLayoutWidget();
         scheduleClosedWindowReconcile();
