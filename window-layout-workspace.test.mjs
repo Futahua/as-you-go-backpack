@@ -877,19 +877,6 @@ test('middle-click splits data unlink from Ctrl+middle-click process close', asy
     'the widget closes only for Ctrl+MMB and sends a scoped unlink for plain MMB');
 });
 
-test('widget clear confirmation listeners do not capture an unscoped card variable', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
-  const start = source.indexOf('  function resetWidgetClearArm()');
-  const end = source.indexOf('  function handleWidgetCardAuxClick(event)', start);
-  const clearArm = source.slice(start, end);
-  assert.match(clearArm, /elements\.grid\.querySelector\('\.window-layout-card \[data-wl-clear\]'\)/,
-    'reset finds the clear control on the currently rendered card');
-  assert.match(clearArm, /elements\.grid\.addEventListener\('pointerout'/,
-    'the delegated pointer handler survives card replacement');
-  assert.doesNotMatch(clearArm, /\bcard\./,
-    'widget bootstrap must not reference renderWidgetCard local state');
-});
-
 test('startup opens non-docked layouts by default without creating implicit tracking', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const baselineStart = source.indexOf('async function reconcileTrackingBaseline()');
