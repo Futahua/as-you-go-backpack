@@ -44,6 +44,14 @@ function layout(members, cardSize = null) {
 
 const BASE = layout([['m1', 'Alpha', 'normal'], ['m2', 'Beta', 'normal']]);
 
+test('compact widget shows a bootstrap card and retries a silent initial snapshot request', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  assert.match(source, /renderWidgetBootstrapCard\('Loading window layout…'\)/);
+  assert.match(source, /client\.requestSnapshot\(\);\s*armSnapshotRetry\(\);/);
+  assert.match(source, /function armSnapshotRetry\(\)[\s\S]*?createBoundedRetry\(/);
+  assert.match(source, /function renderWidgetBootstrapCard\(message\)[\s\S]*?window-layout-card--bootstrap/);
+});
+
 test('identical snapshots share a render identity whatever revision carried them', () => {
   const a = windowLayoutWidgetSnapshot(BASE);
   const b = windowLayoutWidgetSnapshot(BASE);
