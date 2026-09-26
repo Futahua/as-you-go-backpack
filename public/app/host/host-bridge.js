@@ -260,7 +260,8 @@ export function createHostBridge(window) {
     resolveDroppedTargets: (files) =>
       request('papers:project:resolve-dropped-targets', { files }),
     copyText: (text) => request('papers:project:copy-text', { text }),
-    windowCandidates: () => request('papers:project:window-candidates'),
+    windowCandidates: ({ includeNativeIcons } = {}) => request('papers:project:window-candidates',
+      typeof includeNativeIcons === 'boolean' ? { includeNativeIcons } : {}),
     windowLifecycleSnapshot: () => request('papers:project:window-lifecycle-snapshot'),
     onWindowLifecycleEvent: (callback) => {
       lifecycleListeners.add(callback);
@@ -288,6 +289,8 @@ export function createHostBridge(window) {
       request('papers:project:window-restore-capability', { capability }),
     closeWindowCapability: (capability) =>
       request('papers:project:window-close-capability', { capability }),
+    endProcessWindowCapability: (capability) =>
+      request('papers:project:window-end-process-capability', { capability }),
     applyWindowCapability: (capability, bounds) =>
       request('papers:project:window-apply-capability', { capability, bounds }),
     resolveWindowDescriptor: (descriptor) =>

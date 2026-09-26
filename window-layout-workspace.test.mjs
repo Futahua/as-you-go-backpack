@@ -10,9 +10,11 @@ import {
   createWindowLayoutPickApplier,
   createWindowLayoutRetirementWriter,
   windowLayoutPickApplyOutcome,
+  windowLayoutCandidateIsMember,
   windowLayoutPickForBoundCandidate,
 } from './public/app/window-layout-workspace.js';
 import { windowLayoutMemberKey } from './public/app/window-layout-runtime.js';
+import { endExactWindowCandidateProcess } from './public/app/window-layout-process-end.js';
 import { windowLayoutWidgetCommittedStatus } from './public/app/window-layout-widget-channel.js';
 import { createWorkspaceStore } from './public/app/workspace-store.js';
 import {
@@ -20,6 +22,14 @@ import {
   removeWindowLayoutMember,
   normalizeState,
 } from './public/workspace-model-20260730b.js';
+
+test('Auto membership keeps one card per exact window instance across reloads', () => {
+  const descriptor = { version: 1, title: 'Notepad', executableFingerprint: 'a'.repeat(64), windowInstanceId: 'W1234567890abcdef' };
+  const member = (id) => ({ id, descriptor, bounds: null, state: 'normal' });
+  const state = normalizeState({ schemaVersion: 1, windowLayouts: [{ id: 'L1', name: 'L1', arrangement: { version: 2, members: [member('first'), member('duplicate')] } }] });
+  assert.deepEqual(state.windowLayouts[0].arrangement.members.map((entry) => entry.id), ['first']);
+  assert.equal(addWindowLayoutMember(state, 'L1', member('new-id')), state);
+});
 
 function makeState(layouts) {
   return { windowLayouts: layouts };
@@ -161,6 +171,232 @@ test('an exact window instance distinguishes same-title siblings for add/remove 
   );
   assert.equal(removingFirst.adds.length, 0);
   assert.deepEqual(removingFirst.removes, [{ descriptor: first }]);
+});
+
+test('picker presentation uses exact window identity and fails closed without identity', () => {
+  const exact = descriptorInstance('Old VS Code title', 'W0000000000000001');
+  const members = [{ id: 'm-vscode', descriptor: exact, state: 'normal', bounds: null }];
+
+  assert.equal(windowLayoutCandidateIsMember(members, {
+    title: 'backpackProject - Visual Studio Code',
+    windowInstanceId: exact.windowInstanceId,
+  }), true, 'a retitled candidate for the same window is still shown as a member');
+  assert.equal(windowLayoutCandidateIsMember(members, {
+    title: exact.title,
+    windowInstanceId: 'W0000000000000002',
+  }), false, 'a distinct same-title sibling remains an add');
+  assert.equal(windowLayoutCandidateIsMember(members, { title: exact.title }), false,
+    'a title match without a valid instance id cannot claim removal');
+  assert.equal(windowLayoutCandidateIsMember(members, {
+    title: exact.title,
+    windowInstanceId: 'not-a-window-id',
+  }), false, 'malformed identity cannot claim removal');
+});
+
+test('mixed WID and legacy identities use matching fingerprints as ambiguity and distinct fingerprints as separation', () => {
+  const saved = descriptorInstance('Notepad', 'W0000000000000001');
+  const members = [{ id: 'm-notepad', descriptor: saved, state: 'normal', bounds: null }];
+  const legacyBound = {
+    descriptor: descriptorOn(saved.title, saved.executableFingerprint),
+    capability: capabilityFor(saved.title),
+  };
+
+  assert.equal(windowLayoutPickForBoundCandidate(members, legacyBound), null,
+    'the legacy pair cannot identify or remove a member that has exact identity');
+  const ambiguousPair = windowLayoutPickForBoundCandidate([
+    { id: 'm-legacy', descriptor: descriptorOn(saved.title, saved.executableFingerprint) },
+    ...members,
+  ], legacyBound);
+  assert.equal(ambiguousPair, null,
+    'a layout mixing legacy and exact identities refuses the uncertain pair');
+  assert.equal(windowLayoutPickForBoundCandidate(members, {
+    descriptor: descriptorOn('Untitled - Notepad', saved.executableFingerprint),
+    capability: capabilityFor('Notepad'),
+  }), null, 'a title change cannot make the same executable look like a safe legacy add');
+  const unrelatedLegacy = windowLayoutPickForBoundCandidate(members, {
+    descriptor: descriptorOn('Calculator', FINGERPRINT_B),
+    capability: capabilityFor('Calculator'),
+  });
+  assert.equal(unrelatedLegacy.adds.length, 1,
+    'a distinct valid process-image-path fingerprint allows an unrelated legacy add');
+  assert.equal(unrelatedLegacy.removes.length, 0);
+
+  const reverseDirection = windowLayoutPickForBoundCandidate([
+    { id: 'm-legacy-calculator', descriptor: descriptorOn('Calculator', FINGERPRINT_B) },
+  ], {
+    descriptor: descriptorInstance('Untitled - Notepad', 'W0000000000000002', FINGERPRINT_A),
+    capability: capabilityFor('Notepad'),
+  });
+  assert.equal(reverseDirection.adds.length, 1,
+    'a WID candidate with a distinct valid process-image-path fingerprint can be added');
+});
+
+test('mixed WID and legacy identities refuse when either executable fingerprint is unavailable', () => {
+  const widMember = descriptorInstance('Notepad', 'W0000000000000001', FINGERPRINT_A);
+  const legacyMissingFingerprint = { version: 1, title: 'Unrelated app' };
+  assert.equal(windowLayoutPickForBoundCandidate([
+    { id: 'm-legacy', descriptor: legacyMissingFingerprint },
+  ], {
+    descriptor: widMember,
+    capability: capabilityFor('Notepad'),
+  }), null, 'missing legacy fingerprint cannot prove a distinct executable');
+
+  assert.equal(windowLayoutPickForBoundCandidate([
+    { id: 'm-legacy', descriptor: descriptorOn('Notepad', FINGERPRINT_A) },
+  ], {
+    descriptor: { version: 1, title: 'Unrelated app', windowInstanceId: 'W0000000000000002' },
+    capability: capabilityFor('Unrelated app'),
+  }), null, 'missing WID-side fingerprint cannot prove a mixed-generation add safe');
+
+  assert.equal(windowLayoutPickForBoundCandidate([
+    { id: 'm-wid', descriptor: widMember },
+  ], {
+    descriptor: descriptorOn('Unrelated app', 'invalid-fingerprint'),
+    capability: capabilityFor('Unrelated app'),
+  }), null, 'malformed legacy fingerprint cannot downgrade into an add');
+});
+
+test('a WID candidate cannot duplicate a matching legacy member after its title changes', () => {
+  const legacyMember = descriptorOn('Old - VS Code', FINGERPRINT_A);
+  const candidateWID = 'W0000000000000001';
+  const pick = windowLayoutPickForBoundCandidate([
+    { id: 'm-legacy-vscode', descriptor: legacyMember, state: 'normal', bounds: null },
+  ], {
+    descriptor: descriptorInstance('backpackProject - Visual Studio Code', candidateWID, FINGERPRINT_A),
+    capability: capabilityFor('Visual Studio Code'),
+  }, {
+    title: 'backpackProject - Visual Studio Code',
+    windowInstanceId: candidateWID,
+  });
+  assert.equal(pick, null,
+    'the shared executable fingerprint makes the retitled cross-generation identity ambiguous');
+});
+
+test('the pick applier also refuses a legacy removal against an exact-identity member', async () => {
+  const saved = descriptorInstance('Notepad', 'W0000000000000001');
+  const h = makeHarness();
+  h.getState().windowLayouts[0].arrangement.members = [
+    { id: 'm-notepad', descriptor: saved, state: 'normal', bounds: null },
+  ];
+  const result = await h.pickApplier.apply('L1', {
+    outcome: 'committed',
+    adds: [],
+    removes: [{ descriptor: descriptorOn(saved.title, saved.executableFingerprint) }],
+  });
+  assert.equal(result.removed, 0);
+  assert.equal(result.unmatched, 0);
+  assert.equal(result.ambiguous, 1);
+  assert.equal(h.getState().windowLayouts[0].arrangement.members[0].id, 'm-notepad');
+  assert.equal(h.countCommits(), 0);
+});
+
+test('picker refuses malformed or stale bound identity before it can add or remove', () => {
+  const first = descriptorInstance('Notepad', 'W0000000000000001');
+  const second = descriptorInstance('Notepad', 'W0000000000000002');
+  const members = [{ id: 'm-notepad', descriptor: first, state: 'normal', bounds: null }];
+  const capability = capabilityFor('Notepad');
+
+  assert.equal(windowLayoutPickForBoundCandidate(members, {
+    descriptor: { ...descriptorOn(first.title, first.executableFingerprint), windowInstanceId: 'invalid' },
+    capability,
+  }), null, 'a malformed identifier is not downgraded to legacy matching');
+  assert.equal(windowLayoutPickForBoundCandidate(members, {
+    descriptor: second,
+    capability,
+  }, { title: first.title, windowInstanceId: first.windowInstanceId }), null,
+  'binding a different instance than the listed row is rejected');
+  assert.equal(windowLayoutPickForBoundCandidate(members, {
+    descriptor: descriptorOn(first.title, first.executableFingerprint),
+    capability,
+  }, { title: first.title, windowInstanceId: first.windowInstanceId }), null,
+  'a WID-qualified row cannot be rebound as a legacy descriptor');
+  assert.equal(windowLayoutPickForBoundCandidate([
+    { id: 'm-legacy', descriptor: descriptorOn('Unrelated app', FINGERPRINT_B) },
+  ], {
+    descriptor: descriptorInstance('Different app', 'W0000000000000003', FINGERPRINT_A),
+    capability,
+  }, { title: 'Different app', windowInstanceId: 'W0000000000000003' }).adds.length, 1,
+  'a WID candidate with a distinct valid fingerprint can be added beside a legacy member');
+});
+
+test('legacy add rebased after observation refuses newly installed exact-identity members', async () => {
+  let harness;
+  harness = makeHarness({
+    observe: async () => {
+      harness.getState().windowLayouts[0].arrangement.members.push({
+        id: 'm-new-exact',
+        descriptor: descriptorInstance('Notepad', 'W0000000000000001'),
+        state: 'normal',
+        bounds: null,
+      });
+      return { outcome: 'success', observation: { bounds: null, state: 'normal' } };
+    },
+  });
+  const result = await harness.pickApplier.apply('L1', {
+    outcome: 'committed',
+    adds: [{ descriptor: descriptorOn('Notepad', FINGERPRINT_A), capability: capabilityFor('Notepad') }],
+    removes: [],
+  });
+  assert.equal(result.added, 0);
+  assert.equal(result.failures, 1);
+  assert.equal(harness.getState().windowLayouts[0].arrangement.members.length, 3,
+    'only the newer exact-identity member is present; no legacy duplicate was appended');
+  assert.equal(harness.countCommits(), 0);
+});
+
+test('WID add rebased after observation refuses a newly installed same-fingerprint legacy member', async () => {
+  let harness;
+  harness = makeHarness({
+    observe: async () => {
+      harness.getState().windowLayouts[0].arrangement.members.push({
+        id: 'm-new-legacy',
+        descriptor: descriptorOn('Retitled Paint', FINGERPRINT_A),
+        state: 'normal',
+        bounds: null,
+      });
+      return { outcome: 'success', observation: { bounds: null, state: 'normal' } };
+    },
+  });
+  harness.getState().windowLayouts[0].arrangement.members = [
+    { id: 'm-existing-wid', descriptor: descriptorInstance('Other WID member', 'W0000000000000002', FINGERPRINT_A), state: 'normal', bounds: null },
+  ];
+  const result = await harness.pickApplier.apply('L1', {
+    outcome: 'committed',
+    adds: [{
+      descriptor: descriptorInstance('Paint', 'W0000000000000001'),
+      capability: capabilityFor('Paint'),
+    }],
+    removes: [],
+  });
+  assert.equal(result.added, 0);
+  assert.equal(result.failures, 1);
+  assert.equal(harness.getState().windowLayouts[0].arrangement.members.length, 2,
+    'the rebased WID member and newly installed legacy member remain; no duplicate was appended');
+  assert.equal(harness.countCommits(), 0);
+});
+
+test('duplicate exact identities show as current and the commit refuses ambiguous removal', async () => {
+  const instance = descriptorInstance('Notepad', 'W0000000000000001');
+  const candidate = { title: 'Retitled Notepad', windowInstanceId: instance.windowInstanceId };
+  assert.equal(windowLayoutCandidateIsMember([
+    { id: 'm-first', descriptor: instance },
+    { id: 'm-second', descriptor: instance },
+  ], candidate), true, 'the exact window is present, even if corrupted state duplicated its identity');
+
+  const harness = makeHarness();
+  harness.getState().windowLayouts[0].arrangement.members = [
+    { id: 'm-first', descriptor: instance, state: 'normal', bounds: null },
+    { id: 'm-second', descriptor: instance, state: 'normal', bounds: null },
+  ];
+  const result = await harness.pickApplier.apply('L1', {
+    outcome: 'committed',
+    adds: [],
+    removes: [{ descriptor: instance }],
+  });
+  assert.equal(result.ambiguous, 1);
+  assert.equal(result.removed, 0);
+  assert.equal(harness.getState().windowLayouts[0].arrangement.members.length, 2,
+    'an ambiguous exact-identity match cannot delete either member');
 });
 
 test('an instance-qualified removal removes only that sibling when title and executable are identical', async () => {
@@ -805,11 +1041,22 @@ test('bound list-pick identity treats same title on another executable as an add
 });
 test('attached and detached list picks use bound descriptor identity and the shared durable writer', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const attachedPickerStart = source.indexOf('async function openWindowLayoutPicker(layoutId)');
+  const attachedPickerEnd = source.indexOf('/** A tracking lifecycle refresh', attachedPickerStart);
+  const attachedPicker = source.slice(attachedPickerStart, attachedPickerEnd);
+  assert.match(attachedPicker, /windowLayoutCandidateIsMember\(members, candidate\)/);
+  assert.doesNotMatch(attachedPicker, /currentTitles|currentTitles\.has\(candidate\.title\)/,
+    'attached row status does not use mutable display titles');
+
   const attachedStart = source.indexOf('async function handleWindowLayoutPickCandidate(layoutId, candidateId)');
   const attachedEnd = source.indexOf('/** 019B: bounded concurrent group scheduling.', attachedStart);
   const attached = source.slice(attachedStart, attachedEnd);
   assert.match(attached, /windowLayoutPickForBoundCandidate\(/);
   assert.match(attached, /await applyWindowLayoutPickSet\(/);
+  assert.match(attached, /if \(!pick\) \{\s*setWindowLayoutStatus\(layoutId, windowLayoutHasValidInstanceId\(bound\.descriptor\)[\s\S]*?return false;/,
+    'an unavailable or changed identity reports no mutation before the writer can run');
+  assert.ok(attached.indexOf('if (!pick)') < attached.indexOf('await applyWindowLayoutPickSet('),
+    'the attached picker exits before applying an unsafe toggle');
   assert.doesNotMatch(attached, /store\.commit\(|saveWorkspaceView\(|descriptor\.title\s*===\s*row\.title/,
     'attached list picking has no title-only or side-channel persistence path');
 
@@ -817,8 +1064,23 @@ test('attached and detached list picks use bound descriptor identity and the sha
   const widgetEnd = source.indexOf('  async function beginWidgetDirectPick()', widgetStart);
   const widget = source.slice(widgetStart, widgetEnd);
   assert.match(widget, /windowLayoutPickForBoundCandidate\(/);
+  assert.match(widget, /if \(!pick\) \{\s*setWindowLayoutStatus\(layoutId, windowLayoutHasValidInstanceId\(bound\.descriptor\)[\s\S]*?return false;/,
+    'the detached picker reports identity failure without sending a mutation');
+  assert.ok(widget.indexOf('if (!pick)') < widget.indexOf("const command = { kind: 'picker-commit', pick }"),
+    'the detached picker exits before sending an unsafe toggle');
   assert.doesNotMatch(widget, /selectedOverride|descriptor\.title\s*===\s*bound\.descriptor\.title/,
     'detached list picking decides add/remove only after binding the persisted descriptor pair');
+
+  const widgetPickerStart = source.indexOf('  async function openWidgetPicker()');
+  const widgetPickerEnd = source.indexOf('  function windowLayoutWidgetPickerMarkup(candidates)', widgetPickerStart);
+  const widgetPicker = source.slice(widgetPickerStart, widgetPickerEnd);
+  assert.match(widgetPicker, /windowLayoutCandidateIsMember\(widgetState\.snapshot\.members \?\? \[\], candidate\)/);
+  assert.doesNotMatch(widgetPicker, /currentTitles|currentTitles\.has\(candidate\.title\)/,
+    'detached row status does not use mutable display titles');
+  const widgetMarkupStart = widgetPickerEnd;
+  const widgetMarkupEnd = source.indexOf('  function closeWidgetPicker()', widgetMarkupStart);
+  assert.match(source.slice(widgetMarkupStart, widgetMarkupEnd), /windowLayoutCandidateIsMember\(/,
+    'fallback in-card picker uses the same identity rule');
 
   const commandStart = source.indexOf("    if (command.kind === 'picker-commit')");
   const commandEnd = source.indexOf("    return { ok: false, error: 'unknown command' };", commandStart);
@@ -869,12 +1131,64 @@ test('middle-click splits data unlink from Ctrl+middle-click process close', asy
   assert.match(attached, /if \(event\.ctrlKey\) \{[\s\S]*closeWindowLayoutMember\([\s\S]*\)[\s\S]*\} else \{[\s\S]*handleWindowLayoutUnlink\(/,
     'the attached card closes only for Ctrl+MMB and unlinks for plain MMB');
 
+  const memberCloseStart = source.indexOf('async function closeWindowLayoutMember(layoutId, memberId)');
+  const memberCloseEnd = source.indexOf('function closeWindowLayoutPicker()', memberCloseStart);
+  const memberClose = source.slice(memberCloseStart, memberCloseEnd);
+  assert.match(memberClose, /host\.closeWindowCapability\(capability\)/,
+    'the member Ctrl+MMB gesture closes only the selected top-level window');
+  assert.doesNotMatch(memberClose, /host\.endProcessWindowCapability\(/,
+    'member Ctrl+MMB never ends the owning process');
+
   const widgetStart = source.indexOf('  function handleWidgetCardAuxClick(event)');
   const widgetEnd = source.indexOf('  async function handleWidgetCardContextMenu(event)', widgetStart);
   const widget = source.slice(widgetStart, widgetEnd);
   assert.match(widget, /const member = event\.target\.closest\('\[data-wl-member\]'\);/);
   assert.match(widget, /if \(event\.ctrlKey\) \{[\s\S]*closeWindowLayoutMember\(layoutId, member\.dataset\.wlMember\)[\s\S]*\} else \{[\s\S]*kind: 'remove-member'/,
     'the widget closes only for Ctrl+MMB and sends a scoped unlink for plain MMB');
+});
+
+test('the all-windows picker ends only the process behind the clicked row', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function closeWindowLayoutCandidate(layoutId, candidateId, candidates)');
+  const end = source.indexOf('async function closeWindowLayoutMember', start);
+  const action = source.slice(start, end);
+  assert.match(action, /endExactWindowCandidateProcess\(/,
+    'process termination uses the exact-row-only operation');
+  assert.match(action, /bindWindowCandidate:\s*host\.bindWindowCandidate/,
+    'the clicked candidate id is bound directly');
+  assert.match(action, /endProcessWindowCapability:\s*host\.endProcessWindowCapability/,
+    'only the capability returned by that exact bind reaches process termination');
+  assert.doesNotMatch(action, /bindWindowLayoutPickerCandidate\(/,
+    'title/application fallback remains outside the process-end path');
+  assert.doesNotMatch(action, /host\.closeWindowCapability\(/,
+    'all-windows row middle-click does not accidentally close only one top-level window');
+  assert.match(action, /setWindowLayoutTransientStatus\(layoutId, 'Process ended'/);
+});
+
+test('a stale process-end row id never falls back to a unique same-title application', async () => {
+  const initiallyDisplayed = [{ id: 'stale-id', title: 'Notepad', applicationLabel: 'Notepad' }];
+  const replacementNowAvailable = [{ id: 'replacement-id', title: 'Notepad', applicationLabel: 'Notepad' }];
+  const bindCalls = [];
+  let refreshCalls = 0;
+  let endCalls = 0;
+  const result = await endExactWindowCandidateProcess({
+    candidateId: 'stale-id',
+    candidates: initiallyDisplayed,
+    bindWindowCandidate: async (id) => {
+      bindCalls.push(id);
+      return { outcome: 'missing', error: 'candidate id expired' };
+    },
+    windowCandidates: async () => {
+      refreshCalls += 1;
+      return { outcome: 'success', candidates: replacementNowAvailable };
+    },
+    endProcessWindowCapability: async () => { endCalls += 1; return { outcome: 'success' }; },
+  });
+  assert.deepEqual(bindCalls, ['stale-id'], 'the helper makes only the exact clicked-id bind');
+  assert.equal(replacementNowAvailable.length, 1, 'a unique title/application replacement exists');
+  assert.equal(refreshCalls, 0, 'stale process-end identities do not enumerate replacements');
+  assert.deepEqual(result, { outcome: 'missing', error: 'candidate id expired' });
+  assert.equal(endCalls, 0, 'a stale row id never ends the replacement process');
 });
 
 test('startup opens non-docked layouts by default without creating implicit tracking', async () => {
@@ -937,7 +1251,7 @@ test('detached picker re-entry invalidates stale chooser ownership before starti
     're-entering an apparently open chooser invalidates the old attempt');
   assert.match(widgetPicker, /const ownsPicker = \(\) => widgetPickerOpen && widgetPickerGeneration === generation;/,
     'late native replies are scoped to the current chooser attempt');
-  assert.match(widgetPicker, /const result = await host\.windowCandidates\(\);\s*if \(!ownsPicker\(\)\) return;/,
+  assert.match(widgetPicker, /const result = await host\.windowCandidates\(\{\s*includeNativeIcons:\s*false\s*\}\);\s*if \(!ownsPicker\(\)\) return;/,
     'a late enumeration result cannot mutate a retired attempt');
   assert.match(widgetPicker, /const picked = await host\.windowCandidatePicker\([\s\S]*?\);\s*if \(!ownsPicker\(\)\) return;/,
     'a late chooser result cannot mutate a retired attempt');

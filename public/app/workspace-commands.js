@@ -157,7 +157,7 @@ export function createWorkspaceCommands({
       ]);
       await store.commit(next);
       const count = next.view?.itemSets?.length ?? 0;
-      setStatus(`Grouped ${selected.length} item${selected.length === 1 ? '' : 's'} (${count} set${count === 1 ? '' : 's'}).`);
+      setStatus(`Grouped ${selected.length} item${selected.length === 1 ? '' : 's'} (${count} set${count === 1 ? '' : 's'}).`, { level: 'success' });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -209,7 +209,7 @@ export function createWorkspaceCommands({
       if (next.length === current.length) return;
       store.clearSelectedSets();
       await store.commit(setItemSets(snapshot, next));
-      setStatus(`Deleted ${setIds.length} ${setIds.length === 1 ? 'set' : 'sets'}. The items are unchanged.`);
+      setStatus(`Deleted ${setIds.length} ${setIds.length === 1 ? 'set' : 'sets'}. The items are unchanged.`, { level: 'success' });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }

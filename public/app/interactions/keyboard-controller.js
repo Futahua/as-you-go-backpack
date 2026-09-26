@@ -55,6 +55,10 @@ export function createKeyboardController({
   function mount() {
     abortController = new AbortController();
     document.addEventListener('keydown', (event) => {
+      // A picker can claim a keydown earlier on this same document. preventDefault
+      // does not stop other listeners on the target, and stopPropagation only
+      // affects later targets, so do not also route that key into the workspace.
+      if (event.defaultPrevented) return;
       // Alt+A is owned by the Papers host while this renderer is the global
       // command surface. The native accelerator opened this page and the
       // Quick Run surface is already visible; letting the same keydown reach

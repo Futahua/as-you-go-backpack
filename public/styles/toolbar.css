@@ -182,6 +182,16 @@
   animation: status-toast-in 180ms ease-out;
 }
 .status:empty { display: none; }
+.status.status-success {
+  border-color: var(--accent-border-soft);
+  background: var(--success-surface);
+  color: var(--accent-strong);
+}
+.status.status-info {
+  border-color: var(--surface-border);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+}
 .status.status-fading {
   opacity: 0;
   transform: translate(-50%, -6px);

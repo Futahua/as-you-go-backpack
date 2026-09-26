@@ -134,7 +134,7 @@ test('035: the attached card becomes a greyed placeholder while its widget is op
   // The placeholder body renders DISABLED members and one reattach lock. The call also carries the
   // "cannot confirm this window" note (null for a healthy member), so the guard asserts the disabled flag
   // rather than the exact end of the argument list.
-  assert.match(workspaceSource, /windowLayoutMemberMarkup\(candidate\.id, member, windowLayoutMemberIcon\(candidate\.id, member\.id\), true,/);
+  assert.match(workspaceSource, /windowLayoutMemberMarkup\(candidate\.id, member, windowLayoutMemberIcon\(candidate\.id, member\), true,/);
   assert.match(workspaceSource, /windowLayoutControlButton\('reattach', 'Reattach this window-layout widget', 'data-wl-reattach', candidate\.id\)/);
   assert.doesNotMatch(workspaceSource, /data-wl-detach/);
   // Ordinary workspace clicks stay inert while detached except the lock.

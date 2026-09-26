@@ -34,6 +34,7 @@ export const WINDOW_LAYOUT_CONTROL_GLYPHS = {
   detach: { path: '<path d="M8 10.5V7.5a4 4 0 0 1 8 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="6" y="10.5" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' },
   reattach: { path: '<path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="6" y="10.5" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' },
   tracking: { path: '<circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.7"/>' },
+  clear: { path: '<path d="M9 5H20v14H9L3.5 12 9 5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="m12 9 5 6m0-6-5 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>' },
 };
 
 /** The three persistent control actions (left-to-right). */
@@ -79,15 +80,11 @@ export function windowLayoutMemberMarkup(layoutId, member, icon = null, disabled
   const runningIndicator = stateClass === 'normal'
     ? `<span class="window-layout-member-state ${stateClass}" data-wl-member-state="${stateClass}" aria-hidden="true"></span>`
     : '';
-  // A member this surface cannot confirm still looks like a member, and the sentence rides where this widget
-  // can carry words: the accessible label (which is also the hover popover seam, so no duplicate native
-  // tooltip appears) and a data attribute for anything that needs to read it. The strip itself takes no text
-  // by the creator's own correction, so the visible sentence is the card's status line - see
-  // windowLayoutStatusForOutcome, which answers this same note. `note` is null for every healthy member and
-  // for every transient that is not this state, and the class only marks the one state that has words.
-  const noteText = typeof note === 'string' && note.trim() !== '' ? note.trim() : null;
-  const label = noteText === null ? escapeHtml(title) : escapeHtml(`${title} — ${noteText}`);
-  return `<button class="window-layout-member ${stateClass}${noteText === null ? '' : ' wl-member-unconfirmed'}" data-wl-member="${escapeHtml(member.id)}" data-wl-layout="${escapeHtml(layoutId)}" type="button" aria-label="${label}" aria-pressed="${stateClass === 'minimized' ? 'true' : 'false'}" aria-selected="false"${noteText === null ? '' : ` data-wl-member-note="${escapeHtml(noteText)}"`}${disabled ? ' disabled' : ''}>
+  // Warning notes are suppressed on every AYG surface, including the accessible
+  // label that also supplies the custom hover popover. Keep the member title as
+  // its accessible and hover name, with state still communicated by the button.
+  void note;
+  return `<button class="window-layout-member ${stateClass}" data-wl-member="${escapeHtml(member.id)}" data-wl-layout="${escapeHtml(layoutId)}" type="button" aria-label="${escapeHtml(title)}" aria-pressed="${stateClass === 'minimized' ? 'true' : 'false'}" aria-selected="false"${disabled ? ' disabled' : ''}>
     ${iconMarkup}
     ${runningIndicator}
   </button>`;

@@ -7,20 +7,21 @@ function fakeNode() {
   return { hidden: true };
 }
 
-function createHarness({ binMode = false, initialState = null, membershipMode = null, activeElement = null, commandSurface = false } = {}) {
+function createHarness({ binMode = false, initialState = null, membershipMode = null, activeElement = null, commandSurface = false, beforeMount = null, afterMount = null } = {}) {
   const listeners = [];
-  const documentMock = {
-    activeElement,
-    addEventListener(type, handler, options) {
-      const entry = { type, handler, options };
-      listeners.push(entry);
-      if (options?.signal) {
-        options.signal.addEventListener('abort', () => {
-          const index = listeners.indexOf(entry);
-          if (index >= 0) listeners.splice(index, 1);
-        });
-      }
-    },
+  const documentMock = new EventTarget();
+  documentMock.activeElement = activeElement;
+  const addEventListener = documentMock.addEventListener.bind(documentMock);
+  documentMock.addEventListener = (type, handler, options) => {
+    const entry = { type, handler, options };
+    listeners.push(entry);
+    if (options?.signal) {
+      options.signal.addEventListener('abort', () => {
+        const index = listeners.indexOf(entry);
+        if (index >= 0) listeners.splice(index, 1);
+      });
+    }
+    addEventListener(type, handler, options);
   };
   const elements = {
     editorLayer: fakeNode(), confirmLayer: fakeNode(), linkEditLayer: fakeNode(), promptLayer: fakeNode(),
@@ -70,8 +71,10 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     commandSurface,
     openQuickRun: (seed) => { called.quickRun += 1; called.quickRunSeeds.push(seed); return true; },
   });
+  beforeMount?.(documentMock);
   controller.mount();
-  return { controller, store, elements, commandSpies, called, listeners };
+  afterMount?.(documentMock);
+  return { controller, store, elements, commandSpies, called, listeners, document: documentMock };
 }
 
 function key(event) {
@@ -576,6 +579,47 @@ test('the two editable selectors are the shapes they claim to be', () => {
     assert.equal(TEXT_ENTRY_SELECTOR.includes(`[type="${excluded}"]`), true, `${excluded} is excluded`);
   }
   assert.equal(EDITABLE_SELECTOR, 'input, textarea, [contenteditable="true"], .set-name-editor', 'the wider guard is unchanged');
+});
+
+test('a claimed picker Delete keydown is not also dispatched as a workspace delete', () => {
+  let pickerCommits = 0;
+  let sameTargetListenerRanAfterPicker = false;
+  const h = createHarness({
+    beforeMount(document) {
+      // The picker listener is registered on the same document before the
+      // workspace controller. stopPropagation must not suppress later listeners
+      // on this target, so the controller must honor defaultPrevented itself.
+      document.addEventListener('keydown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        pickerCommits += 1;
+      });
+    },
+    afterMount(document) {
+      document.addEventListener('keydown', () => { sameTargetListenerRanAfterPicker = true; });
+    },
+  });
+  h.store.setSelection(['a']);
+  const event = new Event('keydown', { cancelable: true });
+  Object.defineProperties(event, {
+    key: { value: 'Delete' },
+    ctrlKey: { value: false },
+    shiftKey: { value: false },
+    altKey: { value: false },
+    metaKey: { value: false },
+    isComposing: { value: false },
+    keyCode: { value: 0 },
+    repeat: { value: false },
+  });
+
+  h.document.dispatchEvent(event);
+
+  assert.equal(pickerCommits, 1, 'picker owns the key once');
+  assert.equal(sameTargetListenerRanAfterPicker, true, 'stopPropagation does not stop same-document listeners');
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0);
+  assert.equal(h.called.permanentDelete, 0);
+  assert.equal(h.commandSpies['deleteSelectedSets:calls'], 0);
 });
 
 test('the global command surface does not let the host Alt+A keydown toggle Quick Run closed', () => {

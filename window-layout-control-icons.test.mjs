@@ -180,3 +180,13 @@ test('035: a placeholder member is the same compact button, marked inert (disabl
   const live = windowLayoutMemberMarkup('L1', member, 'data:icon');
   assert.ok(!live.includes(' disabled'), 'a live member is never disabled');
 });
+
+test('member warning notes stay out of accessible and hover names while title and state remain', () => {
+  const html = windowLayoutMemberMarkup('L1', {
+    id: 'm1', descriptor: { title: 'Notepad' }, state: 'normal',
+  }, null, false, 'This window could not be confirmed');
+  assert.match(html, /aria-label="Notepad"/, 'the custom hover popover and screen reader keep the title');
+  assert.match(html, /class="window-layout-member normal"/, 'the running state remains identified');
+  assert.doesNotMatch(html, /could not be confirmed|data-wl-member-note|wl-member-unconfirmed/,
+    'the warning is not rendered or exposed through hover metadata');
+});

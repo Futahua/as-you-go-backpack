@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 import { createStatusToast } from './public/app/components/status-toast.js';
 
-function harness() {
+function harness({ suppressWarnings = false } = {}) {
   const classes = new Set();
   const element = {
     textContent: '',
@@ -35,9 +36,33 @@ function harness() {
     }
     now = end;
   };
-  const toast = createStatusToast({ element, visibleMs: 100, fadeMs: 20, setTimer, clearTimer });
+  const toast = createStatusToast({ element, visibleMs: 100, fadeMs: 20, setTimer, clearTimer, suppressWarnings });
   return { element, classes, toast, advance, tasks };
 }
+
+test('the workspace warning policy hides warning-level toasts but preserves validation and success feedback', () => {
+  const h = harness({ suppressWarnings: true });
+  h.toast.show('Native operation failed');
+  assert.equal(h.element.textContent, '', 'unclassified status messages use the warning level and are suppressed');
+  assert.equal(h.tasks.size, 0, 'a suppressed warning schedules no delayed UI work');
+  h.toast.show('A required field is missing.', { level: 'validation' });
+  assert.equal(h.element.textContent, 'A required field is missing.');
+  h.toast.show('Saved successfully.', { level: 'success' });
+  assert.equal(h.element.textContent, 'Saved successfully.');
+  h.toast.show('Enter confirms.', { persistent: true, level: 'info' });
+  assert.equal(h.element.textContent, 'Enter confirms.');
+  assert.equal(h.tasks.size, 0, 'persistent interaction guidance still remains until cleared');
+});
+
+test('workspace enables toast warning suppression while its validation live regions remain separate', async () => {
+  const workspace = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const dialogs = await readFile(new URL('./public/styles/dialogs.css', import.meta.url), 'utf8');
+  assert.match(workspace, /createStatusToast\(\{ element: elements\.status, suppressWarnings: true \}\)/);
+  assert.match(workspace, /Select exactly one set to rename\.', \{ level: 'validation' \}\)/,
+    'the one workspace toast used to block a form-like rename action is explicitly retained');
+  assert.match(dialogs, /\.prompt-library-status/,
+    'prompt and hotkey dialog validation text uses its own live regions outside the toast policy');
+});
 
 test('an ordinary warning fades and removes itself', () => {
   const h = harness();

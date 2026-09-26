@@ -4,9 +4,10 @@ import test from 'node:test';
 
 const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
 
-test('022: active direct picker routes Space to stage and Enter to commit', () => {
-  assert.match(source, /pickUnsubscribe && \(event\.key === ' ' \|\| event\.key === 'Enter'\)/);
-  assert.match(source, /event\.key === ' '\s*\?\s*host\.pickWindowStage\(\)\s*:\s*host\.pickWindowCommit\(\)/);
+test('active direct picker routes every non-Escape key to confirmation and Escape to cancellation', () => {
+  assert.match(source, /if \(event\.key === 'Escape' && windowLayoutRuntime\.pickUnsubscribe\)[\s\S]*?host\.pickWindowCancel\(\)/);
+  assert.match(source, /if \(windowLayoutRuntime\.pickUnsubscribe\) \{[\s\S]*?const request = host\.pickWindowCommit\(\)/);
+  assert.match(source, /if \(event\.key === 'Escape'\) \{[\s\S]*?host\.pickWindowCancel\(\)[\s\S]*?\} else \{[\s\S]*?host\.pickWindowCommit\(\)/);
   assert.match(source, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);/);
   assert.match(source, /pickLayoutId/);
 });

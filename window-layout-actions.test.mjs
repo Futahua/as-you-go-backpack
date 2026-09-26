@@ -64,6 +64,65 @@ test('member icon minimizes a live window instead of restoring it', async () => 
   assert.deepEqual(calls, ['minimize']);
 });
 
+test('member toggle retries one failed cold resolve before observing and mutating', async () => {
+  const calls = [];
+  let resolves = 0;
+  const result = await toggleWindowLayoutMemberVisibility({
+    host: {
+      observeWindowCapability: async (capability) => { calls.push(['observe', capability.bindingId]); return { outcome: 'success', observation: { state: 'normal' } }; },
+      minimizeWindowCapability: async () => { calls.push('minimize'); return { outcome: 'success' }; },
+    },
+    capability: null,
+    member: { bounds: null },
+    isReadOnly: never,
+    resolveCapability: async () => {
+      resolves += 1;
+      return resolves === 1 ? { outcome: 'helper-unavailable' } : { outcome: 'success', capability: { bindingId: 'fresh' } };
+    },
+  });
+  assert.equal(result.outcome, 'success');
+  assert.equal(resolves, 2);
+  assert.deepEqual(calls, [['observe', 'fresh'], 'minimize']);
+});
+
+test('member toggle re-resolves once after cold observe failure, then mutates once', async () => {
+  const calls = [];
+  const result = await toggleWindowLayoutMemberVisibility({
+    host: {
+      observeWindowCapability: async (capability) => {
+        calls.push(['observe', capability.bindingId]);
+        if (calls.length === 1) throw new Error('read-only RPC failed');
+        return { outcome: 'success', observation: { state: 'normal' } };
+      },
+      minimizeWindowCapability: async () => { calls.push('minimize'); return { outcome: 'success' }; },
+    },
+    capability: { bindingId: 'cold' },
+    member: { bounds: null },
+    isReadOnly: never,
+    resolveCapability: async () => ({ outcome: 'success', capability: { bindingId: 'fresh' } }),
+  });
+  assert.equal(result.outcome, 'success');
+  assert.deepEqual(calls, [['observe', 'cold'], ['observe', 'fresh'], 'minimize']);
+});
+
+test('uncertain mutation response is never replayed', async () => {
+  let mutations = 0;
+  let resolves = 0;
+  const result = await toggleWindowLayoutMemberVisibility({
+    host: {
+      observeWindowCapability: async () => ({ outcome: 'success', observation: { state: 'normal' } }),
+      minimizeWindowCapability: async () => { mutations += 1; throw new Error('response lost after dispatch'); },
+    },
+    capability: { bindingId: 'warm' },
+    member: { bounds: null },
+    isReadOnly: never,
+    resolveCapability: async () => { resolves += 1; return { outcome: 'success', capability: { bindingId: 'fresh' } }; },
+  });
+  assert.equal(result.outcome, 'uncertain');
+  assert.equal(mutations, 1);
+  assert.equal(resolves, 0);
+});
+
 test('runs every item and returns results in item order', async () => {
   const calls = [];
   const results = await runBoundedConcurrent([1, 2, 3], 4, async (n) => {

@@ -236,7 +236,7 @@ export function bindQuickRunWorkspace({
       }
       Promise.resolve(copyText(copy.target.path))
         .then(() => {
-          setStatus(`Quick Run: copied ${current.row.name} [${copy.target.path}].`);
+          setStatus(`Quick Run: copied ${current.row.name} [${copy.target.path}].`, { level: 'success' });
           return closeAfterSuccess();
         })
         .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));

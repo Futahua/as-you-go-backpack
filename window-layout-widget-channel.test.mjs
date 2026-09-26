@@ -410,6 +410,8 @@ test('windowLayoutWidgetParseCommand bounds the exact vocabulary', () => {
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'toggle-tracking' }), { kind: 'toggle-tracking' });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'dock-widget-to-pill' }), { kind: 'dock-widget-to-pill' });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'delete-layout' }), { kind: 'delete-layout' });
+  assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'clear-layout' }), { kind: 'clear-layout' });
+  assert.equal(windowLayoutWidgetParseCommand({ kind: 'clear-layout', extra: true }), null);
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'delete-layout', extra: true }), null);
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'toggle-tracking', extra: true }), null);
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'group-action', action: 'isolate', memberIds: ['m1'] }), { kind: 'group-action', action: 'isolate', memberIds: ['m1'] });
@@ -448,6 +450,28 @@ test('windowLayoutWidgetParseCommand bounds the exact vocabulary', () => {
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'picker-commit', pick: { outcome: 'committed', adds: [], removes: [], extra: true } }), null);
   assert.equal(windowLayoutWidgetParseCommand(null), null);
   assert.equal(windowLayoutWidgetParseCommand('command'), null);
+});
+
+test('clear-layout uses the normal revisioned command path and returns its committed empty snapshot', async () => {
+  const layouts = [makeLayout('L1', [{ id: 'm1', title: 'Notepad' }, { id: 'm2', title: 'Calculator' }])];
+  const { workspace, clientChannel, applied } = makeBus(layouts, (layoutId, command) => {
+    assert.equal(layoutId, 'L1');
+    assert.deepEqual(command, { kind: 'clear-layout' });
+    layouts[0].arrangement.members = [];
+    return { ok: true };
+  });
+  const received = [];
+  const client = createWindowLayoutWidgetChannelClient({ channel: clientChannel, layoutId: 'L1', onMessage: (message) => received.push(message) });
+  client.ready();
+  client.sendCommand({ kind: 'clear-layout' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(applied.length, 1);
+  const committed = received.find((message) => message.type === 'committed');
+  assert.ok(committed);
+  assert.equal(committed.commandKind, 'clear-layout');
+  assert.deepEqual(committed.snapshot.members, []);
+  workspace.close();
+  client.close();
 });
 
 test('committed responses carry the origin client id and a fresh snapshot', async () => {

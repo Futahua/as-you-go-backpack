@@ -145,10 +145,14 @@ function normalizeWindowLayoutArrangement(arrangement) {
   if (!Array.isArray(arrangement.members)) return emptyWindowLayoutArrangement();
   const members = [];
   const seen = new Set();
+  const seenInstances = new Set();
   for (const rawMember of arrangement.members) {
     const member = normalizeWindowLayoutMember(rawMember);
     if (!member || seen.has(member.id)) continue;
+    const instanceId = member.descriptor.windowInstanceId;
+    if (instanceId && seenInstances.has(instanceId)) continue;
     seen.add(member.id);
+    if (instanceId) seenInstances.add(instanceId);
     members.push(member);
   }
   return { version: 2, members };
@@ -795,6 +799,9 @@ export function addWindowLayoutMember(state, windowLayoutId, member) {
   if (layout.arrangement.members.some((existing) => existing.id === normalized.id)) {
     throw new Error('This window is already a member of the layout.');
   }
+  const instanceId = normalized.descriptor.windowInstanceId;
+  if (instanceId && layout.arrangement.members.some((existing) =>
+    existing.descriptor.windowInstanceId === instanceId)) return state;
   const members = [...layout.arrangement.members, normalized];
   return {
     ...state,

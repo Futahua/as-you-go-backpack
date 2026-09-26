@@ -522,6 +522,37 @@ test('host bridge window observation/control methods carry the capability and un
   assert.deepEqual(await resolved, { outcome: 'missing', observation: null, error: 'no visible window matches' });
 });
 
+test('window candidates can explicitly request exact native window icons', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const pending = host.windowCandidates({ includeNativeIcons: true });
+  const request = mock.parent.messages[0].message;
+  assert.equal(request.type, 'papers:project:window-candidates');
+  assert.equal(request.includeNativeIcons, true);
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: request.requestId, ok: true,
+    outcome: 'success',
+    candidates: [{ id: 'cap-1', windowInstanceId: 'W0123456789abcdef', title: 'Notepad', icon: 'data:native-icon' }],
+  });
+  const result = await pending;
+  assert.equal(result.candidates[0].windowInstanceId, 'W0123456789abcdef');
+  assert.equal(result.candidates[0].icon, 'data:native-icon');
+});
+
+test('ending an application process is a separate exact-capability operation from closing one window', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const capability = { version: 1, runtimeToken: 'opaque-exact-instance' };
+  const pending = host.endProcessWindowCapability(capability);
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:window-end-process-capability');
+  assert.deepEqual(sent.capability, capability);
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sent.requestId, ok: true, outcome: 'success',
+  });
+  assert.deepEqual(await pending, { outcome: 'success', observation: null, error: null });
+});
+
 test('host bridge surfaces window capability failures as rejected outcomes, never as commands', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);
