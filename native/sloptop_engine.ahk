@@ -72,6 +72,7 @@ global voreCursorPath   := A_ScriptDir "\assets\cursor\vore.cur"
 global currentCursorType := ""
 global activeTargetHwnd := 0
 global pickerActive := false
+global pickerKeyWatcher := 0
 ; Safety gate remains closed until this local-only picker passes its isolated
 ; static/harness checks. The mode contains no hover/click network round trips.
 global pickerIntegrationEnabled := true
@@ -396,6 +397,7 @@ CheckPickerActivation() {
         StopPickerMode(false)
         return
     }
+    StartPickerKeyWatcher()
     PickerTrace("activation accepted")
 }
 
@@ -405,12 +407,47 @@ StopPickerMode(cancel := true) {
     stoppedToken := pickerToken
     pickerActive := false
     pickerToken := ""
+    StopPickerKeyWatcher()
     pickerLastHoverHwnd := 0
     pickerHoverVisualKey := ""
     HidePickerOverlays()
     ClearPickerSelections()
     if (wasActive && cancel)
         PickerAtomicWrite(pickerResultPath, '{"version":2,"token":"' stoppedToken '","outcome":"cancelled"}')
+}
+
+StartPickerKeyWatcher() {
+    global pickerKeyWatcher
+    StopPickerKeyWatcher()
+    pickerKeyWatcher := InputHook()
+    pickerKeyWatcher.KeyOpt("{All}", "N")
+    pickerKeyWatcher.OnKeyDown := PickerKeyDown
+    pickerKeyWatcher.Start()
+}
+
+StopPickerKeyWatcher() {
+    global pickerKeyWatcher
+    watcher := pickerKeyWatcher
+    pickerKeyWatcher := 0
+    if watcher
+        watcher.Stop()
+}
+
+PickerKeyDown(ih, vk, sc) {
+    global pickerActive, pickerToken, pickerResultPath
+    if !pickerActive
+        return
+    ih.Stop()
+    if (vk = 0x1B) {
+        PickerTrace("cancel requested by Escape")
+        StopPickerMode(true)
+        return
+    }
+    commitToken := pickerToken
+    selected := PickerSnapshot()
+    PickerTrace("commit requested by key vk=" vk " count=" selected.Length)
+    StopPickerMode(false)
+    PickerAtomicWrite(pickerResultPath, PickerCommitBody(commitToken, selected))
 }
 
 SetGlobalCursor(path, type := "") {
@@ -1250,21 +1287,6 @@ SetTimer(UpdateOverlay, 16)
     }
     pickerHoverVisualKey := ""
     UpdatePickerMode()
-}
-#HotIf
-
-#HotIf pickerActive
-*Enter:: {
-    global pickerToken, pickerResultPath
-    commitToken := pickerToken
-    selected := PickerSnapshot()
-    PickerTrace("commit requested count=" selected.Length)
-    StopPickerMode(false)
-    PickerAtomicWrite(pickerResultPath, PickerCommitBody(commitToken, selected))
-}
-
-*Escape:: {
-    StopPickerMode(true)
 }
 #HotIf
 
