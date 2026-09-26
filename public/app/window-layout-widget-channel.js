@@ -40,7 +40,7 @@ export const WINDOW_LAYOUT_WIDGET_MAX_ICON_BYTES = 262144;
 // Bounded like the member note it appears next to.
 export const WINDOW_LAYOUT_WIDGET_MAX_STATUS_CHARS = 160;
 
-const COMMAND_KINDS = new Set(['member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window', 'toggle-tracking', 'dock-widget-to-pill', 'delete-layout', 'clear-layout']);
+const COMMAND_KINDS = new Set(['activate-member', 'member-toggle', 'group-action', 'range-toggle', 'picker-commit', 'reorder', 'remove-member', 'retire-closed-window', 'toggle-tracking', 'dock-widget-to-pill', 'delete-layout', 'clear-layout']);
 const GROUP_ACTIONS = new Set(['minimize', 'restore', 'isolate']);
 
 function isPlainObject(value) {
@@ -141,7 +141,13 @@ export function windowLayoutWidgetParseCommand(raw) {
     if (!exactKeys(raw, ['kind', 'memberId']) || !boundedString(raw.memberId, 'memberId')) return null;
     return { kind: 'member-toggle', memberId: raw.memberId };
   }
-  if (raw.kind === 'remove-member') {
+  if (raw.kind === 'activate-member') {
+    // The widget never resolves members from its own document - its mirror can
+    // lag the writer, and "no such member" is what a right-click got there. It
+    // asks the workspace, which owns the state, to bring the window forward.
+    if (!exactKeys(raw, ['kind', 'memberId']) || !boundedString(raw.memberId, 'memberId')) return null;
+    return { kind: 'activate-member', memberId: raw.memberId };
+  }  if (raw.kind === 'remove-member') {
     // 040: the widget's `Remove from this layout` context action routes through
     // the workspace writer with the exact memberId; the layout is implied by the
     // channel's layoutId. Bounded memberId only.
@@ -277,10 +283,9 @@ export function windowLayoutWidgetRenderIdentity(snapshot) {
  * emitting a partial `{}` that later poisons pickWindowBegin. Never carries a
  * runtime capability, token or any extra field. */
 function memberDescriptorSnapshot(member) {
-  // Persisted members carry runtime-only identity alongside the descriptor.
-  // Keep the descriptor itself exact for picker commands, while the opaque
-  // native instance id travels as a separate bounded snapshot field for exact
-  // preview resolution.
+  // Preserve the exact window identity in the descriptor as well as the
+  // snapshot's preview field. List membership and Direct Pick seeds compare
+  // descriptors; dropping it made every existing widget member appear new.
   const raw = member?.descriptor;
   if (!isPlainObject(raw)
     || raw.version !== 1
@@ -291,6 +296,9 @@ function memberDescriptorSnapshot(member) {
     version: 1,
     title: raw.title,
     executableFingerprint: raw.executableFingerprint,
+    ...(typeof raw.windowInstanceId === 'string' && /^W[0-9a-f]{16}$/i.test(raw.windowInstanceId)
+      ? { windowInstanceId: raw.windowInstanceId }
+      : {}),
   };
 }
 

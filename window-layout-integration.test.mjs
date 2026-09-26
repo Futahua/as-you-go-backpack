@@ -83,10 +83,21 @@ function wiring(overrides = {}) {
     cadenceMs: 10,
   });
   const applyCalls = [];
+  const stateCalls = [];
   const originalApply = host.applyWindowCapability.bind(host);
   host.applyWindowCapability = async (capability, bounds) => {
     applyCalls.push([capability.bindingId, bounds]);
     return originalApply(capability, bounds);
+  };
+  const originalRestore = host.restoreWindowCapability.bind(host);
+  host.restoreWindowCapability = async (capability) => {
+    stateCalls.push(['restore', capability.bindingId]);
+    return originalRestore(capability);
+  };
+  const originalMinimize = host.minimizeWindowCapability.bind(host);
+  host.minimizeWindowCapability = async (capability) => {
+    stateCalls.push(['minimize', capability.bindingId]);
+    return originalMinimize(capability);
   };
   return {
     recording,
@@ -98,9 +109,24 @@ function wiring(overrides = {}) {
     stateChanges,
     intervals,
     applyCalls,
+    stateCalls,
     host,
   };
 }
+
+test('resuming after a restart attaches observation and touches no window', async () => {
+  // The measured bug: launching Papers replayed the persisted layout - applying
+  // every saved rectangle and restoring each window in turn for about eight
+  // seconds - which raised the creator's windows over whatever they were doing.
+  const h = wiring({ state: makeState('L1') });
+  const result = await h.recording.resumeRecording('L1');
+  assert.equal(h.recording.runtime.getSnapshot().activeLayoutId, 'L1');
+  assert.equal(h.recording.runtime.getSnapshot().timerActive, true);
+  assert.equal(result.layoutId, 'L1');
+  assert.deepEqual(h.applyCalls, [], 'resuming must not place any window');
+  assert.deepEqual(h.stateCalls, [], 'resuming must not minimize or restore any window');
+  assert.deepEqual(h.saves, [], 'resuming must not rewrite the document');
+});
 
 test('017I2 bootstrap reconciles the persisted active id without inventing one', async () => {
   // Persisted active id -> the whole layout is switched and observed.

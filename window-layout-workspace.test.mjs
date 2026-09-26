@@ -1233,7 +1233,8 @@ test('closed-window safety reconciliation removes only positively missing exact 
   assert.match(reconcile, /host\.resolveWindowInstance\(instanceId\)/);
   assert.match(reconcile, /result\?\.outcome !== 'missing'/,
     'helper outages, timeouts, and ambiguous matches are retained');
-  assert.match(reconcile, /retireClosedWindowEverywhere\(\{ version: 1, windowInstanceId: instanceId \}\)/);
+  assert.match(reconcile, /retireClosedWindowEverywhere\(\{ version: 1, windowInstanceId: instanceId \}, \{ source: 'periodic-resolve-missing'/,
+    'the periodic sweep retires the exact instance and records that the sweep decided it');
   assert.match(source, /event\?\.kind === 'closed'/,
     'hosts using close/closed lifecycle vocabulary still retire the exact instance');
   assert.match(source, /scheduleClosedWindowReconcile\(\);/,

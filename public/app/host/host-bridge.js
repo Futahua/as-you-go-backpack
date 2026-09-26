@@ -277,6 +277,20 @@ export function createHostBridge(window) {
       request('papers:project:window-activate-capability', { capability }),
     observeWindowCapability: (capability) =>
       request('papers:project:window-observe-capability', { capability }),
+    /** Hover intent: while this is held, Papers keeps its periodic desktop scan
+     * off, so a scan cannot start during the preview dwell and land in front of
+     * the capture. Reference counted by the caller; paired with the release. */
+    windowPreviewHold: () =>
+      request('papers:project:window-preview-hold', {}),
+    windowPreviewRelease: () =>
+      request('papers:project:window-preview-release', {}),
+    /** The project's own hover preview, in Papers' always-on-top preview window
+     * rather than an in-page popover: a popover can only ever be as visible as
+     * this window, so another application could hide it. */
+    windowPreviewShow: (imageUrl, title, width, height, anchor) =>
+      request('papers:project:window-preview-show', { imageUrl, title, width, height, anchor }),
+    windowPreviewHide: () =>
+      request('papers:project:window-preview-hide', {}),
     minimizeWindowCapability: (capability) =>
       request('papers:project:window-minimize-capability', { capability }),
     /** One request: the helper reads the live state and minimizes or restores

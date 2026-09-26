@@ -53,17 +53,114 @@ function okResult(imageUrl = pngDataUrl(), width = 240, height = 135) {
   return { outcome: 'success', imageUrl, width, height };
 }
 
-function makePreview({ timers, resolveCapability = async () => ({ id: 'cap' }), requestThumbnail = async () => ({ outcome: 'missing' }), setPreviewImage = () => undefined, clearPreview = () => undefined, debounceMs = 10 }) {
+function makePreview({ timers, resolveCapability = async () => ({ id: 'cap' }), requestThumbnail = async () => ({ outcome: 'missing' }), setPreviewImage = () => undefined, clearPreview = () => undefined, debounceMs = 10, holdPreview = () => undefined, releasePreview = () => undefined }) {
   return createWindowLayoutMemberPreview({
     resolveCapability,
     requestThumbnail,
     setPreviewImage,
     clearPreview,
     debounceMs,
+    holdPreview,
+    releasePreview,
     setTimeoutFn: timers.setTimeout,
     clearTimeoutFn: timers.clearTimeout,
   });
 }
+
+test('a re-hover shows the last captured image immediately, then swaps in the fresh one', async () => {
+  const timers = fakeTimers();
+  const shown = [];
+  const first = pngDataUrl(16);
+  const second = pngDataUrl(24);
+  let captures = 0;
+  const preview = makePreview({
+    timers,
+    setPreviewImage: (imageUrl, width, height) => shown.push([imageUrl, width, height]),
+    requestThumbnail: async () => {
+      captures += 1;
+      return okResult(captures === 1 ? first : second);
+    },
+  });
+  preview.schedule('L1', 'A');
+  await timers.flush();
+  assert.equal(shown.length, 1, 'the first hover waits for its capture');
+  assert.equal(shown[0][0], first);
+
+  preview.cancel();
+  preview.schedule('L1', 'A');
+  assert.equal(shown.length, 2, 'the second hover shows the remembered image before any capture runs');
+  assert.equal(shown[1][0], first);
+  await timers.flush();
+  assert.equal(shown.length, 3, 'the fresh capture then replaces it');
+  assert.equal(shown[2][0], second);
+});
+
+test('a member never captured before still waits, and the cache stays bounded', async () => {
+  const timers = fakeTimers();
+  const shown = [];
+  const preview = makePreview({
+    timers,
+    setPreviewImage: (imageUrl) => shown.push(imageUrl),
+    requestThumbnail: async () => okResult(),
+  });
+  preview.schedule('L1', 'fresh');
+  assert.deepEqual(shown, [], 'nothing to show yet for a member never captured');
+  await timers.flush();
+  assert.equal(shown.length, 1);
+});
+
+test('a hover holds the desktop scan off from the hover itself, not from the capture', async () => {
+  const timers = fakeTimers();
+  const events = [];
+  const preview = makePreview({
+    timers,
+    holdPreview: () => events.push('hold'),
+    releasePreview: () => events.push('release'),
+    requestThumbnail: async () => okResult(),
+  });
+  preview.schedule('L1', 'A');
+  assert.deepEqual(events, ['hold'], 'the hold is taken before the dwell, so a scan cannot start during it');
+  await timers.flush();
+  assert.deepEqual(events, ['hold', 'release'], 'the capture settling releases it');
+});
+
+test('a sweep across icons keeps one hold until the last capture settles', async () => {
+  const timers = fakeTimers();
+  const events = [];
+  let releaseFirst;
+  const first = new Promise((resolve) => { releaseFirst = resolve; });
+  let call = 0;
+  const preview = makePreview({
+    timers,
+    holdPreview: () => events.push('hold'),
+    releasePreview: () => events.push('release'),
+    requestThumbnail: async () => {
+      call += 1;
+      return call === 1 ? first : okResult();
+    },
+  });
+  preview.schedule('L1', 'A');
+  await timers.flush(); // A's capture starts and stays open
+  preview.schedule('L1', 'B');
+  releaseFirst({ outcome: 'failed' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ['hold'], 'the hold survives a stale capture finishing mid-sweep');
+  await timers.flush();
+  assert.deepEqual(events, ['hold', 'release'], 'the last capture releases it');
+});
+
+test('cancelling a scheduled hover releases the hold', () => {
+  const timers = fakeTimers();
+  const events = [];
+  const preview = makePreview({
+    timers,
+    holdPreview: () => events.push('hold'),
+    releasePreview: () => events.push('release'),
+  });
+  preview.schedule('L1', 'A');
+  preview.cancel();
+  assert.deepEqual(events, ['hold', 'release'], 'a hover that never captured still releases');
+});
 
 test('capture is debounced; only the latest hover is captured', async () => {
   const timers = fakeTimers();

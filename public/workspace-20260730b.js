@@ -47,6 +47,7 @@ import {
   setWindowLayoutInstanceSuppressed,
   addWindowLayoutMember,
   removeWindowLayoutMember,
+  noteWindowLayoutDiagnostic,
   removeClosedWindowFromAllLayouts,
   reconcileWindowLayoutsAfterStartup,
   updateWindowLayoutMember,
@@ -106,6 +107,9 @@ import {
   createWindowLayoutRetirementWriter,
   windowLayoutPickApplyOutcome,
   windowLayoutPickForBoundCandidate,
+  windowLayoutCandidateIsMember,
+  windowLayoutHasValidInstanceId,
+  windowLayoutPickMemberDescriptors,
 } from './app/window-layout-workspace.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup, windowLayoutMemberState } from './app/window-layout-control-icons.js';
 import {
@@ -1056,18 +1060,93 @@ async function resolveWindowLayoutMemberDescriptor(descriptor, layoutId = null, 
  * fail-closed: an ambiguous/missing member is reported, never guessed. The
  * Papers host performs the final token identity check and atomically restores
  * an iconic window before raising it. */
+/** Records WHY bringing a window forward was refused. The status line is for the
+ * creator; this is for whoever reads the document afterwards - an ignored promise
+ * is exactly how this feature quietly did nothing. */
+function recordActivationRefusal(layoutId, memberId, message) {
+  try {
+    void store.commit(noteWindowLayoutDiagnostic(state, {
+      layoutId,
+      memberId,
+      reason: message,
+      source: 'activate',
+    }));
+  } catch {
+    /* diagnostics never fail the action they describe */
+  }
+}
+
 async function activateWindowLayoutMember(layoutId, memberId) {
+  // Whatever happens inside, the refusal is recorded and returned - never thrown
+  // away. A right-click that quietly did nothing is what this whole path cost us.
+  try {
+    return await bringWindowLayoutMemberToFront(layoutId, memberId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordActivationRefusal(layoutId, memberId, 'threw: ' + message);
+    return { outcome: 'failed', message };
+  }
+}
+
+async function bringWindowLayoutMemberToFront(layoutId, memberId) {
   if (windowLayoutDetachment.isReadOnly()) {
+    recordActivationRefusal(layoutId, memberId, 'read-only: another surface is writing');
     return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
   }
-  const capability = await capabilityForMember(layoutId, memberId);
-  if (windowLayoutDetachment.isReadOnly()) {
-    return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
+  // The steps are spelled out here rather than hidden behind capabilityForMember:
+  // "unavailable" named none of them, and a right-click that says nothing useful
+  // is how this feature spent an evening doing nothing.
+  const member = windowLayoutMemberFromState(layoutId, memberId);
+  if (!member) {
+    recordActivationRefusal(layoutId, memberId, 'no such member: ' + layoutId + '/' + memberId);
+    return { outcome: 'failed', message: 'That icon is not part of this layout any more.' };
   }
-  if (!capability || typeof host.activateWindowCapability !== 'function') {
+  const memberKey = windowLayoutMemberKey(layoutId, memberId);
+  let capability = windowLayoutRuntime.capabilities.get(memberKey);
+  if (!capability) {
+    let resolved = null;
+    try {
+      resolved = await resolveWindowLayoutMemberDescriptor(member.descriptor, layoutId);
+    } catch (error) {
+      recordActivationRefusal(layoutId, memberId, 'resolve threw: ' + (error instanceof Error ? error.message : String(error)));
+      throw error;
+    }
+    if (windowLayoutDetachment.isReadOnly()) {
+      return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
+    }
+    if (resolved?.outcome !== 'success') {
+      recordActivationRefusal(layoutId, memberId, 'resolve said ' + String(resolved?.outcome ?? 'nothing') + ' ' + String(resolved?.error ?? ''));
+      return {
+        outcome: resolved?.outcome ?? 'failed',
+        message: windowLayoutStatusForOutcome(resolved?.outcome),
+      };
+    }
+    capability = resolved.capability ?? null;
+    if (capability) windowLayoutRuntime.capabilities.set(memberKey, capability);
+  }
+  if (!capability) {
+    recordActivationRefusal(layoutId, memberId, 'resolved successfully but carried no capability');
     return { outcome: 'failed', message: 'Window activation is unavailable.' };
   }
-  const result = await host.activateWindowCapability(capability);
+  // RESTORE is the primitive that raises. This used to call an "activate"
+  // channel that Papers does not implement, so the request rejected, nothing
+  // caught it, and a right-click quietly did nothing at all. The helper's
+  // restore puts the window back AND explicitly brings it to the front, which
+  // is exactly what "show me that window" means.
+  const bring = typeof host.restoreWindowCapability === 'function'
+    ? host.restoreWindowCapability
+    : host.activateWindowCapability;
+  if (typeof bring !== 'function') {
+    recordActivationRefusal(layoutId, memberId, 'Window activation is unavailable.');
+    return { outcome: 'failed', message: 'Window activation is unavailable.' };
+  }
+  let result;
+  try {
+    result = await bring(capability);
+  } catch (error) {
+    recordActivationRefusal(layoutId, memberId, error instanceof Error ? error.message : String(error));
+    return { outcome: 'failed', message: error instanceof Error ? error.message : String(error) };
+  }
   if (windowLayoutDetachment.isReadOnly()) {
     return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
   }
@@ -1243,11 +1322,26 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
   // 018X2: a handoff begun during the toggle must abort before any side effect.
   if (windowLayoutDetachment.isReadOnly()) return;
   const nextState = result.action === 'restore' ? 'normal' : 'minimized';
-  // The PRE-mutation bounds, exactly as before: they are this window's restore
-  // rectangle, and a window that has just been minimized has none to give.
+  // A MINIMIZED RECTANGLE IS NOT A RESTORE RECTANGLE.
+  //
+  // The observation returned here is the PRE-mutation one. That is exactly right
+  // when the window was just minimized: its normal rectangle is the placement a
+  // later restore should return to. It is exactly wrong when the window was
+  // restored, because then the pre-mutation rectangle is Windows' minimized
+  // sentinel (-32000,-32000 with a tiny size), and persisting it destroys the
+  // layout's real remembered rectangle - the window later gets restored to that
+  // sentinel and reads as maximally shrunk somewhere odd.
+  //
+  // The recording observer in window-layout-runtime.js already keeps this rule.
+  // Restoring now preserves the existing bounds; only a minimize refreshes them.
+  const observationBounds = result.observation?.bounds ?? null;
+  const observationWasMinimized = result.observation?.state === 'minimized';
+  const persistBounds = result.action === 'restore' || observationWasMinimized
+    ? undefined
+    : observationBounds;
   store.replace(updateWindowLayoutMember(state, layoutId, memberId, {
     state: nextState,
-    bounds: result.observation.bounds,
+    ...(persistBounds === undefined ? {} : { bounds: persistBounds }),
   }));
   patchWindowLayoutMember(layoutId, memberId, nextState);
   noteWindowLayoutCommit(layoutId);
@@ -1307,13 +1401,12 @@ async function openWindowLayoutPicker(layoutId) {
         break;
       }
       windowLayoutRuntime.pickerCandidates = result.candidates;
-      const currentTitles = new Set((windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
-        .map((member) => member.descriptor.title));
+      const members = windowLayoutFromState(layoutId)?.arrangement?.members ?? [];
       const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
         id: candidate.id,
         title: candidate.title,
         icon: candidate.icon ?? null,
-        current: currentTitles.has(candidate.title),
+        current: windowLayoutCandidateIsMember(members, candidate),
       })));
       if (windowLayoutRuntime.pickerOpenFor !== layoutId
         || windowLayoutRuntime.pickerGeneration !== generation) return;
@@ -1378,7 +1471,7 @@ async function closeWindowLayoutCandidate(layoutId, candidateId, candidates) {
     setWindowLayoutTransientStatus(layoutId, result.error || 'Window is no longer available');
     return false;
   }
-  await retireClosedWindowEverywhere(result.descriptor);
+  await retireClosedWindowEverywhere(result.descriptor, { source: 'explicit-close', reason: 'the creator closed it' });
   setWindowLayoutTransientStatus(layoutId, 'Process ended', 1200);
   return true;
 }
@@ -1405,16 +1498,18 @@ async function closeWindowLayoutMember(layoutId, memberId) {
   }
   windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
   windowLayoutWidgetPreviewCapabilities.delete(windowLayoutMemberKey(layoutId, memberId));
-  if (descriptor) await retireClosedWindowEverywhere(descriptor);
+  if (descriptor) await retireClosedWindowEverywhere(descriptor, { source: 'explicit-close', reason: 'the creator closed it' });
   setWindowLayoutTransientStatus(layoutId, 'Window closed', 1200);
 }
 
-function closeWindowLayoutPicker() {
+function closeWindowLayoutPicker({ requireClosed = false } = {}) {
   const layoutId = windowLayoutRuntime.pickerOpenFor;
   windowLayoutRuntime.pickerOpenFor = null;
   windowLayoutRuntime.pickerGeneration += 1;
   const closeRequest = layoutId
-    ? host.windowCandidatePickerClose().catch(() => undefined)
+    ? (requireClosed
+      ? host.windowCandidatePickerClose()
+      : host.windowCandidatePickerClose().catch(() => undefined))
     : Promise.resolve();
   windowLayoutRuntime.pickerCandidates = null;
   const pickerHost = layoutId
@@ -1455,7 +1550,9 @@ async function handleWindowLayoutPickCandidate(layoutId, candidateId) {
     picked.row,
   );
   if (!pick) {
-    setWindowLayoutStatus(layoutId, 'Pick failed');
+    setWindowLayoutStatus(layoutId, windowLayoutHasValidInstanceId(bound.descriptor)
+      ? 'Window identity could not be confirmed; no layout change was made.'
+      : 'Window identity is unavailable; no layout change was made.');
     return false;
   }
   const removing = pick.removes.length > 0;
@@ -1653,27 +1750,6 @@ async function windowLayoutToggleRange(layoutId, clickedMemberId, explicitMember
 
 /** 016 direct onscreen pick: begin the Papers-owned pick session for THIS
  * layout and wait for its single typed result (Escape/right-click cancels). */
-function uniqueWindowLayoutMemberDescriptors(members) {
-  const unique = new Map();
-  for (const descriptor of members) {
-    if (!descriptor || descriptor.version !== 1
-      || typeof descriptor.title !== 'string'
-      || typeof descriptor.executableFingerprint !== 'string') continue;
-    const key = `${descriptor.executableFingerprint}|${descriptor.title}`;
-    // Papers' current picker-begin preload deliberately accepts only this
-    // legacy three-field shape. Persisted windowInstanceId remains available
-    // for ordinary resolution, but must not widen this page -> preload wire.
-    if (!unique.has(key)) {
-      unique.set(key, {
-        version: 1,
-        title: descriptor.title,
-        executableFingerprint: descriptor.executableFingerprint,
-      });
-    }
-  }
-  return [...unique.values()];
-}
-
 async function beginWindowLayoutDirectPick(layoutId) {
   console.info('[045-direct-pick] begin-enter', layoutId);
   if (windowLayoutDetachment.isReadOnly()) return;
@@ -1684,13 +1760,22 @@ async function beginWindowLayoutDirectPick(layoutId) {
   // The chooser is a native always-on-top window. Do not race its asynchronous
   // destruction against the Papers-owned direct picker: until it is gone it
   // can retain foreground/ownership and make the picker appear to do nothing.
-  await closeWindowLayoutPicker();
+  try {
+    await closeWindowLayoutPicker({ requireClosed: true });
+  } catch (error) {
+    setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : 'Window list could not close');
+    return;
+  }
+  const members = windowLayoutPickMemberDescriptors(
+    (layout.arrangement?.members ?? []).map((member) => member.descriptor),
+  );
+  if (!members) {
+    setWindowLayoutStatus(layoutId, 'A saved window identity is invalid; Direct Pick could not start.');
+    return;
+  }
   windowLayoutRuntime.pickLayoutId = layoutId;
   const pickAttempt = Symbol('window-layout-direct-pick');
   windowLayoutRuntime.pickAttempt = pickAttempt;
-  const members = uniqueWindowLayoutMemberDescriptors(
-    (layout.arrangement?.members ?? []).map((member) => member.descriptor),
-  );
   let result = null;
   let pickUnsubscribe = null;
   try {
@@ -1895,6 +1980,7 @@ function createWindowLayoutMemberPopover() {
         element.hidden = true;
       }
       if (WIDGET_SURFACE) void host.widgetPreviewHide().catch(() => undefined);
+      else void host.windowPreviewHide().catch(() => undefined);
     },
     /** 019GR: the preview image changed the popover size - re-clamp placement
      * against the SAME member anchor so it never jumps off-screen. */
@@ -1910,10 +1996,15 @@ function createWindowLayoutMemberPopover() {
     updatePreview(memberId, previewMarkup) {
       const preview = ensure().querySelector('[data-wl-popover-preview]');
       if (!preview) return;
-      if (WIDGET_SURFACE) {
+      // BOTH surfaces now use Papers' own always-on-top preview window. The
+      // in-page popover could only ever be as visible as this project window, so
+      // any other application's window could hide the preview - the creator saw
+      // exactly that. The widget keeps its own authorized message; the workspace
+      // uses the project-authorized one; the anchor is the same screen rectangle.
+      {
         preview.replaceChildren();
         if (previewMarkup == null) {
-          void host.widgetPreviewHide().catch(() => undefined);
+          void (WIDGET_SURFACE ? host.widgetPreviewHide() : host.windowPreviewHide()).catch(() => undefined);
           return;
         }
         const holder = document.createElement('div');
@@ -1923,12 +2014,15 @@ function createWindowLayoutMemberPopover() {
         const width = Number(img.getAttribute('width'));
         const height = Number(img.getAttribute('height'));
         if (!Number.isFinite(width) || !Number.isFinite(height)) return;
-        void host.widgetPreviewShow(img.src, lastName, width, height, {
+        const anchor = {
           x: Math.round(window.screenX + lastAnchor.left),
           y: Math.round(window.screenY + lastAnchor.top),
           width: Math.round(lastAnchor.width),
           height: Math.round(lastAnchor.height),
-        }).catch(() => undefined);
+        };
+        void (WIDGET_SURFACE
+          ? host.widgetPreviewShow(img.src, lastName, width, height, anchor)
+          : host.windowPreviewShow(img.src, lastName, width, height, anchor)).catch(() => undefined);
         return;
       }
       const popover = ensure();
@@ -2080,6 +2174,11 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
 const windowLayoutMemberPreview = createWindowLayoutMemberPreview({
   resolveCapability: resolveWindowLayoutPreviewCapability,
   requestThumbnail: (capability, options) => host.windowThumbnailCapability(capability, options),
+  // Hold the periodic desktop scan off for the whole hover intent, dwell
+  // included: otherwise a scan that starts during the dwell lands in front of
+  // the capture and the preview arrives late or not at all.
+  holdPreview: () => { void host.windowPreviewHold().catch(() => undefined); },
+  releasePreview: () => { void host.windowPreviewRelease().catch(() => undefined); },
   // Capabilities now survive a state-only re-render, so a token Papers has
   // stopped recognising (helper restart, window gone) has to be dropped here
   // instead of relying on the card's old blanket clear to eventually do it.
@@ -2261,8 +2360,13 @@ elements.grid.addEventListener('mouseout', (event) => {
   const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
   // Crossing directly from one member to another is a Peek transition, not a
   // release. Keep the session alive so the host can reveal only the new target
-  // and hide only the old one. End only when the pointer leaves the member row.
-  if (member && !relatedMember && windowLayoutShiftPeekKey) deferWindowLayoutShiftPeekEnd();
+  // and hide only the old one. Blank space between icons keeps the last Peek
+  // while Shift is held; leaving the widget or releasing Shift ends it.
+  if (member && !relatedMember && windowLayoutShiftPeekKey) {
+    const leftWidget = !event.relatedTarget || !elements.grid.contains(event.relatedTarget);
+    const leave = planWindowLayoutShiftPeekTransition('memberleave', { leftWidget }, { held: windowLayoutShiftPeekHeld });
+    if (leave.end) deferWindowLayoutShiftPeekEnd();
+  }
   const state = windowLayoutPreviewHoverState(member, relatedMember);
   if (state === 'enter') {
     cancelWindowLayoutPreviewDwell();
@@ -2412,7 +2516,12 @@ const windowLayoutAutoTracking = createWindowLayoutAutoTracking({
     windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(layoutId, member.id), capability);
     saveWorkspaceView();
     noteWindowLayoutCommit(layoutId);
-    await windowLayoutRecording.ensureRecording(layoutId);
+    // Auto observes a new member; it must not select/reapply the entire saved
+    // arrangement when the recording context is inactive (for example while
+    // Quick Run has focus). Only refresh an already active recording session.
+    if (isActiveRecordingContext(layoutId)) {
+      await windowLayoutRuntimeController.reconcileActive();
+    }
   },
 });
 
@@ -2432,7 +2541,7 @@ async function processTrackingLifecycleEvent(event) {
       // A close is global membership truth, not tracking-only state. The same
       // window may be present in several layouts, so retire every exact
       // instance match without closing or otherwise touching the process.
-      await retireClosedWindowEverywhere({ version: 1, windowInstanceId: event.windowInstanceId });
+      await retireClosedWindowEverywhere({ version: 1, windowInstanceId: event.windowInstanceId }, { source: 'lifecycle-gone-event', reason: 'the lifecycle watcher reported it gone' });
       return;
     }
     await windowLayoutAutoTracking.addFromEvent(event);
@@ -2481,7 +2590,7 @@ async function reconcileClosedWindowMembers() {
         result = null;
       }
       if (result?.outcome !== 'missing') continue;
-      await retireClosedWindowEverywhere({ version: 1, windowInstanceId: instanceId });
+      await retireClosedWindowEverywhere({ version: 1, windowInstanceId: instanceId }, { source: 'periodic-resolve-missing', reason: 'the periodic sweep could not resolve it' });
     }
   } finally {
     closedWindowReconcileInFlight = false;
@@ -2663,11 +2772,12 @@ const detachedWidgets = new Set();
 // when the widget bootstraps, cleared on pagehide.
 let windowLayoutWidgetClient = null;
 
-async function retireClosedWindowEverywhere(descriptor) {
+async function retireClosedWindowEverywhere(descriptor, diagnostics = {}) {
   if (WIDGET_SURFACE) {
     return Boolean(windowLayoutWidgetClient?.sendCommand({
       kind: 'retire-closed-window',
       descriptor,
+      diagnostics,
     }));
   }
   if (windowLayoutDetachment.isReadOnly()) return false;
@@ -2684,7 +2794,7 @@ async function retireClosedWindowEverywhere(descriptor) {
     if (removed.length > 0) removedByLayout.set(layout.id, removed);
   }
   if (removedByLayout.size === 0) return false;
-  const next = removeClosedWindowFromAllLayouts(state, descriptor);
+  const next = removeClosedWindowFromAllLayouts(state, descriptor, diagnostics);
   const persisted = await store.commit(next);
   if (!persisted) return false;
   for (const [changedLayoutId, removed] of removedByLayout) {
@@ -2811,7 +2921,15 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       if (detachedWidgets.delete(layoutId)) render();
       return { ok: true };
     }
-    if (command.kind === 'delete-layout') {
+    if (command.kind === 'activate-member') {
+      // The widget's right-click intent: it owns no state, so the workspace
+      // resolves the member here and brings that window forward.
+      const activated = await activateWindowLayoutMember(layoutId, command.memberId);
+      if (activated?.outcome !== 'success') {
+        return { ok: false, error: activated?.message || 'that window could not be brought forward' };
+      }
+      return { ok: true, activated: true };
+    }    if (command.kind === 'delete-layout') {
       const wasActive = isActiveRecordingContext(layoutId);
       const next = deleteWindowLayout(state, layoutId);
       if (next === state || !(await store.commit(next))) return { ok: false, error: 'delete persistence failed' };
@@ -2871,7 +2989,7 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       return { ok: true };
     }
     if (command.kind === 'retire-closed-window') {
-      await retireClosedWindowEverywhere(command.descriptor);
+      await retireClosedWindowEverywhere(command.descriptor, { source: command.diagnostics?.source ?? 'writer-retire', reason: command.diagnostics?.reason, operationId: command.diagnostics?.operationId });
       return { ok: true };
     }
     if (command.kind === 'group-action') {
@@ -3035,7 +3153,12 @@ function bootstrapWindowLayoutRecording() {
   // resume seam, and at boot the runtime has no active layout yet. This is the
   // one question the persisted field is the right answer to.
   if (state.activeWindowLayoutId) {
-    return windowLayoutRecording.ensureRecording(state.activeWindowLayoutId);
+    // RESUME, do not activate. Launching Papers attaches observation to the
+    // layout that was already active; ensureRecording() here replayed the whole
+    // layout - applying every saved rectangle and restoring each window in turn
+    // for about eight seconds after launch, raising the creator's windows over
+    // whatever they were doing. A deliberate switch still applies the layout.
+    return windowLayoutRecording.resumeRecording(state.activeWindowLayoutId);
   }
   return Promise.resolve();
 }
@@ -3084,7 +3207,7 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
   if (!layout || !memberId) return;
   // 019G: a removed card must clear/discard any pending hover preview.
   windowLayoutMemberPreview.cancel();
-  let next = removeWindowLayoutMember(state, layoutId, memberId);
+  let next = removeWindowLayoutMember(state, layoutId, memberId, { source: 'user-unlink', reason: 'the creator removed this icon' });
   if (layout.tracking?.enabled === true && typeof layout.arrangement?.members?.find((member) => member.id === memberId)?.descriptor?.windowInstanceId === 'string') {
     const instanceId = layout.arrangement.members.find((member) => member.id === memberId).descriptor.windowInstanceId;
     next = setWindowLayoutInstanceSuppressed(next, layoutId, instanceId, true);
@@ -5454,10 +5577,18 @@ elements.grid.addEventListener('contextmenu', (event) => {
     // 040: grey placeholder refusal — the placeholder card's members are
     // disabled and never offer removal.
     if (wlMember.disabled) return;
-    // 040: scope the removal target on the menu element (layoutId/memberId).
-    elements.menu.dataset.wlLayout = layoutId;
-    elements.menu.dataset.wlMember = memberId;
-    openMenu(event.clientX, event.clientY, 'member', layoutId);
+    // A plain right-click brings that member's window to the front. It used to
+    // open a menu whose only entry was "remove from this layout" - a dead end
+    // for the far more common "show me that window". Removing an icon is Direct
+    // Pick's job now, and it names the windows on screen instead of a menu item.
+    // The refusal is SHOWN: an ignored promise is how this quietly did nothing.
+    void activateWindowLayoutMember(layoutId, memberId).then((activated) => {
+      if (activated?.outcome !== 'success') {
+        setWindowLayoutStatus(layoutId, activated?.message || 'That window could not be brought forward.');
+      }
+    }).catch((error) => {
+      setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
+    });
     return;
   }
   const tile = event.target.closest('.icon-item');
@@ -6172,12 +6303,26 @@ const keyboard = createKeyboardController({
 // which the controller's own guard arranges.
 //
 // Named rather than inline because the overlay's invocation listener above the controller also needs it.
+// One chord, one toggle. The same Alt+A can reach two receivers - the in-page
+// shortcut and the widget's own Quick Run path - and a toggle that runs twice
+// opens the palette and closes it again in the same instant, which the creator
+// sees as "it got cancelled immediately". A second toggle inside this window is
+// the same gesture arriving twice, not a new one, so it is ignored.
+const QUICK_RUN_TOGGLE_COALESCE_MS = 300;
+let quickRunToggleHandledAt = 0;
+
 function openQuickRun(seed) {
   if (SCOPE_ROOT_ID) {
     setStatus('Quick Run is unavailable inside a project folder.');
     return;
   }
-  return typeof seed === 'string' && seed !== '' ? quickRun.open(seed) : quickRun.toggle();
+  if (typeof seed === 'string' && seed !== '') return quickRun.open(seed);
+  const now = Date.now();
+  if (now - quickRunToggleHandledAt < QUICK_RUN_TOGGLE_COALESCE_MS) {
+    return quickRun.session().open;
+  }
+  quickRunToggleHandledAt = now;
+  return quickRun.toggle();
 }
 
 const promptLibrary = createPromptLibraryDialog({
@@ -6736,26 +6881,12 @@ function bootstrapWindowLayoutWidget() {
       const memberId = member.dataset.wlMember;
       if (!memberId || member.disabled) return;
       windowLayoutMemberPreview.cancel();
-      try {
-        const result = await host.widgetContextMenu();
-        if (result?.action === 'remove') {
-          const selectedIds = widgetState.selection.size > 0
-            ? [...widgetState.selection]
-            : [memberId];
-          const selectedSet = new Set(selectedIds);
-          const removes = (widgetState.snapshot.members ?? [])
-            .filter((candidate) => selectedSet.has(candidate.id))
-            .map((candidate) => ({ descriptor: candidate.descriptor }));
-          if (removes.length === 0) return;
-          client.sendCommand({
-            kind: 'picker-commit',
-            pick: { outcome: 'committed', adds: [], removes },
-          });
-          clearWidgetSelection();
-        }
-      } catch (error) {
-        setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
-      }
+      // A plain right-click brings that member's window to the front here too.
+      // The widget must not resolve it from its OWN document: that mirror lags
+      // the writer, and "no such member" is exactly what a right-click got. It
+      // asks the workspace, which owns the state, through the channel.
+      client.sendCommand({ kind: 'activate-member', memberId });
+      return;
     }
   }
 
@@ -6785,13 +6916,11 @@ function bootstrapWindowLayoutWidget() {
         widgetState.candidates = result.candidates;
         // The chooser stays open while searching/selecting. Recompute its
         // presentation state after every authoritative command acknowledgement.
-        const currentTitles = new Set((widgetState.snapshot.members ?? [])
-          .map((member) => member.descriptor.title));
         const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
           id: candidate.id,
           title: candidate.title,
           icon: candidate.icon ?? null,
-          current: currentTitles.has(candidate.title),
+          current: windowLayoutCandidateIsMember(widgetState.snapshot.members ?? [], candidate),
         })));
         if (!ownsPicker()) return;
         if (picked.action === 'close' && picked.candidateId) {
@@ -6816,9 +6945,8 @@ function bootstrapWindowLayoutWidget() {
   }
 
   function windowLayoutWidgetPickerMarkup(candidates) {
-    const currentTitles = new Set((widgetState.snapshot.members ?? []).map((member) => member.descriptor.title));
     const rows = candidates.map((candidate) => {
-      const isCurrent = currentTitles.has(candidate.title);
+      const isCurrent = windowLayoutCandidateIsMember(widgetState.snapshot.members ?? [], candidate);
       return `<button class="window-layout-pick-candidate${isCurrent ? ' current-member' : ''}" data-wl-pick-candidate="${escapeHtml(candidate.id)}" type="button" title="${escapeHtml(candidate.title)}">
         ${candidate.icon
           ? `<img class="window-layout-pick-icon" src="${escapeHtml(candidate.icon)}" alt="">`
@@ -6835,7 +6963,7 @@ function bootstrapWindowLayoutWidget() {
     </div>`;
   }
 
-  function closeWidgetPicker() {
+  function closeWidgetPicker({ requireClosed = false } = {}) {
     widgetState.candidates = null;
     const pickerHost = elements.grid.querySelector(`[data-wl-picker="${CSS.escape(layoutId)}"]`);
     // A direct-pick click comes from the normal widget card, where the list
@@ -6850,7 +6978,10 @@ function bootstrapWindowLayoutWidget() {
     widgetPickerGeneration += 1;
     if (pickerHost) pickerHost.innerHTML = '';
     restoreHoveredWindowLayoutPreview(layoutId);
-    return wasOpen ? host.windowCandidatePickerClose().catch(() => undefined) : Promise.resolve();
+    if (!wasOpen) return Promise.resolve();
+    return requireClosed
+      ? host.windowCandidatePickerClose()
+      : host.windowCandidatePickerClose().catch(() => undefined);
   }
 
   async function handleWidgetListCandidate(candidateId) {
@@ -6869,9 +7000,11 @@ function bootstrapWindowLayoutWidget() {
       widgetState.snapshot.members ?? [],
       bound,
       picked.row,
-    );
-    if (!pick) {
-      setWindowLayoutStatus(layoutId, 'Pick failed');
+  );
+  if (!pick) {
+    setWindowLayoutStatus(layoutId, windowLayoutHasValidInstanceId(bound.descriptor)
+      ? 'Window identity could not be confirmed; no layout change was made.'
+      : 'Window identity is unavailable; no layout change was made.');
       return false;
     }
     const command = { kind: 'picker-commit', pick };
@@ -6896,12 +7029,25 @@ function bootstrapWindowLayoutWidget() {
     widgetState.pickAttempt = pickAttempt;
     // As on the attached surface, the native chooser must be fully destroyed
     // before starting the direct picker or it can steal picker ownership.
-    await closeWidgetPicker();
+    try {
+      await closeWidgetPicker({ requireClosed: true });
+    } catch (error) {
+      if (widgetState.pickAttempt === pickAttempt) {
+        widgetState.pickAttempt = null;
+        setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : 'Window list could not close');
+      }
+      return;
+    }
     if (widgetState.pickAttempt !== pickAttempt) return;
-    windowLayoutRuntime.pickLayoutId = layoutId;
-    const members = uniqueWindowLayoutMemberDescriptors(
+    const members = windowLayoutPickMemberDescriptors(
       (widgetState.snapshot.members ?? []).map((member) => member.descriptor),
     );
+    if (!members) {
+      if (widgetState.pickAttempt === pickAttempt) widgetState.pickAttempt = null;
+      setWindowLayoutStatus(layoutId, 'A saved window identity is invalid; Direct Pick could not start.');
+      return;
+    }
+    windowLayoutRuntime.pickLayoutId = layoutId;
     let pickUnsubscribe = null;
     try {
       // Recover an orphaned main-process picker before starting this widget's

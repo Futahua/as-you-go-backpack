@@ -399,6 +399,33 @@ export function createWindowLayoutRuntime({
     return switchTo(layoutId);
   }
 
+  /** Cold start: adopt the persisted layout as the OBSERVED context without
+   * touching a single window.
+   *
+   * Resuming recording and activating a layout are different things. A
+   * deliberate switch (L1 -> L2) places and restores members, which is what
+   * switchTo() is for. Launching Papers must only resume observing whichever
+   * layout was active: replaying it re-applied every member's saved geometry and
+   * restored its window one after another for about eight seconds after launch,
+   * raising the creator's own windows over whatever they were doing. */
+  async function resumeActive(layoutId) {
+    if (typeof layoutId !== 'string' || layoutId.length === 0) {
+      return { outcome: 'inactive', layoutId: null, results: [] };
+    }
+    const layout = getLayout(layoutId);
+    if (!layout || layout.bin) return { outcome: 'inactive', layoutId: null, results: [] };
+    if (activeLayoutId === layoutId) return reconcileActive();
+    ++generation;
+    stopTimer();
+    suppressions.clear();
+    missingCounts.clear();
+    retired.clear();
+    activeLayoutId = layoutId;
+    // No persistActiveLayout: the id came FROM the document, so writing it back
+    // would be a document mutation caused by merely launching.
+    return reconcileActive();
+  }
+
   /** 017I2: re-sync the observed member set from the CURRENT persisted layout
    * WITHOUT re-applying saved geometry (a member was added or removed while the
    * layout stayed active). A binned/removed active layout delegates to
@@ -469,6 +496,7 @@ export function createWindowLayoutRuntime({
     switchTo,
     retry,
     reconcileActive,
+    resumeActive,
     observeActiveMembers,
     invalidateCapabilities,
     stop,
@@ -560,5 +588,12 @@ export function createWindowLayoutRecordingWiring({
     return runtime.switchTo(targetLayoutId);
   }
 
-  return { runtime, ensureRecording };
+  /** Cold start only: adopt the persisted layout as the observed context. No
+   * window is placed, restored or raised by resuming. */
+  async function resumeRecording(targetLayoutId) {
+    if (typeof targetLayoutId !== 'string' || targetLayoutId.length === 0) return { outcome: 'inactive', layoutId: null, results: [] };
+    return runtime.resumeActive(targetLayoutId);
+  }
+
+  return { runtime, ensureRecording, resumeRecording };
 }

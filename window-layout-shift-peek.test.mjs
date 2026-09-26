@@ -43,6 +43,16 @@ test('ordinary hovered Quick Run typing with Shift false has no Peek lifecycle; 
   assert.equal(ends, 1, 'Shift release ends that Peek once');
 });
 
+test('blank space between icons keeps the last Peek while Shift is held', () => {
+  const kept = planWindowLayoutShiftPeekTransition('memberleave', { leftWidget: false }, { held: true });
+  assert.deepEqual(kept, { handled: true, held: true, begin: null, end: false },
+    'drifting between icons must not drop the Peek and flash the desktop');
+  const left = planWindowLayoutShiftPeekTransition('memberleave', { leftWidget: true }, { held: true });
+  assert.equal(left.end, true, 'leaving the widget still ends it');
+  const released = planWindowLayoutShiftPeekTransition('memberleave', { leftWidget: false }, { held: false });
+  assert.equal(released.end, true, 'without Shift held a member leave ends it as before');
+});
+
 test('the workspace routes every Shift Peek event source through the tested planner', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   assert.match(source, /planWindowLayoutShiftPeekTransition\('keydown'/);
@@ -50,6 +60,7 @@ test('the workspace routes every Shift Peek event source through the tested plan
   assert.match(source, /planWindowLayoutShiftPeekTransition\('blur'/);
   assert.match(source, /planWindowLayoutShiftPeekTransition\('hover'/);
   assert.match(source, /planWindowLayoutShiftPeekTransition\('pointermove'/);
+  assert.match(source, /planWindowLayoutShiftPeekTransition\('memberleave'/);
   assert.equal([...source.matchAll(/host\.windowPeekBeginCapability\(/g)].length, 1,
     'only the guarded Peek execution path calls the host begin API');
 });

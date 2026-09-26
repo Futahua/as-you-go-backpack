@@ -1,6 +1,7 @@
 import { normalizeItemSets } from './sets-model.js';
 import { normalizePromptLibrary } from './prompt-library-model.js';
 import { normalizeViewPreferences } from './app/hotkeys-model.js';
+import { appendWindowLayoutMembershipEntry, normalizeWindowLayoutMembershipLog } from './app/window-layout-membership-log.js';
 
 export const ROOT_ID = 'root';
 export const DEFAULT_ICON_SIZE = 96;
@@ -532,6 +533,9 @@ export function normalizeState(raw) {
     // the layouts the user explicitly docked back into the AYG pill tray.
     windowLayoutPillIds: [...new Set(stringIds(raw?.windowLayoutPillIds))]
       .filter((layoutId) => windowLayouts.some((layout) => layout.id === layoutId)),
+    // Diagnostic only: the last few membership changes, kept so an unexplained
+    // ejection can be read back. Nothing consumes it.
+    windowLayoutMembershipLog: normalizeWindowLayoutMembershipLog(raw?.windowLayoutMembershipLog),
     activeWindowLayoutId: normalizeActiveWindowLayoutId(raw?.activeWindowLayoutId, windowLayouts, groups),
     startupWindowLayoutId: normalizeActiveWindowLayoutId(raw?.startupWindowLayoutId, windowLayouts, groups),
     view: {
@@ -791,7 +795,7 @@ export function setWindowLayoutInstanceSuppressed(state, windowLayoutId, windowI
 /** Adds one member (from a host bind: stable descriptor + optional first
  * arrangement) to a window-layout's ordered membership. Data-only: nothing
  * here launches, moves or closes a window. */
-export function addWindowLayoutMember(state, windowLayoutId, member) {
+export function addWindowLayoutMember(state, windowLayoutId, member, diagnostics = {}) {
   const layout = windowLayout(state, windowLayoutId);
   if (!layout) throw new Error('Window layout not found.');
   const normalized = normalizeWindowLayoutMember(member);
@@ -805,6 +809,18 @@ export function addWindowLayoutMember(state, windowLayoutId, member) {
   const members = [...layout.arrangement.members, normalized];
   return {
     ...state,
+    windowLayoutMembershipLog: appendWindowLayoutMembershipEntry(state.windowLayoutMembershipLog, {
+      kind: 'added',
+      layoutId: windowLayoutId,
+      memberId: normalized.id,
+      title: normalized.descriptor?.title,
+      reason: 'added to the layout',
+      source: diagnostics.source ?? 'add',
+      windowInstanceId: normalized.descriptor?.windowInstanceId,
+      operationId: diagnostics.operationId,
+      membersBefore: layout.arrangement.members.length,
+      membersAfter: members.length,
+    }),
     windowLayouts: state.windowLayouts.map((candidate) =>
       candidate.id === windowLayoutId
         ? { ...candidate, arrangement: { version: 2, members } }
@@ -814,12 +830,40 @@ export function addWindowLayoutMember(state, windowLayoutId, member) {
 
 /** Removes one member by its membership id. Data-only: the window itself
  * is never closed or moved. */
-export function removeWindowLayoutMember(state, windowLayoutId, memberId) {
+/** A bounded diagnostic entry for something that failed BEFORE it could touch
+ * membership. The log already records who decided what; this is how a refusal
+ * that changes nothing can still be read afterwards instead of guessed at. */
+export function noteWindowLayoutDiagnostic(state, { layoutId = '', memberId = '', reason = '', source = 'diagnostic' } = {}) {
+  return {
+    ...state,
+    windowLayoutMembershipLog: appendWindowLayoutMembershipEntry(state.windowLayoutMembershipLog, {
+      kind: 'unknown',
+      layoutId,
+      memberId,
+      reason,
+      source,
+    }),
+  };
+}
+export function removeWindowLayoutMember(state, windowLayoutId, memberId, diagnostics = {}) {
   const layout = windowLayout(state, windowLayoutId);
   if (!layout) throw new Error('Window layout not found.');
   const members = layout.arrangement.members.filter((member) => member.id !== memberId);
   return {
     ...state,
+    windowLayoutMembershipLog: appendWindowLayoutMembershipEntry(state.windowLayoutMembershipLog, {
+      kind: 'removed',
+      layoutId: windowLayoutId,
+      memberId,
+      title: layout.arrangement.members.find((member) => member.id === memberId)?.descriptor?.title,
+      reason: diagnostics.reason ?? 'removed from the layout',
+      source: diagnostics.source ?? 'remove',
+      windowInstanceId: layout.arrangement.members
+        .find((member) => member.id === memberId)?.descriptor?.windowInstanceId,
+      operationId: diagnostics.operationId,
+      membersBefore: layout.arrangement.members.length,
+      membersAfter: members.length,
+    }),
     windowLayouts: state.windowLayouts.map((candidate) =>
       candidate.id === windowLayoutId
         ? { ...candidate, arrangement: { version: 2, members } }
@@ -831,7 +875,7 @@ export function removeWindowLayoutMember(state, windowLayoutId, memberId) {
  * A window may intentionally occur in several independent layouts, but once
  * its process/window is actually closed none of those records remains live.
  * One immutable state transition prevents inactive layouts retaining ghosts. */
-export function removeClosedWindowFromAllLayouts(state, descriptor) {
+export function removeClosedWindowFromAllLayouts(state, descriptor, diagnostics = {}) {
   const title = descriptor?.title;
   const fingerprint = descriptor?.executableFingerprint;
   const windowInstanceId = descriptor?.windowInstanceId;
@@ -842,20 +886,37 @@ export function removeClosedWindowFromAllLayouts(state, descriptor) {
   }
   const normalizedFingerprint = typeof fingerprint === 'string' ? fingerprint.toLowerCase() : null;
   let changed = false;
+  let log = state.windowLayoutMembershipLog;
   const windowLayouts = (state.windowLayouts ?? []).map((layout) => {
     const members = layout.arrangement.members.filter((member) => {
       const same = windowInstanceId !== undefined
         ? member.descriptor.windowInstanceId === windowInstanceId
         : member.descriptor.title === title
           && member.descriptor.executableFingerprint.toLowerCase() === normalizedFingerprint;
-      if (same) changed = true;
+      if (same) {
+        changed = true;
+        // One entry per ejected icon, with the count on each side: this is the
+        // case the creator sees as "I added one and three others vanished".
+        log = appendWindowLayoutMembershipEntry(log, {
+          kind: 'closed-sweep',
+          layoutId: layout.id,
+          memberId: member.id,
+          title: member.descriptor?.title,
+          reason: diagnostics.reason ?? 'its window was reported closed',
+          source: diagnostics.source ?? 'closed-descriptor',
+          windowInstanceId: member.descriptor?.windowInstanceId,
+          operationId: diagnostics.operationId,
+          membersBefore: layout.arrangement.members.length,
+          membersAfter: layout.arrangement.members.length - 1,
+        });
+      }
       return !same;
     });
     return members.length === layout.arrangement.members.length
       ? layout
       : { ...layout, arrangement: { version: 2, members } };
   });
-  return changed ? { ...state, windowLayouts } : state;
+  return changed ? { ...state, windowLayouts, windowLayoutMembershipLog: log } : state;
 }
 
 /** A layout's X is a direct, non-Bin deletion. It also clears native-surface

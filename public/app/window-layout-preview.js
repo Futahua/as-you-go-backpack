@@ -17,9 +17,16 @@
  */
 
 export const WINDOW_LAYOUT_PREVIEW_DEBOUNCE_MS = 120;
+/** How many members keep their last captured image for an instant re-hover. */
+export const WINDOW_LAYOUT_PREVIEW_CACHE_LIMIT = 24;
 export const WINDOW_LAYOUT_PREVIEW_MAX_WIDTH = 240;
 export const WINDOW_LAYOUT_PREVIEW_MAX_HEIGHT = 135;
 export const WINDOW_LAYOUT_PREVIEW_DIMENSION_LIMIT = { maxWidth: 320, maxHeight: 180 };
+/** Proof switch: whether a member hover asks the control helper for a capture.
+ * See the note in capture() - captures are what a click can end up waiting
+ * behind. ON is the shipped behavior; OFF was the one-purpose proof build that
+ * judged the click path with nothing of ours in front of it. */
+export const WINDOW_LAYOUT_HOVER_THUMBNAIL_CAPTURE = true;
 export const WINDOW_LAYOUT_PREVIEW_MAX_DECODED_BYTES = 256 * 1024; // 256 KiB
 export const WINDOW_LAYOUT_PREVIEW_MAX_URL_CHARS = 512 * 1024;
 
@@ -113,6 +120,13 @@ export function createWindowLayoutMemberPreview({
   resolveCapability,
   requestThumbnail,
   debounceMs = WINDOW_LAYOUT_PREVIEW_DEBOUNCE_MS,
+  /** Proof switch, injectable so the capture path keeps its coverage while the
+   * shipped default is off. */
+  captureEnabled = WINDOW_LAYOUT_HOVER_THUMBNAIL_CAPTURE,
+  /** Papers-side lifecycle hold taken for the whole hover intent (dwell plus
+   * capture), so the periodic desktop scan cannot start in the middle of it. */
+  holdPreview = () => undefined,
+  releasePreview = () => undefined,
   setPreviewImage = () => undefined,
   clearPreview = () => undefined,
   /** Papers no longer recognises the capability we resolved - the helper
@@ -128,32 +142,79 @@ export function createWindowLayoutMemberPreview({
   }
   let generation = 0;
   let timer = null;
+  let intentHolds = 0;
+  /** The last image captured for each member. A hover shows this IMMEDIATELY and
+   * the fresh capture replaces it when it lands, so the wait for a capture is
+   * never the wait to see something. Bounded, newest last. */
+  const previewCache = new Map();
+  const previewCacheKey = (layoutId, memberId) => `${layoutId}\u0000${memberId}`;
+  function rememberPreview(key, imageUrl, width, height) {
+    previewCache.delete(key);
+    previewCache.set(key, { imageUrl, width, height });
+    while (previewCache.size > WINDOW_LAYOUT_PREVIEW_CACHE_LIMIT) {
+      const oldest = previewCache.keys().next().value;
+      if (oldest === undefined) break;
+      previewCache.delete(oldest);
+    }
+  }
+  function acquireIntent() {
+    if (intentHolds === 0) holdPreview();
+    intentHolds += 1;
+  }
+  function releaseIntent() {
+    if (intentHolds === 0) return;
+    intentHolds -= 1;
+    if (intentHolds === 0) releasePreview();
+  }
 
   async function capture(layoutId, memberId, gen) {
-    if (gen !== generation) return;
-    const capability = await resolveCapability(layoutId, memberId);
-    if (gen !== generation) return;
-    if (!capability) return; // icon/name-only fallback; no request
-    let result;
     try {
-      result = await requestThumbnail(capability, {
-        maxWidth: WINDOW_LAYOUT_PREVIEW_MAX_WIDTH,
-        maxHeight: WINDOW_LAYOUT_PREVIEW_MAX_HEIGHT,
-      });
-    } catch {
-      result = { outcome: 'failed' };
+      if (gen !== generation) return;
+      // PROOF SWITCH - member hover thumbnail capture.
+      //
+      // The control helper serves one request at a time and cannot preempt one
+      // already running, so a PrintWindow capture started by a hover preview sits
+      // in front of the next minimize/restore, however the control request is
+      // ordered. With this off the popover still shows the icon and the title and
+      // the preview area keeps its honest fallback; list Peek, the icon peek and
+      // every window action are untouched.
+      if (captureEnabled !== true) return;
+      const capability = await resolveCapability(layoutId, memberId);
+      if (gen !== generation) return;
+      if (!capability) return; // icon/name-only fallback; no request
+      let result;
+      try {
+        result = await requestThumbnail(capability, {
+          maxWidth: WINDOW_LAYOUT_PREVIEW_MAX_WIDTH,
+          maxHeight: WINDOW_LAYOUT_PREVIEW_MAX_HEIGHT,
+        });
+      } catch {
+        result = { outcome: 'failed' };
+      }
+      if (gen !== generation) return; // late response discarded (rapid A->B / leave)
+      if (result?.outcome === 'missing') onCapabilityMissing(layoutId, memberId);
+      if (isValidThumbnailSuccess(result)) {
+        rememberPreview(previewCacheKey(layoutId, memberId), result.imageUrl, result.width, result.height);
+        setPreviewImage(result.imageUrl, result.width, result.height);
+      }
+      // otherwise: honest typed/name-only fallback, never a fabricated image
+    } finally {
+      releaseIntent();
     }
-    if (gen !== generation) return; // late response discarded (rapid A->B / leave)
-    if (result?.outcome === 'missing') onCapabilityMissing(layoutId, memberId);
-    if (isValidThumbnailSuccess(result)) {
-      setPreviewImage(result.imageUrl, result.width, result.height);
-    }
-    // otherwise: honest typed/name-only fallback, never a fabricated image
   }
 
   function schedule(layoutId, memberId) {
     const gen = ++generation;
     clearTimeoutFn(timer);
+    // Intent hold: from the hover itself, so the periodic desktop scan cannot
+    // start during the dwell and end up in front of this capture. Reference
+    // counted, because a sweep schedules the next member before the previous
+    // capture has settled.
+    acquireIntent();
+    // Instant: whatever we captured for this member last time is shown NOW, and
+    // the fresh capture replaces it when it lands. Nothing waits to be seen.
+    const cached = previewCache.get(previewCacheKey(layoutId, memberId));
+    if (cached) setPreviewImage(cached.imageUrl, cached.width, cached.height);
     timer = setTimeoutFn(() => {
       timer = null;
       void capture(layoutId, memberId, gen);
@@ -165,6 +226,7 @@ export function createWindowLayoutMemberPreview({
     generation += 1;
     clearTimeoutFn(timer);
     timer = null;
+    releaseIntent();
     clearPreview();
   }
 

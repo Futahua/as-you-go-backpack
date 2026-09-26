@@ -15,6 +15,14 @@ export function planWindowLayoutShiftPeekTransition(source, event, {
     return { handled: true, held: false, begin: null, end: true };
   }
   if (source === 'blur') return { handled: true, held: false, begin: null, end: true };
+  if (source === 'memberleave') {
+    // The pointer left a member. Blank space INSIDE the widget keeps the last
+    // Peek while Shift is held - the pointer drifts between icons, and ending
+    // there flashed the desktop and re-peeked on the next icon. Leaving the
+    // widget itself, or releasing Shift, still ends it.
+    const keep = held && event.leftWidget !== true;
+    return { handled: true, held, begin: null, end: !keep };
+  }
   if (source === 'hover') {
     if (member && member !== relatedMember && (event.shiftKey || held)) {
       return { handled: true, held: true, begin: member, end: false };

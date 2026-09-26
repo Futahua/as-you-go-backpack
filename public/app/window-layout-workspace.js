@@ -78,6 +78,34 @@ export function windowLayoutHasValidInstanceId(value) {
   return isPlainObject(value) && validWindowInstanceId(value.windowInstanceId);
 }
 
+/** The native Direct Pick seed keeps exact instance ids when available so the
+ * host can distinguish same-title siblings. Legacy descriptors still collapse
+ * by title and executable fingerprint; malformed present ids fail closed
+ * rather than being silently downgraded to that weaker identity. */
+export function windowLayoutPickMemberDescriptors(members) {
+  const unique = new Map();
+  for (const member of Array.isArray(members) ? members : []) {
+    const descriptor = member?.descriptor ?? member;
+    if (!isPlainObject(descriptor) || descriptor.version !== 1
+      || typeof descriptor.title !== 'string'
+      || typeof descriptor.executableFingerprint !== 'string') continue;
+    const hasInstanceId = descriptor.windowInstanceId !== undefined;
+    if (hasInstanceId && !validWindowInstanceId(descriptor.windowInstanceId)) return null;
+    const identity = hasInstanceId
+      ? `window:${descriptor.windowInstanceId}`
+      : `legacy:${descriptor.executableFingerprint}|${descriptor.title}`;
+    if (!unique.has(identity)) {
+      unique.set(identity, {
+        version: 1,
+        title: descriptor.title,
+        executableFingerprint: descriptor.executableFingerprint,
+        ...(hasInstanceId ? { windowInstanceId: descriptor.windowInstanceId } : {}),
+      });
+    }
+  }
+  return [...unique.values()];
+}
+
 /** Candidate rows have an exact host-observed identity, but no persisted
  * executable fingerprint. Only an exact, valid instance id can establish
  * current membership before binding; title-only matching can confuse sibling
@@ -220,7 +248,7 @@ export function createWindowLayoutPickApplier({
         continue;
       }
       const existing = matches[0];
-      next = model.removeWindowLayoutMember(next, layoutId, existing.id);
+      next = model.removeWindowLayoutMember(next, layoutId, existing.id, { source: 'pick-remove', reason: 'the pick asked for this window to be removed' });
       capabilityDeletes.add(memberKey(layoutId, existing.id));
       iconDeletes.add(memberKey(layoutId, existing.id));
       removed += 1;
@@ -356,7 +384,7 @@ export function createWindowLayoutRetirementWriter({
     const layout = getState().windowLayouts?.find((candidate) => candidate.id === layoutId);
     const member = layout?.arrangement?.members?.find((candidate) => candidate.id === memberId);
     if (!member) return { outcome: 'ignored' };
-    const next = model.removeWindowLayoutMember(getState(), layoutId, memberId);
+    const next = model.removeWindowLayoutMember(getState(), layoutId, memberId, { source: 'watcher-retire', reason: 'a retirement command removed this member' });
     capabilities?.delete(memberKey(layoutId, memberId));
     icons?.delete(memberKey(layoutId, memberId));
     if (next !== getState()) commitState(next);
