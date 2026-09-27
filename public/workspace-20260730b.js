@@ -1159,8 +1159,28 @@ async function bringWindowLayoutMemberToFront(layoutId, memberId) {
   }
   if (result?.outcome === 'success') return result;
   if (result?.outcome === 'missing') {
+    // The cached handle is DEAD - Papers restarted, or the binding was dropped -
+    // and it used to be thrown away only after failing, which is why the first
+    // right-click on every member did nothing and the second one worked. Drop it,
+    // resolve a fresh one, and act ONCE more so the first click is the click.
     windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
     windowLayoutRuntimeController.invalidateCapabilities(layoutId);
+    const fresh = await capabilityForMember(layoutId, memberId);
+    if (windowLayoutDetachment.isReadOnly()) {
+      return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
+    }
+    if (fresh) {
+      try {
+        result = await bring(fresh);
+      } catch (error) {
+        recordActivationRefusal(layoutId, memberId, error instanceof Error ? error.message : String(error));
+        return { outcome: 'failed', message: error instanceof Error ? error.message : String(error) };
+      }
+      if (windowLayoutDetachment.isReadOnly()) {
+        return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
+      }
+      if (result?.outcome === 'success') return result;
+    }
   }
   return {
     outcome: result?.outcome ?? 'failed',
