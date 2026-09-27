@@ -77,9 +77,11 @@ export function windowLayoutMemberMarkup(layoutId, member, icon = null, disabled
     : `<span class="window-layout-member-icon placeholder" data-wl-member-icon="${escapeHtml(member.id)}" aria-hidden="true"></span>`;
   const stateClass = windowLayoutMemberState(member);
   const title = member.descriptor?.title ?? member.title ?? 'Untitled';
-  const runningIndicator = stateClass === 'normal'
-    ? `<span class="window-layout-member-state ${stateClass}" data-wl-member-state="${stateClass}" aria-hidden="true"></span>`
-    : '';
+  // ONE stable marker, always present, carrying the LIVE state. It used to be
+  // omitted entirely for a minimized member, so the markup could not express
+  // "the app cannot see this window right now" - and the underline renders from
+  // live observation, never from the persisted member state.
+  const runningIndicator = `<span class="window-layout-member-state ${stateClass}" data-wl-live-state="${stateClass}" aria-hidden="true"></span>`;
   // Warning notes are suppressed on every AYG surface, including the accessible
   // label that also supplies the custom hover popover. Keep the member title as
   // its accessible and hover name, with state still communicated by the button.

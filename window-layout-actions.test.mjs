@@ -15,6 +15,66 @@ import { createWindowLayoutGroupActionRunner, toggleWindowLayoutMemberVisibility
 
 const never = () => false;
 
+test('a click that can toggle atomically never observes first', async () => {
+  // The helper decides and acts inside one request. The old path observed in the
+  // page, carried the answer back over IPC and returned to mutate - and that
+  // observation also started a thumbnail capture on the click's own lane.
+  const calls = [];
+  const host = {
+    observeWindowCapability: async () => {
+      calls.push('observe');
+      return { outcome: 'success', observation: { state: 'normal', bounds: null } };
+    },
+    toggleWindowCapability: async () => {
+      calls.push('toggle');
+      return { outcome: 'success', action: 'minimize', observation: { state: 'normal', bounds: null } };
+    },
+    applyWindowCapability: async () => {
+      calls.push('apply');
+      return { outcome: 'success' };
+    },
+    minimizeWindowCapability: async () => {
+      calls.push('minimize');
+      return { outcome: 'success' };
+    },
+  };
+  const result = await toggleWindowLayoutMemberVisibility({
+    host,
+    capability: { version: 1, bindingId: 'member-capability' },
+    member: { bounds: { x: 0, y: 0, width: 100, height: 100 } },
+    isReadOnly: never,
+  });
+  assert.equal(result.action, 'minimize');
+  assert.deepEqual(calls, ['toggle']);
+});
+
+test('an atomic toggle that restores still applies the remembered rectangle', async () => {
+  const calls = [];
+  const host = {
+    toggleWindowCapability: async () => {
+      calls.push('toggle');
+      return { outcome: 'success', action: 'restore', observation: { state: 'minimized', bounds: null } };
+    },
+    applyWindowCapability: async (_capability, bounds) => {
+      calls.push(['apply', bounds]);
+      return { outcome: 'success' };
+    },
+    observeWindowCapability: async () => {
+      calls.push('observe');
+      return { outcome: 'success', observation: { state: 'normal', bounds: null } };
+    },
+  };
+  const bounds = { x: 10, y: 20, width: 800, height: 600 };
+  const result = await toggleWindowLayoutMemberVisibility({
+    host,
+    capability: { version: 1, bindingId: 'member-capability' },
+    member: { bounds },
+    isReadOnly: never,
+  });
+  assert.equal(result.action, 'restore');
+  assert.deepEqual(calls, ['toggle', ['apply', bounds]]);
+});
+
 test('member icon restores at saved bounds through the same restore operation as Restore all', async () => {
   const calls = [];
   const host = {

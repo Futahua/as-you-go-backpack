@@ -741,7 +741,11 @@ function windowLayoutPickerMarkup(layoutId, candidates) {
 // referencing the same real window never share ephemeral state; every cache,
 // DOM selector and removal path uses the composite key.
 const windowLayoutRuntime = {
-  capabilities: new Map(),   // `${layoutId}\u0000${memberId}` -> capability (ephemeral, entry-side discrete actions)
+  capabilities: new Map(),   // `${layoutId}\u0000${memberId}` -> capability (ephemeral, entry-side only)
+  // Live presentation state per member: the underline under an icon renders from
+  // THIS, never from the persisted member state. `unknown` is a real value - a
+  // member the app cannot observe must not masquerade as minimized.
+  liveMemberState: new Map(),
   icons: new Map(),          // `${layoutId}\u0000${memberId}` -> data URL (ephemeral)
   pickerOpenFor: null,
   pickerGeneration: 0,
@@ -873,6 +877,9 @@ function windowLayoutStatusText(layoutId) {
 }
 
 const windowLayoutTransientStatusTimers = new Map();
+/** Consecutive independent positives that a member's window is gone. One is not
+ * enough: a resolve can miss a window that is merely hidden or not enumerated. */
+const windowLayoutGoneConfirmations = new Map();
 function setWindowLayoutStatus(layoutId, text) {
   const previous = windowLayoutTransientStatusTimers.get(layoutId);
   if (previous) {
@@ -1128,14 +1135,14 @@ async function bringWindowLayoutMemberToFront(layoutId, memberId) {
     recordActivationRefusal(layoutId, memberId, 'resolved successfully but carried no capability');
     return { outcome: 'failed', message: 'Window activation is unavailable.' };
   }
-  // RESTORE is the primitive that raises. This used to call an "activate"
-  // channel that Papers does not implement, so the request rejected, nothing
-  // caught it, and a right-click quietly did nothing at all. The helper's
-  // restore puts the window back AND explicitly brings it to the front, which
-  // is exactly what "show me that window" means.
-  const bring = typeof host.restoreWindowCapability === 'function'
-    ? host.restoreWindowCapability
-    : host.activateWindowCapability;
+  // Papers now owns a real activation: it makes the foreground call in its own
+  // process, because Papers owns the click that asked for it, and it reports
+  // success only when the foreground actually moved. Restore was the wrong
+  // primitive - Windows refuses a foreground switch from a background worker,
+  // and a refusal flashes the taskbar button instead of raising the window.
+  const bring = typeof host.activateWindowCapability === 'function'
+    ? host.activateWindowCapability
+    : host.restoreWindowCapability;
   if (typeof bring !== 'function') {
     recordActivationRefusal(layoutId, memberId, 'Window activation is unavailable.');
     return { outcome: 'failed', message: 'Window activation is unavailable.' };
@@ -1343,36 +1350,44 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
     state: nextState,
     ...(persistBounds === undefined ? {} : { bounds: persistBounds }),
   }));
-  patchWindowLayoutMember(layoutId, memberId, nextState);
+  // The action's result says what was ASKED for; the observation that follows
+  // says what is true. Paint unknown until it arrives.
+  patchWindowLayoutMember(layoutId, memberId, 'unknown');
   noteWindowLayoutCommit(layoutId);
   queueWindowLayoutSave();
 }
 
-function patchWindowLayoutMember(layoutId, memberId, stateValue) {
+function patchWindowLayoutMember(layoutId, memberId, liveState) {
   // 040: scope the DOM selector by layout+member so a state patch for one
   // layout can never touch the same-window member of another layout. There
   // can be two legitimate matches while a compact widget is detached: update
   // both copies instead of leaving one surface with stale underlines.
-  const stateClass = windowLayoutMemberState({ state: stateValue });
+  //
+  // LIVE state, not persisted state. The underline is presentation truth, and
+  // only a live observation is allowed to paint it. An action's own result says
+  // what was ASKED for, and the atomic toggle's observation describes the window
+  // BEFORE the mutation - neither proves what is on screen now, so both paint
+  // `unknown` until an observation confirms.
+  const state = liveState === 'minimized' ? 'minimized' : (liveState === 'normal' ? 'normal' : 'unknown');
+  windowLayoutRuntime.liveMemberState.set(windowLayoutMemberKey(layoutId, memberId), state);
   const buttons = document.querySelectorAll(
     `[data-wl-layout="${CSS.escape(layoutId)}"] [data-wl-member="${CSS.escape(memberId)}"]`);
   for (const button of buttons) {
-    button.classList.remove('normal', 'minimized');
-    button.classList.add(stateClass);
-    button.setAttribute('aria-pressed', stateClass === 'minimized' ? 'true' : 'false');
+    button.classList.remove('normal', 'minimized', 'unknown');
+    button.classList.add(state);
+    button.setAttribute('aria-pressed', state === 'minimized' ? 'true' : 'false');
     button.removeAttribute('title');
-    const marker = button.querySelector('.window-layout-member-state');
-    if (stateClass === 'normal') {
-      const nextMarker = marker ?? document.createElement('span');
-      nextMarker.className = 'window-layout-member-state normal';
-      nextMarker.setAttribute('data-wl-member-state', 'normal');
-      nextMarker.setAttribute('aria-hidden', 'true');
-      if (!marker) button.append(nextMarker);
-    } else if (marker) {
-      // Minimized members have no marker in the markup at all. Removing it
-      // prevents a later CSS/layout rule from making a stale bar visible.
-      marker.remove();
+    // ONE stable element, always present: its state is inspectable at any moment
+    // and there is no create/remove churn. Removing it for minimized made sense
+    // while the model had only two states; "unknown" is a real state now.
+    let marker = button.querySelector('.window-layout-member-state');
+    if (!marker) {
+      marker = document.createElement('span');
+      marker.setAttribute('aria-hidden', 'true');
+      button.append(marker);
     }
+    marker.className = `window-layout-member-state ${state}`;
+    marker.setAttribute('data-wl-live-state', state);
   }
 }
 
@@ -1594,7 +1609,9 @@ async function runGroupMemberAction(layoutId, member, action, results, patches) 
   if (windowLayoutDetachment.isReadOnly()) return 'superseded';
   results.push({ memberId: member.id, outcome });
   patches.push({ memberId: member.id, state: nextState });
-  patchWindowLayoutMember(layoutId, member.id, nextState);
+  // Persisted intent, not presentation truth: the underline waits for the
+  // observation that follows the mutation.
+  patchWindowLayoutMember(layoutId, member.id, 'unknown');
   return outcome;
 }
 
@@ -1633,7 +1650,7 @@ async function isolateMinimizeMember(layoutId, member, results, patches) {
   results.push({ memberId: member.id, outcome: result.outcome });
   if (result.outcome === 'success') {
     patches.push({ memberId: member.id, state: 'minimized' });
-    patchWindowLayoutMember(layoutId, member.id, 'minimized');
+    patchWindowLayoutMember(layoutId, member.id, 'unknown');
   }
   return result.outcome;
 }
@@ -2488,7 +2505,14 @@ const windowLayoutRecording = createWindowLayoutRecordingWiring({
   // Bounds observations stay local; a normal/minimized transition is the
   // state that the detached widget must receive so its underline cannot go
   // stale while the attached card is already correct.
-  onObservationStateChange: (layoutId) => noteWindowLayoutCommit(layoutId),
+  // A live observation is the ONLY writer allowed to paint the underline: it is
+  // the only thing that knows what the window is doing now. This used to commit
+  // a save and nothing else, so the marker was repainted by whatever else
+  // happened to run - which is why it lagged the screen.
+  onObservationStateChange: (layoutId, memberId, state) => {
+    if (memberId) patchWindowLayoutMember(layoutId, memberId, state);
+    noteWindowLayoutCommit(layoutId);
+  },
   statusText: windowLayoutStatusForOutcome,
   onRetireMember: (intent) => handleWindowLayoutRetireMember(intent),
   // Every member result reaches the card's state, and only a TRANSITION repaints: the cadence runs every few
@@ -2538,10 +2562,16 @@ async function processTrackingLifecycleEvent(event) {
   trackingEventInFlight = true;
   try {
     if (isWindowLifecycleDestroyEvent(event)) {
-      // A close is global membership truth, not tracking-only state. The same
-      // window may be present in several layouts, so retire every exact
-      // instance match without closing or otherwise touching the process.
-      await retireClosedWindowEverywhere({ version: 1, windowInstanceId: event.windowInstanceId }, { source: 'lifecycle-gone-event', reason: 'the lifecycle watcher reported it gone' });
+      // EVIDENCE, NOT PROOF. A lifecycle 'gone' is produced by diffing successive
+      // task-worthy enumerations, so one transient disappearance would delete a
+      // member outright - and it bypassed the periodic sweep's confirmation
+      // entirely. It seeds a confirmation instead: the sweep corroborates it with
+      // an independent resolve, and only two positives retire anything.
+      const existing = windowLayoutGoneConfirmations.get(event.windowInstanceId);
+      windowLayoutGoneConfirmations.set(event.windowInstanceId, {
+        count: Math.max(1, existing?.count ?? 0),
+        at: Date.now(),
+      });
       return;
     }
     await windowLayoutAutoTracking.addFromEvent(event);
@@ -2589,8 +2619,23 @@ async function reconcileClosedWindowMembers() {
       } catch {
         result = null;
       }
-      if (result?.outcome !== 'missing') continue;
-      await retireClosedWindowEverywhere({ version: 1, windowInstanceId: instanceId }, { source: 'periodic-resolve-missing', reason: 'the periodic sweep could not resolve it' });
+      if (result?.outcome !== 'missing') {
+        // Any other answer - including "I could not tell" - clears the count.
+        windowLayoutGoneConfirmations.delete(instanceId);
+        continue;
+      }
+      // ONE POSITIVE ANSWER IS NOT ENOUGH. A resolve can report 'missing' for a
+      // window that is merely not visible, cloaked, or not yet enumerated, and a
+      // single such answer once deleted live members one by one until the layout
+      // was empty. Two independent positives, separated by at least one sweep,
+      // are required before anything is retired.
+      const confirmed = (windowLayoutGoneConfirmations.get(instanceId)?.count ?? 0) + 1;
+      if (confirmed < 2) {
+        windowLayoutGoneConfirmations.set(instanceId, { count: confirmed, at: Date.now() });
+        continue;
+      }
+      windowLayoutGoneConfirmations.delete(instanceId);
+      await retireClosedWindowEverywhere({ version: 1, windowInstanceId: instanceId }, { source: 'periodic-resolve-missing', reason: 'two independent resolutions could not find it' });
     }
   } finally {
     closedWindowReconcileInFlight = false;

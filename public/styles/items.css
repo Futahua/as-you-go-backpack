@@ -469,6 +469,14 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
 .window-layout-member-state.missing {
   display: none;
 }
+/* Unknown is a REAL state: the app cannot see this window right now - a denied
+   capability, a helper timeout, an unverified identity, or the moment between a
+   mutation and the observation that confirms it. It must not look minimized and
+   it must not look normal. */
+.window-layout-member-state.unknown {
+  background: var(--text-muted);
+  opacity: 0.3;
+}
 .window-layout-member.minimized { background: transparent; }
 .window-layout-member.missing { opacity: 0.55; }
 /* 019F: subtle STATIC rounded hover/selected backgrounds (no animation); the

@@ -237,6 +237,42 @@ export async function toggleWindowLayoutMemberVisibility({
   let activeCapability = capability;
   let observed = null;
   let observationFailed = false;
+  // ONE transaction decides and acts. The helper reads the live state and toggles
+  // inside a single request, returning the pre-mutation observation and the action
+  // it took. The old path observed here, carried the answer back across IPC,
+  // decided in the page and returned to mutate - two or three full round trips for
+  // one click - and Papers' observe also started a thumbnail capture on the
+  // click's own lane.
+  if (typeof host.toggleWindowCapability === 'function' && activeCapability) {
+    let toggled = null;
+    try {
+      toggled = await host.toggleWindowCapability(activeCapability);
+    } catch {
+      // The request may have reached the native helper before its response was
+      // lost. Never replay a visibility mutation with an unknown outcome.
+      return { outcome: 'uncertain' };
+    }
+    if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
+    if (toggled?.outcome !== 'success') return toggled ?? { outcome: 'failed' };
+    const tookAction = toggled.action === 'restore' ? 'restore' : 'minimize';
+    // Restoring is the only case that still needs a second request: the window is
+    // put back at its remembered rectangle. Minimizing is complete.
+    if (tookAction === 'restore' && member.bounds) {
+      let applied = null;
+      try {
+        applied = await host.applyWindowCapability(activeCapability, member.bounds);
+      } catch {
+        return { outcome: 'uncertain', action: tookAction };
+      }
+      if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
+      if (applied?.outcome !== 'success') return applied ?? { outcome: 'failed' };
+    }
+    return {
+      ...toggled,
+      action: tookAction,
+      observation: toggled.observation ?? null,
+    };
+  }
   for (let attempt = 0; attempt < (typeof resolveCapability === 'function' ? 2 : 1); attempt += 1) {
     if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
     if (attempt > 0 || !activeCapability) {
