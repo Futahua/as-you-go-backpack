@@ -327,6 +327,11 @@ export function windowLayoutWidgetSnapshot(layout, memberIcon = () => null, memb
     members.push({
       id: member.id,
       descriptor,
+      ...(member.bounds && Number.isFinite(member.bounds.x) && Number.isFinite(member.bounds.y)
+        && Number.isFinite(member.bounds.width) && Number.isFinite(member.bounds.height)
+        && member.bounds.width > 0 && member.bounds.height > 0
+        ? { bounds: { x: member.bounds.x, y: member.bounds.y,
+          width: member.bounds.width, height: member.bounds.height } } : {}),
       // Preserve the per-member distinction, and fail closed for malformed or
       // not-yet-confirmed values so an unknown window is never underlined as
       // if it were known to be open.

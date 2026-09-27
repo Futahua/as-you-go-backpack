@@ -898,6 +898,194 @@ function setWindowLayoutStatus(layoutId, text) {
   }
 }
 
+// Geometry and capability publication is background work. The resident native
+// broker sees the physical press; these requests never run inside a click.
+const windowControlReady = new Set();
+let windowControlWidgetSnapshot = null;
+/** The last eligibility count per sync, so "sent 0" can name which half failed. */
+let windowControlLastCounts = null;
+/** The last handle-resolution answer, surfaced in the widget title while this is
+ * being proven: the widget cannot write the document, so its diagnostics have
+ * nowhere else to go. */
+/** The last control event, kept because the 200ms sync overwrites the title. */
+let windowControlLastEvent = 'none';
+/** The last recorded sync shape, so a 200ms loop cannot erase the journal. */
+let windowControlLastSyncNote = '';
+let windowControlSignature = '';
+let windowControlNextSyncAt = 0;
+let windowControlSyncPending = false;
+let windowControlUnavailable = '';
+function windowControlKey(layoutId, memberId) {
+  return windowLayoutMemberKey(layoutId, memberId);
+}
+function windowControlEntries() {
+  const entries = [];
+  const counts = { buttons: 0, disabled: 0, noMember: 0, noCapability: 0, noRect: 0 };
+  for (const button of document.querySelectorAll('[data-wl-member]')) {
+    counts.buttons += 1;
+    if (entries.length >= 32 || button.disabled || !button.isConnected) { counts.disabled += 1; continue; }
+    const layoutId = button.dataset.wlLayout;
+    const memberId = button.dataset.wlMember;
+    const member = layoutId && memberId
+      ? (WIDGET_SURFACE
+        ? windowControlWidgetSnapshot?.members?.find((candidate) => candidate.id === memberId)
+        : windowLayoutMemberFromState(layoutId, memberId))
+      : null;
+    if (!member) { counts.noMember += 1; continue; }
+    const rect = button.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) { counts.noRect += 1; continue; }
+    const restore = member.bounds ?? null;
+    // IDENTITY, not a capability. This surface knows which member each icon is
+    // and where it sits; only Papers can turn that into a live window. Requiring
+    // a resolved capability here meant the request was parked behind an authority
+    // this surface does not hold, and the broker was never given a single slot.
+    entries.push({
+      layoutId, memberId, descriptor: member.descriptor,
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      restore,
+    });
+  }
+  windowControlLastCounts = counts;
+  return entries;
+}
+async function syncWindowControls() {
+  if (windowControlSyncPending || typeof host.windowControlSync !== 'function') return;
+  const entries = windowControlEntries();
+  const signature = JSON.stringify([window.screenX, window.screenY, entries]);
+  if (signature === windowControlSignature && Date.now() < windowControlNextSyncAt) return;
+  windowControlSyncPending = true;
+  try {
+    const response = await host.windowControlSync(entries);
+    const allReady = response?.outcome === 'success'
+      && (response.results ?? []).length === entries.length
+      && (response.results ?? []).every((entry) => entry.ready);
+    windowControlSignature = signature;
+    windowControlNextSyncAt = allReady ? Infinity : Date.now() + 3000;
+    windowControlReady.clear();
+    if (response?.outcome === 'success') {
+      windowControlUnavailable = '';
+      for (const entry of response.results ?? []) {
+        if (entry.ready) windowControlReady.add(windowControlKey(entry.layoutId, entry.memberId));
+      }
+    } else {
+      windowControlUnavailable = response?.error || 'Native window control is unavailable';
+    }
+    // Recorded, because "the broker holds nothing" has to be readable rather than
+    // inferred from an empty action log: it names how many members were sent, how
+    // many the broker accepted, and why the rest were refused.
+    recordControlSyncDiagnostic(entries.length, response);
+  } catch (error) {
+    windowControlSignature = signature;
+    windowControlNextSyncAt = Date.now() + 3000;
+    windowControlUnavailable = error instanceof Error ? error.message : 'Native window control is unavailable';
+    // The widget cannot write the document, so its refusal goes in the title.
+    try {
+      if (WIDGET_SURFACE) document.title = 'WC error: ' + windowControlUnavailable.slice(0, 140);
+    } catch { /* the report is a diagnostic */ }
+    recordControlSyncDiagnostic(entries.length, null);
+  } finally {
+    windowControlSyncPending = false;
+  }
+}
+
+/** One bounded entry per sync: what was sent, what was accepted, what was refused. */
+function recordControlSyncDiagnostic(requested, response) {
+  // The WIDGET surface has no document-write authority, so a record written there
+  // can never appear - which is why every sync record so far came from the
+  // workspace, where there are no member buttons at all. While this is being
+  // proven, the widget states its own outcome in its window title, which is
+  // readable from outside the app.
+  try {
+    if (WIDGET_SURFACE && response?.outcome !== 'success') {
+      const counts = windowControlLastCounts ?? { buttons: 0, disabled: 0, noMember: 0, noCapability: 0, noRect: 0 };
+      let shape = 'none';
+      try { shape = JSON.stringify(response)?.slice(0, 90) ?? 'undefined'; } catch { shape = 'unserializable'; }
+      document.title = 'ev ' + windowControlLastEvent + ' | sent ' + requested + ' | btn ' + counts.buttons
+        + (windowControlUnavailable ? ' | err ' + String(windowControlUnavailable).slice(0, 90) : '');
+    }
+  } catch {
+    /* diagnostics never fail the action they describe */
+  }
+  try {
+    const ready = (response?.results ?? []).filter((entry) => entry.ready).length;
+    const reason = response?.outcome !== 'success'
+      ? String(response?.error ?? 'no response')
+      : ready === requested ? 'all accepted' : (requested - ready) + ' refused';
+    const note = 'window control[' + (WIDGET_SURFACE ? 'widget' : 'workspace') + ']: sent ' + requested
+        + ', accepted ' + ready + ' (' + reason + ')'
+        + (windowControlLastCounts
+          ? ' [buttons ' + windowControlLastCounts.buttons + ', inert ' + windowControlLastCounts.disabled
+            + ', no-member ' + windowControlLastCounts.noMember + ', no-handle ' + windowControlLastCounts.noCapability
+            + ', no-rect ' + windowControlLastCounts.noRect + ']'
+          : '');
+    if (note === windowControlLastSyncNote) return;
+    windowControlLastSyncNote = note;
+    if (WIDGET_SURFACE) return;
+    void store.commit(noteWindowLayoutDiagnostic(state, {
+      reason: note,
+      source: 'control-sync',
+    }));
+  } catch {
+    /* diagnostics never fail the action they describe */
+  }
+}
+if (typeof host.onWindowControlEvent === 'function') host.onWindowControlEvent((event) => {
+  if (!event?.layoutId) return;
+  // The widget cannot write the document, so the last control event it hears is
+  // also stated in its title: that is the only diagnostic a non-writer surface has.
+  try {
+    if (WIDGET_SURFACE) windowControlLastEvent = String(event.result).slice(0, 120);
+  } catch { /* diagnostics never fail the action they describe */ }
+  // THE BROKER'S EVENT IS THE TRUTH ABOUT WHAT HAPPENED. It reports the operation it
+  // ACTUALLY performed - a toggle is resolved there from the window's live state,
+  // not guessed here from persisted state that can lag - so the member's state and
+  // marker follow that.
+  if ((event.operation === 'minimize' || event.operation === 'restore')
+    && (event.result === 'success' || event.result === 'pending')) {
+    const memberState = event.operation === 'minimize' ? 'minimized' : 'normal';
+    patchWindowLayoutMember(event.layoutId, event.memberId, memberState);
+    if (!WIDGET_SURFACE && surfaceCoordinator?.role === SURFACE_ROLE.WRITER) {
+      const next = updateWindowLayoutMember(state, event.layoutId, event.memberId, { state: memberState });
+      store.replace(next);
+      noteWindowLayoutCommit(event.layoutId);
+      queueWindowLayoutSave();
+    }
+    return;
+  }
+  // Registration is BACKGROUND work, so readiness ARRIVES here: a member is ready
+  // only when Papers reports a positive slot for it in the current broker session.
+  if (event.result === 'ready') {
+    windowControlReady.add(windowControlKey(event.layoutId, event.memberId));
+    setWindowLayoutStatus(event.layoutId, '');
+    return;
+  }
+  if (event.result === 'refused' || event.result === 'no-surface' || String(event.result).startsWith('no-window')) {
+    windowControlReady.delete(windowControlKey(event.layoutId, event.memberId));
+    setWindowLayoutStatus(event.layoutId, 'Window control could not take this icon: ' + event.result);
+    return;
+  }
+  if (event.result === 'stale') {
+    const key = windowControlKey(event.layoutId, event.memberId);
+    windowControlReady.delete(key);
+    windowLayoutRuntime.capabilities.delete(key);
+    windowControlSignature = '';
+  }
+  if (event.result === 'foreground-refused') {
+    setWindowLayoutStatus(event.layoutId, 'Windows refused the foreground switch.');
+  } else if (event.result !== 'success' && event.result !== 'pending') {
+    setWindowLayoutStatus(event.layoutId, 'Window control failed: ' + event.result);
+  }
+});
+if (typeof host.onWindowControlUnavailable === 'function') host.onWindowControlUnavailable((reason) => {
+  windowControlReady.clear();
+  windowControlSignature = '';
+  windowControlUnavailable = String(reason || 'Native window control is unavailable');
+  for (const button of document.querySelectorAll('[data-wl-member]')) {
+    if (button.dataset.wlLayout) setWindowLayoutStatus(button.dataset.wlLayout, windowControlUnavailable);
+  }
+});
+setInterval(() => { void syncWindowControls(); }, 200);
+
 /** 040: ONE shared/batched layout-scoped icon refresh. Members whose icon is
  * not yet cached are queued by their composite layout\u0000member key; a single
  * bounded `windowCandidates()` request resolves every queued member's icon in
@@ -1100,6 +1288,17 @@ async function bringWindowLayoutMemberToFront(layoutId, memberId) {
     recordActivationRefusal(layoutId, memberId, 'read-only: another surface is writing');
     return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
   }
+  // THE BROKER IS THE BRING-FORWARD PATH TOO, not only the toggle. It already holds
+  // this member's slot with a revalidated identity, so raising it costs one message
+  // to a resident process instead of resolving a capability and making Papers act.
+  // A member it does not hold says so out loud and falls back with that recorded.
+  if (windowControlReady.has(windowLayoutMemberKey(layoutId, memberId))
+    && typeof host.windowControlGroup === 'function') {
+    const sent = await host.windowControlGroup(layoutId, [{ memberId, operation: 'foreground' }])
+      .catch(() => ({ outcome: 'helper-unavailable' }));
+    if (sent?.outcome === 'success') return { outcome: 'success' };
+    setWindowLayoutStatus(layoutId, 'Window control did not raise that window; using the slower path.');
+  }
   // The steps are spelled out here rather than hidden behind capabilityForMember:
   // "unavailable" named none of them, and a right-click that says nothing useful
   // is how this feature spent an evening doing nothing.
@@ -1301,6 +1500,30 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
   }
   const descriptorIdentity = member.descriptor?.windowInstanceId
     ?? JSON.stringify([member.descriptor?.title, member.descriptor?.executableFingerprint]);
+  // THE BROKER IS THE CLICK PATH. One message to the already-running native
+  // process: no observation, no PowerShell, no process creation, no decision made
+  // in this page. A member the broker does not hold is said OUT LOUD and falls
+  // back to the legacy path with that fact recorded - a silent fallback is what
+  // made a broken broker look intermittently functional for a whole session.
+  if (typeof host.windowControlGroup === 'function') {
+    // NO LOCAL READINESS GATE, and the broker decides the direction. Readiness is
+    // this renderer's view; Papers can find a slot the widget registered
+    // cross-surface, and the resident process knows from LIVE state whether this
+    // window is minimized - persisted state can lag reality. 'toggle' is that
+    // decision, made where the truth is.
+    const sent = await host.windowControlGroup(layoutId, [{ memberId, operation: 'toggle' }])
+      .catch(() => ({ outcome: 'helper-unavailable' }));
+    if (sent?.outcome === 'success') {
+      // DELIVERED, not done: the window's real state is persisted from the broker's
+      // own event, which reports the operation it actually performed.
+      patchWindowLayoutMember(layoutId, memberId, 'unknown');
+      setWindowLayoutStatus(layoutId, '');
+      return;
+    }
+    setWindowLayoutStatus(layoutId, 'Window control did not accept that click; using the slower path.');
+  } else {
+    setWindowLayoutStatus(layoutId, 'Window control is not ready for this icon yet.');
+  }
   const isMemberCurrent = () => {
     if (windowLayoutDetachment.isReadOnly() || !isActiveRecordingContext(layoutId)) return false;
     const current = windowLayoutMemberFromState(layoutId, memberId);
@@ -1693,53 +1916,36 @@ async function windowLayoutGroupAction(layoutId, action, explicitTargetIds = nul
     : windowLayoutRuntime.selectedMembers.get(layoutId);
   const targets = selected && selected.size > 0
     ? members.filter((member) => selected.has(member.id)) : members;
-  const results = [];
-  const patches = [];
-  // 019B prewarm: resolve every target's capability before the batch so the
-  // bounded observes/mutates below are cache-hot. A handoff entered during the
-  // fan-out aborts before any host call.
-  await Promise.all(targets.map((member) => capabilityForMember(layoutId, member.id)));
-  if (windowLayoutDetachment.isReadOnly()) return;
-  await runBoundedConcurrent(
-    targets,
-    WINDOW_LAYOUT_GROUP_CONCURRENCY,
-    (member) => runGroupMemberActionWithRetry(layoutId, member, action, results, patches),
-    WINDOW_LAYOUT_GROUP_ABORT,
-  );
+  const actions = targets.map((member) => ({
+    memberId: member.id,
+    operation: action === 'isolate' ? 'restore' : action,
+  }));
   if (action === 'isolate') {
-    const unselected = selected && selected.size > 0
-      ? members.filter((member) => !selected.has(member.id)) : [];
-    if (unselected.length > 0) {
-      await Promise.all(unselected.map((member) => capabilityForMember(layoutId, member.id)));
-      if (windowLayoutDetachment.isReadOnly()) return;
-      await runBoundedConcurrent(
-        unselected,
-        WINDOW_LAYOUT_GROUP_CONCURRENCY,
-        (member) => isolateMinimizeMember(layoutId, member, results, patches),
-        WINDOW_LAYOUT_GROUP_ABORT,
-      );
+    for (const member of members) {
+      if (!targets.some((target) => target.id === member.id)) {
+        actions.push({ memberId: member.id, operation: 'minimize' });
+      }
     }
   }
-  // 018X5/019B: the FINAL abort barrier — a handoff begun during any in-flight
-  // member (returned 'superseded') or discovered by the runner aborts the
-  // ENTIRE action before the committed state, status and controller ensure.
-  if (windowLayoutDetachment.isReadOnly() || windowLayoutGroupActionRunner.aborted()) return;
-  // Chain every member patch into ONE next state and commit once, so a later
-  // patch can never clobber an earlier one with stale state.
+  if (typeof host.windowControlGroup !== 'function') {
+    setWindowLayoutStatus(layoutId, 'Native window control is unavailable.');
+    return;
+  }
+  const result = await host.windowControlGroup(layoutId, actions).catch(() => ({ outcome: 'helper-unavailable' }));
+  if (windowLayoutDetachment.isReadOnly()) return;
+  if (result?.outcome !== 'success') {
+    setWindowLayoutStatus(layoutId, 'Native window control is unavailable.');
+    return;
+  }
   let nextState = state;
-  for (const patch of patches) {
-    nextState = updateWindowLayoutMember(nextState, layoutId, patch.memberId, { state: patch.state });
+  for (const entry of actions) {
+    nextState = updateWindowLayoutMember(nextState, layoutId, entry.memberId,
+      { state: entry.operation === 'minimize' ? 'minimized' : 'normal' });
   }
-  if (patches.length > 0) {
-    store.replace(nextState);
-    noteWindowLayoutCommit(layoutId);
-  }
+  store.replace(nextState);
+  noteWindowLayoutCommit(layoutId);
   queueWindowLayoutSave();
-  const failed = results.filter((result) => result.outcome !== 'success').length;
-  if (failed > 0) setWindowLayoutStatus(layoutId, `${failed} of ${results.length} members failed`);
-  else setWindowLayoutStatus(layoutId, '');
-  // Group actions select/persist this layout as the recording context and
-  // leave one active observer; an already-active layout only re-syncs members.
+  setWindowLayoutStatus(layoutId, '');
   await windowLayoutRecording.ensureRecording(layoutId);
 }
 
@@ -2174,6 +2380,7 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
   const member = (windowLayoutWidgetPreviewSnapshot?.members ?? [])
     .find((candidate) => candidate.id === memberId);
   if (!member || !member.descriptor || typeof member.descriptor !== 'object' || Array.isArray(member.descriptor)) {
+    if (WIDGET_SURFACE) document.title = 'preview: no member descriptor';
     windowLayoutWidgetPreviewCapabilities.delete(key);
     return Promise.resolve(null);
   }
@@ -2189,6 +2396,7 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
     })
     : resolveWindowLayoutMemberDescriptor(member.descriptor, layoutId, windowLayoutWidgetPreviewSnapshot?.members);
   return Promise.resolve(resolve).then((resolved) => {
+    if (WIDGET_SURFACE) document.title = 'preview resolve: ' + String(resolved?.outcome ?? 'empty');
     if (!resolved || resolved.outcome !== 'success' || !resolved.capability) {
       windowLayoutWidgetPreviewCapabilities.delete(key);
       return null;
@@ -2196,6 +2404,9 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
     windowLayoutWidgetPreviewCapabilities.set(key, resolved.capability);
     windowLayoutWidgetPreviewIdentities.set(key, widgetPreviewIdentity(member));
     return resolved.capability;
+  }).catch((error) => {
+    if (WIDGET_SURFACE) document.title = 'preview resolve error: ' + String(error).slice(0, 90);
+    return null;
   });
 }
 
@@ -2210,7 +2421,11 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
 // animation/flashing.
 const windowLayoutMemberPreview = createWindowLayoutMemberPreview({
   resolveCapability: resolveWindowLayoutPreviewCapability,
-  requestThumbnail: (capability, options) => host.windowThumbnailCapability(capability, options),
+  requestThumbnail: async (capability, options) => {
+    const result = await host.windowThumbnailCapability(capability, options);
+    if (WIDGET_SURFACE) document.title = 'thumbnail: ' + String(result?.outcome ?? 'empty');
+    return result;
+  },
   // Hold the periodic desktop scan off for the whole hover intent, dwell
   // included: otherwise a scan that starts during the dwell lands in front of
   // the capture and the preview arrives late or not at all.
@@ -2294,12 +2509,14 @@ function beginWindowLayoutShiftPeek(member) {
 
 async function performWindowLayoutShiftPeek(member, layoutId, memberId, generation) {
   const capability = await resolveWindowLayoutPreviewCapability(layoutId, memberId);
+  if (!capability && WIDGET_SURFACE) document.title = 'peek: no capability';
   if (generation !== windowLayoutShiftPeekGeneration
     || !windowLayoutShiftPeekHeld
     || !member.isConnected
     || !member.matches(':hover')
     || !capability) return;
-  await host.windowPeekBeginCapability(capability).catch(() => undefined);
+  const result = await host.windowPeekBeginCapability(capability).catch((error) => ({ outcome: 'error', error: String(error) }));
+  if (WIDGET_SURFACE) document.title = 'peek: ' + String(result?.outcome ?? 'empty') + ' ' + String(result?.error ?? '').slice(0, 80);
   if (generation !== windowLayoutShiftPeekGeneration) void host.windowPeekEnd().catch(() => undefined);
 }
 
@@ -2324,6 +2541,15 @@ window.addEventListener('keyup', (event) => {
 });
 window.addEventListener('blur', () => {
   const transition = planWindowLayoutShiftPeekTransition('blur', {}, { held: windowLayoutShiftPeekHeld });
+  applyWindowLayoutShiftPeekTransition(transition);
+});
+// A detached widget is non-focusable. The resident native broker reports the
+// physical Shift key, including when the pointer stays still over an icon.
+if (typeof host.onWindowControlShift === 'function') host.onWindowControlShift((held) => {
+  const transition = planWindowLayoutShiftPeekTransition(held ? 'keydown' : 'keyup', { key: 'Shift' }, {
+    held: windowLayoutShiftPeekHeld,
+    member: document.querySelector('[data-wl-member]:hover'),
+  });
   applyWindowLayoutShiftPeekTransition(transition);
 });
 
@@ -3039,6 +3265,14 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       return { ok: true };
     }
     if (command.kind === 'member-toggle') {
+      // Recorded, because "the widget sent it" and "the writer received it" are
+      // different facts, and only one of them was ever visible.
+      try {
+        void store.commit(noteWindowLayoutDiagnostic(state, {
+          reason: 'writer received member-toggle for ' + command.memberId,
+          source: 'member-toggle',
+        }));
+      } catch { /* diagnostics never fail the action they describe */ }
       await handleWindowLayoutMemberClick(layoutId, command.memberId);
       return { ok: true };
     }
@@ -5466,6 +5700,23 @@ elements.grid.addEventListener('click', (event) => {
         windowLayoutDragJustMoved = false;
         return;
       }
+      if (!event.ctrlKey && !event.shiftKey
+        && !windowLayoutRuntime.isolateMode.isActive(memberButton.dataset.wlLayout)) {
+        // A PLAIN CLICK TOGGLES. This branch used to check readiness and RETURN -
+        // nothing was ever sent, which is why an icon click did nothing at all while
+        // minimize-all and restore-all worked. The widget is not the writer, so it
+        // sends the intent over the seam that already exists; the writer applies it
+        // and routes it to the resident broker.
+        const plainLayoutId = memberButton.dataset.wlLayout;
+        const plainMemberId = memberButton.dataset.wlMember;
+        if (WIDGET_SURFACE && windowLayoutWidgetClient) {
+          const sentOk = windowLayoutWidgetClient.sendCommand({ kind: 'member-toggle', memberId: plainMemberId });
+          try { document.title = 'click->toggle sent=' + String(sentOk); } catch { /* diagnostic */ }
+          return;
+        }
+        void handleWindowLayoutMemberClick(plainLayoutId, plainMemberId);
+        return;
+      }
       void handleWindowLayoutMemberClick(memberButton.dataset.wlLayout, memberButton.dataset.wlMember, event.ctrlKey, event.shiftKey);
       return;
     }
@@ -5642,19 +5893,16 @@ elements.grid.addEventListener('contextmenu', (event) => {
     // 040: grey placeholder refusal — the placeholder card's members are
     // disabled and never offer removal.
     if (wlMember.disabled) return;
+    if (!windowControlReady.has(windowControlKey(layoutId, memberId))) {
+      setWindowLayoutStatus(layoutId, windowControlUnavailable || 'Native window control is preparing.');
+    }
+    return;
     // A plain right-click brings that member's window to the front. It used to
     // open a menu whose only entry was "remove from this layout" - a dead end
     // for the far more common "show me that window". Removing an icon is Direct
     // Pick's job now, and it names the windows on screen instead of a menu item.
     // The refusal is SHOWN: an ignored promise is how this quietly did nothing.
-    void activateWindowLayoutMember(layoutId, memberId).then((activated) => {
-      if (activated?.outcome !== 'success') {
-        setWindowLayoutStatus(layoutId, activated?.message || 'That window could not be brought forward.');
-      }
-    }).catch((error) => {
-      setWindowLayoutStatus(layoutId, error instanceof Error ? error.message : String(error));
-    });
-    return;
+    // The resident hook already attempted the native action at mouse-down.
   }
   const tile = event.target.closest('.icon-item');
   if (tile && tile.classList.contains('bin-origin-ghost')) return;
@@ -6501,6 +6749,8 @@ function bootstrapWindowLayoutWidget() {
       widgetState.lastRevision = message.revision;
       if (message.snapshot && typeof message.snapshot === 'object' && message.snapshot.id === layoutId) {
         widgetState.snapshot = message.snapshot;
+        windowControlWidgetSnapshot = message.snapshot;
+        windowControlSignature = '';
         if (message.snapshot.appearance && typeof message.snapshot.appearance === 'object') {
           applyTheme(message.snapshot.appearance);
           // Widget opacity is independent of workspace opacity. A fresh widget
@@ -6786,6 +7036,24 @@ function bootstrapWindowLayoutWidget() {
     if (event.data?.type === 'clear-selection') clearWidgetSelection();
   });
 
+  async function sendWidgetNativeActions(actions) {
+    if (typeof host.windowControlGroup !== 'function') {
+      setWindowLayoutStatus(layoutId, 'Native window control is unavailable.');
+      return;
+    }
+    const result = await host.windowControlGroup(layoutId, actions).catch(() => ({ outcome: 'helper-unavailable' }));
+    if (result?.outcome !== 'success') {
+      setWindowLayoutStatus(layoutId, 'Native window control is unavailable.');
+    }
+  }
+
+  function widgetGroupTargets() {
+    const members = widgetState.snapshot.members ?? [];
+    return widgetState.selection.size > 0
+      ? members.filter((member) => widgetState.selection.has(member.id))
+      : members;
+  }
+
   function handleWidgetCardClick(event) {
     event.stopPropagation();
     const deleteButton = event.target.closest('[data-wl-delete]');
@@ -6840,7 +7108,8 @@ function bootstrapWindowLayoutWidget() {
         syncWidgetSelection();
         return;
       }
-      client.sendCommand({ kind: 'member-toggle', memberId });
+      // Send the native operation from the surface that received the click.
+      void sendWidgetNativeActions([{ memberId, operation: 'toggle' }]);
       return;
     }
     const pickCandidate = event.target.closest('[data-wl-pick-candidate]');
@@ -6866,12 +7135,12 @@ function bootstrapWindowLayoutWidget() {
     }
     const minAll = event.target.closest('[data-wl-min-all]');
     if (minAll) {
-      client.sendCommand({ kind: 'group-action', action: 'minimize', memberIds: [...widgetState.selection] });
+      void sendWidgetNativeActions(widgetGroupTargets().map(({ id: memberId }) => ({ memberId, operation: 'minimize' })));
       return;
     }
     const restoreAll = event.target.closest('[data-wl-restore-all]');
     if (restoreAll) {
-      client.sendCommand({ kind: 'group-action', action: 'restore', memberIds: [...widgetState.selection] });
+      void sendWidgetNativeActions(widgetGroupTargets().map(({ id: memberId }) => ({ memberId, operation: 'restore' })));
       return;
     }
     // Plain blank-card click exits the widget-local Ctrl/range selection. This
@@ -6946,11 +7215,10 @@ function bootstrapWindowLayoutWidget() {
       const memberId = member.dataset.wlMember;
       if (!memberId || member.disabled) return;
       windowLayoutMemberPreview.cancel();
-      // A plain right-click brings that member's window to the front here too.
-      // The widget must not resolve it from its OWN document: that mirror lags
-      // the writer, and "no such member" is exactly what a right-click got. It
-      // asks the workspace, which owns the state, through the channel.
-      client.sendCommand({ kind: 'activate-member', memberId });
+      // The broker already made this one attempt at physical right-button down.
+      if (!windowControlReady.has(windowControlKey(layoutId, memberId))) {
+        setWindowLayoutStatus(layoutId, windowControlUnavailable || 'Native window control is preparing.');
+      }
       return;
     }
   }

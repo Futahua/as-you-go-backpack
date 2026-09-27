@@ -35,6 +35,9 @@ export function createHostBridge(window) {
   const widgetQuickRunSealListeners = new Set();
   const lifecycleListeners = new Set();
   const lifecycleBaselineListeners = new Set();
+  const windowControlListeners = new Set();
+  const windowControlShiftListeners = new Set();
+  const windowControlUnavailableListeners = new Set();
 
   function parentOrigin() {
     try {
@@ -106,6 +109,20 @@ export function createHostBridge(window) {
     }
     if (event.data?.type === 'papers:project:window-lifecycle-baseline') {
       for (const listener of lifecycleBaselineListeners) listener(event.data.baseline);
+      return;
+    }
+    if (event.data?.type === 'papers:project:window-control-event') {
+      for (const listener of windowControlListeners) listener(event.data.event);
+      return;
+    }
+    if (event.data?.type === 'papers:project:window-control-shift') {
+      if (typeof event.data.held === 'boolean') {
+        for (const listener of windowControlShiftListeners) listener(event.data.held);
+      }
+      return;
+    }
+    if (event.data?.type === 'papers:project:window-control-unavailable') {
+      for (const listener of windowControlUnavailableListeners) listener(event.data.reason);
       return;
     }
     if (event.data?.type !== HOST_RESULT) return;
@@ -187,6 +204,11 @@ export function createHostBridge(window) {
       task.resolve({
         outcome: event.data.outcome,
         observation: event.data.observation ?? null,
+        // `results` is the per-member answer the control sync returns, and this
+        // branch used to drop it - so even a successful sync arrived with no
+        // members in it. Added only when the reply carries it, so every other
+        // channel keeps exactly the shape it had.
+        ...(event.data.results !== undefined ? { results: event.data.results } : {}),
         error: event.data.error ?? null,
       });
       return;
@@ -270,6 +292,21 @@ export function createHostBridge(window) {
     onWindowLifecycleBaseline: (callback) => {
       lifecycleBaselineListeners.add(callback);
       return () => lifecycleBaselineListeners.delete(callback);
+    },
+    windowControlSync: (controls) => request('papers:project:window-control-sync', { controls }),
+    windowControlGroup: (layoutId, actions) =>
+      request('papers:project:window-control-group', { layoutId, actions }),
+    onWindowControlEvent: (callback) => {
+      windowControlListeners.add(callback);
+      return () => windowControlListeners.delete(callback);
+    },
+    onWindowControlShift: (callback) => {
+      windowControlShiftListeners.add(callback);
+      return () => windowControlShiftListeners.delete(callback);
+    },
+    onWindowControlUnavailable: (callback) => {
+      windowControlUnavailableListeners.add(callback);
+      return () => windowControlUnavailableListeners.delete(callback);
     },
     bindWindowCandidate: (candidateId) =>
       request('papers:project:window-bind-candidate', { candidateId }),
