@@ -1057,6 +1057,15 @@ if (typeof host.onWindowControlEvent === 'function') host.onWindowControlEvent((
   if (event.result === 'ready') {
     windowControlReady.add(windowControlKey(event.layoutId, event.memberId));
     setWindowLayoutStatus(event.layoutId, '');
+    // WARM THE CAPABILITY CACHE OFF THE GESTURE.
+    //
+    // Right-click uses the accepted activation path, which needs a capability. When
+    // one is not cached, the first right-click after a restart resolves it through
+    // the window helper - the seconds-long step - so that gesture carried the cost.
+    // Registration has just proved the member is real, so the capability is fetched
+    // now, in the background, one at a time; the gesture then costs only the native
+    // bridge. This is the part that makes right-click FASTER than it was, not equal.
+    queueCapabilityWarmup(event.layoutId, event.memberId);
     return;
   }
   if (event.result === 'refused' || event.result === 'no-surface' || String(event.result).startsWith('no-window')) {
@@ -1206,6 +1215,23 @@ function setWindowLayoutTransientStatus(layoutId, text, durationMs = 2400) {
   windowLayoutTransientStatusTimers.set(layoutId, timer);
 }
 
+/** One capability warm-up at a time, in the background.
+ *
+ * The accepted right-click path needs a capability, and fetching a cold one goes
+ * through the window helper - the step measured in seconds. Registration proves a
+ * member is real, so its capability is fetched then, serialised so the helper's
+ * single lane is never flooded, and the gesture later finds it cached. */
+let capabilityWarmupChain = Promise.resolve();
+const capabilityWarmupSeen = new Set();
+function queueCapabilityWarmup(layoutId, memberId) {
+  const key = windowLayoutMemberKey(layoutId, memberId);
+  if (capabilityWarmupSeen.has(key)) return;
+  if (windowLayoutRuntime.capabilities.get(key)) return;
+  capabilityWarmupSeen.add(key);
+  capabilityWarmupChain = capabilityWarmupChain
+    .then(() => (typeof capabilityForMember === 'function' ? capabilityForMember(layoutId, memberId) : null))
+    .catch(() => undefined);
+}
 async function capabilityForMember(layoutId, memberId) {
   // 018X5: reject immediately when read-only, BEFORE the cached-capability fast
   // path, so a later group member cannot issue observe/mutation calls without
@@ -1288,17 +1314,18 @@ async function bringWindowLayoutMemberToFront(layoutId, memberId) {
     recordActivationRefusal(layoutId, memberId, 'read-only: another surface is writing');
     return { outcome: 'refused', message: 'Window layout is read-only while another surface is writing.' };
   }
-  // THE BROKER IS THE BRING-FORWARD PATH TOO, not only the toggle. It already holds
-  // this member's slot with a revalidated identity, so raising it costs one message
-  // to a resident process instead of resolving a capability and making Papers act.
-  // A member it does not hold says so out loud and falls back with that recorded.
-  if (windowControlReady.has(windowLayoutMemberKey(layoutId, memberId))
-    && typeof host.windowControlGroup === 'function') {
-    const sent = await host.windowControlGroup(layoutId, [{ memberId, operation: 'foreground' }])
-      .catch(() => ({ outcome: 'helper-unavailable' }));
-    if (sent?.outcome === 'success') return { outcome: 'success' };
-    setWindowLayoutStatus(layoutId, 'Window control did not raise that window; using the slower path.');
-  }
+  // RIGHT-CLICK IS BACK ON THE ACCEPTED PATH, and it is not the broker's job.
+  //
+  // The broker can only raise a window into the ordinary z-order, and the widget is
+  // a TOPMOST window, so a raised target still sits beneath it - which reads as
+  // "nothing happened". This path resolves the exact capability and hands the
+  // activation to Papers, which is the behaviour the creator accepted at checkpoint
+  // 4. It is a small native bridge launched per click: the same foreground primitive,
+  // but from a process Windows treats far more favourably than a resident background
+  // one, and it reports success only when the target really became the foreground.
+  //
+  // The broker keeps the CLICK (minimize, restore, toggle) - that is the one thing
+  // this checkpoint is allowed to change.
   // The steps are spelled out here rather than hidden behind capabilityForMember:
   // "unavailable" named none of them, and a right-click that says nothing useful
   // is how this feature spent an evening doing nothing.
@@ -2386,17 +2413,32 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
   }
   const cached = windowLayoutWidgetPreviewCapabilities.get(key);
   if (cached) return Promise.resolve(cached);
-  const resolve = typeof member.windowInstanceId === 'string' && typeof host.resolveWindowInstance === 'function'
+  // THE EXACT-IDENTITY PATH MUST RETURN A CAPABILITY.
+  //
+  // resolveWindowInstance is an EXISTENCE probe: it answers success with a
+  // descriptor and NO capability, deliberately, so a two-second sweep cannot mint a
+  // binding per member. This resolver requires a capability, and the fallback only
+  // fires on a missing outcome - so success-without-capability fell straight
+  // through and the preview returned null. Hover and Shift-peek both died there,
+  // before any capture was ever requested, which is why neither ever appeared.
+  //
+  // The descriptor can carry its own windowInstanceId, and THAT path returns a
+  // capability: Papers matches the exact instance and issues one binding.
+  const exactDescriptor = typeof member.windowInstanceId === 'string'
+    ? { ...member.descriptor, windowInstanceId: member.windowInstanceId }
+    : member.descriptor;
+  const resolve = typeof member.windowInstanceId === 'string' && typeof host.resolveWindowDescriptor === 'function'
     ? resolveWindowLayoutDescriptorWithFallback({
-      descriptor: member.descriptor,
+      descriptor: exactDescriptor,
       exactIdentity: member.windowInstanceId,
       members: windowLayoutWidgetPreviewSnapshot?.members,
-      resolveExact: (instanceId) => host.resolveWindowInstance(instanceId),
+      resolveExact: () => host.resolveWindowDescriptor(exactDescriptor),
       resolveFallback: (value) => host.resolveWindowDescriptor(value),
     })
     : resolveWindowLayoutMemberDescriptor(member.descriptor, layoutId, windowLayoutWidgetPreviewSnapshot?.members);
   return Promise.resolve(resolve).then((resolved) => {
-    if (WIDGET_SURFACE) document.title = 'preview resolve: ' + String(resolved?.outcome ?? 'empty');
+    if (WIDGET_SURFACE) document.title = 'preview resolve: ' + String(resolved?.outcome ?? 'empty')
+      + ' cap=' + (resolved?.capability ? 'yes' : 'no');
     if (!resolved || resolved.outcome !== 'success' || !resolved.capability) {
       windowLayoutWidgetPreviewCapabilities.delete(key);
       return null;
@@ -2443,6 +2485,13 @@ const windowLayoutMemberPreview = createWindowLayoutMemberPreview({
       `<img class="window-layout-member-preview-image" src="${escapeHtml(imageUrl)}" alt="" width="${width}" height="${height}">`);
     // 019GR: the image changed the popover size - re-clamp placement.
     windowLayoutMemberPopover.reposition();
+    // THE IMAGE IS INSTALLED - this is the only point that proves a preview was
+    // SHOWN rather than merely resolved. A successful resolve and a successful
+    // thumbnail can both happen while nothing is ever painted, which is exactly how
+    // hover looked dead while its diagnostics read "success".
+    try {
+      document.title = 'preview-applied | thumbnail=success | ' + width + 'x' + height;
+    } catch { /* diagnostic */ }
   },
   clearPreview: () => windowLayoutMemberPopover.updatePreview(null, null),
 });
@@ -2516,7 +2565,12 @@ async function performWindowLayoutShiftPeek(member, layoutId, memberId, generati
     || !member.matches(':hover')
     || !capability) return;
   const result = await host.windowPeekBeginCapability(capability).catch((error) => ({ outcome: 'error', error: String(error) }));
-  if (WIDGET_SURFACE) document.title = 'peek: ' + String(result?.outcome ?? 'empty') + ' ' + String(result?.error ?? '').slice(0, 80);
+  // ONE LINE THAT PROVES THE WHOLE REMAINING CHAIN: the broker noticed physical
+  // Shift, Node parsed it, IPC forwarded it, the preload posted it, the host bridge
+  // relayed it, the widget received it, resolved a capability and Peek began. The
+  // native watcher is already proven separately, so nothing else needs proving.
+  if (WIDGET_SURFACE) document.title = 'shift-peek | held=1 | begin=' + String(result?.outcome ?? 'empty')
+    + ' ' + String(result?.error ?? '').slice(0, 60);
   if (generation !== windowLayoutShiftPeekGeneration) void host.windowPeekEnd().catch(() => undefined);
 }
 
@@ -3262,6 +3316,11 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       windowLayoutRuntime.selectionAnchor.delete(layoutId);
       await windowLayoutRuntimeController.reconcileActive();
       noteWindowLayoutCommit(layoutId);
+      return { ok: true };
+    }
+    if (command.kind === 'bring-to-front') {
+      // The widget cannot activate a window itself; the writer owns that path.
+      await bringWindowLayoutMemberToFront(layoutId, command.memberId);
       return { ok: true };
     }
     if (command.kind === 'member-toggle') {
@@ -7215,9 +7274,19 @@ function bootstrapWindowLayoutWidget() {
       const memberId = member.dataset.wlMember;
       if (!memberId || member.disabled) return;
       windowLayoutMemberPreview.cancel();
-      // The broker already made this one attempt at physical right-button down.
-      if (!windowControlReady.has(windowControlKey(layoutId, memberId))) {
-        setWindowLayoutStatus(layoutId, windowControlUnavailable || 'Native window control is preparing.');
+      // RIGHT-CLICK ACTIVATES, AND ONLY FOR THIS PRESS.
+      //
+      // Papers takes the foreground for the duration of this one press, which makes
+      // the native bridge it spawns eligible to hand that foreground to the target -
+      // eligibility a resident background process can never have. That is the chosen
+      // behaviour: right-click activates, while an ordinary icon click still never
+      // steals focus. No capability is resolved, because the broker's own
+      // registration already proved this member's native handle.
+      const activated = await host.windowControlActivate(layoutId, memberId)
+        .catch(() => ({ outcome: 'helper-unavailable' }));
+      if (activated?.outcome !== 'activated') {
+        setWindowLayoutStatus(layoutId, 'Windows did not give that window the foreground ('
+          + String(activated?.outcome ?? 'no answer') + ').');
       }
       return;
     }

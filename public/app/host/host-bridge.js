@@ -294,7 +294,8 @@ export function createHostBridge(window) {
       return () => lifecycleBaselineListeners.delete(callback);
     },
     windowControlSync: (controls) => request('papers:project:window-control-sync', { controls }),
-    windowControlGroup: (layoutId, actions) =>
+    windowControlActivate: (layoutId, memberId) =>
+      request('papers:project:window-control-activate', { layoutId, memberId }),    windowControlGroup: (layoutId, actions) =>
       request('papers:project:window-control-group', { layoutId, actions }),
     onWindowControlEvent: (callback) => {
       windowControlListeners.add(callback);
