@@ -170,6 +170,13 @@ export function createHostBridge(window) {
       }
       return;
     }
+    if (task.type === 'papers:project:window-candidate-picker-update') {
+      task.resolve({
+        outcome: event.data.outcome,
+        ...(event.data.delivery !== undefined ? { delivery: event.data.delivery } : {}),
+      });
+      return;
+    }
     if ('target' in event.data && 'icon' in event.data) {
       task.resolve({ target: event.data.target, icon: event.data.icon });
       return;
