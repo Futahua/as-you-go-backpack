@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { createWindowLayoutAutoTracking } from './public/app/window-layout-auto-tracking.js';
@@ -55,6 +56,50 @@ test('Auto lifecycle add resolves and observes a new exact window, then commits 
   assert.equal(JSON.stringify(state).includes('runtimeToken'), false, 'ephemeral host capability is never persisted');
 });
 
+test('Auto binds a capability after the capability-free lifecycle probe, then adds the exact new window', async () => {
+  let state = stateWithAuto();
+  const order = [];
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async (id) => {
+      order.push(`probe:${id}`);
+      return { outcome: 'success', descriptor };
+    },
+    resolveWindowDescriptor: async (value) => {
+      order.push(`bind:${value.windowInstanceId}`);
+      return { outcome: 'success', capability: { runtimeToken: 'fresh-binding' }, descriptor: value };
+    },
+    observeWindowCapability: async (capability) => {
+      order.push(`observe:${capability.runtimeToken}`);
+      return { outcome: 'success', observation: { windowInstanceId: INSTANCE, bounds: { x: 1, y: 2, width: 300, height: 200 } } };
+    },
+    commit: async (next) => { order.push('commit'); state = next; return true; },
+    createMemberId: () => 'new-member',
+  });
+
+  const result = await auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE });
+  assert.equal(result.outcome, 'added');
+  assert.deepEqual(order, [
+    `probe:${INSTANCE}`, `bind:${INSTANCE}`, 'observe:fresh-binding', 'commit',
+  ]);
+  assert.equal(state.windowLayouts[0].arrangement.members[0].descriptor.windowInstanceId, INSTANCE);
+});
+
+test('Auto rejects a probe or fresh binding for a different instance', async () => {
+  let state = stateWithAuto();
+  let binds = 0;
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async () => ({ outcome: 'success', descriptor: { ...descriptor, windowInstanceId: 'Wffffffffffffffff' } }),
+    resolveWindowDescriptor: async () => { binds += 1; return { outcome: 'success', capability: {}, descriptor }; },
+    observeWindowCapability: async () => ({ outcome: 'success', observation: {} }),
+    commit: async (next) => { state = next; return true; },
+  });
+  assert.deepEqual(await auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE }), { outcome: 'unresolved' });
+  assert.equal(binds, 0, 'a mismatched event identity never gets rebound');
+  assert.equal(state.windowLayouts[0].arrangement.members.length, 0);
+});
+
 test('Auto rechecks its owner after host waits and will not add after the creator disables it', async () => {
   let state = stateWithAuto();
   let releaseResolve;
@@ -105,4 +150,13 @@ test('Auto leaves durable membership untouched when persistence refuses the new 
   assert.deepEqual(await auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE }), { outcome: 'persistence-failed' });
   assert.equal(state.windowLayouts[0].arrangement.members.length, 0);
   assert.equal(published, false);
+});
+
+test('workspace rebinds lifecycle probes and keeps one lifecycle queue drain active', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  assert.match(source, /resolveWindowDescriptor:\s*\(descriptor\)\s*=>\s*host\.resolveWindowDescriptor\(descriptor\)/);
+  assert.match(source, /while \(trackingEventQueue\.length > 0\)\s*\{\s*try\s*\{\s*await processTrackingLifecycleEvent/);
+  const processor = source.match(/async function processTrackingLifecycleEvent\(event\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+  assert.doesNotMatch(processor, /trackingEventInFlight\s*=/,
+    'the queue drain alone owns the in-flight lock while awaiting one event');
 });

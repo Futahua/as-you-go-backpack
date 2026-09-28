@@ -7,6 +7,7 @@ import { addWindowLayoutMember } from '../workspace-model-20260730b.js';
 export function createWindowLayoutAutoTracking({
   getState,
   resolveWindowInstance,
+  resolveWindowDescriptor,
   observeWindowCapability,
   commit,
   createMemberId = () => crypto.randomUUID(),
@@ -29,10 +30,37 @@ export function createWindowLayoutAutoTracking({
     }
     if (initialLayout.tracking?.suppressedInstanceIds?.includes(instanceId)) return { outcome: 'suppressed' };
 
-    const resolved = await resolveWindowInstance(instanceId);
-    if (resolved?.outcome !== 'success' || !resolved.capability || !resolved.descriptor) return { outcome: 'unresolved' };
-    const observed = await observeWindowCapability(resolved.capability);
+    let probe;
+    try {
+      probe = await resolveWindowInstance(instanceId);
+    } catch {
+      return { outcome: 'resolve-failed' };
+    }
+    if (probe?.outcome !== 'success' || !probe.descriptor
+      || probe.descriptor.windowInstanceId !== instanceId) return { outcome: 'unresolved' };
+    // Existence probes deliberately do not mint capabilities. Auto-add is an
+    // explicit one-window action, so bind the exact freshly probed identity here
+    // instead of expecting a disposable capability from the watcher event.
+    let resolved = probe;
+    if (!probe.capability) {
+      if (typeof resolveWindowDescriptor !== 'function') return { outcome: 'unresolved' };
+      try {
+        resolved = await resolveWindowDescriptor(probe.descriptor);
+      } catch {
+        return { outcome: 'resolve-failed' };
+      }
+    }
+    if (resolved?.outcome !== 'success' || !resolved.capability || !resolved.descriptor
+      || resolved.descriptor.windowInstanceId !== instanceId) return { outcome: 'unresolved' };
+    let observed;
+    try {
+      observed = await observeWindowCapability(resolved.capability);
+    } catch {
+      return { outcome: 'unobserved' };
+    }
     if (observed?.outcome !== 'success') return { outcome: 'unobserved' };
+    if (typeof observed.observation?.windowInstanceId === 'string'
+      && observed.observation.windowInstanceId !== instanceId) return { outcome: 'unobserved' };
 
     const currentState = getState();
     const currentLayout = (currentState.windowLayouts ?? []).find((layout) =>
@@ -51,8 +79,17 @@ export function createWindowLayoutAutoTracking({
     };
     const nextState = addWindowLayoutMember(currentState, currentLayout.id, member);
     if (nextState === currentState) return { outcome: 'duplicate' };
-    if (!(await commit(nextState))) return { outcome: 'persistence-failed' };
-    await onCommitted({ layoutId: currentLayout.id, member, capability: resolved.capability });
+    try {
+      if (!(await commit(nextState))) return { outcome: 'persistence-failed' };
+    } catch {
+      return { outcome: 'persistence-failed' };
+    }
+    try {
+      await onCommitted({ layoutId: currentLayout.id, member, capability: resolved.capability });
+    } catch {
+      // Membership is already durable; notification failures cannot turn an
+      // added member into a failed result or prevent later lifecycle events.
+    }
     return { outcome: 'added', layoutId: currentLayout.id, member };
   }
 

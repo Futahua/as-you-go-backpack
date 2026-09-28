@@ -149,7 +149,8 @@ export function createHostBridge(window) {
       task.resolve(event.data.writerLease);
       return;
     }
-    if (task.type === 'papers:project:window-thumbnail') {
+    if (task.type === 'papers:project:window-thumbnail'
+      || task.type === 'papers:project:window-thumbnail-cache') {
       // 019GR: the compact hover preview consumes ONLY the exact shared result.
       // Success is exactly { outcome, imageUrl, width, height }; a fallback is
       // exactly { outcome } plus an optional bounded error - never generic
@@ -435,6 +436,10 @@ export function createHostBridge(window) {
         maxHeight: options.maxHeight ?? 135,
       },
     }),
+    // Read the safe persisted frame for an already freshly resolved live
+    // capability. This never triggers capture; the following thumbnail request
+    // replaces it in the same preview window when fresh pixels arrive.
+    windowThumbnailCacheCapability: (capability) => request('papers:project:window-thumbnail-cache', { capability }),
     windowPeekBeginCapability: (capability) => request('papers:project:window-peek-begin', { capability }),
     windowPeekEnd: () => request('papers:project:window-peek-end'),
   };

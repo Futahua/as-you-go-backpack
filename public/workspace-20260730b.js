@@ -2463,6 +2463,7 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
 // animation/flashing.
 const windowLayoutMemberPreview = createWindowLayoutMemberPreview({
   resolveCapability: resolveWindowLayoutPreviewCapability,
+  requestCachedThumbnail: (capability) => host.windowThumbnailCacheCapability(capability),
   requestThumbnail: async (capability, options) => {
     const result = await host.windowThumbnailCapability(capability, options);
     if (WIDGET_SURFACE) document.title = 'thumbnail: ' + String(result?.outcome ?? 'empty');
@@ -2504,8 +2505,24 @@ let windowLayoutShiftPeekGeneration = 0;
 let windowLayoutShiftPeekKey = null;
 let windowLayoutShiftPeekEndTimer = null;
 let windowLayoutShiftPeekStartTimer = null;
+let windowLayoutShiftPeekRetryTimer = null;
+let windowLayoutLastHoveredMember = null;
+let windowLayoutShiftPeekHostQueue = Promise.resolve();
+
+function enqueueWindowLayoutShiftPeekHostOperation(operation) {
+  const pending = windowLayoutShiftPeekHostQueue.then(operation, operation);
+  windowLayoutShiftPeekHostQueue = pending.catch(() => undefined);
+  return pending;
+}
 
 function endWindowLayoutShiftPeek() {
+  // Planner keyup/blur and pointer-leave can converge on this function. Once
+  // this target's lifecycle has been cleared, later notifications must not
+  // issue another host end (or let an old completion end a newer target).
+  if (windowLayoutShiftPeekKey === null
+    && windowLayoutShiftPeekStartTimer === null
+    && windowLayoutShiftPeekEndTimer === null
+    && windowLayoutShiftPeekRetryTimer === null) return;
   if (windowLayoutShiftPeekStartTimer !== null) {
     clearTimeout(windowLayoutShiftPeekStartTimer);
     windowLayoutShiftPeekStartTimer = null;
@@ -2514,9 +2531,13 @@ function endWindowLayoutShiftPeek() {
     clearTimeout(windowLayoutShiftPeekEndTimer);
     windowLayoutShiftPeekEndTimer = null;
   }
+  if (windowLayoutShiftPeekRetryTimer !== null) {
+    clearTimeout(windowLayoutShiftPeekRetryTimer);
+    windowLayoutShiftPeekRetryTimer = null;
+  }
   windowLayoutShiftPeekGeneration += 1;
   windowLayoutShiftPeekKey = null;
-  void host.windowPeekEnd().catch(() => undefined);
+  void enqueueWindowLayoutShiftPeekHostOperation(() => host.windowPeekEnd()).catch(() => undefined);
 }
 
 function deferWindowLayoutShiftPeekEnd() {
@@ -2543,6 +2564,7 @@ function beginWindowLayoutShiftPeek(member) {
   const generation = ++windowLayoutShiftPeekGeneration;
   windowLayoutShiftPeekKey = key;
   if (windowLayoutShiftPeekStartTimer !== null) clearTimeout(windowLayoutShiftPeekStartTimer);
+  if (windowLayoutShiftPeekRetryTimer !== null) clearTimeout(windowLayoutShiftPeekRetryTimer);
   cancelWindowLayoutPreviewDwell();
   windowLayoutMemberPopover.hide();
   windowLayoutMemberPreview.cancel();
@@ -2552,26 +2574,52 @@ function beginWindowLayoutShiftPeek(member) {
   // only, while an intentional hover remains effectively immediate.
   windowLayoutShiftPeekStartTimer = setTimeout(() => {
     windowLayoutShiftPeekStartTimer = null;
-    void performWindowLayoutShiftPeek(member, layoutId, memberId, generation);
+    void performWindowLayoutShiftPeek(layoutId, memberId, generation);
   }, 32);
 }
 
-async function performWindowLayoutShiftPeek(member, layoutId, memberId, generation) {
-  const capability = await resolveWindowLayoutPreviewCapability(layoutId, memberId);
+async function performWindowLayoutShiftPeek(layoutId, memberId, generation, attempt = 0) {
+  let capability = null;
+  try {
+    capability = await resolveWindowLayoutPreviewCapability(layoutId, memberId);
+  } catch {
+    // Capability lookup may briefly fail while the host is catching up. Keep
+    // retrying this same hovered target while Shift remains held.
+  }
   if (!capability && WIDGET_SURFACE) document.title = 'peek: no capability';
-  if (generation !== windowLayoutShiftPeekGeneration
-    || !windowLayoutShiftPeekHeld
-    || !member.isConnected
-    || !member.matches(':hover')
-    || !capability) return;
-  const result = await host.windowPeekBeginCapability(capability).catch((error) => ({ outcome: 'error', error: String(error) }));
+  if (generation !== windowLayoutShiftPeekGeneration || !windowLayoutShiftPeekHeld
+    || windowLayoutShiftPeekKey !== `${layoutId}\u0000${memberId}`) return;
+  if (!capability) {
+    windowLayoutShiftPeekRetryTimer = setTimeout(() => {
+      windowLayoutShiftPeekRetryTimer = null;
+      void performWindowLayoutShiftPeek(layoutId, memberId, generation, attempt + 1);
+    }, Math.min(1000, 180 + attempt * 120));
+    return;
+  }
+  const result = await enqueueWindowLayoutShiftPeekHostOperation(() => {
+    // A newer target or release may have arrived while this operation waited
+    // behind an in-flight host call. Never let the stale target start late.
+    if (generation !== windowLayoutShiftPeekGeneration || !windowLayoutShiftPeekHeld
+      || windowLayoutShiftPeekKey !== `${layoutId}\u0000${memberId}`) return { outcome: 'cancelled' };
+    return host.windowPeekBeginCapability(capability);
+  }).catch((error) => ({ outcome: 'error', error: String(error) }));
   // ONE LINE THAT PROVES THE WHOLE REMAINING CHAIN: the broker noticed physical
   // Shift, Node parsed it, IPC forwarded it, the preload posted it, the host bridge
   // relayed it, the widget received it, resolved a capability and Peek began. The
   // native watcher is already proven separately, so nothing else needs proving.
   if (WIDGET_SURFACE) document.title = 'shift-peek | held=1 | begin=' + String(result?.outcome ?? 'empty')
     + ' ' + String(result?.error ?? '').slice(0, 60);
-  if (generation !== windowLayoutShiftPeekGeneration) void host.windowPeekEnd().catch(() => undefined);
+  if (generation !== windowLayoutShiftPeekGeneration) {
+    // The lifecycle owner already ended or superseded this attempt. An extra
+    // global end here could cancel a newer member's Peek.
+    return;
+  }
+  if (result?.outcome !== 'success' && windowLayoutShiftPeekHeld) {
+    windowLayoutShiftPeekRetryTimer = setTimeout(() => {
+      windowLayoutShiftPeekRetryTimer = null;
+      void performWindowLayoutShiftPeek(layoutId, memberId, generation, attempt + 1);
+    }, Math.min(1000, 180 + attempt * 120));
+  }
 }
 
 function applyWindowLayoutShiftPeekTransition(transition) {
@@ -2594,6 +2642,7 @@ window.addEventListener('keyup', (event) => {
   applyWindowLayoutShiftPeekTransition(transition);
 });
 window.addEventListener('blur', () => {
+  if (WIDGET_SURFACE) return; // Physical Shift release comes from the native broker.
   const transition = planWindowLayoutShiftPeekTransition('blur', {}, { held: windowLayoutShiftPeekHeld });
   applyWindowLayoutShiftPeekTransition(transition);
 });
@@ -2602,7 +2651,9 @@ window.addEventListener('blur', () => {
 if (typeof host.onWindowControlShift === 'function') host.onWindowControlShift((held) => {
   const transition = planWindowLayoutShiftPeekTransition(held ? 'keydown' : 'keyup', { key: 'Shift' }, {
     held: windowLayoutShiftPeekHeld,
-    member: document.querySelector('[data-wl-member]:hover'),
+    member: document.querySelector('[data-wl-member]:hover')
+      ?? (elements.grid.matches(':hover') && windowLayoutLastHoveredMember?.isConnected
+        ? windowLayoutLastHoveredMember : null),
   });
   applyWindowLayoutShiftPeekTransition(transition);
 });
@@ -2628,6 +2679,7 @@ elements.grid.addEventListener('mouseover', (event) => {
   }
   const member = event.target.closest('[data-wl-member]');
   const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
+  if (member) windowLayoutLastHoveredMember = member;
   const peekTransition = planWindowLayoutShiftPeekTransition('hover', event, {
     held: windowLayoutShiftPeekHeld,
     member,
@@ -2655,7 +2707,12 @@ elements.grid.addEventListener('mouseover', (event) => {
 // modifier state. Track that state while the pointer moves so Shift Peek works
 // even when Shift was pressed before entering the widget.
 elements.grid.addEventListener('pointermove', (event) => {
+  // Small pointer drift over gaps/descendants is still inside the compact
+  // widget. Cancel the delayed leave end even when the move is not over a
+  // member and therefore produces no planner transition.
+  if (windowLayoutShiftPeekHeld && elements.grid.matches(':hover')) keepWindowLayoutShiftPeekAlive();
   const member = event.target.closest('[data-wl-member]');
+  if (member) windowLayoutLastHoveredMember = member;
   const transition = planWindowLayoutShiftPeekTransition('pointermove', event, {
     held: windowLayoutShiftPeekHeld,
     member,
@@ -2675,6 +2732,8 @@ elements.grid.addEventListener('mouseout', (event) => {
   if (listButton && listButton !== relatedListButton) cancelWindowLayoutListDwell();
   const member = event.target.closest('[data-wl-member]');
   const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
+  if (relatedMember) windowLayoutLastHoveredMember = relatedMember;
+  else if (!event.relatedTarget || !elements.grid.contains(event.relatedTarget)) windowLayoutLastHoveredMember = null;
   // Crossing directly from one member to another is a Peek transition, not a
   // release. Keep the session alive so the host can reveal only the new target
   // and hide only the old one. Blank space between icons keeps the last Peek
@@ -2834,6 +2893,7 @@ let closedWindowReconcileInFlight = false;
 const windowLayoutAutoTracking = createWindowLayoutAutoTracking({
   getState: () => state,
   resolveWindowInstance: (instanceId) => host.resolveWindowInstance(instanceId),
+  resolveWindowDescriptor: (descriptor) => host.resolveWindowDescriptor(descriptor),
   observeWindowCapability: (capability) => host.observeWindowCapability(capability),
   commit: (next) => store.commit(next),
   onCommitted: async ({ layoutId, member, capability }) => {
@@ -2859,31 +2919,33 @@ function isWindowLifecycleDestroyEvent(event) {
 async function processTrackingLifecycleEvent(event) {
   if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
   if (!event || typeof event.windowInstanceId !== 'string') return;
-  trackingEventInFlight = true;
-  try {
-    if (isWindowLifecycleDestroyEvent(event)) {
-      // EVIDENCE, NOT PROOF. A lifecycle 'gone' is produced by diffing successive
-      // task-worthy enumerations, so one transient disappearance would delete a
-      // member outright - and it bypassed the periodic sweep's confirmation
-      // entirely. It seeds a confirmation instead: the sweep corroborates it with
-      // an independent resolve, and only two positives retire anything.
-      const existing = windowLayoutGoneConfirmations.get(event.windowInstanceId);
-      windowLayoutGoneConfirmations.set(event.windowInstanceId, {
-        count: Math.max(1, existing?.count ?? 0),
-        at: Date.now(),
-      });
-      return;
-    }
-    await windowLayoutAutoTracking.addFromEvent(event);
-  } finally {
-    trackingEventInFlight = false;
+  if (isWindowLifecycleDestroyEvent(event)) {
+    // EVIDENCE, NOT PROOF. A lifecycle 'gone' is produced by diffing successive
+    // task-worthy enumerations, so one transient disappearance would delete a
+    // member outright - and it bypassed the periodic sweep's confirmation
+    // entirely. It seeds a confirmation instead: the sweep corroborates it with
+    // an independent resolve, and only two positives retire anything.
+    const existing = windowLayoutGoneConfirmations.get(event.windowInstanceId);
+    windowLayoutGoneConfirmations.set(event.windowInstanceId, {
+      count: Math.max(1, existing?.count ?? 0),
+      at: Date.now(),
+    });
+    return;
   }
+  await windowLayoutAutoTracking.addFromEvent(event);
 }
 async function drainTrackingLifecycleEvents() {
   if (trackingEventInFlight) return;
   trackingEventInFlight = true;
   try {
-    while (trackingEventQueue.length > 0) await processTrackingLifecycleEvent(trackingEventQueue.shift());
+    while (trackingEventQueue.length > 0) {
+      try {
+        await processTrackingLifecycleEvent(trackingEventQueue.shift());
+      } catch {
+        // One transient IPC/store failure must not strand later eligible opens
+        // behind an abandoned queue drain.
+      }
+    }
   } finally {
     trackingEventInFlight = false;
   }
