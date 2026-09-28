@@ -1276,3 +1276,33 @@ test('detached picker re-entry invalidates stale chooser ownership before starti
   assert.match(widgetPicker, /if \(ownsPicker\(\)\) closeWidgetPicker\(\);/,
     'the owning finally block performs one cleanup and retired attempts do not duplicate it');
 });
+
+test('widget member gestures map plain left click to activation and plain right click to toggle', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const clickStart = source.indexOf('  function handleWidgetCardClick(event)');
+  const clickEnd = source.indexOf('  function resetWidgetClearArm()', clickStart);
+  const click = source.slice(clickStart, clickEnd);
+  assert.match(click, /windowLayoutRuntime\.isolateMode\.click\(layoutId, memberId, false\)[\s\S]*if \(isolationTargets !== null\)/,
+    'plain left click preserves isolate-mode interception');
+  assert.match(click, /if \(event\.ctrlKey\)[\s\S]*if \(event\.shiftKey\)[\s\S]*if \(!member\.disabled\) void activateWidgetMember\(memberId\)/,
+    'modifier selection stays intact and disabled members cannot be activated');
+  assert.doesNotMatch(click, /sendWidgetNativeActions\(\[\{ memberId, operation: 'toggle' \}\]\)/,
+    'left click no longer toggles visibility');
+
+  const activateStart = source.indexOf('  async function activateWidgetMember(memberId)');
+  const activateEnd = source.indexOf('  function widgetGroupTargets()', activateStart);
+  const activate = source.slice(activateStart, activateEnd);
+  assert.match(activate, /host\.windowControlActivate\(layoutId, memberId\)/);
+  assert.match(activate, /activated\?\.outcome !== 'activated'[\s\S]*setWindowLayoutStatus/,
+    'activation refusal remains visible to the creator');
+
+  const contextStart = source.indexOf('  async function handleWidgetCardContextMenu(event)');
+  const contextEnd = source.indexOf('  let widgetPickerOpen = false;', contextStart);
+  const context = source.slice(contextStart, contextEnd);
+  assert.match(context, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);/,
+    'the browser context menu stays suppressed for this right-button gesture');
+  assert.match(context, /if \(member && event\.ctrlKey[\s\S]*if \(member && event\.shiftKey[\s\S]*if \(member\)[\s\S]*if \(!memberId \|\| member\.disabled\) return[\s\S]*sendWidgetNativeActions\(\[\{ memberId, operation: 'toggle' \}\]\)/,
+    'right click preserves Ctrl/Shift behavior and toggles only an enabled member');
+  assert.doesNotMatch(context, /windowControlActivate/,
+    'right click no longer activates the member');
+});

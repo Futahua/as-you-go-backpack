@@ -7204,6 +7204,16 @@ function bootstrapWindowLayoutWidget() {
     }
   }
 
+  async function activateWidgetMember(memberId) {
+    windowLayoutMemberPreview.cancel();
+    const activated = await host.windowControlActivate(layoutId, memberId)
+      .catch(() => ({ outcome: 'helper-unavailable' }));
+    if (activated?.outcome !== 'activated') {
+      setWindowLayoutStatus(layoutId, 'Windows did not give that window the foreground ('
+        + String(activated?.outcome ?? 'no answer') + ').');
+    }
+  }
+
   function widgetGroupTargets() {
     const members = widgetState.snapshot.members ?? [];
     return widgetState.selection.size > 0
@@ -7265,8 +7275,9 @@ function bootstrapWindowLayoutWidget() {
         syncWidgetSelection();
         return;
       }
-      // Send the native operation from the surface that received the click.
-      void sendWidgetNativeActions([{ memberId, operation: 'toggle' }]);
+      // A plain left click raises this exact member. Right click owns the
+      // minimize/restore toggle in handleWidgetCardContextMenu.
+      if (!member.disabled) void activateWidgetMember(memberId);
       return;
     }
     const pickCandidate = event.target.closest('[data-wl-pick-candidate]');
@@ -7372,20 +7383,9 @@ function bootstrapWindowLayoutWidget() {
       const memberId = member.dataset.wlMember;
       if (!memberId || member.disabled) return;
       windowLayoutMemberPreview.cancel();
-      // RIGHT-CLICK ACTIVATES, AND ONLY FOR THIS PRESS.
-      //
-      // Papers takes the foreground for the duration of this one press, which makes
-      // the native bridge it spawns eligible to hand that foreground to the target -
-      // eligibility a resident background process can never have. That is the chosen
-      // behaviour: right-click activates, while an ordinary icon click still never
-      // steals focus. No capability is resolved, because the broker's own
-      // registration already proved this member's native handle.
-      const activated = await host.windowControlActivate(layoutId, memberId)
-        .catch(() => ({ outcome: 'helper-unavailable' }));
-      if (activated?.outcome !== 'activated') {
-        setWindowLayoutStatus(layoutId, 'Windows did not give that window the foreground ('
-          + String(activated?.outcome ?? 'no answer') + ').');
-      }
+      // The browser context menu is suppressed above; the right button is the
+      // member's minimize/restore gesture instead.
+      await sendWidgetNativeActions([{ memberId, operation: 'toggle' }]);
       return;
     }
   }
