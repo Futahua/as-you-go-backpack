@@ -94,6 +94,7 @@ import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-lin
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createWindowLayoutAutoTracking } from './app/window-layout-auto-tracking.js';
+import { openWindowLayoutPickerSession, toWindowLayoutPickerRows } from './app/window-layout-picker-session.js';
 import { endExactWindowCandidateProcess } from './app/window-layout-process-end.js';
 import { createClickTwiceGuard } from './app/click-twice-guard.js';
 import { createWidgetHoverPolicy, createWidgetHoverPolicyDiagnostics } from './app/widget-hover-policy.js';
@@ -1676,34 +1677,55 @@ async function openWindowLayoutPicker(layoutId) {
   try {
     while (windowLayoutRuntime.pickerOpenFor === layoutId
       && windowLayoutRuntime.pickerGeneration === generation) {
-      const result = await host.windowCandidates({ includeNativeIcons: false });
-      // 018X4: abort immediately after the await, before the failure or success UI.
-      if (windowLayoutDetachment.isReadOnly()) return;
-      if (windowLayoutRuntime.pickerOpenFor !== layoutId
-        || windowLayoutRuntime.pickerGeneration !== generation) return; // closed meanwhile
-      if (result.outcome !== 'success') {
-        setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
+      const pickerId = crypto.randomUUID();
+      const isCurrent = () => !windowLayoutDetachment.isReadOnly()
+        && windowLayoutRuntime.pickerOpenFor === layoutId
+        && windowLayoutRuntime.pickerGeneration === generation;
+      let session;
+      if (typeof host.windowCandidatePickerUpdate === 'function') {
+        session = await openWindowLayoutPickerSession({
+          pickerId,
+          openPicker: (id) => host.windowCandidatePicker([], id),
+          loadCandidates: () => host.windowCandidates({ includeNativeIcons: false }),
+          updatePicker: (candidates, id) => {
+            const rows = toWindowLayoutPickerRows(
+              candidates,
+              windowLayoutFromState(layoutId)?.arrangement?.members ?? [],
+              windowLayoutCandidateIsMember,
+            );
+            return host.windowCandidatePickerUpdate(rows, id);
+          },
+          isCurrent,
+        });
+      } else {
+        const result = await host.windowCandidates({ includeNativeIcons: false });
+        if (!isCurrent()) return;
+        const members = windowLayoutFromState(layoutId)?.arrangement?.members ?? [];
+        session = result.outcome === 'success'
+          ? { outcome: 'success', candidates: result.candidates, actionPromise: host.windowCandidatePicker(
+            toWindowLayoutPickerRows(result.candidates, members, windowLayoutCandidateIsMember),
+          ) }
+          : { outcome: 'list-error', error: result.error ?? result.outcome, candidates: [] };
+      }
+      if (!isCurrent() || session.outcome === 'stale') return;
+      if (session.outcome === 'list-error' || session.outcome === 'picker-error') {
+        const error = session.error;
+        setWindowLayoutStatus(layoutId, error instanceof Error ? error.message
+          : (typeof error === 'string' ? error : windowLayoutStatusForOutcome(error?.outcome ?? 'helper-unavailable')));
         break;
       }
-      windowLayoutRuntime.pickerCandidates = result.candidates;
-      const members = windowLayoutFromState(layoutId)?.arrangement?.members ?? [];
-      const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
-        id: candidate.id,
-        title: candidate.title,
-        icon: candidate.icon ?? null,
-        current: windowLayoutCandidateIsMember(members, candidate),
-      })));
-      if (windowLayoutRuntime.pickerOpenFor !== layoutId
-        || windowLayoutRuntime.pickerGeneration !== generation) return;
-      if (picked.action === 'close' && picked.candidateId) {
-        await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
+      windowLayoutRuntime.pickerCandidates = session.candidates;
+      const picked = session.outcome === 'action' ? session.action : await session.actionPromise;
+      if (!isCurrent()) return;
+      if (picked?.action === 'close' && picked.candidateId) {
+        await closeWindowLayoutCandidate(layoutId, picked.candidateId, session.candidates);
         continue;
       }
-      if (picked.action === 'direct-pick') {
+      if (picked?.action === 'direct-pick') {
         await beginWindowLayoutDirectPick(layoutId);
         break;
       }
-      if (picked.action !== 'select' || !picked.candidateId) break;
+      if (picked?.action !== 'select' || !picked.candidateId) break;
       await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
     }
   } catch (error) {
@@ -2907,6 +2929,7 @@ const windowLayoutAutoTracking = createWindowLayoutAutoTracking({
       await windowLayoutRuntimeController.reconcileActive();
     }
   },
+  onDiagnostic: ({ stage, outcome }) => host.windowLayoutDiagnostic?.({ stage, outcome }),
 });
 
 function isWindowLifecycleDestroyEvent(event) {
@@ -3038,7 +3061,7 @@ host.onWindowLifecycleBaseline?.((baseline) => {
   if (!baseline || baseline.complete !== true || typeof baseline.trackerSessionId !== 'string') return;
   trackingSessionId = baseline.trackerSessionId;
   if (Number.isSafeInteger(baseline.sequence)) trackingLastSequence = baseline.sequence;
-  void reconcileTrackingBaseline();
+  void reconcileTrackingBaseline(baseline);
 });
 
 // ---- 018A1 exclusive-controller handoff (As You Go half) ------------------
@@ -3646,57 +3669,70 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
   }
 }
 
-async function reconcileTrackingBaseline() {
-  const response = await host.windowLifecycleSnapshot?.().catch(() => null);
-  const snapshot = response?.snapshot;
+async function reconcileTrackingBaseline(providedSnapshot = null) {
+  if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
+  const response = providedSnapshot ? null : await host.windowLifecycleSnapshot?.().catch(() => null);
+  const snapshot = providedSnapshot ?? response?.snapshot;
   if (!snapshot || snapshot.complete !== true || !Array.isArray(snapshot.windows)) return;
-  const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId).filter((id) => typeof id === 'string'));
-  const before = state;
-  let next = reconcileWindowLayoutsAfterStartup(state, [...live]);
-  const trackingLayout = (next.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
-  if (trackingLayout) {
-    const suppressed = (trackingLayout.tracking?.suppressedInstanceIds ?? []).filter((id) => live.has(id));
-    if (suppressed.length !== (trackingLayout.tracking?.suppressedInstanceIds ?? []).length) {
-      next = {
-        ...next,
-        windowLayouts: next.windowLayouts.map((entry) => entry.id === trackingLayout.id
-          ? { ...entry, tracking: { ...entry.tracking, suppressedInstanceIds: suppressed } }
-          : entry),
-      };
-    }
-  }
-  if (next !== before && await store.commit(next)) {
-    const after = state;
-    for (const layout of before.windowLayouts ?? []) {
-      const nextLayout = (after.windowLayouts ?? []).find((entry) => entry.id === layout.id);
-      const removedIds = new Set((layout.arrangement?.members ?? [])
-        .filter((member) => !nextLayout?.arrangement?.members?.some((candidate) => candidate.id === member.id))
-        .map((member) => member.id));
-      for (const memberId of removedIds) {
-        const key = windowLayoutMemberKey(layout.id, memberId);
-        windowLayoutRuntime.capabilities.delete(key);
-        windowLayoutRuntime.icons.delete(key);
-        windowLayoutWidgetPreviewCapabilities.delete(key);
+  // A delayed snapshot from an old watcher session must not overwrite a newer
+  // baseline or reintroduce opens from that retired session.
+  if (trackingSessionId && snapshot.trackerSessionId !== trackingSessionId) return;
+  const accepted = await windowLayoutAutoTracking.acceptBaseline(snapshot, async () => {
+    // Authority can change while a host snapshot is in flight. Do not consume
+    // its lifecycle delta unless this surface can reconcile and commit it.
+    if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return false;
+    const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId).filter((id) => typeof id === 'string'));
+    const before = state;
+    let next = reconcileWindowLayoutsAfterStartup(state, [...live]);
+    const trackingLayout = (next.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
+    if (trackingLayout) {
+      const suppressed = (trackingLayout.tracking?.suppressedInstanceIds ?? []).filter((id) => live.has(id));
+      if (suppressed.length !== (trackingLayout.tracking?.suppressedInstanceIds ?? []).length) {
+        next = {
+          ...next,
+          windowLayouts: next.windowLayouts.map((entry) => entry.id === trackingLayout.id
+            ? { ...entry, tracking: { ...entry.tracking, suppressedInstanceIds: suppressed } }
+            : entry),
+        };
       }
-      if (removedIds.size > 0 || !nextLayout) {
-        const selected = windowLayoutRuntime.selectedMembers.get(layout.id);
-        if (selected) {
-          for (const memberId of removedIds) selected.delete(memberId);
-          if (selected.size === 0) windowLayoutRuntime.selectedMembers.delete(layout.id);
-          syncWindowLayoutMemberSelection(layout.id);
+    }
+    if (next !== before && !(await store.commit(next))) return false;
+    if (next !== before) {
+      const after = state;
+      for (const layout of before.windowLayouts ?? []) {
+        const nextLayout = (after.windowLayouts ?? []).find((entry) => entry.id === layout.id);
+        const removedIds = new Set((layout.arrangement?.members ?? [])
+          .filter((member) => !nextLayout?.arrangement?.members?.some((candidate) => candidate.id === member.id))
+          .map((member) => member.id));
+        for (const memberId of removedIds) {
+          const key = windowLayoutMemberKey(layout.id, memberId);
+          windowLayoutRuntime.capabilities.delete(key);
+          windowLayoutRuntime.icons.delete(key);
+          windowLayoutWidgetPreviewCapabilities.delete(key);
         }
-        setWindowLayoutStatus(layout.id, '');
-        noteWindowLayoutCommit(layout.id, { reason: 'startup-window-baseline' });
+        if (removedIds.size > 0 || !nextLayout) {
+          const selected = windowLayoutRuntime.selectedMembers.get(layout.id);
+          if (selected) {
+            for (const memberId of removedIds) selected.delete(memberId);
+            if (selected.size === 0) windowLayoutRuntime.selectedMembers.delete(layout.id);
+            syncWindowLayoutMemberSelection(layout.id);
+          }
+          setWindowLayoutStatus(layout.id, '');
+          noteWindowLayoutCommit(layout.id, { reason: 'startup-window-baseline' });
+        }
+      }
+      windowLayoutMemberPreview.cancel();
+      saveWorkspaceView();
+      if (before.activeWindowLayoutId !== after.activeWindowLayoutId) {
+        await windowLayoutRuntimeController.reconcileActive();
       }
     }
-    windowLayoutMemberPreview.cancel();
-    saveWorkspaceView();
-    if (before.activeWindowLayoutId !== after.activeWindowLayoutId) {
-      await windowLayoutRuntimeController.reconcileActive();
-    }
-  }
-  const currentTrackingLayout = (state.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
-  if (currentTrackingLayout) await populateTrackingLayout(currentTrackingLayout.id);
+    return true;
+  });
+  // Baseline deltas are accepted only after the durable startup reconciliation
+  // succeeds. Both lifecycle pushes and recovered opens then share one queue.
+  for (const event of accepted.events) trackingEventQueue.push(event);
+  if (accepted.events.length) void drainTrackingLifecycleEvents();
 }
 
 async function ensureStartupWindowLayoutWidget() {
@@ -7371,32 +7407,49 @@ function bootstrapWindowLayoutWidget() {
     windowLayoutMemberPreview.cancel();
     try {
       while (true) {
-        const result = await host.windowCandidates({ includeNativeIcons: false });
-        if (!ownsPicker()) return;
-        if (result.outcome !== 'success') {
-          setWindowLayoutStatus(layoutId, result.error || 'List unavailable');
+        const pickerId = crypto.randomUUID();
+        let session;
+        if (typeof host.windowCandidatePickerUpdate === 'function') {
+          session = await openWindowLayoutPickerSession({
+            pickerId,
+            openPicker: (id) => host.windowCandidatePicker([], id),
+            loadCandidates: () => host.windowCandidates({ includeNativeIcons: false }),
+            updatePicker: (candidates, id) => host.windowCandidatePickerUpdate(toWindowLayoutPickerRows(
+              candidates, widgetState.snapshot.members ?? [], windowLayoutCandidateIsMember,
+            ), id),
+            isCurrent: ownsPicker,
+          });
+        } else {
+          const result = await host.windowCandidates({ includeNativeIcons: false });
+          if (!ownsPicker()) return;
+          session = result.outcome === 'success'
+            ? { outcome: 'success', candidates: result.candidates, actionPromise: host.windowCandidatePicker(
+              toWindowLayoutPickerRows(result.candidates, widgetState.snapshot.members ?? [], windowLayoutCandidateIsMember),
+            ) }
+            : { outcome: 'list-error', error: result.error || 'List unavailable', candidates: [] };
+        }
+        if (!ownsPicker() || session.outcome === 'stale') return;
+        if (session.outcome === 'list-error' || session.outcome === 'picker-error') {
+          const error = session.error;
+          setWindowLayoutStatus(layoutId, error instanceof Error ? error.message
+            : (typeof error === 'string' ? error : 'List unavailable'));
           break;
         }
-        widgetState.candidates = result.candidates;
+        widgetState.candidates = session.candidates;
         // The chooser stays open while searching/selecting. Recompute its
         // presentation state after every authoritative command acknowledgement.
-        const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
-          id: candidate.id,
-          title: candidate.title,
-          icon: candidate.icon ?? null,
-          current: windowLayoutCandidateIsMember(widgetState.snapshot.members ?? [], candidate),
-        })));
+        const picked = session.outcome === 'action' ? session.action : await session.actionPromise;
         if (!ownsPicker()) return;
-        if (picked.action === 'close' && picked.candidateId) {
-          await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
+        if (picked?.action === 'close' && picked.candidateId) {
+          await closeWindowLayoutCandidate(layoutId, picked.candidateId, session.candidates);
           if (!ownsPicker()) return;
           continue;
         }
-        if (picked.action === 'direct-pick') {
+        if (picked?.action === 'direct-pick') {
           await beginWidgetDirectPick();
           break;
         }
-        if (picked.action !== 'select' || !picked.candidateId) break;
+        if (picked?.action !== 'select' || !picked.candidateId) break;
         await handleWidgetListCandidate(picked.candidateId);
         if (!ownsPicker()) return;
       }

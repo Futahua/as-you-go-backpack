@@ -707,6 +707,7 @@ test('persisted runtime identity does not hide a real widget member', () => {
     version: 1,
     title: 'Papers',
     executableFingerprint: fingerprint('Papers'),
+    windowInstanceId: 'W0123456789abcdef',
   });
   assert.equal(snapshot.members[0].windowInstanceId, 'W0123456789abcdef');
 });
