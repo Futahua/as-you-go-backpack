@@ -1708,7 +1708,7 @@ async function openWindowLayoutPicker(layoutId) {
           : { outcome: 'list-error', error: result.error ?? result.outcome, candidates: [] };
       }
       if (!isCurrent() || session.outcome === 'stale') return;
-      if (session.outcome === 'list-error' || session.outcome === 'picker-error') {
+      if (session.outcome === 'list-error' || session.outcome === 'picker-error' || session.outcome === 'update-error') {
         const error = session.error;
         setWindowLayoutStatus(layoutId, error instanceof Error ? error.message
           : (typeof error === 'string' ? error : windowLayoutStatusForOutcome(error?.outcome ?? 'helper-unavailable')));
@@ -7429,7 +7429,7 @@ function bootstrapWindowLayoutWidget() {
             : { outcome: 'list-error', error: result.error || 'List unavailable', candidates: [] };
         }
         if (!ownsPicker() || session.outcome === 'stale') return;
-        if (session.outcome === 'list-error' || session.outcome === 'picker-error') {
+        if (session.outcome === 'list-error' || session.outcome === 'picker-error' || session.outcome === 'update-error') {
           const error = session.error;
           setWindowLayoutStatus(layoutId, error instanceof Error ? error.message
             : (typeof error === 'string' ? error : 'List unavailable'));

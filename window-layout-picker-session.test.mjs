@@ -32,7 +32,7 @@ test('picker shell opens before enumeration and gets updated rows without replac
     pickerId: 'picker-a',
     openPicker: (id) => { order.push(`open:${id}`); return action.promise; },
     loadCandidates: () => { order.push('list'); return list.promise; },
-    updatePicker: async (rows, id) => { order.push(`update:${id}`); updatedRows = rows; },
+    updatePicker: async (rows, id) => { order.push(`update:${id}`); updatedRows = rows; return { outcome: 'success', delivery: 'applied' }; },
   });
   assert.deepEqual(order, ['open:picker-a', 'list']);
 
@@ -55,7 +55,7 @@ test('closing the loading shell before enumeration prevents a stale row update',
     pickerId: 'picker-old',
     openPicker: async () => ({ action: 'cancel' }),
     loadCandidates: () => list.promise,
-    updatePicker: async (rows, id) => updates.push({ rows, id }),
+    updatePicker: async (rows, id) => { updates.push({ rows, id }); return { outcome: 'success', delivery: 'applied' }; },
   });
   const session = await sessionPromise;
   assert.equal(session.outcome, 'action');
@@ -72,12 +72,26 @@ test('enumeration failure clears the loading rows and returns the failure to the
     pickerId: 'picker-error',
     openPicker: () => action.promise,
     loadCandidates: async () => ({ outcome: 'helper-unavailable', error: 'offline' }),
-    updatePicker: async (rows, id) => updates.push({ rows, id }),
+    updatePicker: async (rows, id) => { updates.push({ rows, id }); return { outcome: 'success', delivery: 'buffered' }; },
   });
   const session = await pending;
   assert.equal(session.outcome, 'list-error');
   assert.deepEqual(session.error, 'offline');
   assert.deepEqual(updates, [{ rows: [], id: 'picker-error' }]);
+  action.resolve({ action: 'cancel' });
+  await session.actionPromise;
+});
+
+test('a rejected or stale row update is reported instead of leaving a loading shell as success', async () => {
+  const action = deferred();
+  const session = await openWindowLayoutPickerSession({
+    pickerId: 'picker-stale',
+    openPicker: () => action.promise,
+    loadCandidates: async () => ({ outcome: 'success', candidates: [{ id: 'candidate-a' }] }),
+    updatePicker: async () => ({ outcome: 'stale' }),
+  });
+  assert.equal(session.outcome, 'update-error');
+  assert.equal(session.error, 'stale');
   action.resolve({ action: 'cancel' });
   await session.actionPromise;
 });

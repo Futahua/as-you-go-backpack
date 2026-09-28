@@ -55,7 +55,14 @@ export async function openWindowLayoutPickerSession({
   const candidates = success ? result.candidates : [];
   // Empty update clears loading on both an empty list and an enumeration error.
   // The caller owns the user-facing error status and dismisses failed sessions.
-  await updatePicker(candidates, pickerId);
+  let delivery;
+  try { delivery = await updatePicker(candidates, pickerId); } catch (error) {
+    return { outcome: 'update-error', error, actionPromise, candidates: [] };
+  }
+  if (delivery?.outcome !== 'success'
+    || !['applied', 'buffered'].includes(delivery.delivery)) {
+    return { outcome: 'update-error', error: delivery?.outcome ?? 'failed', actionPromise, candidates: [] };
+  }
   if (!isCurrent()) return { outcome: 'stale', actionPromise, candidates: [] };
   return {
     outcome: success ? 'success' : 'list-error',
