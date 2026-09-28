@@ -149,7 +149,8 @@ export function createHostBridge(window) {
       task.resolve(event.data.writerLease);
       return;
     }
-    if (task.type === 'papers:project:window-thumbnail') {
+    if (task.type === 'papers:project:window-thumbnail'
+      || task.type === 'papers:project:window-thumbnail-cache') {
       // 019GR: the compact hover preview consumes ONLY the exact shared result.
       // Success is exactly { outcome, imageUrl, width, height }; a fallback is
       // exactly { outcome } plus an optional bounded error - never generic
@@ -167,6 +168,13 @@ export function createHostBridge(window) {
           ...(event.data.error !== undefined ? { error: event.data.error } : {}),
         });
       }
+      return;
+    }
+    if (task.type === 'papers:project:window-candidate-picker-update') {
+      task.resolve({
+        outcome: event.data.outcome,
+        ...(event.data.delivery !== undefined ? { delivery: event.data.delivery } : {}),
+      });
       return;
     }
     if ('target' in event.data && 'icon' in event.data) {
@@ -420,8 +428,13 @@ export function createHostBridge(window) {
     }),
     widgetPreviewHide: () => request('papers:project:widget-preview-hide'),
     widgetContextMenu: () => request('papers:project:widget-context-menu'),
-    windowCandidatePicker: (candidates) =>
-      request('papers:project:window-candidate-picker', { candidates }, INTERACTIVE_REQUEST_TIMEOUT_MS),
+    windowCandidatePicker: (candidates, pickerId) => request(
+      'papers:project:window-candidate-picker',
+      { candidates, ...(typeof pickerId === 'string' ? { pickerId } : {}) },
+      INTERACTIVE_REQUEST_TIMEOUT_MS,
+    ),
+    windowCandidatePickerUpdate: (candidates, pickerId) =>
+      request('papers:project:window-candidate-picker-update', { candidates, pickerId }),
     windowCandidatePickerClose: () => request('papers:project:window-candidate-picker-close'),
     // 019G: real window thumbnail (Windows-taskbar-like hover preview). Consumes
     // ONLY the exact shared API: page request `papers:project:window-thumbnail`
@@ -435,6 +448,17 @@ export function createHostBridge(window) {
         maxHeight: options.maxHeight ?? 135,
       },
     }),
+    // Read the safe persisted frame for an already freshly resolved live
+    // capability. This never triggers capture; the following thumbnail request
+    // replaces it in the same preview window when fresh pixels arrive.
+    windowThumbnailCacheCapability: (capability) => request('papers:project:window-thumbnail-cache', { capability }),
+    // Fixed enum-only telemetry; never include a window title, path, identity or image.
+    windowLayoutDiagnostic: ({ stage, outcome } = {}) => {
+      const stages = new Set(['auto-add-resolve', 'auto-add-observe', 'auto-add-commit']);
+      const outcomes = new Set(['success', 'missing', 'ambiguous', 'helper-unavailable', 'timeout', 'failed', 'skipped']);
+      if (!stages.has(stage) || !outcomes.has(outcome)) return Promise.resolve({ outcome: 'skipped' });
+      return request('papers:project:window-diagnostic', { stage, outcome });
+    },
     windowPeekBeginCapability: (capability) => request('papers:project:window-peek-begin', { capability }),
     windowPeekEnd: () => request('papers:project:window-peek-end'),
   };

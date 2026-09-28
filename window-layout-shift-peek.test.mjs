@@ -61,6 +61,16 @@ test('the workspace routes every Shift Peek event source through the tested plan
   assert.match(source, /planWindowLayoutShiftPeekTransition\('hover'/);
   assert.match(source, /planWindowLayoutShiftPeekTransition\('pointermove'/);
   assert.match(source, /planWindowLayoutShiftPeekTransition\('memberleave'/);
+  assert.match(source, /windowLayoutShiftPeekHostQueue/,
+    'host begin/end transitions are serialized so an old target cannot finish after a newer one');
+  assert.match(source, /catch \{\s*\/\/ Capability lookup may briefly fail/s,
+    'transient capability helper failures stay inside the held retry loop');
+  assert.match(source, /windowLayoutShiftPeekHeld && elements\.grid\.matches\(':hover'\)\) keepWindowLayoutShiftPeekAlive\(\)/,
+    'pointer movement over widget gaps cancels a pending leave end');
+  assert.match(source, /if \(windowLayoutShiftPeekKey === null[\s\S]*?return;/,
+    'converging release and leave notifications issue at most one host end');
+  assert.match(source, /Math\.min\(1000, 180 \+ attempt \* 120\)/,
+    'retry cadence remains bounded while Shift is held');
   assert.equal([...source.matchAll(/host\.windowPeekBeginCapability\(/g)].length, 1,
     'only the guarded Peek execution path calls the host begin API');
 });

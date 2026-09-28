@@ -118,6 +118,7 @@ export function windowLayoutPreviewHoverState(targetMember, relatedTargetMember)
 
 export function createWindowLayoutMemberPreview({
   resolveCapability,
+  requestCachedThumbnail = async () => ({ outcome: 'cache-miss' }),
   requestThumbnail,
   debounceMs = WINDOW_LAYOUT_PREVIEW_DEBOUNCE_MS,
   /** Proof switch, injectable so the capture path keeps its coverage while the
@@ -142,7 +143,7 @@ export function createWindowLayoutMemberPreview({
   }
   let generation = 0;
   let timer = null;
-  let intentHolds = 0;
+  const intentReleases = new Set();
   /** The last image captured for each member. A hover shows this IMMEDIATELY and
    * the fresh capture replaces it when it lands, so the wait for a capture is
    * never the wait to see something. Bounded, newest last. */
@@ -158,16 +159,19 @@ export function createWindowLayoutMemberPreview({
     }
   }
   function acquireIntent() {
-    if (intentHolds === 0) holdPreview();
-    intentHolds += 1;
-  }
-  function releaseIntent() {
-    if (intentHolds === 0) return;
-    intentHolds -= 1;
-    if (intentHolds === 0) releasePreview();
+    if (intentReleases.size === 0) holdPreview();
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      intentReleases.delete(release);
+      if (intentReleases.size === 0) releasePreview();
+    };
+    intentReleases.add(release);
+    return release;
   }
 
-  async function capture(layoutId, memberId, gen) {
+  async function requestFreshThumbnail(layoutId, memberId, gen, capability, releaseIntent) {
     try {
       if (gen !== generation) return;
       // PROOF SWITCH - member hover thumbnail capture.
@@ -179,9 +183,6 @@ export function createWindowLayoutMemberPreview({
       // the preview area keeps its honest fallback; list Peek, the icon peek and
       // every window action are untouched.
       if (captureEnabled !== true) return;
-      const capability = await resolveCapability(layoutId, memberId);
-      if (gen !== generation) return;
-      if (!capability) return; // icon/name-only fallback; no request
       let result;
       try {
         result = await requestThumbnail(capability, {
@@ -210,15 +211,70 @@ export function createWindowLayoutMemberPreview({
     // start during the dwell and end up in front of this capture. Reference
     // counted, because a sweep schedules the next member before the previous
     // capture has settled.
-    acquireIntent();
+    const releaseThisIntent = acquireIntent();
     // Instant: whatever we captured for this member last time is shown NOW, and
     // the fresh capture replaces it when it lands. Nothing waits to be seen.
     const cached = previewCache.get(previewCacheKey(layoutId, memberId));
     if (cached) setPreviewImage(cached.imageUrl, cached.width, cached.height);
+    let capability = null;
+    let capabilityReady = false;
+    let cacheReady = false;
+    let freshDue = false;
+    let freshStarted = false;
+    const runFreshWhenReady = () => {
+      if (!freshDue || !cacheReady || freshStarted) return;
+      freshStarted = true;
+      if (!capability || captureEnabled !== true) {
+        releaseThisIntent();
+        return;
+      }
+      void requestFreshThumbnail(layoutId, memberId, gen, capability, releaseThisIntent);
+    };
     timer = setTimeoutFn(() => {
       timer = null;
-      void capture(layoutId, memberId, gen);
+      freshDue = true;
+      runFreshWhenReady();
     }, debounceMs);
+    // Resolve while the hover is fresh, then fetch the persisted frame before
+    // allowing a fresh capture to replace it. A live capability is mandatory:
+    // the Papers host validates its current target binding before reading cache.
+    void (async () => {
+      try {
+        capability = await resolveCapability(layoutId, memberId);
+        if (gen !== generation) return;
+        capabilityReady = true;
+        if (!capability) return;
+        if (!cached) {
+          let cachedResult;
+          try {
+            cachedResult = await requestCachedThumbnail(capability);
+          } catch {
+            cachedResult = { outcome: 'cache-miss' };
+          }
+          if (gen !== generation) return;
+          if (cachedResult?.outcome === 'missing') onCapabilityMissing(layoutId, memberId);
+          if (isValidThumbnailSuccess(cachedResult)) {
+            rememberPreview(previewCacheKey(layoutId, memberId), cachedResult.imageUrl,
+              cachedResult.width, cachedResult.height);
+            setPreviewImage(cachedResult.imageUrl, cachedResult.width, cachedResult.height);
+          }
+        }
+      } catch {
+        // Keep the existing honest icon/name fallback when resolution or the
+        // optional durable cache path is unavailable.
+      } finally {
+        if (gen !== generation) {
+          releaseThisIntent();
+          return;
+        }
+        cacheReady = true;
+        // `capabilityReady` distinguishes a resolver still in flight from a
+        // completed empty result; cache misses must still fall through to the
+        // fresh request when a capability exists.
+        if (!capabilityReady) capability = null;
+        runFreshWhenReady();
+      }
+    })();
     return gen;
   }
 
@@ -226,7 +282,7 @@ export function createWindowLayoutMemberPreview({
     generation += 1;
     clearTimeoutFn(timer);
     timer = null;
-    releaseIntent();
+    for (const release of [...intentReleases]) release();
     clearPreview();
   }
 

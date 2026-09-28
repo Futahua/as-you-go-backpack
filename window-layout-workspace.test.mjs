@@ -12,6 +12,7 @@ import {
   windowLayoutPickApplyOutcome,
   windowLayoutCandidateIsMember,
   windowLayoutPickForBoundCandidate,
+  windowLayoutPickMemberDescriptors,
 } from './public/app/window-layout-workspace.js';
 import { windowLayoutMemberKey } from './public/app/window-layout-runtime.js';
 import { endExactWindowCandidateProcess } from './public/app/window-layout-process-end.js';
@@ -857,14 +858,17 @@ test('direct picker self-recovers orphaned Papers sessions before attached and w
     'a superseded widget attempt stops after awaited host/channel work');
   assert.match(widget, /widgetState\.pickAttempt === pickAttempt/,
     'only the current widget attempt may clear shared picker ownership');
-  assert.match(source, /function uniqueWindowLayoutMemberDescriptors\(members\)/,
-    'duplicate saved members are collapsed before they can brick native preparation');
-  assert.doesNotMatch(source, /unique\.set\(key, descriptor\)/,
-    'picker begin never forwards persisted descriptor extras such as windowInstanceId');
-  assert.match(source, /unique\.set\(key, \{[\s\S]*?version: 1,[\s\S]*?title: descriptor\.title,[\s\S]*?executableFingerprint: descriptor\.executableFingerprint,[\s\S]*?\}\)/,
-    'picker begin rebuilds the exact legacy three-field preload descriptor');
-  assert.equal((source.match(/uniqueWindowLayoutMemberDescriptors\(/g) ?? []).length, 3,
-    'both attached and widget surfaces use the shared descriptor deduplication');
+  const saved = [
+    { version: 1, title: 'Paint', executableFingerprint: 'a'.repeat(64), windowInstanceId: 'W0123456789abcdef' },
+    { version: 1, title: 'Paint', executableFingerprint: 'a'.repeat(64), windowInstanceId: 'W0123456789abcdef' },
+    { version: 1, title: 'Paint', executableFingerprint: 'a'.repeat(64), windowInstanceId: 'W0123456789abcdee' },
+  ];
+  assert.deepEqual(windowLayoutPickMemberDescriptors(saved), [saved[0], saved[2]],
+    'direct-pick seeds collapse duplicate persisted identities while retaining distinct exact windows');
+  assert.equal(windowLayoutPickMemberDescriptors([{ ...saved[0], windowInstanceId: 'invalid' }]), null,
+    'an invalid persisted runtime identity fails closed instead of being downgraded');
+  assert.equal((source.match(/windowLayoutPickMemberDescriptors\(/g) ?? []).length, 2,
+    'both attached and widget direct-pick entry points use the shared exact-identity seed builder');
 });
 
 test('pagehide explicitly releases active native direct-pick ownership on both surfaces', async () => {
@@ -1044,7 +1048,8 @@ test('attached and detached list picks use bound descriptor identity and the sha
   const attachedPickerStart = source.indexOf('async function openWindowLayoutPicker(layoutId)');
   const attachedPickerEnd = source.indexOf('/** A tracking lifecycle refresh', attachedPickerStart);
   const attachedPicker = source.slice(attachedPickerStart, attachedPickerEnd);
-  assert.match(attachedPicker, /windowLayoutCandidateIsMember\(members, candidate\)/);
+  assert.match(attachedPicker, /toWindowLayoutPickerRows\([\s\S]*?windowLayoutFromState\(layoutId\)\?\.arrangement\?\.members \?\? \[\],[\s\S]*?windowLayoutCandidateIsMember/,
+    'attached native rows mark membership from the current layout snapshot and exact identity rule');
   assert.doesNotMatch(attachedPicker, /currentTitles|currentTitles\.has\(candidate\.title\)/,
     'attached row status does not use mutable display titles');
 
@@ -1074,7 +1079,8 @@ test('attached and detached list picks use bound descriptor identity and the sha
   const widgetPickerStart = source.indexOf('  async function openWidgetPicker()');
   const widgetPickerEnd = source.indexOf('  function windowLayoutWidgetPickerMarkup(candidates)', widgetPickerStart);
   const widgetPicker = source.slice(widgetPickerStart, widgetPickerEnd);
-  assert.match(widgetPicker, /windowLayoutCandidateIsMember\(widgetState\.snapshot\.members \?\? \[\], candidate\)/);
+  assert.match(widgetPicker, /toWindowLayoutPickerRows\([\s\S]*?widgetState\.snapshot\.members \?\? \[\],[\s\S]*?windowLayoutCandidateIsMember/,
+    'detached native rows mark membership from the widget snapshot and exact identity rule');
   assert.doesNotMatch(widgetPicker, /currentTitles|currentTitles\.has\(candidate\.title\)/,
     'detached row status does not use mutable display titles');
   const widgetMarkupStart = widgetPickerEnd;
@@ -1193,11 +1199,18 @@ test('a stale process-end row id never falls back to a unique same-title applica
 
 test('startup opens non-docked layouts by default without creating implicit tracking', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
-  const baselineStart = source.indexOf('async function reconcileTrackingBaseline()');
+  const baselineStart = source.indexOf('async function reconcileTrackingBaseline(providedSnapshot = null)');
   const baselineEnd = source.indexOf('async function ensureStartupWindowLayoutWidget()', baselineStart);
   const baseline = source.slice(baselineStart, baselineEnd);
   assert.match(baseline, /reconcileWindowLayoutsAfterStartup\(state, \[\.\.\.live\]\)/);
-  assert.match(baseline, /const currentTrackingLayout = \(state\.windowLayouts \?\? \[\]\)\.find/);
+  assert.match(baseline, /if \(windowLayoutDetachment\.isReadOnly\(\) \|\| !hasDocumentWriteAuthority\(\)\) return;/,
+    'only the durable workspace writer may reconcile and accept a baseline');
+  assert.match(baseline, /acceptBaseline\(snapshot, async \(\) =>/,
+    'the baseline accepts its lifecycle delta only after the durable reconciliation callback succeeds');
+  assert.match(baseline, /if \(next !== before && !\(await store\.commit\(next\)\)\) return false;/,
+    'a refused durable reconciliation keeps the lifecycle baseline retryable');
+  assert.doesNotMatch(baseline, /populateTrackingLayout\(/,
+    'startup does not bulk-add every window that was already open');
 
   const startupStart = source.indexOf('async function ensureStartupWindowLayoutWidget()');
   const startupEnd = source.indexOf('async function populateTrackingLayout', startupStart);
@@ -1252,12 +1265,44 @@ test('detached picker re-entry invalidates stale chooser ownership before starti
     're-entering an apparently open chooser invalidates the old attempt');
   assert.match(widgetPicker, /const ownsPicker = \(\) => widgetPickerOpen && widgetPickerGeneration === generation;/,
     'late native replies are scoped to the current chooser attempt');
-  assert.match(widgetPicker, /const result = await host\.windowCandidates\(\{\s*includeNativeIcons:\s*false\s*\}\);\s*if \(!ownsPicker\(\)\) return;/,
-    'a late enumeration result cannot mutate a retired attempt');
-  assert.match(widgetPicker, /const picked = await host\.windowCandidatePicker\([\s\S]*?\);\s*if \(!ownsPicker\(\)\) return;/,
+  assert.match(widgetPicker, /openWindowLayoutPickerSession\([\s\S]*?loadCandidates: \(\) => host\.windowCandidates\([\s\S]*?isCurrent: ownsPicker/,
+    'enumeration and native chooser work are scoped to the active attempt');
+  assert.match(widgetPicker, /if \(!ownsPicker\(\) \|\| session\.outcome === 'stale'\) return;/,
+    'a late enumeration or update cannot mutate a retired attempt');
+  assert.match(widgetPicker, /const picked = session\.outcome === 'action' \? session\.action : await session\.actionPromise;\s*if \(!ownsPicker\(\)\) return;/,
     'a late chooser result cannot mutate a retired attempt');
   assert.match(widgetPicker, /widgetPickerOpen = false;\s*widgetPickerGeneration \+= 1;\s*if \(pickerHost\) pickerHost\.innerHTML = '';/,
     'close synchronously clears ownership before awaiting native dismissal');
   assert.match(widgetPicker, /if \(ownsPicker\(\)\) closeWidgetPicker\(\);/,
     'the owning finally block performs one cleanup and retired attempts do not duplicate it');
+});
+
+test('widget member gestures map plain left click to activation and plain right click to toggle', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const clickStart = source.indexOf('  function handleWidgetCardClick(event)');
+  const clickEnd = source.indexOf('  function resetWidgetClearArm()', clickStart);
+  const click = source.slice(clickStart, clickEnd);
+  assert.match(click, /windowLayoutRuntime\.isolateMode\.click\(layoutId, memberId, false\)[\s\S]*if \(isolationTargets !== null\)/,
+    'plain left click preserves isolate-mode interception');
+  assert.match(click, /if \(event\.ctrlKey\)[\s\S]*if \(event\.shiftKey\)[\s\S]*if \(!member\.disabled\) void activateWidgetMember\(memberId\)/,
+    'modifier selection stays intact and disabled members cannot be activated');
+  assert.doesNotMatch(click, /sendWidgetNativeActions\(\[\{ memberId, operation: 'toggle' \}\]\)/,
+    'left click no longer toggles visibility');
+
+  const activateStart = source.indexOf('  async function activateWidgetMember(memberId)');
+  const activateEnd = source.indexOf('  function widgetGroupTargets()', activateStart);
+  const activate = source.slice(activateStart, activateEnd);
+  assert.match(activate, /host\.windowControlActivate\(layoutId, memberId\)/);
+  assert.match(activate, /activated\?\.outcome !== 'activated'[\s\S]*setWindowLayoutStatus/,
+    'activation refusal remains visible to the creator');
+
+  const contextStart = source.indexOf('  async function handleWidgetCardContextMenu(event)');
+  const contextEnd = source.indexOf('  let widgetPickerOpen = false;', contextStart);
+  const context = source.slice(contextStart, contextEnd);
+  assert.match(context, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);/,
+    'the browser context menu stays suppressed for this right-button gesture');
+  assert.match(context, /if \(member && event\.ctrlKey[\s\S]*if \(member && event\.shiftKey[\s\S]*if \(member\)[\s\S]*if \(!memberId \|\| member\.disabled\) return[\s\S]*sendWidgetNativeActions\(\[\{ memberId, operation: 'toggle' \}\]\)/,
+    'right click preserves Ctrl/Shift behavior and toggles only an enabled member');
+  assert.doesNotMatch(context, /windowControlActivate/,
+    'right click no longer activates the member');
 });

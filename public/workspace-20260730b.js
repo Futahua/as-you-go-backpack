@@ -94,6 +94,7 @@ import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-lin
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createWindowLayoutAutoTracking } from './app/window-layout-auto-tracking.js';
+import { openWindowLayoutPickerSession, toWindowLayoutPickerRows } from './app/window-layout-picker-session.js';
 import { endExactWindowCandidateProcess } from './app/window-layout-process-end.js';
 import { createClickTwiceGuard } from './app/click-twice-guard.js';
 import { createWidgetHoverPolicy, createWidgetHoverPolicyDiagnostics } from './app/widget-hover-policy.js';
@@ -1676,34 +1677,55 @@ async function openWindowLayoutPicker(layoutId) {
   try {
     while (windowLayoutRuntime.pickerOpenFor === layoutId
       && windowLayoutRuntime.pickerGeneration === generation) {
-      const result = await host.windowCandidates({ includeNativeIcons: false });
-      // 018X4: abort immediately after the await, before the failure or success UI.
-      if (windowLayoutDetachment.isReadOnly()) return;
-      if (windowLayoutRuntime.pickerOpenFor !== layoutId
-        || windowLayoutRuntime.pickerGeneration !== generation) return; // closed meanwhile
-      if (result.outcome !== 'success') {
-        setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(result.outcome));
+      const pickerId = crypto.randomUUID();
+      const isCurrent = () => !windowLayoutDetachment.isReadOnly()
+        && windowLayoutRuntime.pickerOpenFor === layoutId
+        && windowLayoutRuntime.pickerGeneration === generation;
+      let session;
+      if (typeof host.windowCandidatePickerUpdate === 'function') {
+        session = await openWindowLayoutPickerSession({
+          pickerId,
+          openPicker: (id) => host.windowCandidatePicker([], id),
+          loadCandidates: () => host.windowCandidates({ includeNativeIcons: false }),
+          updatePicker: (candidates, id) => {
+            const rows = toWindowLayoutPickerRows(
+              candidates,
+              windowLayoutFromState(layoutId)?.arrangement?.members ?? [],
+              windowLayoutCandidateIsMember,
+            );
+            return host.windowCandidatePickerUpdate(rows, id);
+          },
+          isCurrent,
+        });
+      } else {
+        const result = await host.windowCandidates({ includeNativeIcons: false });
+        if (!isCurrent()) return;
+        const members = windowLayoutFromState(layoutId)?.arrangement?.members ?? [];
+        session = result.outcome === 'success'
+          ? { outcome: 'success', candidates: result.candidates, actionPromise: host.windowCandidatePicker(
+            toWindowLayoutPickerRows(result.candidates, members, windowLayoutCandidateIsMember),
+          ) }
+          : { outcome: 'list-error', error: result.error ?? result.outcome, candidates: [] };
+      }
+      if (!isCurrent() || session.outcome === 'stale') return;
+      if (session.outcome === 'list-error' || session.outcome === 'picker-error' || session.outcome === 'update-error') {
+        const error = session.error;
+        setWindowLayoutStatus(layoutId, error instanceof Error ? error.message
+          : (typeof error === 'string' ? error : windowLayoutStatusForOutcome(error?.outcome ?? 'helper-unavailable')));
         break;
       }
-      windowLayoutRuntime.pickerCandidates = result.candidates;
-      const members = windowLayoutFromState(layoutId)?.arrangement?.members ?? [];
-      const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
-        id: candidate.id,
-        title: candidate.title,
-        icon: candidate.icon ?? null,
-        current: windowLayoutCandidateIsMember(members, candidate),
-      })));
-      if (windowLayoutRuntime.pickerOpenFor !== layoutId
-        || windowLayoutRuntime.pickerGeneration !== generation) return;
-      if (picked.action === 'close' && picked.candidateId) {
-        await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
+      windowLayoutRuntime.pickerCandidates = session.candidates;
+      const picked = session.outcome === 'action' ? session.action : await session.actionPromise;
+      if (!isCurrent()) return;
+      if (picked?.action === 'close' && picked.candidateId) {
+        await closeWindowLayoutCandidate(layoutId, picked.candidateId, session.candidates);
         continue;
       }
-      if (picked.action === 'direct-pick') {
+      if (picked?.action === 'direct-pick') {
         await beginWindowLayoutDirectPick(layoutId);
         break;
       }
-      if (picked.action !== 'select' || !picked.candidateId) break;
+      if (picked?.action !== 'select' || !picked.candidateId) break;
       await handleWindowLayoutPickCandidate(layoutId, picked.candidateId);
     }
   } catch (error) {
@@ -2463,6 +2485,7 @@ function resolveWindowLayoutPreviewCapability(layoutId, memberId) {
 // animation/flashing.
 const windowLayoutMemberPreview = createWindowLayoutMemberPreview({
   resolveCapability: resolveWindowLayoutPreviewCapability,
+  requestCachedThumbnail: (capability) => host.windowThumbnailCacheCapability(capability),
   requestThumbnail: async (capability, options) => {
     const result = await host.windowThumbnailCapability(capability, options);
     if (WIDGET_SURFACE) document.title = 'thumbnail: ' + String(result?.outcome ?? 'empty');
@@ -2504,8 +2527,24 @@ let windowLayoutShiftPeekGeneration = 0;
 let windowLayoutShiftPeekKey = null;
 let windowLayoutShiftPeekEndTimer = null;
 let windowLayoutShiftPeekStartTimer = null;
+let windowLayoutShiftPeekRetryTimer = null;
+let windowLayoutLastHoveredMember = null;
+let windowLayoutShiftPeekHostQueue = Promise.resolve();
+
+function enqueueWindowLayoutShiftPeekHostOperation(operation) {
+  const pending = windowLayoutShiftPeekHostQueue.then(operation, operation);
+  windowLayoutShiftPeekHostQueue = pending.catch(() => undefined);
+  return pending;
+}
 
 function endWindowLayoutShiftPeek() {
+  // Planner keyup/blur and pointer-leave can converge on this function. Once
+  // this target's lifecycle has been cleared, later notifications must not
+  // issue another host end (or let an old completion end a newer target).
+  if (windowLayoutShiftPeekKey === null
+    && windowLayoutShiftPeekStartTimer === null
+    && windowLayoutShiftPeekEndTimer === null
+    && windowLayoutShiftPeekRetryTimer === null) return;
   if (windowLayoutShiftPeekStartTimer !== null) {
     clearTimeout(windowLayoutShiftPeekStartTimer);
     windowLayoutShiftPeekStartTimer = null;
@@ -2514,9 +2553,13 @@ function endWindowLayoutShiftPeek() {
     clearTimeout(windowLayoutShiftPeekEndTimer);
     windowLayoutShiftPeekEndTimer = null;
   }
+  if (windowLayoutShiftPeekRetryTimer !== null) {
+    clearTimeout(windowLayoutShiftPeekRetryTimer);
+    windowLayoutShiftPeekRetryTimer = null;
+  }
   windowLayoutShiftPeekGeneration += 1;
   windowLayoutShiftPeekKey = null;
-  void host.windowPeekEnd().catch(() => undefined);
+  void enqueueWindowLayoutShiftPeekHostOperation(() => host.windowPeekEnd()).catch(() => undefined);
 }
 
 function deferWindowLayoutShiftPeekEnd() {
@@ -2543,6 +2586,7 @@ function beginWindowLayoutShiftPeek(member) {
   const generation = ++windowLayoutShiftPeekGeneration;
   windowLayoutShiftPeekKey = key;
   if (windowLayoutShiftPeekStartTimer !== null) clearTimeout(windowLayoutShiftPeekStartTimer);
+  if (windowLayoutShiftPeekRetryTimer !== null) clearTimeout(windowLayoutShiftPeekRetryTimer);
   cancelWindowLayoutPreviewDwell();
   windowLayoutMemberPopover.hide();
   windowLayoutMemberPreview.cancel();
@@ -2552,26 +2596,52 @@ function beginWindowLayoutShiftPeek(member) {
   // only, while an intentional hover remains effectively immediate.
   windowLayoutShiftPeekStartTimer = setTimeout(() => {
     windowLayoutShiftPeekStartTimer = null;
-    void performWindowLayoutShiftPeek(member, layoutId, memberId, generation);
+    void performWindowLayoutShiftPeek(layoutId, memberId, generation);
   }, 32);
 }
 
-async function performWindowLayoutShiftPeek(member, layoutId, memberId, generation) {
-  const capability = await resolveWindowLayoutPreviewCapability(layoutId, memberId);
+async function performWindowLayoutShiftPeek(layoutId, memberId, generation, attempt = 0) {
+  let capability = null;
+  try {
+    capability = await resolveWindowLayoutPreviewCapability(layoutId, memberId);
+  } catch {
+    // Capability lookup may briefly fail while the host is catching up. Keep
+    // retrying this same hovered target while Shift remains held.
+  }
   if (!capability && WIDGET_SURFACE) document.title = 'peek: no capability';
-  if (generation !== windowLayoutShiftPeekGeneration
-    || !windowLayoutShiftPeekHeld
-    || !member.isConnected
-    || !member.matches(':hover')
-    || !capability) return;
-  const result = await host.windowPeekBeginCapability(capability).catch((error) => ({ outcome: 'error', error: String(error) }));
+  if (generation !== windowLayoutShiftPeekGeneration || !windowLayoutShiftPeekHeld
+    || windowLayoutShiftPeekKey !== `${layoutId}\u0000${memberId}`) return;
+  if (!capability) {
+    windowLayoutShiftPeekRetryTimer = setTimeout(() => {
+      windowLayoutShiftPeekRetryTimer = null;
+      void performWindowLayoutShiftPeek(layoutId, memberId, generation, attempt + 1);
+    }, Math.min(1000, 180 + attempt * 120));
+    return;
+  }
+  const result = await enqueueWindowLayoutShiftPeekHostOperation(() => {
+    // A newer target or release may have arrived while this operation waited
+    // behind an in-flight host call. Never let the stale target start late.
+    if (generation !== windowLayoutShiftPeekGeneration || !windowLayoutShiftPeekHeld
+      || windowLayoutShiftPeekKey !== `${layoutId}\u0000${memberId}`) return { outcome: 'cancelled' };
+    return host.windowPeekBeginCapability(capability);
+  }).catch((error) => ({ outcome: 'error', error: String(error) }));
   // ONE LINE THAT PROVES THE WHOLE REMAINING CHAIN: the broker noticed physical
   // Shift, Node parsed it, IPC forwarded it, the preload posted it, the host bridge
   // relayed it, the widget received it, resolved a capability and Peek began. The
   // native watcher is already proven separately, so nothing else needs proving.
   if (WIDGET_SURFACE) document.title = 'shift-peek | held=1 | begin=' + String(result?.outcome ?? 'empty')
     + ' ' + String(result?.error ?? '').slice(0, 60);
-  if (generation !== windowLayoutShiftPeekGeneration) void host.windowPeekEnd().catch(() => undefined);
+  if (generation !== windowLayoutShiftPeekGeneration) {
+    // The lifecycle owner already ended or superseded this attempt. An extra
+    // global end here could cancel a newer member's Peek.
+    return;
+  }
+  if (result?.outcome !== 'success' && windowLayoutShiftPeekHeld) {
+    windowLayoutShiftPeekRetryTimer = setTimeout(() => {
+      windowLayoutShiftPeekRetryTimer = null;
+      void performWindowLayoutShiftPeek(layoutId, memberId, generation, attempt + 1);
+    }, Math.min(1000, 180 + attempt * 120));
+  }
 }
 
 function applyWindowLayoutShiftPeekTransition(transition) {
@@ -2594,6 +2664,7 @@ window.addEventListener('keyup', (event) => {
   applyWindowLayoutShiftPeekTransition(transition);
 });
 window.addEventListener('blur', () => {
+  if (WIDGET_SURFACE) return; // Physical Shift release comes from the native broker.
   const transition = planWindowLayoutShiftPeekTransition('blur', {}, { held: windowLayoutShiftPeekHeld });
   applyWindowLayoutShiftPeekTransition(transition);
 });
@@ -2602,7 +2673,9 @@ window.addEventListener('blur', () => {
 if (typeof host.onWindowControlShift === 'function') host.onWindowControlShift((held) => {
   const transition = planWindowLayoutShiftPeekTransition(held ? 'keydown' : 'keyup', { key: 'Shift' }, {
     held: windowLayoutShiftPeekHeld,
-    member: document.querySelector('[data-wl-member]:hover'),
+    member: document.querySelector('[data-wl-member]:hover')
+      ?? (elements.grid.matches(':hover') && windowLayoutLastHoveredMember?.isConnected
+        ? windowLayoutLastHoveredMember : null),
   });
   applyWindowLayoutShiftPeekTransition(transition);
 });
@@ -2628,6 +2701,7 @@ elements.grid.addEventListener('mouseover', (event) => {
   }
   const member = event.target.closest('[data-wl-member]');
   const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
+  if (member) windowLayoutLastHoveredMember = member;
   const peekTransition = planWindowLayoutShiftPeekTransition('hover', event, {
     held: windowLayoutShiftPeekHeld,
     member,
@@ -2655,7 +2729,12 @@ elements.grid.addEventListener('mouseover', (event) => {
 // modifier state. Track that state while the pointer moves so Shift Peek works
 // even when Shift was pressed before entering the widget.
 elements.grid.addEventListener('pointermove', (event) => {
+  // Small pointer drift over gaps/descendants is still inside the compact
+  // widget. Cancel the delayed leave end even when the move is not over a
+  // member and therefore produces no planner transition.
+  if (windowLayoutShiftPeekHeld && elements.grid.matches(':hover')) keepWindowLayoutShiftPeekAlive();
   const member = event.target.closest('[data-wl-member]');
+  if (member) windowLayoutLastHoveredMember = member;
   const transition = planWindowLayoutShiftPeekTransition('pointermove', event, {
     held: windowLayoutShiftPeekHeld,
     member,
@@ -2675,6 +2754,8 @@ elements.grid.addEventListener('mouseout', (event) => {
   if (listButton && listButton !== relatedListButton) cancelWindowLayoutListDwell();
   const member = event.target.closest('[data-wl-member]');
   const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
+  if (relatedMember) windowLayoutLastHoveredMember = relatedMember;
+  else if (!event.relatedTarget || !elements.grid.contains(event.relatedTarget)) windowLayoutLastHoveredMember = null;
   // Crossing directly from one member to another is a Peek transition, not a
   // release. Keep the session alive so the host can reveal only the new target
   // and hide only the old one. Blank space between icons keeps the last Peek
@@ -2834,6 +2915,7 @@ let closedWindowReconcileInFlight = false;
 const windowLayoutAutoTracking = createWindowLayoutAutoTracking({
   getState: () => state,
   resolveWindowInstance: (instanceId) => host.resolveWindowInstance(instanceId),
+  resolveWindowDescriptor: (descriptor) => host.resolveWindowDescriptor(descriptor),
   observeWindowCapability: (capability) => host.observeWindowCapability(capability),
   commit: (next) => store.commit(next),
   onCommitted: async ({ layoutId, member, capability }) => {
@@ -2847,6 +2929,7 @@ const windowLayoutAutoTracking = createWindowLayoutAutoTracking({
       await windowLayoutRuntimeController.reconcileActive();
     }
   },
+  onDiagnostic: ({ stage, outcome }) => host.windowLayoutDiagnostic?.({ stage, outcome }),
 });
 
 function isWindowLifecycleDestroyEvent(event) {
@@ -2859,31 +2942,33 @@ function isWindowLifecycleDestroyEvent(event) {
 async function processTrackingLifecycleEvent(event) {
   if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
   if (!event || typeof event.windowInstanceId !== 'string') return;
-  trackingEventInFlight = true;
-  try {
-    if (isWindowLifecycleDestroyEvent(event)) {
-      // EVIDENCE, NOT PROOF. A lifecycle 'gone' is produced by diffing successive
-      // task-worthy enumerations, so one transient disappearance would delete a
-      // member outright - and it bypassed the periodic sweep's confirmation
-      // entirely. It seeds a confirmation instead: the sweep corroborates it with
-      // an independent resolve, and only two positives retire anything.
-      const existing = windowLayoutGoneConfirmations.get(event.windowInstanceId);
-      windowLayoutGoneConfirmations.set(event.windowInstanceId, {
-        count: Math.max(1, existing?.count ?? 0),
-        at: Date.now(),
-      });
-      return;
-    }
-    await windowLayoutAutoTracking.addFromEvent(event);
-  } finally {
-    trackingEventInFlight = false;
+  if (isWindowLifecycleDestroyEvent(event)) {
+    // EVIDENCE, NOT PROOF. A lifecycle 'gone' is produced by diffing successive
+    // task-worthy enumerations, so one transient disappearance would delete a
+    // member outright - and it bypassed the periodic sweep's confirmation
+    // entirely. It seeds a confirmation instead: the sweep corroborates it with
+    // an independent resolve, and only two positives retire anything.
+    const existing = windowLayoutGoneConfirmations.get(event.windowInstanceId);
+    windowLayoutGoneConfirmations.set(event.windowInstanceId, {
+      count: Math.max(1, existing?.count ?? 0),
+      at: Date.now(),
+    });
+    return;
   }
+  await windowLayoutAutoTracking.addFromEvent(event);
 }
 async function drainTrackingLifecycleEvents() {
   if (trackingEventInFlight) return;
   trackingEventInFlight = true;
   try {
-    while (trackingEventQueue.length > 0) await processTrackingLifecycleEvent(trackingEventQueue.shift());
+    while (trackingEventQueue.length > 0) {
+      try {
+        await processTrackingLifecycleEvent(trackingEventQueue.shift());
+      } catch {
+        // One transient IPC/store failure must not strand later eligible opens
+        // behind an abandoned queue drain.
+      }
+    }
   } finally {
     trackingEventInFlight = false;
   }
@@ -2976,7 +3061,7 @@ host.onWindowLifecycleBaseline?.((baseline) => {
   if (!baseline || baseline.complete !== true || typeof baseline.trackerSessionId !== 'string') return;
   trackingSessionId = baseline.trackerSessionId;
   if (Number.isSafeInteger(baseline.sequence)) trackingLastSequence = baseline.sequence;
-  void reconcileTrackingBaseline();
+  void reconcileTrackingBaseline(baseline);
 });
 
 // ---- 018A1 exclusive-controller handoff (As You Go half) ------------------
@@ -3584,57 +3669,70 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
   }
 }
 
-async function reconcileTrackingBaseline() {
-  const response = await host.windowLifecycleSnapshot?.().catch(() => null);
-  const snapshot = response?.snapshot;
+async function reconcileTrackingBaseline(providedSnapshot = null) {
+  if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
+  const response = providedSnapshot ? null : await host.windowLifecycleSnapshot?.().catch(() => null);
+  const snapshot = providedSnapshot ?? response?.snapshot;
   if (!snapshot || snapshot.complete !== true || !Array.isArray(snapshot.windows)) return;
-  const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId).filter((id) => typeof id === 'string'));
-  const before = state;
-  let next = reconcileWindowLayoutsAfterStartup(state, [...live]);
-  const trackingLayout = (next.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
-  if (trackingLayout) {
-    const suppressed = (trackingLayout.tracking?.suppressedInstanceIds ?? []).filter((id) => live.has(id));
-    if (suppressed.length !== (trackingLayout.tracking?.suppressedInstanceIds ?? []).length) {
-      next = {
-        ...next,
-        windowLayouts: next.windowLayouts.map((entry) => entry.id === trackingLayout.id
-          ? { ...entry, tracking: { ...entry.tracking, suppressedInstanceIds: suppressed } }
-          : entry),
-      };
-    }
-  }
-  if (next !== before && await store.commit(next)) {
-    const after = state;
-    for (const layout of before.windowLayouts ?? []) {
-      const nextLayout = (after.windowLayouts ?? []).find((entry) => entry.id === layout.id);
-      const removedIds = new Set((layout.arrangement?.members ?? [])
-        .filter((member) => !nextLayout?.arrangement?.members?.some((candidate) => candidate.id === member.id))
-        .map((member) => member.id));
-      for (const memberId of removedIds) {
-        const key = windowLayoutMemberKey(layout.id, memberId);
-        windowLayoutRuntime.capabilities.delete(key);
-        windowLayoutRuntime.icons.delete(key);
-        windowLayoutWidgetPreviewCapabilities.delete(key);
+  // A delayed snapshot from an old watcher session must not overwrite a newer
+  // baseline or reintroduce opens from that retired session.
+  if (trackingSessionId && snapshot.trackerSessionId !== trackingSessionId) return;
+  const accepted = await windowLayoutAutoTracking.acceptBaseline(snapshot, async () => {
+    // Authority can change while a host snapshot is in flight. Do not consume
+    // its lifecycle delta unless this surface can reconcile and commit it.
+    if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return false;
+    const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId).filter((id) => typeof id === 'string'));
+    const before = state;
+    let next = reconcileWindowLayoutsAfterStartup(state, [...live]);
+    const trackingLayout = (next.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
+    if (trackingLayout) {
+      const suppressed = (trackingLayout.tracking?.suppressedInstanceIds ?? []).filter((id) => live.has(id));
+      if (suppressed.length !== (trackingLayout.tracking?.suppressedInstanceIds ?? []).length) {
+        next = {
+          ...next,
+          windowLayouts: next.windowLayouts.map((entry) => entry.id === trackingLayout.id
+            ? { ...entry, tracking: { ...entry.tracking, suppressedInstanceIds: suppressed } }
+            : entry),
+        };
       }
-      if (removedIds.size > 0 || !nextLayout) {
-        const selected = windowLayoutRuntime.selectedMembers.get(layout.id);
-        if (selected) {
-          for (const memberId of removedIds) selected.delete(memberId);
-          if (selected.size === 0) windowLayoutRuntime.selectedMembers.delete(layout.id);
-          syncWindowLayoutMemberSelection(layout.id);
+    }
+    if (next !== before && !(await store.commit(next))) return false;
+    if (next !== before) {
+      const after = state;
+      for (const layout of before.windowLayouts ?? []) {
+        const nextLayout = (after.windowLayouts ?? []).find((entry) => entry.id === layout.id);
+        const removedIds = new Set((layout.arrangement?.members ?? [])
+          .filter((member) => !nextLayout?.arrangement?.members?.some((candidate) => candidate.id === member.id))
+          .map((member) => member.id));
+        for (const memberId of removedIds) {
+          const key = windowLayoutMemberKey(layout.id, memberId);
+          windowLayoutRuntime.capabilities.delete(key);
+          windowLayoutRuntime.icons.delete(key);
+          windowLayoutWidgetPreviewCapabilities.delete(key);
         }
-        setWindowLayoutStatus(layout.id, '');
-        noteWindowLayoutCommit(layout.id, { reason: 'startup-window-baseline' });
+        if (removedIds.size > 0 || !nextLayout) {
+          const selected = windowLayoutRuntime.selectedMembers.get(layout.id);
+          if (selected) {
+            for (const memberId of removedIds) selected.delete(memberId);
+            if (selected.size === 0) windowLayoutRuntime.selectedMembers.delete(layout.id);
+            syncWindowLayoutMemberSelection(layout.id);
+          }
+          setWindowLayoutStatus(layout.id, '');
+          noteWindowLayoutCommit(layout.id, { reason: 'startup-window-baseline' });
+        }
+      }
+      windowLayoutMemberPreview.cancel();
+      saveWorkspaceView();
+      if (before.activeWindowLayoutId !== after.activeWindowLayoutId) {
+        await windowLayoutRuntimeController.reconcileActive();
       }
     }
-    windowLayoutMemberPreview.cancel();
-    saveWorkspaceView();
-    if (before.activeWindowLayoutId !== after.activeWindowLayoutId) {
-      await windowLayoutRuntimeController.reconcileActive();
-    }
-  }
-  const currentTrackingLayout = (state.windowLayouts ?? []).find((entry) => entry.tracking?.enabled === true);
-  if (currentTrackingLayout) await populateTrackingLayout(currentTrackingLayout.id);
+    return true;
+  });
+  // Baseline deltas are accepted only after the durable startup reconciliation
+  // succeeds. Both lifecycle pushes and recovered opens then share one queue.
+  for (const event of accepted.events) trackingEventQueue.push(event);
+  if (accepted.events.length) void drainTrackingLifecycleEvents();
 }
 
 async function ensureStartupWindowLayoutWidget() {
@@ -7106,6 +7204,16 @@ function bootstrapWindowLayoutWidget() {
     }
   }
 
+  async function activateWidgetMember(memberId) {
+    windowLayoutMemberPreview.cancel();
+    const activated = await host.windowControlActivate(layoutId, memberId)
+      .catch(() => ({ outcome: 'helper-unavailable' }));
+    if (activated?.outcome !== 'activated') {
+      setWindowLayoutStatus(layoutId, 'Windows did not give that window the foreground ('
+        + String(activated?.outcome ?? 'no answer') + ').');
+    }
+  }
+
   function widgetGroupTargets() {
     const members = widgetState.snapshot.members ?? [];
     return widgetState.selection.size > 0
@@ -7167,8 +7275,9 @@ function bootstrapWindowLayoutWidget() {
         syncWidgetSelection();
         return;
       }
-      // Send the native operation from the surface that received the click.
-      void sendWidgetNativeActions([{ memberId, operation: 'toggle' }]);
+      // A plain left click raises this exact member. Right click owns the
+      // minimize/restore toggle in handleWidgetCardContextMenu.
+      if (!member.disabled) void activateWidgetMember(memberId);
       return;
     }
     const pickCandidate = event.target.closest('[data-wl-pick-candidate]');
@@ -7274,20 +7383,9 @@ function bootstrapWindowLayoutWidget() {
       const memberId = member.dataset.wlMember;
       if (!memberId || member.disabled) return;
       windowLayoutMemberPreview.cancel();
-      // RIGHT-CLICK ACTIVATES, AND ONLY FOR THIS PRESS.
-      //
-      // Papers takes the foreground for the duration of this one press, which makes
-      // the native bridge it spawns eligible to hand that foreground to the target -
-      // eligibility a resident background process can never have. That is the chosen
-      // behaviour: right-click activates, while an ordinary icon click still never
-      // steals focus. No capability is resolved, because the broker's own
-      // registration already proved this member's native handle.
-      const activated = await host.windowControlActivate(layoutId, memberId)
-        .catch(() => ({ outcome: 'helper-unavailable' }));
-      if (activated?.outcome !== 'activated') {
-        setWindowLayoutStatus(layoutId, 'Windows did not give that window the foreground ('
-          + String(activated?.outcome ?? 'no answer') + ').');
-      }
+      // The browser context menu is suppressed above; the right button is the
+      // member's minimize/restore gesture instead.
+      await sendWidgetNativeActions([{ memberId, operation: 'toggle' }]);
       return;
     }
   }
@@ -7309,32 +7407,49 @@ function bootstrapWindowLayoutWidget() {
     windowLayoutMemberPreview.cancel();
     try {
       while (true) {
-        const result = await host.windowCandidates({ includeNativeIcons: false });
-        if (!ownsPicker()) return;
-        if (result.outcome !== 'success') {
-          setWindowLayoutStatus(layoutId, result.error || 'List unavailable');
+        const pickerId = crypto.randomUUID();
+        let session;
+        if (typeof host.windowCandidatePickerUpdate === 'function') {
+          session = await openWindowLayoutPickerSession({
+            pickerId,
+            openPicker: (id) => host.windowCandidatePicker([], id),
+            loadCandidates: () => host.windowCandidates({ includeNativeIcons: false }),
+            updatePicker: (candidates, id) => host.windowCandidatePickerUpdate(toWindowLayoutPickerRows(
+              candidates, widgetState.snapshot.members ?? [], windowLayoutCandidateIsMember,
+            ), id),
+            isCurrent: ownsPicker,
+          });
+        } else {
+          const result = await host.windowCandidates({ includeNativeIcons: false });
+          if (!ownsPicker()) return;
+          session = result.outcome === 'success'
+            ? { outcome: 'success', candidates: result.candidates, actionPromise: host.windowCandidatePicker(
+              toWindowLayoutPickerRows(result.candidates, widgetState.snapshot.members ?? [], windowLayoutCandidateIsMember),
+            ) }
+            : { outcome: 'list-error', error: result.error || 'List unavailable', candidates: [] };
+        }
+        if (!ownsPicker() || session.outcome === 'stale') return;
+        if (session.outcome === 'list-error' || session.outcome === 'picker-error' || session.outcome === 'update-error') {
+          const error = session.error;
+          setWindowLayoutStatus(layoutId, error instanceof Error ? error.message
+            : (typeof error === 'string' ? error : 'List unavailable'));
           break;
         }
-        widgetState.candidates = result.candidates;
+        widgetState.candidates = session.candidates;
         // The chooser stays open while searching/selecting. Recompute its
         // presentation state after every authoritative command acknowledgement.
-        const picked = await host.windowCandidatePicker(result.candidates.map((candidate) => ({
-          id: candidate.id,
-          title: candidate.title,
-          icon: candidate.icon ?? null,
-          current: windowLayoutCandidateIsMember(widgetState.snapshot.members ?? [], candidate),
-        })));
+        const picked = session.outcome === 'action' ? session.action : await session.actionPromise;
         if (!ownsPicker()) return;
-        if (picked.action === 'close' && picked.candidateId) {
-          await closeWindowLayoutCandidate(layoutId, picked.candidateId, result.candidates);
+        if (picked?.action === 'close' && picked.candidateId) {
+          await closeWindowLayoutCandidate(layoutId, picked.candidateId, session.candidates);
           if (!ownsPicker()) return;
           continue;
         }
-        if (picked.action === 'direct-pick') {
+        if (picked?.action === 'direct-pick') {
           await beginWidgetDirectPick();
           break;
         }
-        if (picked.action !== 'select' || !picked.candidateId) break;
+        if (picked?.action !== 'select' || !picked.candidateId) break;
         await handleWidgetListCandidate(picked.candidateId);
         if (!ownsPicker()) return;
       }

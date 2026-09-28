@@ -3,6 +3,7 @@
 // strict-success-only rendering, typed/name-only fallbacks, cleanup, and the
 // no-state/store surface. Fake timers + gated async responses, no DOM/host.
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -53,9 +54,10 @@ function okResult(imageUrl = pngDataUrl(), width = 240, height = 135) {
   return { outcome: 'success', imageUrl, width, height };
 }
 
-function makePreview({ timers, resolveCapability = async () => ({ id: 'cap' }), requestThumbnail = async () => ({ outcome: 'missing' }), setPreviewImage = () => undefined, clearPreview = () => undefined, debounceMs = 10, holdPreview = () => undefined, releasePreview = () => undefined }) {
+function makePreview({ timers, resolveCapability = async () => ({ id: 'cap' }), requestCachedThumbnail, requestThumbnail = async () => ({ outcome: 'missing' }), setPreviewImage = () => undefined, clearPreview = () => undefined, debounceMs = 10, holdPreview = () => undefined, releasePreview = () => undefined }) {
   return createWindowLayoutMemberPreview({
     resolveCapability,
+    requestCachedThumbnail,
     requestThumbnail,
     setPreviewImage,
     clearPreview,
@@ -107,6 +109,35 @@ test('a member never captured before still waits, and the cache stays bounded', 
   assert.deepEqual(shown, [], 'nothing to show yet for a member never captured');
   await timers.flush();
   assert.equal(shown.length, 1);
+});
+
+test('durable cache is shown before fresh capture and both update the same preview sink', async () => {
+  const timers = fakeTimers();
+  const events = [];
+  const persisted = pngDataUrl(20);
+  const fresh = pngDataUrl(28);
+  const preview = makePreview({
+    timers,
+    resolveCapability: async () => { events.push('resolve'); return { id: 'live-cap' }; },
+    requestCachedThumbnail: async (capability) => {
+      events.push(`cache:${capability.id}`);
+      return okResult(persisted);
+    },
+    requestThumbnail: async (capability) => {
+      events.push(`fresh:${capability.id}`);
+      return okResult(fresh);
+    },
+    setPreviewImage: (imageUrl) => events.push(imageUrl === persisted ? 'show:persisted' : 'show:fresh'),
+  });
+
+  preview.schedule('L1', 'A');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ['resolve', 'cache:live-cap', 'show:persisted'],
+    'the durable frame is requested immediately after capability resolution and shown before the debounce');
+  await timers.flush();
+  assert.deepEqual(events, [
+    'resolve', 'cache:live-cap', 'show:persisted', 'fresh:live-cap', 'show:fresh',
+  ], 'the fresh result replaces the durable frame through the same preview sink');
 });
 
 test('a hover holds the desktop scan off from the hover itself, not from the capture', async () => {
@@ -162,20 +193,23 @@ test('cancelling a scheduled hover releases the hold', () => {
   assert.deepEqual(events, ['hold', 'release'], 'a hover that never captured still releases');
 });
 
-test('capture is debounced; only the latest hover is captured', async () => {
+test('durable lookup starts immediately, but only the latest hover gets a fresh capture after debounce', async () => {
   const timers = fakeTimers();
   const resolved = [];
+  const cacheReads = [];
   const requests = [];
   const preview = makePreview({
     timers,
     resolveCapability: async (layoutId, memberId) => { resolved.push(memberId); return { id: memberId }; },
+    requestCachedThumbnail: async (capability) => { cacheReads.push(capability.id); return { outcome: 'cache-miss' }; },
     requestThumbnail: async (capability, options) => { requests.push([capability.id, options]); return okResult(); },
   });
   preview.schedule('L1', 'A');
-  assert.equal(resolved.length, 0, 'no capture before the debounce elapses');
+  assert.deepEqual(resolved, ['A'], 'the capability lookup starts on hover so durable cache can be requested immediately');
   preview.schedule('L1', 'B'); // replaces the pending A capture
   await timers.flush();
-  assert.deepEqual(resolved, ['B'], 'only the latest hover is captured');
+  assert.deepEqual(resolved, ['A', 'B'], 'capability lookup starts for each hover');
+  assert.deepEqual(cacheReads, ['B'], 'the stale hover is discarded before its cache lookup');
   assert.equal(requests.length, 1, 'one thumbnail request');
   assert.deepEqual(requests[0][1], { maxWidth: 240, maxHeight: 135 }, 'requests the 240x135 default');
 });
@@ -336,6 +370,15 @@ test('the preview controller exposes only schedule/cancel and no store/save surf
   for (const forbidden of ['saveWorkspace', 'commit', 'replace', 'install', 'persist', 'undo', 'redo']) {
     assert.equal(preview[forbidden], undefined, `the preview controller must not expose ${forbidden}`);
   }
+});
+
+test('workspace preview is wired to the durable-cache and fresh-capture host APIs', async () => {
+  const workspace = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const bridge = await readFile(new URL('./public/app/host/host-bridge.js', import.meta.url), 'utf8');
+  assert.match(workspace, /requestCachedThumbnail:\s*\(capability\)\s*=>\s*host\.windowThumbnailCacheCapability\(capability\)/);
+  assert.match(workspace, /requestThumbnail:\s*async\s*\(capability, options\)\s*=>\s*\{[\s\S]*?host\.windowThumbnailCapability\(capability, options\)/);
+  assert.match(bridge, /windowThumbnailCacheCapability:\s*\(capability\)\s*=>\s*request\('papers:project:window-thumbnail-cache',\s*\{\s*capability\s*\}\)/);
+  assert.match(bridge, /task\.type === 'papers:project:window-thumbnail'\s*\|\|\s*task\.type === 'papers:project:window-thumbnail-cache'/);
 });
 
 test('isValidThumbnailSuccess accepts only strict success with a bounded data PNG', () => {
