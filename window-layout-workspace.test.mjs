@@ -1203,7 +1203,7 @@ test('startup opens non-docked layouts by default without creating implicit trac
   const baselineEnd = source.indexOf('async function ensureStartupWindowLayoutWidget()', baselineStart);
   const baseline = source.slice(baselineStart, baselineEnd);
   assert.match(baseline, /reconcileWindowLayoutsAfterStartup\(state, \[\.\.\.live\]\)/);
-  assert.match(baseline, /if \(windowLayoutDetachment\.isReadOnly\(\) \|\| !hasDocumentWriteAuthority\(\)\) return;/,
+  assert.match(baseline, /if \(windowLayoutDetachment\.isReadOnly\(\) \|\| !hasDocumentWriteAuthority\(\)[\s\S]*?surfaceCoordinator\?\.role !== SURFACE_ROLE\.WRITER\) return;/,
     'only the durable workspace writer may reconcile and accept a baseline');
   assert.match(baseline, /acceptBaseline\(snapshot, async \(\) =>/,
     'the baseline accepts its lifecycle delta only after the durable reconciliation callback succeeds');
