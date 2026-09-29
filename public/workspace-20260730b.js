@@ -2964,8 +2964,12 @@ async function processTrackingLifecycleEvent(event) {
   if (result?.outcome === 'added' || result?.outcome === 'duplicate'
     || result?.outcome === 'disabled' || result?.outcome === 'suppressed') {
     trackingPendingOpens.delete(event.windowInstanceId);
-  } else if (trackingPendingOpens.size < 64) {
-    trackingPendingOpens.set(event.windowInstanceId, Date.now());
+  } else if (trackingPendingOpens.has(event.windowInstanceId) || trackingPendingOpens.size < 64) {
+    const pending = trackingPendingOpens.get(event.windowInstanceId);
+    trackingPendingOpens.set(event.windowInstanceId, {
+      firstSeenAt: pending?.firstSeenAt ?? Date.now(),
+      lastAttemptAt: Date.now(),
+    });
   }
 }
 async function drainTrackingLifecycleEvents() {
@@ -3051,14 +3055,18 @@ async function reconcileClosedWindowMembers() {
     }
     // Retry only opens the watcher actually delivered. A failed one-shot bind
     // no longer loses that window, while startup does not bulk-add old windows.
-    for (const [instanceId, attemptedAt] of trackingPendingOpens) {
-      if (!live.has(instanceId)) {
+    let retried = 0;
+    for (const [instanceId, pending] of trackingPendingOpens) {
+      if (Date.now() - pending.firstSeenAt > 60000) {
         trackingPendingOpens.delete(instanceId);
         continue;
       }
-      if (Date.now() - attemptedAt >= 2000) {
+      // A single lifecycle snapshot can omit a still-opening window. Keep the
+      // bounded retry alive; the exact resolver itself confirms identity.
+      if (Date.now() - pending.lastAttemptAt >= 2000) {
         if (surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
         await processTrackingLifecycleEvent({ kind: 'open', windowInstanceId: instanceId });
+        if (++retried >= 4) break;
       }
     }
   } finally {
