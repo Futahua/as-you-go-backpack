@@ -39,13 +39,19 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
 });
 
 test('file capability panel source keeps destructive retargeting verification-bound', async () => {
-  const source = await import('node:fs/promises').then(({ readFile }) =>
-    readFile(new URL('./public/app/file-capability-panel.js', import.meta.url), 'utf8'));
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('./public/app/file-capability-panel.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('./public/styles/file-capability.css', import.meta.url), 'utf8');
   assert.match(source, /waitForPathState\(host, \{ present: expectedPath, absent: oldPath \}\)/);
   assert.match(source, /retargetShortcut\(\{[\s\S]*oldPath,[\s\S]*newPath: expectedPath/);
   assert.match(source, /fileCapability\('delete', \{ paths: \[target\] \}\)/);
   assert.match(source, /Moved to Recycle Bin\. The AYG reference was kept\./);
   assert.match(source, /URL\.createObjectURL\(new Blob/);
   assert.match(source, /URL\.revokeObjectURL\(state\.previewObjectUrl\)/);
+  assert.match(source, /fileCapability\('preview-release', \{ resourceId \}\)/);
+  assert.match(source, /parsed\.protocol === 'papers-file-preview:'/);
+  assert.match(source, /fileCapability\('preview-text-chunk'/);
+  assert.match(source, /media\.preload = 'metadata'/);
+  assert.match(css, /\.file-capability-text-scroller/);
   assert.doesNotMatch(source, /frame\.src = data\.dataUrl/);
 });

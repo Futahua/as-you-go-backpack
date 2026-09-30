@@ -113,6 +113,7 @@ export function createFileCapabilityPanel(options) {
     inspectGeneration: 0,
     deleteArmed: false,
     previewObjectUrl: null,
+    previewResourceId: null,
   };
 
   const workspace = documentRef.querySelector('.workspace');
@@ -267,7 +268,14 @@ export function createFileCapabilityPanel(options) {
     button.disabled = false;
   }
 
+  function releasePreviewResource(resourceId = state.previewResourceId) {
+    if (!resourceId) return;
+    if (resourceId === state.previewResourceId) state.previewResourceId = null;
+    void host.fileCapability('preview-release', { resourceId }).catch(() => {});
+  }
+
   function clearPreview() {
+    releasePreviewResource();
     if (state.previewObjectUrl) {
       URL.revokeObjectURL(state.previewObjectUrl);
       state.previewObjectUrl = null;
@@ -284,6 +292,16 @@ export function createFileCapabilityPanel(options) {
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     state.previewObjectUrl = URL.createObjectURL(new Blob([bytes], { type: data.mime || match[1] }));
     return state.previewObjectUrl;
+  }
+
+  function previewSource(data) {
+    if (data && typeof data.url === 'string') {
+      try {
+        const parsed = new URL(data.url);
+        if (parsed.protocol === 'papers-file-preview:') return parsed.toString();
+      } catch {}
+    }
+    return previewBlobUrl(data);
   }
 
   function renderEntry(entry) {
@@ -335,16 +353,20 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     const data = result.preview || {};
+    if (typeof data.resourceId === 'string') state.previewResourceId = data.resourceId;
     if (data.kind === 'image') {
-      const image = documentRef.createElement('img');
-      image.src = data.dataUrl;
-      image.alt = itemTitle.textContent || '';
-      image.className = 'file-capability-preview-image';
-      preview.append(image);
-      return;
+      const source = previewSource(data);
+      if (source) {
+        const image = documentRef.createElement('img');
+        image.src = source;
+        image.alt = itemTitle.textContent || '';
+        image.className = 'file-capability-preview-image';
+        preview.append(image);
+        return;
+      }
     }
     if (data.kind === 'pdf') {
-      const source = previewBlobUrl(data);
+      const source = previewSource(data);
       if (source) {
         const frame = documentRef.createElement('iframe');
         frame.src = source;
@@ -355,21 +377,55 @@ export function createFileCapabilityPanel(options) {
       }
     }
     if (data.kind === 'audio' || data.kind === 'video') {
-      const source = previewBlobUrl(data);
+      const source = previewSource(data);
       if (source) {
         const media = documentRef.createElement(data.kind);
         media.src = source;
         media.controls = true;
+        media.preload = 'metadata';
         media.className = 'file-capability-preview-' + data.kind;
         preview.append(media);
         return;
       }
     }
     if (data.kind === 'text') {
+      const scroller = documentRef.createElement('div');
+      scroller.className = 'file-capability-text-scroller';
       const pre = documentRef.createElement('pre');
       pre.className = 'file-capability-preview-text';
       pre.textContent = data.text || '';
-      preview.append(pre);
+      scroller.append(pre);
+      preview.append(scroller);
+
+      let nextOffset = Number.isSafeInteger(data.nextOffset) ? data.nextOffset : 0;
+      let eof = data.eof === true;
+      let loading = false;
+      const target = state.inspectedPath;
+      const generation = state.inspectGeneration;
+      const loadMore = async () => {
+        if (loading || eof || !target || generation !== state.inspectGeneration || state.inspectedPath !== target) return;
+        loading = true;
+        try {
+          const chunk = await host.fileCapability('preview-text-chunk', {
+            path: target,
+            offset: nextOffset,
+          });
+          if (generation !== state.inspectGeneration || state.inspectedPath !== target) return;
+          if (!chunk || !chunk.ok) throw new Error(chunk && chunk.message ? chunk.message : 'Could not continue text preview.');
+          if (typeof chunk.text === 'string') pre.textContent += chunk.text;
+          if (Number.isSafeInteger(chunk.nextOffset)) nextOffset = chunk.nextOffset;
+          eof = chunk.eof === true;
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error));
+          eof = true;
+        } finally {
+          loading = false;
+        }
+      };
+      scroller.addEventListener('scroll', () => {
+        if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 320) void loadMore();
+      }, { passive: true });
+      if (!eof && scroller.scrollHeight <= scroller.clientHeight + 320) void loadMore();
       return;
     }
     if (data.kind === 'directory') {
@@ -453,7 +509,13 @@ export function createFileCapabilityPanel(options) {
       ok: false,
       message: error instanceof Error ? error.message : String(error),
     }));
-    if (generation !== state.inspectGeneration) return false;
+    if (generation !== state.inspectGeneration) {
+      const staleResourceId = result && result.preview && typeof result.preview.resourceId === 'string'
+        ? result.preview.resourceId
+        : null;
+      if (staleResourceId) releasePreviewResource(staleResourceId);
+      return false;
+    }
     renderEntry(result && result.entry);
     renderPreview(result);
     return result && result.ok === true;
