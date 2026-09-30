@@ -210,11 +210,17 @@
      rest of the card must not reveal the delete affordance. */
   pointer-events: auto;
   cursor: pointer;
-  transition: opacity 100ms ease;
+  transition: opacity 100ms ease, color 100ms ease, background 100ms ease, filter 100ms ease;
 }
 .window-layout-delete:hover,
 .window-layout-delete:focus-visible {
   opacity: 1;
+}
+.window-layout-delete.is-delete-armed {
+  opacity: 1;
+  color: #ff5555;
+  background: rgba(255, 85, 85, 0.14);
+  filter: drop-shadow(0 0 5px #ff5555);
 }
 .window-layout-control.wl-clear {
   position: absolute;

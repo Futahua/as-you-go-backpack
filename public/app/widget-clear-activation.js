@@ -1,7 +1,6 @@
-/** Process a widget clear only for a real pointer-generated click. */
-export function handleWidgetClearActivation(event, button, guard, clear) {
+function handleWidgetDestructiveActivation(event, button, guard, action, armedClass) {
   event?.preventDefault?.();
-  if (!button || !guard || typeof clear !== 'function') return 'ignored';
+  if (!button || !guard || typeof action !== 'function') return 'ignored';
   // Enter/Space synthesize click events with detail 0 on a focused button.
   // This control is intentionally a two-pointer-click confirmation, so a key
   // press can never become the second destructive activation.
@@ -12,14 +11,26 @@ export function handleWidgetClearActivation(event, button, guard, clear) {
 
   const activation = guard.activate();
   if (!activation.confirmed) {
-    button.classList?.add('is-clear-armed');
+    button.classList?.add(armedClass);
     button.blur?.();
     return 'armed';
   }
 
   guard.reset();
-  button.classList?.remove('is-clear-armed');
+  button.classList?.remove(armedClass);
   button.blur?.();
-  clear();
-  return 'cleared';
+  action();
+  return 'confirmed';
+}
+
+/** Process a widget clear only for two consecutive real pointer clicks. */
+export function handleWidgetClearActivation(event, button, guard, clear) {
+  const outcome = handleWidgetDestructiveActivation(event, button, guard, clear, 'is-clear-armed');
+  return outcome === 'confirmed' ? 'cleared' : outcome;
+}
+
+/** Process a widget delete only for two consecutive real pointer clicks. */
+export function handleWidgetDeleteActivation(event, button, guard, remove) {
+  const outcome = handleWidgetDestructiveActivation(event, button, guard, remove, 'is-delete-armed');
+  return outcome === 'confirmed' ? 'deleted' : outcome;
 }

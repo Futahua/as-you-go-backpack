@@ -98,7 +98,7 @@ import { openWindowLayoutPickerSession, toWindowLayoutPickerRows } from './app/w
 import { endExactWindowCandidateProcess } from './app/window-layout-process-end.js';
 import { createClickTwiceGuard } from './app/click-twice-guard.js';
 import { createWidgetHoverPolicy, createWidgetHoverPolicyDiagnostics } from './app/widget-hover-policy.js';
-import { handleWidgetClearActivation } from './app/widget-clear-activation.js';
+import { handleWidgetClearActivation, handleWidgetDeleteActivation } from './app/widget-clear-activation.js';
 import { planWindowLayoutShiftPeekTransition } from './app/window-layout-shift-peek.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, toggleWindowLayoutMemberVisibility, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { runBoundedConcurrent } from './app/window-layout-actions.js';
@@ -684,7 +684,7 @@ function windowLayoutBodyMarkup(candidate, options = {}) {
     ? windowLayoutControlButton('tracking', candidate.tracking?.enabled === true ? 'Stop automatic window tracking' : 'Start automatic window tracking', 'data-wl-track', candidate.id, { toggle: true, active: candidate.tracking?.enabled === true, activeClass: 'tracking-enabled' })
     : '';
   return `<div class="window-layout-body" data-wl-layout="${escapeHtml(candidate.id)}" aria-label="Window group">
-    ${widgetSurface ? `<button class="window-layout-delete" type="button" data-wl-delete="${escapeHtml(candidate.id)}" title="Delete this layout" aria-label="Delete this layout">×</button>` : ''}
+    ${widgetSurface ? `<button class="window-layout-delete" type="button" data-wl-delete="${escapeHtml(candidate.id)}" title="Click twice to delete this layout" aria-label="Click twice to delete this layout">×</button>` : ''}
     ${widgetSurface ? windowLayoutControlButton('clear', 'Click twice to clear all windows from this layout', 'data-wl-clear', candidate.id) : ''}
     <div class="window-layout-members" data-wl-members="${escapeHtml(candidate.id)}">${members}${emptyHint}</div>
     ${trackingControl}
@@ -6954,6 +6954,7 @@ function bootstrapWindowLayoutWidget() {
     hoverPolicyReceived: false,
   };
   const widgetClearGuard = createClickTwiceGuard();
+  const widgetDeleteGuard = createClickTwiceGuard();
   const widgetHoverPolicyDiagnostics = createWidgetHoverPolicyDiagnostics();
   const widgetHoverPolicy = createWidgetHoverPolicy({
     publish: (enabled, blockedBindings) => host.setWidgetHoverPolicy(enabled, blockedBindings),
@@ -7077,6 +7078,7 @@ function bootstrapWindowLayoutWidget() {
     // The previous button node is about to be replaced; discard any armed
     // confirmation so its invisible state cannot survive without a red cue.
     resetWidgetClearArm();
+    resetWidgetDeleteArm();
     // A capability identifies a WINDOW. A member going normal -> minimized does
     // not change which window it is, yet member state is part of the widget's
     // render identity, so the old blanket clear threw away every warm
@@ -7329,8 +7331,11 @@ function bootstrapWindowLayoutWidget() {
     event.stopPropagation();
     const deleteButton = event.target.closest('[data-wl-delete]');
     if (deleteButton) {
-      event.preventDefault();
-      client.sendCommand({ kind: 'delete-layout' });
+      const outcome = handleWidgetDeleteActivation(event, deleteButton, widgetDeleteGuard, () => {
+        resetWidgetDeleteArm();
+        client.sendCommand({ kind: 'delete-layout' });
+      });
+      if (outcome === 'armed' || outcome === 'deleted') event.stopPropagation();
       return;
     }
     const clearButton = event.target.closest('[data-wl-clear]');
@@ -7428,11 +7433,19 @@ function bootstrapWindowLayoutWidget() {
     elements.grid.querySelector('.window-layout-card [data-wl-clear]')?.classList.remove('is-clear-armed');
   }
 
+  function resetWidgetDeleteArm() {
+    widgetDeleteGuard.reset();
+    elements.grid.querySelector('.window-layout-card [data-wl-delete]')?.classList.remove('is-delete-armed');
+  }
+
   elements.grid.addEventListener('pointerout', (event) => {
     if (event.target.closest('[data-wl-clear]')
       && !event.relatedTarget?.closest?.('[data-wl-clear]')) resetWidgetClearArm();
+    if (event.target.closest('[data-wl-delete]')
+      && !event.relatedTarget?.closest?.('[data-wl-delete]')) resetWidgetDeleteArm();
   });
   window.addEventListener('blur', resetWidgetClearArm);
+  window.addEventListener('blur', resetWidgetDeleteArm);
 
   function handleWidgetCardAuxClick(event) {
     if (event.button !== 1) return;

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
 import { createClickTwiceGuard } from './public/app/click-twice-guard.js';
-import { handleWidgetClearActivation } from './public/app/widget-clear-activation.js';
+import { handleWidgetClearActivation, handleWidgetDeleteActivation } from './public/app/widget-clear-activation.js';
 import { windowLayoutControlButton, WINDOW_LAYOUT_CONTROL_GLYPHS } from './public/app/window-layout-control-icons.js';
 
 test('widget clear requires two activations and disarms on pointer leave or window blur', () => {
@@ -67,6 +67,49 @@ test('typing after the first pointer click cannot synthesize the second destruct
   assert.equal(click(1), 'cleared');
   assert.deepEqual(commands, ['clear-layout']);
   assert.equal(guard.isArmed(), false);
+});
+
+test('layout delete turns red on the first pointer click, deletes only on the second, and disarms when left alone', async () => {
+  const guard = createClickTwiceGuard();
+  const commands = [];
+  const classes = new Set();
+  const button = {
+    classList: {
+      add(name) { classes.add(name); },
+      remove(name) { classes.delete(name); },
+    },
+    blur() {},
+  };
+  const click = (detail = 1) => handleWidgetDeleteActivation(
+    { detail, preventDefault() {} }, button, guard, () => commands.push('delete-layout'),
+  );
+
+  assert.equal(click(), 'armed');
+  assert.equal(classes.has('is-delete-armed'), true);
+  assert.deepEqual(commands, []);
+
+  guard.reset();
+  classes.delete('is-delete-armed');
+  assert.equal(click(), 'armed', 'leaving the button makes the next click a fresh first click');
+  assert.deepEqual(commands, []);
+  assert.equal(click(), 'deleted');
+  assert.deepEqual(commands, ['delete-layout']);
+  assert.equal(classes.has('is-delete-armed'), false);
+  assert.equal(guard.isArmed(), false);
+
+  const css = await readFile(new URL('./public/styles/items.css', import.meta.url), 'utf8');
+  const deleteRule = css.match(/\.window-layout-delete\.is-delete-armed\s*\{[^}]*\}/)?.[0] ?? '';
+  assert.match(deleteRule, /opacity:\s*1/);
+  assert.match(deleteRule, /color:\s*#ff5555/);
+  assert.match(deleteRule, /background:\s*rgba\(255, 85, 85, 0\.14\)/);
+
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  assert.match(source, /Click twice to delete this layout/);
+  assert.match(source, /handleWidgetDeleteActivation\(event, deleteButton, widgetDeleteGuard,[\s\S]*?sendCommand\(\{ kind: 'delete-layout' \}\)/);
+  assert.match(source, /pointerout[\s\S]*?resetWidgetDeleteArm\(\)/);
+  assert.match(source, /window\.addEventListener\('blur', resetWidgetDeleteArm\)/);
+  assert.match(source, /resetWidgetClearArm\(\);\s*resetWidgetDeleteArm\(\);/,
+    'a card rerender cannot preserve an invisible armed delete');
 });
 
 test('warning copy is hidden from window-layout cards', async () => {
