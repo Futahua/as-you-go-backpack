@@ -92,6 +92,7 @@ import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
+import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-capability-panel.js';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createWindowLayoutAutoTracking } from './app/window-layout-auto-tracking.js';
 import { openWindowLayoutPickerSession, toWindowLayoutPickerRows } from './app/window-layout-picker-session.js';
@@ -341,6 +342,7 @@ const session = store.getSession();
 let suppressBlankClick = false;
 let suppressGraphClick = false;
 let zoomTimer = null;
+let fileCapabilityPanel = null;
 
 function setStatus(text = '', options) {
   statusToast.show(text, options);
@@ -5617,6 +5619,18 @@ windowLayoutPillTray?.addEventListener('click', (event) => {
   if (pill) void reopenWindowLayoutWidget(pill.dataset.layoutWidgetPill);
 });
 
+function selectedFileCapabilityContext() {
+  if (session.selected.size !== 1) return null;
+  const selectedId = [...session.selected][0];
+  const record = shortcutByRecordOrPlacementId(selectedId);
+  if (!record || isWebLink(record) || !isAbsoluteWindowsPath(record.target)) return null;
+  return { shortcutId: record.id, path: record.target, name: record.name };
+}
+
+function syncFileCapabilitySelection() {
+  fileCapabilityPanel?.syncSelection(selectedFileCapabilityContext());
+}
+
 function syncSelection() {
   if (graph.isAttached) {
     graph.refreshSelection();
@@ -5631,6 +5645,7 @@ function syncSelection() {
   elements.selectionStatus.textContent = session.selected.size === 1
     ? '1 item selected'
     : `${session.selected.size} items selected`;
+  syncFileCapabilitySelection();
 }
 
 async function hydrateIcons() {
@@ -6576,6 +6591,29 @@ const commands = createWorkspaceCommands({
   render,
   setStatus,
 });
+
+if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
+  fileCapabilityPanel = createFileCapabilityPanel({
+    document,
+    host,
+    setStatus,
+    retargetShortcut: async ({ shortcutId, oldPath, newPath, nextName }) => {
+      const record = shortcut(shortcutId);
+      if (!record || record.target !== oldPath) return false;
+      const next = updateShortcut(state, shortcutId, {
+        name: nextName ?? record.name,
+        description: record.description ?? '',
+        target: newPath,
+        icon: record.icon ?? null,
+      });
+      const persisted = await store.commit(next);
+      if (!persisted) return false;
+      render();
+      return true;
+    },
+  });
+  syncFileCapabilitySelection();
+}
 
 let activeSetRename = null;
 function beginSetRename() {

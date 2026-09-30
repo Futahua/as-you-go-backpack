@@ -165,6 +165,31 @@ test('host bridge unwraps the target+icon shape used by target picking', async (
   });
 });
 
+test('host bridge routes the shared file capability and unwraps its typed result', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+
+  const promise = host.fileCapability('search', { query: 'draft', limit: 25 });
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:file-capability');
+  assert.equal(sent.operation, 'search');
+  assert.deepEqual(sent.params, { query: 'draft', limit: 25 });
+
+  const fileCapability = {
+    ok: true,
+    provider: 'everything',
+    total: 1,
+    results: [{ path: 'D:\\draft.txt', name: 'draft.txt', kind: 'file' }],
+  };
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: sent.requestId,
+    ok: true,
+    fileCapability,
+  });
+  assert.deepEqual(await promise, fileCapability);
+});
+
 test('host bridge sends dropped files flat and unwraps the returned targets array', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);

@@ -26,6 +26,8 @@ export function createHostBridge(window) {
   // Keep it bounded, but do not let the ordinary quick-RPC timeout make a
   // still-open list silently reject after 15 seconds.
   const INTERACTIVE_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+  const FILE_PREVIEW_REQUEST_TIMEOUT_MS = 45 * 1000;
+  const FILE_MUTATION_REQUEST_TIMEOUT_MS = 30 * 1000;
   const pickListeners = new Set();
   const detachListeners = new Set();
   // The launcher overlay's invocation (the creator's "Alt+A anywhere", host side). A push, like the detach
@@ -190,6 +192,10 @@ export function createHostBridge(window) {
       });
       return;
     }
+    if ('fileCapability' in event.data) {
+      task.resolve(event.data.fileCapability);
+      return;
+    }
     if ('candidates' in event.data) {
       task.resolve({
         outcome: event.data.outcome,
@@ -290,6 +296,16 @@ export function createHostBridge(window) {
     resolveDroppedTargets: (files) =>
       request('papers:project:resolve-dropped-targets', { files }),
     copyText: (text) => request('papers:project:copy-text', { text }),
+    fileCapability: (operation, params = {}) =>
+      request(
+        'papers:project:file-capability',
+        { operation, params },
+        operation === 'preview'
+          ? FILE_PREVIEW_REQUEST_TIMEOUT_MS
+          : ['copy', 'move', 'rename', 'delete'].includes(operation)
+            ? FILE_MUTATION_REQUEST_TIMEOUT_MS
+            : REQUEST_TIMEOUT_MS,
+      ),
     windowCandidates: ({ includeNativeIcons } = {}) => request('papers:project:window-candidates',
       typeof includeNativeIcons === 'boolean' ? { includeNativeIcons } : {}),
     windowLifecycleSnapshot: () => request('papers:project:window-lifecycle-snapshot'),
