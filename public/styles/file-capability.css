@@ -1,22 +1,23 @@
 .workspace.file-capability-docked .explorer {
-  right: 356px;
+  right: 46px;
   transition: right 160ms ease;
 }
 
 .workspace.file-capability-docked.file-capability-expanded .explorer {
-  right: 736px;
+  right: calc(var(--file-capability-width, 380px) + 16px);
 }
 
 .file-capability-panel {
+  --file-capability-width: 380px;
   position: fixed;
   z-index: 905;
   top: 60px;
   right: 8px;
   bottom: 8px;
-  width: min(340px, calc(100vw - 24px));
+  width: 38px;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: visible;
   border: 1px solid var(--border-strong);
   border-radius: 14px;
   background: var(--surface-raised);
@@ -25,11 +26,10 @@
 }
 
 .file-capability-panel.expanded {
-  width: min(720px, calc(100vw - 24px));
+  width: min(var(--file-capability-width), calc(100vw - 24px));
 }
 
-.file-capability-header,
-.file-capability-search {
+.file-capability-header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -37,16 +37,10 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.file-capability-header > strong { font-size: 13px; }
-
-.file-capability-provider-status {
+.file-capability-header > strong {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  color: var(--text-faint);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 13px;
 }
 
 .file-capability-expand {
@@ -65,26 +59,65 @@
   background: var(--surface-soft);
 }
 
-.file-capability-search input {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 8px 9px;
-  background: var(--surface);
-  color: var(--text);
-  outline: none;
+.file-capability-panel:not(.expanded) .file-capability-header {
+  height: 100%;
+  box-sizing: border-box;
+  justify-content: center;
+  padding: 5px 4px;
+  border-bottom: 0;
 }
 
-.file-capability-search input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--focus);
+.file-capability-panel:not(.expanded) .file-capability-header > strong,
+.file-capability-panel:not(.expanded) .file-capability-body {
+  display: none;
 }
 
-.file-capability-search span {
-  flex: 0 0 auto;
-  color: var(--text-faint);
-  font-size: 10px;
+.file-capability-panel:not(.expanded) .file-capability-expand {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  overflow: hidden;
+  font-size: 0;
+}
+
+.file-capability-panel:not(.expanded) .file-capability-expand::before {
+  content: '›';
+  display: block;
+  font-size: 18px;
+  line-height: 26px;
+}
+
+.file-capability-resizer {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  bottom: 8px;
+  left: -6px;
+  width: 12px;
+  cursor: ew-resize;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.file-capability-panel.expanded .file-capability-resizer {
+  pointer-events: auto;
+}
+
+.file-capability-resizer::after {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.file-capability-resizer:hover::after,
+.file-capability-panel.resizing .file-capability-resizer::after {
+  background: var(--border-hover);
 }
 
 .file-capability-body {
@@ -92,72 +125,6 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.file-capability-results {
-  flex: 0 0 min(42%, 260px);
-  min-height: 100px;
-  overflow: hidden;
-  border-bottom: 1px solid var(--border-subtle);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.file-capability-results[hidden] { display: none; }
-
-.file-capability-results-status {
-  padding: 7px 9px;
-  color: var(--text-muted);
-  font-size: 10px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.file-capability-results-list,
-.file-capability-preview {
-  overflow: auto;
-  min-height: 0;
-}
-
-.file-capability-result,
-.file-capability-directory-entry {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 7px;
-  padding: 8px 9px;
-  border: 0;
-  border-bottom: 1px solid var(--border-subtle);
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.file-capability-result:hover,
-.file-capability-directory-entry:hover { background: var(--surface-soft); }
-
-.file-capability-result strong,
-.file-capability-directory-entry strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-}
-
-.file-capability-result span {
-  grid-column: 1 / -1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-muted);
-  font-size: 9px;
-}
-
-.file-capability-result small,
-.file-capability-directory-entry span {
-  color: var(--text-faint);
-  font-size: 9px;
 }
 
 .file-capability-inspector {
@@ -178,15 +145,15 @@
 }
 
 .file-capability-item-meta {
+  min-height: 13px;
   color: var(--text-muted);
   font-size: 10px;
-  min-height: 13px;
 }
 
 .file-capability-path-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .file-capability-path {
@@ -202,57 +169,35 @@
   white-space: nowrap;
 }
 
-.file-capability-path-copy,
-.file-capability-actions button,
-.file-capability-rename button {
-  border: 1px solid var(--border);
+.file-capability-icon-button {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
   border-radius: 7px;
-  padding: 5px 7px;
-  background: var(--surface);
-  color: var(--text);
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
-  font-size: 10px;
 }
 
-.file-capability-path-copy:hover,
-.file-capability-actions button:hover,
-.file-capability-rename button:hover {
-  border-color: var(--border-hover);
+.file-capability-icon-button:hover {
+  border-color: var(--border);
   background: var(--surface-soft);
-}
-
-.file-capability-actions {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-
-.file-capability-delete { margin-left: auto; }
-
-.file-capability-delete.armed {
-  border-color: var(--danger);
-  background: var(--danger);
-  color: var(--text-on-accent);
-}
-
-.file-capability-rename {
-  display: flex;
-  gap: 5px;
-}
-
-.file-capability-rename input {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 6px 8px;
-  background: var(--surface);
   color: var(--text);
+}
+
+.file-capability-icon-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .file-capability-preview {
   flex: 1 1 auto;
   min-height: 0;
+  overflow: auto;
   border: 1px solid var(--border-subtle);
   border-radius: 9px;
   background: var(--surface);
@@ -280,51 +225,12 @@
   margin: 16px 10px;
 }
 
-.file-capability-preview-text,
-.file-capability-preview-hex {
+.file-capability-preview-text {
   margin: 0;
   padding: 10px;
-  min-width: max-content;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: 10px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
-}
-
-.file-capability-preview-hex { white-space: pre; }
-
-.file-capability-preview details {
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.file-capability-preview summary {
-  padding: 7px 9px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-size: 10px;
-}
-
-.file-capability-multi { display: grid; }
-
-.file-capability-multi-entry {
-  display: grid;
-  gap: 3px;
-  padding: 9px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.file-capability-multi-entry strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-}
-
-.file-capability-multi-entry code {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .file-capability-empty {
@@ -334,7 +240,9 @@
   font-size: 11px;
 }
 
-.file-capability-error { color: var(--danger); }
+.file-capability-error {
+  color: var(--danger);
+}
 
 @media (max-width: 560px) {
   .workspace.file-capability-docked .explorer,
@@ -342,11 +250,13 @@
     right: 0;
   }
 
-  .file-capability-panel,
-  .file-capability-panel.expanded {
+  .file-capability-panel {
     top: 54px;
     right: 6px;
     bottom: 6px;
+  }
+
+  .file-capability-panel.expanded {
     width: calc(100vw - 12px);
   }
 }

@@ -51,6 +51,25 @@ function createButton(documentRef, label, className) {
   return button;
 }
 
+function setButtonSvg(documentRef, button, label, paths) {
+  const svg = documentRef.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 20 20');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const definition of paths) {
+    const node = documentRef.createElementNS('http://www.w3.org/2000/svg', 'path');
+    node.setAttribute('d', definition);
+    node.setAttribute('fill', 'none');
+    node.setAttribute('stroke', 'currentColor');
+    node.setAttribute('stroke-width', '1.5');
+    node.setAttribute('stroke-linecap', 'round');
+    node.setAttribute('stroke-linejoin', 'round');
+    svg.append(node);
+  }
+  button.replaceChildren(svg);
+  button.title = label;
+  button.setAttribute('aria-label', label);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -85,6 +104,8 @@ export function createFileCapabilityPanel(options) {
 
   const state = {
     expanded: false,
+    width: 380,
+    resizing: false,
     context: null,
     inspectedPath: null,
     searchTimer: null,
@@ -97,19 +118,26 @@ export function createFileCapabilityPanel(options) {
   const workspace = documentRef.querySelector('.workspace');
   const panel = documentRef.createElement('aside');
   panel.className = 'file-capability-panel';
-  panel.setAttribute('aria-label', 'Files');
+  panel.setAttribute('aria-label', 'File preview');
+  panel.style.setProperty('--file-capability-width', state.width + 'px');
+  workspace?.style.setProperty('--file-capability-width', state.width + 'px');
   workspace?.classList.add('file-capability-docked');
+  const resizer = documentRef.createElement('div');
+  resizer.className = 'file-capability-resizer';
+  resizer.setAttribute('role', 'separator');
+  resizer.setAttribute('aria-orientation', 'vertical');
+  resizer.setAttribute('aria-label', 'Resize file preview');
 
   const header = documentRef.createElement('header');
   header.className = 'file-capability-header';
   const title = documentRef.createElement('strong');
-  title.textContent = 'Files';
+  title.textContent = 'Preview';
   const providerStatus = documentRef.createElement('span');
   providerStatus.className = 'file-capability-provider-status';
   const expandButton = createButton(documentRef, 'Expand', 'file-capability-expand');
-  expandButton.setAttribute('aria-label', 'Expand files panel');
+  expandButton.setAttribute('aria-label', 'Expand file preview');
   expandButton.setAttribute('aria-pressed', 'false');
-  header.append(title, providerStatus, expandButton);
+  header.append(title, expandButton);
 
   const searchWrap = documentRef.createElement('div');
   searchWrap.className = 'file-capability-search';
@@ -146,14 +174,18 @@ export function createFileCapabilityPanel(options) {
   const pathText = documentRef.createElement('code');
   pathText.className = 'file-capability-path';
   pathText.textContent = 'Select a local file or folder in As you Go.';
-  const copyPathButton = createButton(documentRef, 'Copy path', 'file-capability-path-copy');
+  const copyPathButton = createButton(documentRef, 'Copy path', 'file-capability-icon-button');
   copyPathButton.hidden = true;
-  pathRow.append(pathText, copyPathButton);
+  setButtonSvg(documentRef, copyPathButton, 'Copy path', ['M6.5 6.5h8v8h-8z', 'M4 11.5H3.5A1.5 1.5 0 0 1 2 10V3.5A1.5 1.5 0 0 1 3.5 2H10A1.5 1.5 0 0 1 11.5 3.5V4']);
+  pathRow.append(pathText);
 
   const actions = documentRef.createElement('div');
   actions.className = 'file-capability-actions';
   const openButton = createButton(documentRef, 'Open');
-  const revealButton = createButton(documentRef, 'Reveal');
+  const revealButton = createButton(documentRef, 'Reveal', 'file-capability-icon-button');
+  revealButton.hidden = true;
+  setButtonSvg(documentRef, revealButton, 'Reveal in file manager', ['M2.5 5.5h5l1.4 1.7h8.6v8.3A1.5 1.5 0 0 1 16 17H4a1.5 1.5 0 0 1-1.5-1.5z', 'M2.5 8h15']);
+  pathRow.append(revealButton, copyPathButton);
   const copyButton = createButton(documentRef, 'Copy to…');
   const moveButton = createButton(documentRef, 'Move to…');
   const renameButton = createButton(documentRef, 'Rename');
@@ -180,10 +212,10 @@ export function createFileCapabilityPanel(options) {
   initialPreview.textContent = 'Preview appears here.';
   preview.append(initialPreview);
 
-  inspector.append(itemTitle, itemMeta, pathRow, actions, renameRow, preview);
+  inspector.append(itemTitle, itemMeta, pathRow, preview);
   resultsPane.hidden = true;
-  body.append(resultsPane, inspector);
-  panel.append(header, searchWrap, body);
+  body.append(inspector);
+  panel.append(resizer, header, body);
   documentRef.body.append(panel);
 
   function loadProviders() {
@@ -202,9 +234,17 @@ export function createFileCapabilityPanel(options) {
     state.expanded = Boolean(expanded);
     panel.classList.toggle('expanded', state.expanded);
     workspace?.classList.toggle('file-capability-expanded', state.expanded);
-    expandButton.textContent = state.expanded ? 'Compact' : 'Expand';
-    expandButton.setAttribute('aria-label', state.expanded ? 'Use compact files panel' : 'Expand files panel');
+    expandButton.textContent = state.expanded ? 'Collapse' : 'Expand';
+    expandButton.setAttribute('aria-label', state.expanded ? 'Collapse file preview' : 'Expand file preview');
     expandButton.setAttribute('aria-pressed', String(state.expanded));
+  }
+
+  function setPanelWidth(width) {
+    const viewportWidth = documentRef.defaultView?.innerWidth ?? 1200;
+    const maxWidth = Math.max(300, Math.min(900, Math.floor(viewportWidth * 0.75)));
+    state.width = Math.max(300, Math.min(maxWidth, Math.round(width)));
+    panel.style.setProperty('--file-capability-width', state.width + 'px');
+    workspace?.style.setProperty('--file-capability-width', state.width + 'px');
   }
 
   loadProviders();
@@ -333,31 +373,17 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     if (data.kind === 'directory') {
-      renderDirectory(Array.isArray(data.items) ? data.items : []);
+      const message = documentRef.createElement('p');
+      message.className = 'file-capability-empty';
+      message.textContent = 'Folder navigation stays in your file manager.';
+      preview.append(message);
       return;
     }
     if (data.kind === 'binary') {
-      const strings = Array.isArray(data.strings) ? data.strings : [];
-      if (strings.length) {
-        const details = documentRef.createElement('details');
-        details.open = true;
-        const summary = documentRef.createElement('summary');
-        summary.textContent = 'Strings';
-        const pre = documentRef.createElement('pre');
-        pre.className = 'file-capability-preview-text';
-        pre.textContent = strings.join('\n');
-        details.append(summary, pre);
-        preview.append(details);
-      }
-      const details = documentRef.createElement('details');
-      details.open = strings.length === 0;
-      const summary = documentRef.createElement('summary');
-      summary.textContent = 'Hex';
-      const pre = documentRef.createElement('pre');
-      pre.className = 'file-capability-preview-hex';
-      pre.textContent = data.hex || '';
-      details.append(summary, pre);
-      preview.append(details);
+      const message = documentRef.createElement('p');
+      message.className = 'file-capability-empty';
+      message.textContent = 'No visual preview available yet.';
+      preview.append(message);
       return;
     }
     const message = documentRef.createElement('p');
@@ -376,6 +402,7 @@ export function createFileCapabilityPanel(options) {
     itemMeta.textContent = selectionCount > 0 ? 'No local file content in this selection yet.' : '';
     pathText.textContent = selectionCount > 0 ? 'Selection stays fully controlled by As you Go.' : 'Select a local file or folder in As you Go.';
     copyPathButton.hidden = true;
+    revealButton.hidden = true;
     actions.hidden = true;
     clearPreview();
     const message = documentRef.createElement('p');
@@ -390,34 +417,17 @@ export function createFileCapabilityPanel(options) {
     ++state.inspectGeneration;
     state.context = null;
     state.inspectedPath = null;
-    disarmDelete();
-    renameRow.hidden = true;
     const count = Number.isSafeInteger(selection?.selectionCount) ? selection.selectionCount : selection.items.length;
     itemTitle.textContent = `${count} items selected`;
-    itemMeta.textContent = 'Multiple content';
-    pathText.textContent = 'Multiple selection';
+    itemMeta.textContent = '';
+    pathText.textContent = 'Multiple preview is not defined yet.';
     copyPathButton.hidden = true;
-    actions.hidden = true;
+    revealButton.hidden = true;
     clearPreview();
-    const list = documentRef.createElement('div');
-    list.className = 'file-capability-multi';
-    for (const entry of selection.items.slice(0, 20)) {
-      const row = documentRef.createElement('div');
-      row.className = 'file-capability-multi-entry';
-      const name = documentRef.createElement('strong');
-      name.textContent = entry.name || basename(entry.path);
-      const pathNode = documentRef.createElement('code');
-      pathNode.textContent = entry.path;
-      row.append(name, pathNode);
-      list.append(row);
-    }
-    if (count > selection.items.length) {
-      const remainder = documentRef.createElement('p');
-      remainder.className = 'file-capability-empty';
-      remainder.textContent = `${count - selection.items.length} selected item${count - selection.items.length === 1 ? '' : 's'} do not currently expose local-file content.`;
-      list.append(remainder);
-    }
-    preview.append(list);
+    const message = documentRef.createElement('p');
+    message.className = 'file-capability-empty';
+    message.textContent = 'Multiple preview will take shape here.';
+    preview.append(message);
   }
 
   async function inspectPath(target, context) {
@@ -431,6 +441,7 @@ export function createFileCapabilityPanel(options) {
     itemMeta.textContent = 'Loading…';
     pathText.textContent = target;
     copyPathButton.hidden = false;
+    revealButton.hidden = false;
     actions.hidden = false;
     clearPreview();
     const loading = documentRef.createElement('p');
@@ -522,6 +533,28 @@ export function createFileCapabilityPanel(options) {
   }
 
   expandButton.addEventListener('click', () => setExpanded(!state.expanded));
+  resizer.addEventListener('pointerdown', (event) => {
+    if (!state.expanded || event.button !== 0) return;
+    state.resizing = true;
+    panel.classList.add('resizing');
+    resizer.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  resizer.addEventListener('pointermove', (event) => {
+    if (!state.resizing) return;
+    const viewportWidth = documentRef.defaultView?.innerWidth ?? 0;
+    if (viewportWidth > 0) setPanelWidth(viewportWidth - event.clientX - 8);
+    event.preventDefault();
+  });
+  const finishResize = (event) => {
+    if (!state.resizing) return;
+    state.resizing = false;
+    panel.classList.remove('resizing');
+    if (resizer.hasPointerCapture?.(event.pointerId)) resizer.releasePointerCapture?.(event.pointerId);
+  };
+  resizer.addEventListener('pointerup', finishResize);
+  resizer.addEventListener('pointercancel', finishResize);
   searchInput.addEventListener('input', () => {
     if (state.searchTimer) clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
@@ -687,13 +720,13 @@ export function createFileCapabilityPanel(options) {
   return Object.freeze({
     syncSelection,
     openSearch() {
-      searchInput.focus();
-      searchInput.select();
+      setExpanded(true);
     },
     destroy() {
       if (state.searchTimer) clearTimeout(state.searchTimer);
       clearPreview();
       workspace?.classList.remove('file-capability-docked', 'file-capability-expanded');
+      workspace?.style.removeProperty('--file-capability-width');
       panel.remove();
     },
     isOpen: () => true,
