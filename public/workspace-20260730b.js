@@ -2907,8 +2907,11 @@ const windowLayoutRuntimeController = windowLayoutRecording.runtime;
 // advisory until the host resolves the exact instance into a fresh capability.
 let trackingEventInFlight = false;
 const trackingEventQueue = [];
+let trackingPopulateInFlight = false;
+const trackingPendingOpens = new Map();
 let trackingSessionId = null;
 let trackingLastSequence = 0;
+let trackingStartupBaselineReconciled = false;
 const CLOSED_WINDOW_RECONCILE_INTERVAL_MS = 2000;
 let closedWindowReconcileTimer = null;
 let closedWindowReconcileInFlight = false;
@@ -2940,22 +2943,63 @@ function isWindowLifecycleDestroyEvent(event) {
 }
 
 async function processTrackingLifecycleEvent(event) {
-  if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
+  if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()
+    || surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
   if (!event || typeof event.windowInstanceId !== 'string') return;
   if (isWindowLifecycleDestroyEvent(event)) {
+    trackingPendingOpens.delete(event.windowInstanceId);
+    const tracked = (state.windowLayouts ?? []).some((layout) =>
+      (layout.arrangement?.members ?? []).some((member) =>
+        member.descriptor?.windowInstanceId === event.windowInstanceId));
+    if (!tracked) return;
     // EVIDENCE, NOT PROOF. A lifecycle 'gone' is produced by diffing successive
     // task-worthy enumerations, so one transient disappearance would delete a
-    // member outright - and it bypassed the periodic sweep's confirmation
-    // entirely. It seeds a confirmation instead: the sweep corroborates it with
-    // an independent resolve, and only two positives retire anything.
+    // member outright. Seed one positive, then corroborate it immediately with
+    // the exact resolver. That resolver performs a fresh serialized enumeration
+    // when the WID is no longer in the lifecycle cache, so this is the second
+    // independent observation. Do not make a real close wait for a renderer
+    // timer: background/throttled writer surfaces can still receive the host
+    // lifecycle push while their 2s safety sweep is delayed indefinitely.
     const existing = windowLayoutGoneConfirmations.get(event.windowInstanceId);
     windowLayoutGoneConfirmations.set(event.windowInstanceId, {
       count: Math.max(1, existing?.count ?? 0),
       at: Date.now(),
     });
+    let confirmed = null;
+    try {
+      confirmed = await host.resolveWindowInstance(event.windowInstanceId);
+    } catch {
+      confirmed = null;
+    }
+    if (surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
+    if (confirmed?.outcome === 'success') {
+      // The lifecycle diff was transient. A fresh exact observation wins.
+      windowLayoutGoneConfirmations.delete(event.windowInstanceId);
+      return;
+    }
+    if (confirmed?.outcome === 'missing') {
+      const retired = await retireClosedWindowEverywhere(
+        { version: 1, windowInstanceId: event.windowInstanceId },
+        { source: 'lifecycle-gone-confirmed', reason: 'the lifecycle close was independently confirmed missing' },
+      );
+      if (retired) windowLayoutGoneConfirmations.delete(event.windowInstanceId);
+    }
+    // An outage/timeout is not proof. Keep the seeded positive so the periodic
+    // reconciliation remains the bounded recovery path.
     return;
   }
-  await windowLayoutAutoTracking.addFromEvent(event);
+  const result = await windowLayoutAutoTracking.addFromEvent(event);
+  if (result?.outcome === 'added' || result?.outcome === 'duplicate'
+    || result?.outcome === 'disabled' || result?.outcome === 'suppressed') {
+    trackingPendingOpens.delete(event.windowInstanceId);
+  } else if (trackingPendingOpens.has(event.windowInstanceId) || trackingPendingOpens.size < 64) {
+    const pending = trackingPendingOpens.get(event.windowInstanceId);
+    trackingPendingOpens.set(event.windowInstanceId, {
+      firstSeenAt: pending?.firstSeenAt ?? Date.now(),
+      lastAttemptAt: Date.now(),
+      descriptor: event.descriptor ?? pending?.descriptor ?? null,
+    });
+  }
 }
 async function drainTrackingLifecycleEvents() {
   if (trackingEventInFlight) return;
@@ -2983,7 +3027,9 @@ async function reconcileClosedWindowMembers() {
   if (closedWindowReconcileInFlight
     || windowLayoutDetachment.isReadOnly()
     || !hasDocumentWriteAuthority()
-    || typeof host.resolveWindowInstance !== 'function') return;
+    || surfaceCoordinator?.role !== SURFACE_ROLE.WRITER
+    || typeof host.resolveWindowInstance !== 'function'
+    || typeof host.windowLifecycleSnapshot !== 'function') return;
   const candidates = [];
   const seen = new Set();
   for (const layout of state.windowLayouts ?? []) {
@@ -2994,10 +3040,23 @@ async function reconcileClosedWindowMembers() {
       candidates.push(instanceId);
     }
   }
-  if (candidates.length === 0) return;
   closedWindowReconcileInFlight = true;
   try {
+    // One complete native enumeration answers which saved identities still
+    // appear live. Probing every member separately kept the serial helper busy
+    // nearly continuously and starved Auto's new-window binding requests.
+    const response = await host.windowLifecycleSnapshot().catch(() => null);
+    const snapshot = response?.snapshot;
+    if (!snapshot || snapshot.complete !== true || !Array.isArray(snapshot.windows)
+      || surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
+    const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId)
+      .filter((id) => typeof id === 'string'));
     for (const instanceId of candidates) {
+      if (surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
+      if (live.has(instanceId)) {
+        windowLayoutGoneConfirmations.delete(instanceId);
+        continue;
+      }
       let result = null;
       try {
         result = await host.resolveWindowInstance(instanceId);
@@ -3019,8 +3078,29 @@ async function reconcileClosedWindowMembers() {
         windowLayoutGoneConfirmations.set(instanceId, { count: confirmed, at: Date.now() });
         continue;
       }
+      if (surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
       windowLayoutGoneConfirmations.delete(instanceId);
       await retireClosedWindowEverywhere({ version: 1, windowInstanceId: instanceId }, { source: 'periodic-resolve-missing', reason: 'two independent resolutions could not find it' });
+    }
+    // Retry only opens the watcher actually delivered. A failed one-shot bind
+    // no longer loses that window, while startup does not bulk-add old windows.
+    let retried = 0;
+    for (const [instanceId, pending] of trackingPendingOpens) {
+      if (Date.now() - pending.firstSeenAt > 60000) {
+        trackingPendingOpens.delete(instanceId);
+        continue;
+      }
+      // A single lifecycle snapshot can omit a still-opening window. Keep the
+      // bounded retry alive; the exact resolver itself confirms identity.
+      if (Date.now() - pending.lastAttemptAt >= 2000) {
+        if (surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
+        await processTrackingLifecycleEvent({
+          kind: 'open',
+          windowInstanceId: instanceId,
+          ...(pending.descriptor ? { descriptor: pending.descriptor } : {}),
+        });
+        if (++retried >= 4) break;
+      }
     }
   } finally {
     closedWindowReconcileInFlight = false;
@@ -3031,7 +3111,7 @@ function scheduleClosedWindowReconcile() {
   if (closedWindowReconcileTimer !== null) return;
   const tick = () => {
     closedWindowReconcileTimer = null;
-    void reconcileClosedWindowMembers().finally(() => {
+    void reconcileClosedWindowMembers().catch(() => undefined).finally(() => {
       if (!windowLayoutDetachment.isStopped()) {
         closedWindowReconcileTimer = window.setTimeout(tick, CLOSED_WINDOW_RECONCILE_INTERVAL_MS);
       }
@@ -3670,7 +3750,8 @@ function handleWindowLayoutUnlink(layoutId, memberId) {
 }
 
 async function reconcileTrackingBaseline(providedSnapshot = null) {
-  if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return;
+  if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()
+    || surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
   const response = providedSnapshot ? null : await host.windowLifecycleSnapshot?.().catch(() => null);
   const snapshot = providedSnapshot ?? response?.snapshot;
   if (!snapshot || snapshot.complete !== true || !Array.isArray(snapshot.windows)) return;
@@ -3680,7 +3761,12 @@ async function reconcileTrackingBaseline(providedSnapshot = null) {
   const accepted = await windowLayoutAutoTracking.acceptBaseline(snapshot, async () => {
     // Authority can change while a host snapshot is in flight. Do not consume
     // its lifecycle delta unless this surface can reconcile and commit it.
-    if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()) return false;
+    if (windowLayoutDetachment.isReadOnly() || !hasDocumentWriteAuthority()
+      || surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return false;
+    // A later watcher restart or sequence-gap baseline is a recovery sample,
+    // not another startup. Runtime removal requires the two confirmed misses
+    // in reconcileClosedWindowMembers instead of one task-list omission.
+    if (trackingStartupBaselineReconciled) return true;
     const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId).filter((id) => typeof id === 'string'));
     const before = state;
     let next = reconcileWindowLayoutsAfterStartup(state, [...live]);
@@ -3727,6 +3813,7 @@ async function reconcileTrackingBaseline(providedSnapshot = null) {
         await windowLayoutRuntimeController.reconcileActive();
       }
     }
+    trackingStartupBaselineReconciled = true;
     return true;
   });
   // Baseline deltas are accepted only after the durable startup reconciliation
@@ -3754,21 +3841,38 @@ async function ensureStartupWindowLayoutWidget() {
 }
 
 async function populateTrackingLayout(layoutId) {
+  if (trackingPopulateInFlight) return;
+  trackingPopulateInFlight = true;
+  try {
+    await populateTrackingLayoutCore(layoutId);
+  } catch {
+    // The periodic lifecycle sweep will retry live windows. A transient
+    // helper or writer failure must not strand the one Auto owner.
+    setWindowLayoutStatus(layoutId, 'Auto Add is preparing; it will retry.');
+  } finally {
+    trackingPopulateInFlight = false;
+  }
+}
+
+async function populateTrackingLayoutCore(layoutId) {
   const layout = windowLayoutFromState(layoutId);
   if (!layout || layout.tracking?.enabled !== true) return;
-  const listed = await host.windowCandidates();
+  const listed = await host.windowCandidates({ includeNativeIcons: false });
   if (listed.outcome !== 'success') {
     setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(listed.outcome));
     return;
   }
   let added = 0;
   for (const candidate of listed.candidates ?? []) {
+    if (surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
     const currentLayout = windowLayoutFromState(layoutId);
     if (!currentLayout || currentLayout.tracking?.enabled !== true) return;
     const currentIds = new Set((currentLayout.arrangement?.members ?? [])
       .map((member) => member.descriptor?.windowInstanceId)
       .filter((value) => typeof value === 'string'));
     const currentSuppressed = new Set(currentLayout.tracking?.suppressedInstanceIds ?? []);
+    if (typeof candidate.windowInstanceId === 'string'
+      && (currentIds.has(candidate.windowInstanceId) || currentSuppressed.has(candidate.windowInstanceId))) continue;
     const bound = await host.bindWindowCandidate(candidate.id);
     if (bound.outcome !== 'success') continue;
     const instanceId = bound.descriptor?.windowInstanceId;

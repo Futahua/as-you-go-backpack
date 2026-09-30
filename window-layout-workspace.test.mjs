@@ -1203,7 +1203,7 @@ test('startup opens non-docked layouts by default without creating implicit trac
   const baselineEnd = source.indexOf('async function ensureStartupWindowLayoutWidget()', baselineStart);
   const baseline = source.slice(baselineStart, baselineEnd);
   assert.match(baseline, /reconcileWindowLayoutsAfterStartup\(state, \[\.\.\.live\]\)/);
-  assert.match(baseline, /if \(windowLayoutDetachment\.isReadOnly\(\) \|\| !hasDocumentWriteAuthority\(\)\) return;/,
+  assert.match(baseline, /if \(windowLayoutDetachment\.isReadOnly\(\) \|\| !hasDocumentWriteAuthority\(\)[\s\S]*?surfaceCoordinator\?\.role !== SURFACE_ROLE\.WRITER\) return;/,
     'only the durable workspace writer may reconcile and accept a baseline');
   assert.match(baseline, /acceptBaseline\(snapshot, async \(\) =>/,
     'the baseline accepts its lifecycle delta only after the durable reconciliation callback succeeds');
@@ -1240,9 +1240,26 @@ test('a fresh compact widget defaults to fully opaque independent of workspace a
 
 test('closed-window safety reconciliation removes only positively missing exact instances', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const eventStart = source.indexOf('async function processTrackingLifecycleEvent(event)');
+  const eventEnd = source.indexOf('async function drainTrackingLifecycleEvents()', eventStart);
+  const lifecycle = source.slice(eventStart, eventEnd);
   const start = source.indexOf('async function reconcileClosedWindowMembers()');
   const end = source.indexOf('function scheduleClosedWindowReconcile()', start);
   const reconcile = source.slice(start, end);
+  assert.match(lifecycle, /const tracked = [\s\S]*?member\.descriptor\?\.windowInstanceId === event\.windowInstanceId[\s\S]*?if \(!tracked\) return;/,
+    'gone events for windows absent from all layouts do not consume an exact host probe');
+  assert.match(lifecycle, /confirmed = await host\.resolveWindowInstance\(event\.windowInstanceId\)/,
+    'a tracked lifecycle gone is corroborated immediately by the exact resolver');
+  assert.match(lifecycle, /confirmed\?\.outcome === 'success'[\s\S]*?windowLayoutGoneConfirmations\.delete\(event\.windowInstanceId\)[\s\S]*?return;/,
+    'a transient gone confirmed live is retained and clears its suspicion');
+  assert.match(lifecycle, /confirmed\?\.outcome === 'missing'[\s\S]*?retireClosedWindowEverywhere\([\s\S]*?source: 'lifecycle-gone-confirmed'/,
+    'a tracked gone plus independent missing result retires the exact window without waiting for a renderer timer');
+  assert.match(lifecycle, /if \(retired\) windowLayoutGoneConfirmations\.delete\(event\.windowInstanceId\)/,
+    'failed persistence keeps the seeded close confirmation retryable');
+  assert.match(source, /descriptor: event\.descriptor \?\? pending\?\.descriptor \?\? null/,
+    'a failed lifecycle open keeps the same-enumeration descriptor for bounded retries');
+  assert.match(reconcile, /\.\.\.\(pending\.descriptor \? \{ descriptor: pending\.descriptor \} : \{\}\)/,
+    'a retry reuses the lifecycle descriptor instead of falling back to a new existence race');
   assert.match(reconcile, /host\.resolveWindowInstance\(instanceId\)/);
   assert.match(reconcile, /result\?\.outcome !== 'missing'/,
     'helper outages, timeouts, and ambiguous matches are retained');

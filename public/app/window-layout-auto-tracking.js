@@ -84,29 +84,47 @@ export function createWindowLayoutAutoTracking({
       return { outcome: 'suppressed' };
     }
 
-    let probe;
-    try {
-      probe = await resolveWindowInstance(instanceId);
-    } catch {
-      report('auto-add-resolve', 'helper-unavailable');
-      return { outcome: 'resolve-failed' };
+    // A live lifecycle OPEN now carries the persisted-safe descriptor captured
+    // by the SAME native enumeration that discovered the window. Bind from that
+    // identity directly. Asking a second existence question first races the
+    // event against a later task-list snapshot; a transient omission can answer
+    // `missing` and prevent the exact bind path from ever running.
+    let resolved = null;
+    const lifecycleDescriptor = event?.descriptor;
+    if (lifecycleDescriptor?.version === 1
+      && lifecycleDescriptor.windowInstanceId === instanceId
+      && typeof resolveWindowDescriptor === 'function') {
+      try {
+        resolved = await resolveWindowDescriptor(lifecycleDescriptor);
+      } catch {
+        report('auto-add-resolve', 'helper-unavailable');
+        return { outcome: 'resolve-failed' };
+      }
+    } else {
+      // Compatibility/recovery path for older hosts and baseline-diff events,
+      // which carry only a WID. The existence probe supplies the descriptor;
+      // capability-free probes are then rebound through the exact host path.
+      let probe;
+      try {
+        probe = await resolveWindowInstance(instanceId);
+      } catch {
+        report('auto-add-resolve', 'helper-unavailable');
+        return { outcome: 'resolve-failed' };
+      }
+      if (probe?.outcome !== 'success' || !probe.descriptor
+        || probe.descriptor.windowInstanceId !== instanceId) {
+        report('auto-add-resolve', probe?.outcome && probe.outcome !== 'success' ? probe.outcome : 'missing');
+        return { outcome: 'unresolved' };
+      }
+      resolved = probe;
     }
-    if (probe?.outcome !== 'success' || !probe.descriptor
-      || probe.descriptor.windowInstanceId !== instanceId) {
-      report('auto-add-resolve', probe?.outcome && probe.outcome !== 'success' ? probe.outcome : 'missing');
-      return { outcome: 'unresolved' };
-    }
-    // Existence probes deliberately do not mint capabilities. Auto-add is an
-    // explicit one-window action, so bind the exact freshly probed identity here
-    // instead of expecting a disposable capability from the watcher event.
-    let resolved = probe;
-    if (!probe.capability) {
+    if (!resolved?.capability) {
       if (typeof resolveWindowDescriptor !== 'function') {
         report('auto-add-resolve', 'missing');
         return { outcome: 'unresolved' };
       }
       try {
-        resolved = await resolveWindowDescriptor(probe.descriptor);
+        resolved = await resolveWindowDescriptor(resolved.descriptor);
       } catch {
         report('auto-add-resolve', 'helper-unavailable');
         return { outcome: 'resolve-failed' };

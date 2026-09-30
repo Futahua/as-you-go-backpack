@@ -92,6 +92,39 @@ test('Auto binds a capability after the capability-free lifecycle probe, then ad
   assert.equal(state.windowLayouts[0].arrangement.members[0].descriptor.windowInstanceId, INSTANCE);
 });
 
+test('Auto binds directly from the descriptor carried by a lifecycle open without a second existence probe', async () => {
+  let state = stateWithAuto();
+  let probeCalls = 0;
+  const order = [];
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async () => {
+      probeCalls += 1;
+      return { outcome: 'missing' };
+    },
+    resolveWindowDescriptor: async (value) => {
+      order.push(`bind:${value.windowInstanceId}`);
+      return { outcome: 'success', capability: { runtimeToken: 'event-binding' }, descriptor: value };
+    },
+    observeWindowCapability: async (capability) => {
+      order.push(`observe:${capability.runtimeToken}`);
+      return { outcome: 'success', observation: { windowInstanceId: INSTANCE, bounds: { x: 2, y: 3, width: 400, height: 300 } } };
+    },
+    commit: async (next) => { order.push('commit'); state = next; return true; },
+    createMemberId: () => 'event-member',
+  });
+
+  const result = await auto.addFromEvent({
+    kind: 'open',
+    windowInstanceId: INSTANCE,
+    descriptor,
+  });
+  assert.equal(result.outcome, 'added');
+  assert.equal(probeCalls, 0, 'the same-enumeration lifecycle descriptor bypasses the racy existence probe');
+  assert.deepEqual(order, [`bind:${INSTANCE}`, 'observe:event-binding', 'commit']);
+  assert.equal(state.windowLayouts[0].arrangement.members[0].descriptor.windowInstanceId, INSTANCE);
+});
+
 test('Auto rejects a probe or fresh binding for a different instance', async () => {
   let state = stateWithAuto();
   let binds = 0;
