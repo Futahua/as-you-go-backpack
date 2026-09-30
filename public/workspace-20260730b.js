@@ -5620,11 +5620,20 @@ windowLayoutPillTray?.addEventListener('click', (event) => {
 });
 
 function selectedFileCapabilityContext() {
-  if (session.selected.size !== 1) return null;
-  const selectedId = [...session.selected][0];
-  const record = shortcutByRecordOrPlacementId(selectedId);
-  if (!record || isWebLink(record) || !isAbsoluteWindowsPath(record.target)) return null;
-  return { shortcutId: record.id, path: record.target, name: record.name };
+  const selectedIds = [...session.selected];
+  if (selectedIds.length === 0) return { mode: 'empty', selectionCount: 0, items: [] };
+  const fileItems = selectedIds.flatMap((selectedId) => {
+    const record = shortcutByRecordOrPlacementId(selectedId);
+    if (!record || isWebLink(record) || !isAbsoluteWindowsPath(record.target)) return [];
+    return [{ shortcutId: record.id, path: record.target, name: record.name }];
+  });
+  if (selectedIds.length === 1 && fileItems.length === 1) {
+    return { mode: 'single', selectionCount: 1, item: fileItems[0], items: fileItems };
+  }
+  if (selectedIds.length > 1) {
+    return { mode: 'multiple', selectionCount: selectedIds.length, items: fileItems };
+  }
+  return { mode: 'empty', selectionCount: selectedIds.length, items: fileItems };
 }
 
 function syncFileCapabilitySelection() {

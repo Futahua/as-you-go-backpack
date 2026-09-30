@@ -84,7 +84,7 @@ export function createFileCapabilityPanel(options) {
   }
 
   const state = {
-    open: false,
+    expanded: false,
     context: null,
     inspectedPath: null,
     searchTimer: null,
@@ -94,14 +94,11 @@ export function createFileCapabilityPanel(options) {
     previewObjectUrl: null,
   };
 
-  const launcher = createButton(documentRef, '⌕', 'file-capability-launcher');
-  launcher.title = 'Files';
-  launcher.setAttribute('aria-label', 'Open files');
-
+  const workspace = documentRef.querySelector('.workspace');
   const panel = documentRef.createElement('aside');
   panel.className = 'file-capability-panel';
-  panel.hidden = true;
   panel.setAttribute('aria-label', 'Files');
+  workspace?.classList.add('file-capability-docked');
 
   const header = documentRef.createElement('header');
   header.className = 'file-capability-header';
@@ -109,9 +106,10 @@ export function createFileCapabilityPanel(options) {
   title.textContent = 'Files';
   const providerStatus = documentRef.createElement('span');
   providerStatus.className = 'file-capability-provider-status';
-  const closeButton = createButton(documentRef, '×', 'file-capability-close');
-  closeButton.setAttribute('aria-label', 'Close files');
-  header.append(title, providerStatus, closeButton);
+  const expandButton = createButton(documentRef, 'Expand', 'file-capability-expand');
+  expandButton.setAttribute('aria-label', 'Expand files panel');
+  expandButton.setAttribute('aria-pressed', 'false');
+  header.append(title, providerStatus, expandButton);
 
   const searchWrap = documentRef.createElement('div');
   searchWrap.className = 'file-capability-search';
@@ -183,26 +181,33 @@ export function createFileCapabilityPanel(options) {
   preview.append(initialPreview);
 
   inspector.append(itemTitle, itemMeta, pathRow, actions, renameRow, preview);
+  resultsPane.hidden = true;
   body.append(resultsPane, inspector);
   panel.append(header, searchWrap, body);
-  documentRef.body.append(panel, launcher);
+  documentRef.body.append(panel);
 
-  function setOpen(open) {
-    state.open = Boolean(open);
-    panel.hidden = !state.open;
-    launcher.classList.toggle('active', state.open);
-    launcher.setAttribute('aria-pressed', String(state.open));
-    if (state.open && !providerStatus.textContent) {
-      void host.fileCapability('providers', {}).then((result) => {
-        if (!result || !result.ok || !result.providers) return;
-        const names = [];
-        if (result.providers.everything) names.push('Everything');
-        if (result.providers.directoryOpus) names.push('Opus');
-        if (result.providers.libreOffice) names.push('LibreOffice');
-        providerStatus.textContent = names.join(' · ');
-      }).catch(() => {});
-    }
+  function loadProviders() {
+    if (providerStatus.textContent) return;
+    void host.fileCapability('providers', {}).then((result) => {
+      if (!result || !result.ok || !result.providers) return;
+      const names = [];
+      if (result.providers.everything) names.push('Everything');
+      if (result.providers.directoryOpus) names.push('Opus');
+      if (result.providers.libreOffice) names.push('LibreOffice');
+      providerStatus.textContent = names.join(' · ');
+    }).catch(() => {});
   }
+
+  function setExpanded(expanded) {
+    state.expanded = Boolean(expanded);
+    panel.classList.toggle('expanded', state.expanded);
+    workspace?.classList.toggle('file-capability-expanded', state.expanded);
+    expandButton.textContent = state.expanded ? 'Compact' : 'Expand';
+    expandButton.setAttribute('aria-label', state.expanded ? 'Use compact files panel' : 'Expand files panel');
+    expandButton.setAttribute('aria-pressed', String(state.expanded));
+  }
+
+  loadProviders();
 
   function disarmDelete() {
     state.deleteArmed = false;
@@ -361,12 +366,65 @@ export function createFileCapabilityPanel(options) {
     preview.append(message);
   }
 
+  function renderEmptySelection(selectionCount = 0) {
+    ++state.inspectGeneration;
+    state.context = null;
+    state.inspectedPath = null;
+    disarmDelete();
+    renameRow.hidden = true;
+    itemTitle.textContent = selectionCount > 0 ? `${selectionCount} item${selectionCount === 1 ? '' : 's'} selected` : 'Select a file';
+    itemMeta.textContent = selectionCount > 0 ? 'No local file content in this selection yet.' : '';
+    pathText.textContent = selectionCount > 0 ? 'Selection stays fully controlled by As you Go.' : 'Select a local file or folder in As you Go.';
+    copyPathButton.hidden = true;
+    actions.hidden = true;
+    clearPreview();
+    const message = documentRef.createElement('p');
+    message.className = 'file-capability-empty';
+    message.textContent = selectionCount > 0
+      ? 'The file pane is observing this selection without changing how AYG selection or dragging works.'
+      : 'Preview appears here.';
+    preview.append(message);
+  }
+
+  function renderMultipleSelection(selection) {
+    ++state.inspectGeneration;
+    state.context = null;
+    state.inspectedPath = null;
+    disarmDelete();
+    renameRow.hidden = true;
+    const count = Number.isSafeInteger(selection?.selectionCount) ? selection.selectionCount : selection.items.length;
+    itemTitle.textContent = `${count} items selected`;
+    itemMeta.textContent = 'Multiple content';
+    pathText.textContent = 'Multiple selection';
+    copyPathButton.hidden = true;
+    actions.hidden = true;
+    clearPreview();
+    const list = documentRef.createElement('div');
+    list.className = 'file-capability-multi';
+    for (const entry of selection.items.slice(0, 20)) {
+      const row = documentRef.createElement('div');
+      row.className = 'file-capability-multi-entry';
+      const name = documentRef.createElement('strong');
+      name.textContent = entry.name || basename(entry.path);
+      const pathNode = documentRef.createElement('code');
+      pathNode.textContent = entry.path;
+      row.append(name, pathNode);
+      list.append(row);
+    }
+    if (count > selection.items.length) {
+      const remainder = documentRef.createElement('p');
+      remainder.className = 'file-capability-empty';
+      remainder.textContent = `${count - selection.items.length} selected item${count - selection.items.length === 1 ? '' : 's'} do not currently expose local-file content.`;
+      list.append(remainder);
+    }
+    preview.append(list);
+  }
+
   async function inspectPath(target, context) {
     if (!isAbsoluteWindowsPath(target)) return false;
     const generation = ++state.inspectGeneration;
     state.inspectedPath = target;
     if (context !== undefined) state.context = context;
-    setOpen(true);
     disarmDelete();
     renameRow.hidden = true;
     itemTitle.textContent = basename(target) || target;
@@ -393,9 +451,11 @@ export function createFileCapabilityPanel(options) {
   function renderSearchResults(result, query) {
     resultsList.replaceChildren();
     if (!query) {
+      resultsPane.hidden = true;
       resultsStatus.textContent = 'Type to search the whole machine.';
       return;
     }
+    resultsPane.hidden = false;
     if (!result || !result.ok) {
       resultsStatus.textContent = result && result.message ? result.message : 'Everything search is unavailable.';
       return;
@@ -461,11 +521,7 @@ export function createFileCapabilityPanel(options) {
     return changed;
   }
 
-  launcher.addEventListener('click', () => {
-    setOpen(!state.open);
-    if (state.open) searchInput.focus();
-  });
-  closeButton.addEventListener('click', () => setOpen(false));
+  expandButton.addEventListener('click', () => setExpanded(!state.expanded));
   searchInput.addEventListener('input', () => {
     if (state.searchTimer) clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
@@ -600,33 +656,47 @@ export function createFileCapabilityPanel(options) {
 
   panel.addEventListener('pointerdown', (event) => event.stopPropagation());
   panel.addEventListener('click', (event) => event.stopPropagation());
-  launcher.addEventListener('pointerdown', (event) => event.stopPropagation());
 
-  function syncSelection(context) {
-    const next = context && isAbsoluteWindowsPath(context.path)
-      ? { shortcutId: context.shortcutId || null, path: context.path, name: context.name || basename(context.path) }
+  function syncSelection(selection) {
+    if (selection?.mode === 'multiple') {
+      renderMultipleSelection({
+        selectionCount: selection.selectionCount,
+        items: Array.isArray(selection.items) ? selection.items.filter((entry) => isAbsoluteWindowsPath(entry?.path)) : [],
+      });
+      return;
+    }
+    if (selection?.mode === 'empty') {
+      renderEmptySelection(selection.selectionCount ?? 0);
+      return;
+    }
+    const source = selection?.mode === 'single' ? selection.item : selection;
+    const next = source && isAbsoluteWindowsPath(source.path)
+      ? { shortcutId: source.shortcutId || null, path: source.path, name: source.name || basename(source.path) }
       : null;
     const same = next && state.context
       && next.shortcutId === state.context.shortcutId
       && next.path === state.context.path;
     state.context = next;
-    if (!next) return;
+    if (!next) {
+      renderEmptySelection(0);
+      return;
+    }
     if (!same || state.inspectedPath !== next.path) void inspectPath(next.path, next);
   }
 
   return Object.freeze({
     syncSelection,
     openSearch() {
-      setOpen(true);
       searchInput.focus();
       searchInput.select();
     },
     destroy() {
       if (state.searchTimer) clearTimeout(state.searchTimer);
       clearPreview();
+      workspace?.classList.remove('file-capability-docked', 'file-capability-expanded');
       panel.remove();
-      launcher.remove();
     },
-    isOpen: () => state.open,
+    isOpen: () => true,
+    isExpanded: () => state.expanded,
   });
 }
