@@ -2948,16 +2948,44 @@ async function processTrackingLifecycleEvent(event) {
   if (!event || typeof event.windowInstanceId !== 'string') return;
   if (isWindowLifecycleDestroyEvent(event)) {
     trackingPendingOpens.delete(event.windowInstanceId);
+    const tracked = (state.windowLayouts ?? []).some((layout) =>
+      (layout.arrangement?.members ?? []).some((member) =>
+        member.descriptor?.windowInstanceId === event.windowInstanceId));
+    if (!tracked) return;
     // EVIDENCE, NOT PROOF. A lifecycle 'gone' is produced by diffing successive
     // task-worthy enumerations, so one transient disappearance would delete a
-    // member outright - and it bypassed the periodic sweep's confirmation
-    // entirely. It seeds a confirmation instead: the sweep corroborates it with
-    // an independent resolve, and only two positives retire anything.
+    // member outright. Seed one positive, then corroborate it immediately with
+    // the exact resolver. That resolver performs a fresh serialized enumeration
+    // when the WID is no longer in the lifecycle cache, so this is the second
+    // independent observation. Do not make a real close wait for a renderer
+    // timer: background/throttled writer surfaces can still receive the host
+    // lifecycle push while their 2s safety sweep is delayed indefinitely.
     const existing = windowLayoutGoneConfirmations.get(event.windowInstanceId);
     windowLayoutGoneConfirmations.set(event.windowInstanceId, {
       count: Math.max(1, existing?.count ?? 0),
       at: Date.now(),
     });
+    let confirmed = null;
+    try {
+      confirmed = await host.resolveWindowInstance(event.windowInstanceId);
+    } catch {
+      confirmed = null;
+    }
+    if (surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
+    if (confirmed?.outcome === 'success') {
+      // The lifecycle diff was transient. A fresh exact observation wins.
+      windowLayoutGoneConfirmations.delete(event.windowInstanceId);
+      return;
+    }
+    if (confirmed?.outcome === 'missing') {
+      const retired = await retireClosedWindowEverywhere(
+        { version: 1, windowInstanceId: event.windowInstanceId },
+        { source: 'lifecycle-gone-confirmed', reason: 'the lifecycle close was independently confirmed missing' },
+      );
+      if (retired) windowLayoutGoneConfirmations.delete(event.windowInstanceId);
+    }
+    // An outage/timeout is not proof. Keep the seeded positive so the periodic
+    // reconciliation remains the bounded recovery path.
     return;
   }
   const result = await windowLayoutAutoTracking.addFromEvent(event);
