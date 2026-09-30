@@ -114,6 +114,9 @@ export function createFileCapabilityPanel(options) {
     deleteArmed: false,
     previewObjectUrl: null,
     previewResourceId: null,
+    nativePreviewSessionId: null,
+    nativePreviewObserver: null,
+    lastPreviewResult: null,
   };
 
   const workspace = documentRef.querySelector('.workspace');
@@ -274,7 +277,16 @@ export function createFileCapabilityPanel(options) {
     void host.fileCapability('preview-release', { resourceId }).catch(() => {});
   }
 
+  function closeNativePreview() {
+    state.nativePreviewObserver?.disconnect();
+    state.nativePreviewObserver = null;
+    const sessionId = state.nativePreviewSessionId;
+    state.nativePreviewSessionId = null;
+    if (sessionId) void host.fileCapability('preview-native-close', { sessionId }).catch(() => {});
+  }
+
   function clearPreview() {
+    closeNativePreview();
     releasePreviewResource();
     if (state.previewObjectUrl) {
       URL.revokeObjectURL(state.previewObjectUrl);
@@ -343,8 +355,47 @@ export function createFileCapabilityPanel(options) {
     preview.append(list);
   }
 
+  function nativePreviewRect(node) {
+    const rect = node.getBoundingClientRect();
+    return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)) };
+  }
+
+  async function startNativePreview(data) {
+    const target = state.inspectedPath;
+    const generation = state.inspectGeneration;
+    const surface = documentRef.createElement('div');
+    surface.className = 'file-capability-native-preview';
+    preview.append(surface);
+    if (!state.expanded || !target) {
+      surface.textContent = 'Expand the preview pane to show the Windows preview.';
+      return;
+    }
+    await new Promise((resolve) => (documentRef.defaultView?.requestAnimationFrame ?? ((callback) => setTimeout(callback, 0)))(resolve));
+    if (generation !== state.inspectGeneration || state.inspectedPath !== target) return;
+    const opened = await host.fileCapability('preview-native-open', { path: target, rect: nativePreviewRect(surface) }).catch((error) => ({ ok: false, message: error instanceof Error ? error.message : String(error) }));
+    if (generation !== state.inspectGeneration || state.inspectedPath !== target) {
+      if (opened && opened.ok && typeof opened.sessionId === 'string') void host.fileCapability('preview-native-close', { sessionId: opened.sessionId }).catch(() => {});
+      return;
+    }
+    if (!opened || !opened.ok || typeof opened.sessionId !== 'string') {
+      surface.textContent = opened && opened.message ? opened.message : 'Windows preview could not be hosted.';
+      return;
+    }
+    state.nativePreviewSessionId = opened.sessionId;
+    const move = () => {
+      if (!state.nativePreviewSessionId || !state.expanded) return;
+      void host.fileCapability('preview-native-move', { sessionId: state.nativePreviewSessionId, rect: nativePreviewRect(surface) }).catch(() => {});
+    };
+    if (typeof ResizeObserver === 'function') {
+      state.nativePreviewObserver = new ResizeObserver(move);
+      state.nativePreviewObserver.observe(surface);
+    }
+    documentRef.defaultView?.addEventListener('resize', move, { passive: true, once: true });
+  }
+
   function renderPreview(result) {
     clearPreview();
+    state.lastPreviewResult = result;
     if (!result || !result.ok) {
       const message = documentRef.createElement('p');
       message.className = 'file-capability-empty file-capability-error';
@@ -353,6 +404,10 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     const data = result.preview || {};
+    if (data.kind === 'windows-preview-handler') {
+      void startNativePreview(data);
+      return;
+    }
     if (typeof data.resourceId === 'string') state.previewResourceId = data.resourceId;
     if (data.kind === 'image') {
       const source = previewSource(data);
@@ -452,6 +507,7 @@ export function createFileCapabilityPanel(options) {
     ++state.inspectGeneration;
     state.context = null;
     state.inspectedPath = null;
+    state.lastPreviewResult = null;
     disarmDelete();
     renameRow.hidden = true;
     itemTitle.textContent = selectionCount > 0 ? `${selectionCount} item${selectionCount === 1 ? '' : 's'} selected` : 'Select a file';
@@ -473,6 +529,7 @@ export function createFileCapabilityPanel(options) {
     ++state.inspectGeneration;
     state.context = null;
     state.inspectedPath = null;
+    state.lastPreviewResult = null;
     const count = Number.isSafeInteger(selection?.selectionCount) ? selection.selectionCount : selection.items.length;
     itemTitle.textContent = `${count} items selected`;
     itemMeta.textContent = '';
@@ -498,6 +555,7 @@ export function createFileCapabilityPanel(options) {
     pathText.textContent = target;
     copyPathButton.hidden = false;
     revealButton.hidden = false;
+    state.lastPreviewResult = null;
     actions.hidden = false;
     clearPreview();
     const loading = documentRef.createElement('p');
@@ -594,7 +652,12 @@ export function createFileCapabilityPanel(options) {
     return changed;
   }
 
-  expandButton.addEventListener('click', () => setExpanded(!state.expanded));
+  expandButton.addEventListener('click', () => {
+    const next = !state.expanded;
+    setExpanded(next);
+    if (!next) closeNativePreview();
+    else if (state.lastPreviewResult?.preview?.kind === 'windows-preview-handler') renderPreview(state.lastPreviewResult);
+  });
   resizer.addEventListener('pointerdown', (event) => {
     if (!state.expanded || event.button !== 0) return;
     state.resizing = true;

@@ -52,6 +52,11 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /parsed\.protocol === 'papers-file-preview:'/);
   assert.match(source, /fileCapability\('preview-text-chunk'/);
   assert.match(source, /media\.preload = 'metadata'/);
+  assert.match(source, /fileCapability\('preview-native-open'/);
+  assert.match(source, /fileCapability\('preview-native-move'/);
+  assert.match(source, /fileCapability\('preview-native-close'/);
+  assert.match(source, /ResizeObserver/);
   assert.match(css, /\.file-capability-text-scroller/);
+  assert.match(css, /\.file-capability-native-preview/);
   assert.doesNotMatch(source, /frame\.src = data\.dataUrl/);
 });
