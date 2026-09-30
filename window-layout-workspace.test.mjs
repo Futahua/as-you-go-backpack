@@ -1243,6 +1243,10 @@ test('closed-window safety reconciliation removes only positively missing exact 
   const start = source.indexOf('async function reconcileClosedWindowMembers()');
   const end = source.indexOf('function scheduleClosedWindowReconcile()', start);
   const reconcile = source.slice(start, end);
+  assert.match(source, /descriptor: event\.descriptor \?\? pending\?\.descriptor \?\? null/,
+    'a failed lifecycle open keeps the same-enumeration descriptor for bounded retries');
+  assert.match(reconcile, /\.\.\.\(pending\.descriptor \? \{ descriptor: pending\.descriptor \} : \{\}\)/,
+    'a retry reuses the lifecycle descriptor instead of falling back to a new existence race');
   assert.match(reconcile, /host\.resolveWindowInstance\(instanceId\)/);
   assert.match(reconcile, /result\?\.outcome !== 'missing'/,
     'helper outages, timeouts, and ambiguous matches are retained');

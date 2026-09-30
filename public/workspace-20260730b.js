@@ -2969,6 +2969,7 @@ async function processTrackingLifecycleEvent(event) {
     trackingPendingOpens.set(event.windowInstanceId, {
       firstSeenAt: pending?.firstSeenAt ?? Date.now(),
       lastAttemptAt: Date.now(),
+      descriptor: event.descriptor ?? pending?.descriptor ?? null,
     });
   }
 }
@@ -3065,7 +3066,11 @@ async function reconcileClosedWindowMembers() {
       // bounded retry alive; the exact resolver itself confirms identity.
       if (Date.now() - pending.lastAttemptAt >= 2000) {
         if (surfaceCoordinator?.role !== SURFACE_ROLE.WRITER) return;
-        await processTrackingLifecycleEvent({ kind: 'open', windowInstanceId: instanceId });
+        await processTrackingLifecycleEvent({
+          kind: 'open',
+          windowInstanceId: instanceId,
+          ...(pending.descriptor ? { descriptor: pending.descriptor } : {}),
+        });
         if (++retried >= 4) break;
       }
     }
