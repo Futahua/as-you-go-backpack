@@ -931,6 +931,7 @@ export function createFileCapabilityPanel(options) {
     frame.title = itemTitle.textContent || 'Obsidian Markdown preview';
     frame.setAttribute('sandbox', '');
     const bodyClass = escapeHtmlAttribute(result.bodyClass || '');
+    const previewClass = escapeHtmlAttribute(result.previewClass || 'markdown-preview-view markdown-rendered is-readable-line-width');
     const variables = typeof result.variables === 'string' ? result.variables : '';
     const obsidianCss = typeof result.css === 'string'
       ? result.css.replace(/<\/style/gi, '<\\/style')
@@ -938,15 +939,15 @@ export function createFileCapabilityPanel(options) {
     const html = typeof result.html === 'string' ? result.html : '';
     frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>
       :root{${variables}}
-      html,body{margin:0;min-height:100%;background:var(--background-primary,#1e1e1e);color:var(--text-normal,#ddd);font-family:var(--font-interface,ui-sans-serif,system-ui,sans-serif)}
-      body{box-sizing:border-box;padding:18px 22px}
-      .markdown-preview-view{max-width:100%;line-height:1.55}
-      img{max-width:100%;height:auto}
-      pre{overflow:auto}
-      table{max-width:100%;border-collapse:collapse}
-      a{color:var(--link-color,#8ab4f8)}
       ${obsidianCss}
-    </style></head><body class="${bodyClass}"><div class="markdown-preview-view markdown-rendered papers-obsidian-preview">${html}</div></body></html>`;
+      html,body{margin:0!important;width:100%!important;min-height:100%!important;overflow-x:hidden!important;background:var(--background-primary)!important;color:var(--text-normal)!important}
+      body{box-sizing:border-box!important;padding:0!important}
+      .papers-obsidian-shell,.papers-obsidian-shell>.workspace-tab-container,.papers-obsidian-shell .workspace-leaf,.papers-obsidian-shell .workspace-leaf-content,.papers-obsidian-shell .view-content,.papers-obsidian-shell .markdown-reading-view{position:static!important;display:block!important;width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;transform:none!important}
+      .papers-obsidian-shell .workspace-leaf-content{background:var(--background-primary)!important}
+      .papers-obsidian-shell .markdown-preview-view{box-sizing:border-box!important;width:100%!important;max-width:none!important;min-height:100%!important;overflow:visible!important}
+      .papers-obsidian-shell img{max-width:100%!important;height:auto}
+      .papers-obsidian-shell pre,.papers-obsidian-shell table{max-width:100%}
+    </style></head><body class="${bodyClass}"><div class="workspace-tabs mod-top papers-obsidian-shell"><div class="workspace-tab-container"><div class="workspace-leaf"><div class="workspace-leaf-content" data-type="markdown"><div class="view-content"><div class="markdown-reading-view"><div class="${previewClass}">${html}</div></div></div></div></div></div></div></body></html>`;
     preview.append(frame);
   }
 
