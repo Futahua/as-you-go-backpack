@@ -84,6 +84,10 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(css, /\.file-capability-panel\.full-page/);
   assert.match(css, /\.file-capability-panel\.embedded-surface-proxima/);
   assert.match(css, /\.file-capability-image-viewport\.panning/);
+  const sidecarHtml = await readFile(new URL('./public/proxima-preview.html', import.meta.url), 'utf8');
+  const sidecarCss = await readFile(new URL('./public/styles/proxima-preview-sidecar.css', import.meta.url), 'utf8');
+  assert.match(sidecarHtml, /data-theme="dark"/);
+  assert.match(sidecarCss, /--surface:\s*#272c37/);
   assert.match(css, /\.file-capability-text-scroller/);
   assert.match(css, /\.file-capability-native-preview/);
   assert.doesNotMatch(source, /frame\.src = data\.dataUrl/);

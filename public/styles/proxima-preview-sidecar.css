@@ -1,5 +1,20 @@
 html[data-proxima-preview-sidecar="true"],
 html[data-proxima-preview-sidecar="true"] body {
+  color-scheme: dark;
+  --page-background: #21252e;
+  --surface: #272c37;
+  --surface-raised: #272c37;
+  --surface-soft: #2e3440;
+  --surface-muted: #2e3440;
+  --border: #3a4150;
+  --border-strong: #4a5364;
+  --border-subtle: #343b49;
+  --text: #e6e9ef;
+  --text-secondary: #c4cad4;
+  --text-muted: #aeb6c4;
+  --text-faint: #8e98aa;
+  --icon-surface: #2e3440;
+  --shadow: rgba(0, 0, 0, 0.35);
   width: 100%;
   height: 100%;
   margin: 0;
