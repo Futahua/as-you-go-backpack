@@ -943,7 +943,13 @@ export function createFileCapabilityPanel(options) {
       html,body{margin:0!important;width:100%!important;min-height:100%!important;overflow-x:hidden!important;background:var(--background-primary)!important;color:var(--text-normal)!important}
       body{box-sizing:border-box!important;padding:16px!important}
       .markdown-reading-view{position:static!important;display:block!important;width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;transform:none!important}
-      .markdown-reading-view>.markdown-preview-view{position:static!important;display:block!important;box-sizing:border-box!important;width:100%!important;max-width:none!important;height:auto!important;min-height:100%!important;overflow:visible!important}
+      .markdown-reading-view>.markdown-preview-view{position:static!important;display:block!important;box-sizing:border-box!important;width:100%!important;max-width:none!important;height:auto!important;min-height:100%!important;overflow:visible!important;color:var(--text-normal)!important;font-family:var(--font-text)!important}
+      .markdown-reading-view h1{color:var(--h1-color,var(--text-normal))!important}
+      .markdown-reading-view h2{color:var(--h2-color,var(--text-normal))!important}
+      .markdown-reading-view h3{color:var(--h3-color,var(--text-normal))!important}
+      .markdown-reading-view h4{color:var(--h4-color,var(--text-normal))!important}
+      .markdown-reading-view h5{color:var(--h5-color,var(--text-normal))!important}
+      .markdown-reading-view h6{color:var(--h6-color,var(--text-normal))!important}
       .markdown-reading-view img{max-width:100%!important;height:auto}
       .markdown-reading-view pre,.markdown-reading-view table{max-width:100%}
     </style></head><body class="${bodyClass}"><div class="markdown-reading-view"><div class="${previewClass}">${html}</div></div></body></html>`;
