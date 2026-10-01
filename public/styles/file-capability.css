@@ -29,6 +29,24 @@
   width: min(var(--file-capability-width), calc(100vw - 24px));
 }
 
+.file-capability-panel.full-page {
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  width: auto;
+  z-index: 990;
+}
+
+.file-capability-panel.full-page .file-capability-resizer,
+.file-capability-panel.full-page .file-capability-expand {
+  display: none;
+}
+
+.file-capability-panel.full-page .file-capability-inspector {
+  padding: 12px;
+}
+
 .file-capability-header {
   display: flex;
   align-items: center;
@@ -203,11 +221,78 @@
   background: var(--surface);
 }
 
-.file-capability-preview-image,
 .file-capability-preview-video {
   width: 100%;
   height: 100%;
   min-height: 180px;
+  object-fit: contain;
+  background: var(--surface-soft);
+}
+
+.file-capability-image-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--surface-soft);
+}
+
+.file-capability-image-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface);
+}
+
+.file-capability-image-toolbar button {
+  min-width: 30px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.file-capability-image-toolbar button:hover,
+.file-capability-image-toolbar button.active {
+  border-color: var(--border-hover);
+  background: var(--surface-raised);
+}
+
+.file-capability-image-zoom-label {
+  min-width: 42px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.file-capability-image-viewport {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--surface-soft);
+}
+
+.file-capability-image-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-capability-preview-image {
+  display: block;
+  flex: 0 0 auto;
+  max-width: none;
+  max-height: none;
+  min-width: 1px;
+  min-height: 1px;
   object-fit: contain;
   background: var(--surface-soft);
 }

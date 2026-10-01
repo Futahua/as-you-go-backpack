@@ -1,6 +1,8 @@
 const SEARCH_DEBOUNCE_MS = 120;
 const VERIFY_ATTEMPTS = 40;
 const VERIFY_DELAY_MS = 250;
+const FULL_PAGE_PREVIEW_PARAM = 'papers-file-preview';
+const FULL_PAGE_PREVIEW_STORAGE_PREFIX = 'papers:file-preview:';
 
 export function isAbsoluteWindowsPath(value) {
   return typeof value === 'string'
@@ -97,6 +99,16 @@ export function createFileCapabilityPanel(options) {
   const host = options.host;
   const setStatus = options.setStatus || (() => {});
   const retargetShortcut = options.retargetShortcut || (async () => false);
+  const windowRef = documentRef?.defaultView ?? null;
+  let launchedPreview = null;
+  try {
+    const token = new URL(windowRef.location.href).searchParams.get(FULL_PAGE_PREVIEW_PARAM);
+    const raw = token ? windowRef.localStorage.getItem(FULL_PAGE_PREVIEW_STORAGE_PREFIX + token) : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && isAbsoluteWindowsPath(parsed.path)) {
+      launchedPreview = { path: parsed.path, name: parsed.name || basename(parsed.path) };
+    }
+  } catch {}
 
   if (!documentRef || !documentRef.body || !host || !host.fileCapability) {
     return Object.freeze({ syncSelection() {}, openSearch() {}, destroy() {}, isOpen: () => false });
@@ -118,6 +130,10 @@ export function createFileCapabilityPanel(options) {
     nativePreviewObserver: null,
     pdfPreviewSessionId: null,
     pdfPreviewObserver: null,
+    htmlPreviewSessionId: null,
+    htmlPreviewObserver: null,
+    imagePreviewObserver: null,
+    fullPage: Boolean(launchedPreview),
     lastPreviewResult: null,
   };
 
@@ -140,10 +156,17 @@ export function createFileCapabilityPanel(options) {
   title.textContent = 'Preview';
   const providerStatus = documentRef.createElement('span');
   providerStatus.className = 'file-capability-provider-status';
+  const openTabButton = createButton(documentRef, 'Full screen', 'file-capability-icon-button file-capability-open-tab');
+  openTabButton.hidden = true;
+  setButtonSvg(documentRef, openTabButton, 'Open preview in a new Papers tab', [
+    'M6 3H3v14h14v-3',
+    'M10 3h7v7',
+    'M9 11l8-8',
+  ]);
   const expandButton = createButton(documentRef, 'Expand', 'file-capability-expand');
   expandButton.setAttribute('aria-label', 'Expand file preview');
   expandButton.setAttribute('aria-pressed', 'false');
-  header.append(title, expandButton);
+  header.append(title, openTabButton, expandButton);
 
   const searchWrap = documentRef.createElement('div');
   searchWrap.className = 'file-capability-search';
@@ -223,6 +246,10 @@ export function createFileCapabilityPanel(options) {
   body.append(inspector);
   panel.append(resizer, header, body);
   documentRef.body.append(panel);
+  if (state.fullPage) {
+    panel.classList.add('full-page');
+    documentRef.body.classList.add('file-capability-full-page');
+  }
 
   function loadProviders() {
     if (providerStatus.textContent) return;
@@ -295,15 +322,103 @@ export function createFileCapabilityPanel(options) {
     if (sessionId) void host.fileCapability('preview-pdf-close', { sessionId }).catch(() => {});
   }
 
+  function closeHtmlPreview() {
+    state.htmlPreviewObserver?.disconnect();
+    state.htmlPreviewObserver = null;
+    const sessionId = state.htmlPreviewSessionId;
+    state.htmlPreviewSessionId = null;
+    if (sessionId) void host.fileCapability('preview-html-close', { sessionId }).catch(() => {});
+  }
+
   function clearPreview() {
     closeNativePreview();
     closePdfPreview();
+    closeHtmlPreview();
+    state.imagePreviewObserver?.disconnect();
+    state.imagePreviewObserver = null;
     releasePreviewResource();
     if (state.previewObjectUrl) {
       URL.revokeObjectURL(state.previewObjectUrl);
       state.previewObjectUrl = null;
     }
     preview.replaceChildren();
+  }
+
+  function renderImagePreview(source) {
+    const shell = documentRef.createElement('div');
+    shell.className = 'file-capability-image-shell';
+    const toolbar = documentRef.createElement('div');
+    toolbar.className = 'file-capability-image-toolbar';
+    const zoomOut = createButton(documentRef, '−');
+    zoomOut.title = 'Zoom out';
+    zoomOut.setAttribute('aria-label', 'Zoom out');
+    const zoomLabel = documentRef.createElement('span');
+    zoomLabel.className = 'file-capability-image-zoom-label';
+    const zoomIn = createButton(documentRef, '+');
+    zoomIn.title = 'Zoom in';
+    zoomIn.setAttribute('aria-label', 'Zoom in');
+    const fit = createButton(documentRef, 'Fit');
+    fit.title = 'Fit image to preview';
+    toolbar.append(zoomOut, zoomLabel, zoomIn, fit);
+
+    const viewport = documentRef.createElement('div');
+    viewport.className = 'file-capability-image-viewport';
+    const stage = documentRef.createElement('div');
+    stage.className = 'file-capability-image-stage';
+    const image = documentRef.createElement('img');
+    image.src = source;
+    image.alt = itemTitle.textContent || '';
+    image.className = 'file-capability-preview-image';
+    stage.append(image);
+    viewport.append(stage);
+    shell.append(toolbar, viewport);
+    preview.append(shell);
+
+    let scale = 1;
+    let fitMode = true;
+    const clamp = (value) => Math.max(0.05, Math.min(10, value));
+    const apply = () => {
+      const naturalWidth = image.naturalWidth || 1;
+      const naturalHeight = image.naturalHeight || 1;
+      if (fitMode && viewport.clientWidth > 0 && viewport.clientHeight > 0) {
+        scale = clamp(Math.min(
+          viewport.clientWidth / naturalWidth,
+          viewport.clientHeight / naturalHeight,
+        ));
+      }
+      const width = Math.max(1, Math.round(naturalWidth * scale));
+      const height = Math.max(1, Math.round(naturalHeight * scale));
+      image.style.width = width + 'px';
+      image.style.height = height + 'px';
+      stage.style.width = Math.max(viewport.clientWidth, width) + 'px';
+      stage.style.height = Math.max(viewport.clientHeight, height) + 'px';
+      zoomLabel.textContent = Math.round(scale * 100) + '%';
+      fit.classList.toggle('active', fitMode);
+    };
+    const step = (factor) => {
+      fitMode = false;
+      scale = clamp(scale * factor);
+      apply();
+    };
+    zoomOut.addEventListener('click', () => step(0.8));
+    zoomIn.addEventListener('click', () => step(1.25));
+    fit.addEventListener('click', () => {
+      fitMode = true;
+      apply();
+    });
+    viewport.addEventListener('wheel', (event) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      step(event.deltaY < 0 ? 1.1 : 1 / 1.1);
+    }, { passive: false });
+    image.addEventListener('load', apply, { once: true });
+    if (image.complete) apply();
+    if (typeof ResizeObserver === 'function') {
+      state.imagePreviewObserver = new ResizeObserver(() => {
+        if (fitMode) apply();
+      });
+      state.imagePreviewObserver.observe(viewport);
+    }
   }
 
   function previewBlobUrl(data) {
@@ -429,6 +544,7 @@ export function createFileCapabilityPanel(options) {
     const opened = await host.fileCapability('preview-pdf-open', {
       resourceId,
       rect: nativePreviewRect(surface),
+      stateKey: typeof data.previewStateKey === 'string' ? data.previewStateKey : undefined,
     }).catch((error) => {
       releasePreviewResource(resourceId);
       return { ok: false, message: error instanceof Error ? error.message : String(error) };
@@ -461,6 +577,63 @@ export function createFileCapabilityPanel(options) {
     documentRef.defaultView?.addEventListener('resize', move, { passive: true, once: true });
   }
 
+  async function startHtmlPreview(data) {
+    const target = state.inspectedPath;
+    const generation = state.inspectGeneration;
+    const resourceId = typeof data.resourceId === 'string' ? data.resourceId : null;
+    const surface = documentRef.createElement('div');
+    surface.className = 'file-capability-native-preview';
+    preview.append(surface);
+    if (!resourceId) {
+      surface.textContent = 'Interactive HTML preview resource is unavailable.';
+      return;
+    }
+    if (!state.expanded || !target) {
+      surface.textContent = 'Expand the preview pane to use this page.';
+      return;
+    }
+    await new Promise((resolve) => (documentRef.defaultView?.requestAnimationFrame ?? ((callback) => setTimeout(callback, 0)))(resolve));
+    if (generation !== state.inspectGeneration || state.inspectedPath !== target) {
+      releasePreviewResource(resourceId);
+      return;
+    }
+
+    if (state.previewResourceId === resourceId) state.previewResourceId = null;
+    const opened = await host.fileCapability('preview-html-open', {
+      resourceId,
+      rect: nativePreviewRect(surface),
+    }).catch((error) => {
+      releasePreviewResource(resourceId);
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    });
+    if (generation !== state.inspectGeneration || state.inspectedPath !== target) {
+      if (opened && opened.ok && typeof opened.sessionId === 'string') {
+        void host.fileCapability('preview-html-close', { sessionId: opened.sessionId }).catch(() => {});
+      } else {
+        releasePreviewResource(resourceId);
+      }
+      return;
+    }
+    if (!opened || !opened.ok || typeof opened.sessionId !== 'string') {
+      releasePreviewResource(resourceId);
+      surface.textContent = opened && opened.message ? opened.message : 'Interactive HTML preview could not be hosted.';
+      return;
+    }
+    state.htmlPreviewSessionId = opened.sessionId;
+    const move = () => {
+      if (!state.htmlPreviewSessionId || !state.expanded) return;
+      void host.fileCapability('preview-html-move', {
+        sessionId: state.htmlPreviewSessionId,
+        rect: nativePreviewRect(surface),
+      }).catch(() => {});
+    };
+    if (typeof ResizeObserver === 'function') {
+      state.htmlPreviewObserver = new ResizeObserver(move);
+      state.htmlPreviewObserver.observe(surface);
+    }
+    documentRef.defaultView?.addEventListener('resize', move, { passive: true, once: true });
+  }
+
   function renderPreview(result) {
     clearPreview();
     state.lastPreviewResult = result;
@@ -481,14 +654,14 @@ export function createFileCapabilityPanel(options) {
       void startPdfPreview(data);
       return;
     }
+    if (data.kind === 'hosted-html') {
+      void startHtmlPreview(data);
+      return;
+    }
     if (data.kind === 'image') {
       const source = previewSource(data);
       if (source) {
-        const image = documentRef.createElement('img');
-        image.src = source;
-        image.alt = itemTitle.textContent || '';
-        image.className = 'file-capability-preview-image';
-        preview.append(image);
+        renderImagePreview(source);
         return;
       }
     }
@@ -587,6 +760,7 @@ export function createFileCapabilityPanel(options) {
     pathText.textContent = selectionCount > 0 ? 'Selection stays fully controlled by As you Go.' : 'Select a local file or folder in As you Go.';
     copyPathButton.hidden = true;
     revealButton.hidden = true;
+    openTabButton.hidden = true;
     actions.hidden = true;
     clearPreview();
     const message = documentRef.createElement('p');
@@ -608,6 +782,7 @@ export function createFileCapabilityPanel(options) {
     pathText.textContent = 'Multiple preview is not defined yet.';
     copyPathButton.hidden = true;
     revealButton.hidden = true;
+    openTabButton.hidden = true;
     clearPreview();
     const message = documentRef.createElement('p');
     message.className = 'file-capability-empty';
@@ -627,6 +802,7 @@ export function createFileCapabilityPanel(options) {
     pathText.textContent = target;
     copyPathButton.hidden = false;
     revealButton.hidden = false;
+    openTabButton.hidden = state.fullPage;
     state.lastPreviewResult = null;
     actions.hidden = false;
     clearPreview();
@@ -730,10 +906,30 @@ export function createFileCapabilityPanel(options) {
     if (!next) {
       closeNativePreview();
       closePdfPreview();
+      closeHtmlPreview();
     }
     else if (state.lastPreviewResult?.preview?.kind === 'windows-preview-handler') renderPreview(state.lastPreviewResult);
-    else if (state.lastPreviewResult?.preview?.kind === 'hosted-pdf' && state.inspectedPath) {
+    else if (['hosted-pdf', 'hosted-html'].includes(state.lastPreviewResult?.preview?.kind) && state.inspectedPath) {
       void inspectPath(state.inspectedPath, state.context);
+    }
+  });
+  openTabButton.addEventListener('click', () => {
+    if (!state.inspectedPath || !windowRef || typeof host.openNewSurface !== 'function') return;
+    const token = typeof windowRef.crypto?.randomUUID === 'function'
+      ? windowRef.crypto.randomUUID()
+      : Date.now().toString(36) + Math.random().toString(36).slice(2);
+    try {
+      windowRef.localStorage.setItem(
+        FULL_PAGE_PREVIEW_STORAGE_PREFIX + token,
+        JSON.stringify({ path: state.inspectedPath, name: itemTitle.textContent || basename(state.inspectedPath) }),
+      );
+      const next = new URL(windowRef.location.href);
+      next.searchParams.set(FULL_PAGE_PREVIEW_PARAM, token);
+      void host.openNewSurface(next.toString()).catch((error) => {
+        setStatus(error instanceof Error ? error.message : String(error));
+      });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
     }
   });
   resizer.addEventListener('pointerdown', (event) => {
@@ -894,6 +1090,7 @@ export function createFileCapabilityPanel(options) {
   panel.addEventListener('click', (event) => event.stopPropagation());
 
   function syncSelection(selection) {
+    if (state.fullPage) return;
     if (selection?.mode === 'multiple') {
       renderMultipleSelection({
         selectionCount: selection.selectionCount,
@@ -920,7 +1117,7 @@ export function createFileCapabilityPanel(options) {
     if (!same || state.inspectedPath !== next.path) void inspectPath(next.path, next);
   }
 
-  return Object.freeze({
+  const api = Object.freeze({
     syncSelection,
     openSearch() {
       setExpanded(true);
@@ -930,9 +1127,19 @@ export function createFileCapabilityPanel(options) {
       clearPreview();
       workspace?.classList.remove('file-capability-docked', 'file-capability-expanded');
       workspace?.style.removeProperty('--file-capability-width');
+      documentRef.body.classList.remove('file-capability-full-page');
       panel.remove();
     },
     isOpen: () => true,
     isExpanded: () => state.expanded,
   });
+
+  if (launchedPreview) {
+    setExpanded(true);
+    expandButton.hidden = true;
+    openTabButton.hidden = true;
+    state.context = { shortcutId: null, path: launchedPreview.path, name: launchedPreview.name };
+    queueMicrotask(() => void inspectPath(launchedPreview.path, state.context));
+  }
+  return api;
 }
