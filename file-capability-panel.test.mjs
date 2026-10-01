@@ -56,7 +56,11 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /workspace-navigator-view-toggle/);
   assert.match(navigator, /workspace-navigator-resizer/);
   assert.match(navigator, /fileCapability\('icon'/);
-  assert.match(navigator, /fileCapability\('search',\{query:normalized,limit:200\}\)/);
+  assert.match(navigator, /fileCapability\('search',\{query:normalized,limit:1000\}\)/);
+  assert.match(navigator, /searchResult\.total/);
+  assert.match(navigator, /formatSearchSize/);
+  assert.match(navigator, /formatSearchDate/);
+  assert.match(navigatorCss, /\.workspace-navigator-search-detail/);
   assert.match(navigator, /pickTarget\('folder'\)/);
   assert.match(navigator, /papers:ayg:navigator-machine-root/);
   assert.match(navigator, /row\.draggable = true/);

@@ -79,7 +79,8 @@ export function createWorkspaceNavigator(o) {
   searchInput.autocomplete = 'off';
   searchInput.spellcheck = false;
   searchInput.setAttribute('aria-label', 'Search files with Everything');
-  search.append(searchInput);
+  const searchInfo = d.createElement('div'); searchInfo.className = 'workspace-navigator-search-info';
+  search.append(searchInput, searchInfo);
   const body = d.createElement('div'); body.className = 'workspace-navigator-body';
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
   panel.replaceChildren(head,tools,search,loc,body,resizer);
@@ -344,8 +345,23 @@ export function createWorkspaceNavigator(o) {
     }
     s.path=path;
   }
+  function formatSearchSize(value) {
+    if (!Number.isFinite(value) || value < 0) return '';
+    if (value < 1024) return `${value} B`;
+    const units=['KB','MB','GB','TB'];
+    let size=value/1024, unit=0;
+    while(size>=1024&&unit<units.length-1){size/=1024;unit++;}
+    return `${size>=100?Math.round(size):size>=10?size.toFixed(1):size.toFixed(2)} ${units[unit]}`;
+  }
+  function formatSearchDate(value) {
+    if (!Number.isFinite(value) || value <= 0) return '';
+    try {
+      return new Date(value).toLocaleString([], { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+    } catch { return ''; }
+  }
   function machineRow(x, depth = 0, { searchResult = false } = {}) {
     const row=d.createElement('div'); row.className='workspace-navigator-row machine-row'; row.style.paddingLeft=`${4+depth*13}px`; row.classList.toggle('selected',s.selected?.path===x.path);
+    row.classList.toggle('search-result',searchResult);
     row.draggable = true;
     row.title = x.path;
     row.addEventListener('dragstart',(event)=>{
@@ -356,6 +372,15 @@ export function createWorkspaceNavigator(o) {
     if(folder&&s.view==='tree'){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'▾':'▸';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
     const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x); hydrateMachineArt(art,x);
     const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name; row.append(lead,art,label);
+    if(searchResult){
+      const detail=d.createElement('span'); detail.className='workspace-navigator-search-detail';
+      const where=d.createElement('span'); where.className='workspace-navigator-search-path'; where.textContent=parentPath(x.path);
+      const facts=d.createElement('span'); facts.className='workspace-navigator-search-facts';
+      const parts=[x.kind==='folder'?'Folder':formatSearchSize(x.size),formatSearchDate(x.modifiedAt)].filter(Boolean);
+      facts.textContent=parts.join(' · ');
+      detail.append(where,facts);
+      row.append(detail);
+    }
     row.addEventListener('click',(e)=>{
       if(e.shiftKey&&!e.ctrlKey){
         e.preventDefault();
@@ -470,13 +495,19 @@ export function createWorkspaceNavigator(o) {
     setLocation([{key:'everything',label:'Everything'},{key:s.searchQuery,label:s.searchQuery}]);
     body.replaceChildren();
     if (!s.searchResult) {
+      searchInfo.textContent = 'Everything · searching…';
       body.innerHTML = '<p class="workspace-navigator-empty">Searching…</p>';
       return;
     }
     if (!s.searchResult.ok) {
-      body.innerHTML = `<p class="workspace-navigator-empty">${s.searchResult.message || 'Everything search is unavailable.'}</p>`;
+      searchInfo.textContent = s.searchResult.message || s.searchResult.error || 'Everything unavailable';
+      body.innerHTML = `<p class="workspace-navigator-empty">${s.searchResult.message || s.searchResult.error || 'Everything search is unavailable.'}</p>`;
       return;
     }
+    const shown = (s.searchResult.results || []).length;
+    const total = Number.isFinite(s.searchResult.total) ? s.searchResult.total : shown;
+    const version = s.searchResult.version ? ` ${s.searchResult.version}` : '';
+    searchInfo.textContent = `Everything${version} · ${total.toLocaleString()} result${total===1?'':'s'}${shown < total ? ` · ${shown.toLocaleString()} shown` : ''}`;
     for (const item of s.searchResult.results || []) body.append(machineRow(item, 0, { searchResult: true }));
     if (!body.childElementCount) body.innerHTML = '<p class="workspace-navigator-empty">No results.</p>';
   }
@@ -487,7 +518,7 @@ export function createWorkspaceNavigator(o) {
     const generation=++s.searchGeneration;
     if(!normalized){render();return;}
     renderSearch();
-    const result=await o.host.fileCapability('search',{query:normalized,limit:200}).catch((error)=>({ok:false,message:error instanceof Error?error.message:String(error),results:[]}));
+    const result=await o.host.fileCapability('search',{query:normalized,limit:1000}).catch((error)=>({ok:false,message:error instanceof Error?error.message:String(error),results:[]}));
     if(generation!==s.searchGeneration||s.searchQuery!==normalized)return;
     s.searchResult=result;
     renderSearch();
@@ -546,6 +577,7 @@ export function createWorkspaceNavigator(o) {
     syncChrome();
     if (s.collapsed) return;
     if(s.searchQuery){renderSearch();return;}
+    searchInfo.textContent = 'Filters: ext: · path: · folder: · file: · size: · dm: · regex:';
     if(s.mode==='ayg')renderAyG();
     else if(s.view==='tree')void renderMachineTree();
     else if(s.path)void loadMachine(s.path,false);
