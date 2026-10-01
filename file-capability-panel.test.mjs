@@ -73,10 +73,17 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /Zoom out/);
   assert.match(source, /Zoom in/);
   assert.match(source, /Fit image to preview/);
+  assert.match(source, /viewport\.addEventListener\('wheel'/);
+  assert.doesNotMatch(source, /if \(!event\.ctrlKey\) return/);
+  assert.match(source, /viewport\.addEventListener\('pointerdown'/);
+  assert.match(source, /viewport\.scrollLeft = pan\.scrollLeft - \(event\.clientX - pan\.x\)/);
+  assert.match(source, /papers-embedded-surface/);
   assert.match(source, /previewStateKey/);
   assert.match(source, /ResizeObserver/);
   assert.match(css, /\.file-capability-image-toolbar/);
   assert.match(css, /\.file-capability-panel\.full-page/);
+  assert.match(css, /\.file-capability-panel\.embedded-surface-proxima/);
+  assert.match(css, /\.file-capability-image-viewport\.panning/);
   assert.match(css, /\.file-capability-text-scroller/);
   assert.match(css, /\.file-capability-native-preview/);
   assert.doesNotMatch(source, /frame\.src = data\.dataUrl/);

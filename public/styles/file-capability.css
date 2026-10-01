@@ -29,6 +29,21 @@
   width: min(var(--file-capability-width), calc(100vw - 24px));
 }
 
+.file-capability-panel.embedded-surface-proxima {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.file-capability-panel.embedded-surface-proxima.expanded {
+  width: min(var(--file-capability-width), 52vw);
+}
+
 .file-capability-panel.full-page {
   top: 8px;
   right: 8px;
@@ -278,6 +293,14 @@
   min-height: 0;
   overflow: auto;
   background: var(--surface-soft);
+  cursor: grab;
+  touch-action: none;
+  overscroll-behavior: contain;
+  user-select: none;
+}
+
+.file-capability-image-viewport.panning {
+  cursor: grabbing;
 }
 
 .file-capability-image-stage {
