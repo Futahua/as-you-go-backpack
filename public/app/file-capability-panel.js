@@ -916,6 +916,40 @@ export function createFileCapabilityPanel(options) {
     preview.append(message);
   }
 
+  function escapeHtmlAttribute(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function renderObsidianMarkdown(result) {
+    clearPreview();
+    const frame = documentRef.createElement('iframe');
+    frame.className = 'file-capability-obsidian-markdown';
+    frame.title = itemTitle.textContent || 'Obsidian Markdown preview';
+    frame.setAttribute('sandbox', '');
+    const bodyClass = escapeHtmlAttribute(result.bodyClass || '');
+    const variables = typeof result.variables === 'string' ? result.variables : '';
+    const obsidianCss = typeof result.css === 'string'
+      ? result.css.replace(/<\/style/gi, '<\\/style')
+      : '';
+    const html = typeof result.html === 'string' ? result.html : '';
+    frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>
+      :root{${variables}}
+      html,body{margin:0;min-height:100%;background:var(--background-primary,#1e1e1e);color:var(--text-normal,#ddd);font-family:var(--font-interface,ui-sans-serif,system-ui,sans-serif)}
+      body{box-sizing:border-box;padding:18px 22px}
+      .markdown-preview-view{max-width:100%;line-height:1.55}
+      img{max-width:100%;height:auto}
+      pre{overflow:auto}
+      table{max-width:100%;border-collapse:collapse}
+      a{color:var(--link-color,#8ab4f8)}
+      ${obsidianCss}
+    </style></head><body class="${bodyClass}"><div class="markdown-preview-view markdown-rendered papers-obsidian-preview">${html}</div></body></html>`;
+    preview.append(frame);
+  }
+
   function renderEmptySelection(selectionCount = 0) {
     ++state.inspectGeneration;
     state.context = null;
@@ -993,6 +1027,18 @@ export function createFileCapabilityPanel(options) {
       return false;
     }
     renderEntry(result && result.entry);
+    if (
+      result?.ok === true
+      && result?.preview?.kind === 'text'
+      && /\.(?:md|markdown)$/i.test(target)
+    ) {
+      const obsidian = await host.fileCapability('preview-markdown-obsidian', { path: target }).catch(() => null);
+      if (generation !== state.inspectGeneration || state.inspectedPath !== target) return false;
+      if (obsidian?.ok && typeof obsidian.html === 'string') {
+        renderObsidianMarkdown(obsidian);
+        return true;
+      }
+    }
     renderPreview(result);
     return result && result.ok === true;
   }

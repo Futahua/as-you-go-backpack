@@ -143,6 +143,9 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /FULL_PAGE_PREVIEW_STORAGE_PREFIX/);
   assert.match(source, /fileCapability\('preview-launch-create', payload\)/);
   assert.match(source, /fileCapability\('preview-launch-resolve', \{ token: launchToken \}\)/);
+  assert.match(source, /fileCapability\('preview-markdown-obsidian', \{ path: target \}\)/);
+  assert.match(source, /renderObsidianMarkdown/);
+  assert.match(css, /\.file-capability-obsidian-markdown/);
   assert.match(source, /fullPage: Boolean\(launchedPreview \|\| launchToken\)/);
   assert.match(source, /workspaceTitle: documentRef\.title/);
   assert.match(source, /workspaceIcon: documentRef\.head\.querySelector\('link\[data-papers-tab-icon\]'/);
