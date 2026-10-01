@@ -43,6 +43,8 @@ export function createWorkspaceNavigator(o) {
     searchGeneration: 0,
     searchTimer: null,
     searchResult: null,
+    searchFilters: { name:'', path:'', type:'', size:'', modified:'' },
+    searchSort: { key:null, direction:1 },
   };
   try {
     const savedWidthRaw = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-width');
@@ -185,6 +187,7 @@ export function createWorkspaceNavigator(o) {
     s.searchTimer = null;
     s.searchQuery = '';
     s.searchResult = null;
+    s.searchFilters = { name:'', path:'', type:'', size:'', modified:'' };
     ++s.searchGeneration;
     if (searchInput.value) searchInput.value = '';
     if (renderNow) render();
@@ -359,6 +362,86 @@ export function createWorkspaceNavigator(o) {
       return new Date(value).toLocaleString([], { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
     } catch { return ''; }
   }
+  function searchTypeLabel(item) {
+    if (item.kind === 'folder') return 'Folder';
+    const match = /(?:^|[\\/])([^\\/]+)$/.exec(item.path || '');
+    const name = match?.[1] || item.name || '';
+    const dot = name.lastIndexOf('.');
+    return dot > 0 && dot < name.length - 1 ? name.slice(dot).toLocaleLowerCase() : 'File';
+  }
+  function parseSizeFilter(raw) {
+    const match = String(raw || '').trim().toLocaleLowerCase().match(/^\s*(<=|>=|<|>|=)?\s*(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?\s*$/);
+    if (!match) return null;
+    const multipliers={b:1,kb:1024,mb:1024**2,gb:1024**3,tb:1024**4};
+    return { op:match[1]||'>=', bytes:Number(match[2])*(multipliers[match[3]||'b']||1) };
+  }
+  function matchesSizeFilter(value, raw) {
+    if (!String(raw || '').trim()) return true;
+    if (!Number.isFinite(value) || value < 0) return false;
+    const parsed=parseSizeFilter(raw);
+    if(!parsed)return formatSearchSize(value).toLocaleLowerCase().includes(String(raw).trim().toLocaleLowerCase());
+    if(parsed.op==='<')return value<parsed.bytes;
+    if(parsed.op==='<=')return value<=parsed.bytes;
+    if(parsed.op==='>')return value>parsed.bytes;
+    if(parsed.op==='=')return value===parsed.bytes;
+    return value>=parsed.bytes;
+  }
+  function filteredSearchResults() {
+    const source=[...(s.searchResult?.results||[])], filters=s.searchFilters;
+    const contains=(value,needle)=>!needle||String(value||'').toLocaleLowerCase().includes(String(needle).toLocaleLowerCase());
+    const filtered=source.filter((item)=>{
+      const parent=parentPath(item.path);
+      const type=searchTypeLabel(item);
+      const modified=formatSearchDate(item.modifiedAt);
+      return contains(item.name,filters.name)
+        && contains(parent,filters.path)
+        && contains(type,filters.type)
+        && matchesSizeFilter(item.size,filters.size)
+        && contains(modified,filters.modified);
+    });
+    const {key,direction}=s.searchSort;
+    if(!key)return filtered;
+    const value=(item)=>{
+      if(key==='path')return parentPath(item.path).toLocaleLowerCase();
+      if(key==='type')return searchTypeLabel(item).toLocaleLowerCase();
+      if(key==='size')return Number.isFinite(item.size)?item.size:-1;
+      if(key==='modified')return Number.isFinite(item.modifiedAt)?item.modifiedAt:-1;
+      return String(item.name||'').toLocaleLowerCase();
+    };
+    filtered.sort((a,b)=>{
+      const av=value(a),bv=value(b);
+      return (typeof av==='number'&&typeof bv==='number' ? av-bv : String(av).localeCompare(String(bv))) * direction;
+    });
+    return filtered;
+  }
+  function searchColumnHeader() {
+    const header=d.createElement('div'); header.className='workspace-navigator-search-columns';
+    const iconSpacer=d.createElement('span'); iconSpacer.className='workspace-navigator-search-column-icon';
+    header.append(iconSpacer);
+    const specs=[
+      ['name','Name','name'],
+      ['path','Path','path contains…'],
+      ['type','Type','folder / .rvt'],
+      ['size','Size','>10mb'],
+      ['modified','Date Modified','date contains…'],
+    ];
+    for(const [key,label,placeholder] of specs){
+      const column=d.createElement('div'); column.className='workspace-navigator-search-column'; column.dataset.column=key;
+      const sort=d.createElement('button'); sort.type='button'; sort.className='workspace-navigator-search-sort';
+      sort.textContent=label+(s.searchSort.key===key?(s.searchSort.direction===1?' ↑':' ↓'):'');
+      sort.title=`Sort by ${label}`;
+      sort.addEventListener('click',()=>{
+        if(s.searchSort.key===key)s.searchSort.direction*=-1;
+        else s.searchSort={key,direction:1};
+        renderSearch();
+      });
+      const input=d.createElement('input'); input.type='search'; input.value=s.searchFilters[key]||''; input.placeholder=placeholder; input.autocomplete='off'; input.spellcheck=false;
+      input.setAttribute('aria-label',`Filter ${label}`);
+      input.addEventListener('input',()=>{s.searchFilters[key]=input.value;renderSearch({preserveFocus:key});});
+      column.append(sort,input); header.append(column);
+    }
+    return header;
+  }
   function machineRow(x, depth = 0, { searchResult = false } = {}) {
     const row=d.createElement('div'); row.className='workspace-navigator-row machine-row'; row.style.paddingLeft=`${4+depth*13}px`; row.classList.toggle('selected',s.selected?.path===x.path);
     row.classList.toggle('search-result',searchResult);
@@ -373,13 +456,12 @@ export function createWorkspaceNavigator(o) {
     const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x); hydrateMachineArt(art,x);
     const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name; row.append(lead,art,label);
     if(searchResult){
-      const detail=d.createElement('span'); detail.className='workspace-navigator-search-detail';
+      row.replaceChildren(art,label);
       const where=d.createElement('span'); where.className='workspace-navigator-search-path'; where.textContent=parentPath(x.path);
-      const facts=d.createElement('span'); facts.className='workspace-navigator-search-facts';
-      const parts=[x.kind==='folder'?'Folder':formatSearchSize(x.size),formatSearchDate(x.modifiedAt)].filter(Boolean);
-      facts.textContent=parts.join(' · ');
-      detail.append(where,facts);
-      row.append(detail);
+      const type=d.createElement('span'); type.className='workspace-navigator-search-type'; type.textContent=searchTypeLabel(x);
+      const size=d.createElement('span'); size.className='workspace-navigator-search-size'; size.textContent=x.kind==='folder'?'':formatSearchSize(x.size);
+      const modified=d.createElement('span'); modified.className='workspace-navigator-search-modified'; modified.textContent=formatSearchDate(x.modifiedAt);
+      row.append(where,type,size,modified);
     }
     row.addEventListener('click',(e)=>{
       if(e.shiftKey&&!e.ctrlKey){
@@ -491,7 +573,7 @@ export function createWorkspaceNavigator(o) {
     if(result?.ok && result.entry?.kind==='folder') return enterMachine(path, false);
     if(s.mode!=='ayg') setMode('ayg'); else render();
   }
-  function renderSearch() {
+  function renderSearch({preserveFocus=null} = {}) {
     setLocation([{key:'everything',label:'Everything'},{key:s.searchQuery,label:s.searchQuery}]);
     body.replaceChildren();
     if (!s.searchResult) {
@@ -506,10 +588,19 @@ export function createWorkspaceNavigator(o) {
     }
     const shown = (s.searchResult.results || []).length;
     const total = Number.isFinite(s.searchResult.total) ? s.searchResult.total : shown;
+    const filtered=filteredSearchResults();
     const version = s.searchResult.version ? ` ${s.searchResult.version}` : '';
-    searchInfo.textContent = `Everything${version} · ${total.toLocaleString()} result${total===1?'':'s'}${shown < total ? ` · ${shown.toLocaleString()} shown` : ''}`;
-    for (const item of s.searchResult.results || []) body.append(machineRow(item, 0, { searchResult: true }));
-    if (!body.childElementCount) body.innerHTML = '<p class="workspace-navigator-empty">No results.</p>';
+    searchInfo.textContent = `Everything${version} · ${total.toLocaleString()} result${total===1?'':'s'} · ${shown.toLocaleString()} loaded${filtered.length!==shown?` · ${filtered.length.toLocaleString()} visible`:''}`;
+    body.append(searchColumnHeader());
+    const rows=d.createElement('div'); rows.className='workspace-navigator-search-rows';
+    for (const item of filtered) rows.append(machineRow(item, 0, { searchResult: true }));
+    if (!rows.childElementCount) rows.innerHTML = '<p class="workspace-navigator-empty">No results match these column filters.</p>';
+    body.append(rows);
+    if(preserveFocus){
+      const active=body.querySelector(`.workspace-navigator-search-column[data-column="${preserveFocus}"] input`);
+      active?.focus();
+      active?.setSelectionRange?.(active.value.length,active.value.length);
+    }
   }
   async function runSearch(query) {
     const normalized=String(query||'').trim();

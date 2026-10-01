@@ -60,7 +60,12 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /searchResult\.total/);
   assert.match(navigator, /formatSearchSize/);
   assert.match(navigator, /formatSearchDate/);
-  assert.match(navigatorCss, /\.workspace-navigator-search-detail/);
+  assert.match(navigator, /searchFilters/);
+  assert.match(navigator, /searchColumnHeader/);
+  assert.match(navigator, /parseSizeFilter/);
+  assert.match(navigator, /No results match these column filters/);
+  assert.match(navigatorCss, /\.workspace-navigator-search-columns/);
+  assert.match(navigatorCss, /grid-template-columns:24px minmax\(150px,1\.15fr\)/);
   assert.match(navigator, /pickTarget\('folder'\)/);
   assert.match(navigator, /papers:ayg:navigator-machine-root/);
   assert.match(navigator, /row\.draggable = true/);
