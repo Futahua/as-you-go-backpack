@@ -17,6 +17,7 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   const source = await readFile(new URL('./public/app/file-capability-panel.js', import.meta.url), 'utf8');
   const css = await readFile(new URL('./public/styles/file-capability.css', import.meta.url), 'utf8');
   const workspace = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const html = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
 
   assert.doesNotMatch(source, /setOpen\(/, 'selection must never open/reposition a panel during pointerdown');
   assert.doesNotMatch(source, /file-capability-launcher/, 'the old floating launcher is gone');
@@ -36,6 +37,9 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(css, /file-capability-expanded \.explorer \{[\s\S]*right: calc\(var\(--file-capability-width/);
   assert.match(workspace, /mode: 'single'/);
   assert.match(workspace, /mode: 'multiple'/);
+  assert.match(html, /img-src 'self' data: blob: papers-file-preview: https: http:/);
+  assert.match(html, /media-src papers-file-preview: blob:/);
+  assert.match(html, /frame-src papers-file-preview: blob:/);
 });
 
 test('file capability panel source keeps destructive retargeting verification-bound', async () => {
