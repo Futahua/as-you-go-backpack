@@ -941,13 +941,12 @@ export function createFileCapabilityPanel(options) {
       :root{${variables}}
       ${obsidianCss}
       html,body{margin:0!important;width:100%!important;min-height:100%!important;overflow-x:hidden!important;background:var(--background-primary)!important;color:var(--text-normal)!important}
-      body{box-sizing:border-box!important;padding:0!important}
-      .papers-obsidian-shell,.papers-obsidian-shell>.workspace-tab-container,.papers-obsidian-shell .workspace-leaf,.papers-obsidian-shell .workspace-leaf-content,.papers-obsidian-shell .view-content,.papers-obsidian-shell .markdown-reading-view{position:static!important;display:block!important;width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;transform:none!important}
-      .papers-obsidian-shell .workspace-leaf-content{background:var(--background-primary)!important}
-      .papers-obsidian-shell .markdown-preview-view{box-sizing:border-box!important;width:100%!important;max-width:none!important;min-height:100%!important;overflow:visible!important}
-      .papers-obsidian-shell img{max-width:100%!important;height:auto}
-      .papers-obsidian-shell pre,.papers-obsidian-shell table{max-width:100%}
-    </style></head><body class="${bodyClass}"><div class="workspace-tabs mod-top papers-obsidian-shell"><div class="workspace-tab-container"><div class="workspace-leaf"><div class="workspace-leaf-content" data-type="markdown"><div class="view-content"><div class="markdown-reading-view"><div class="${previewClass}">${html}</div></div></div></div></div></div></div></body></html>`;
+      body{box-sizing:border-box!important;padding:16px!important}
+      .markdown-reading-view{position:static!important;display:block!important;width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;transform:none!important}
+      .markdown-reading-view>.markdown-preview-view{position:static!important;display:block!important;box-sizing:border-box!important;width:100%!important;max-width:none!important;height:auto!important;min-height:100%!important;overflow:visible!important}
+      .markdown-reading-view img{max-width:100%!important;height:auto}
+      .markdown-reading-view pre,.markdown-reading-view table{max-width:100%}
+    </style></head><body class="${bodyClass}"><div class="markdown-reading-view"><div class="${previewClass}">${html}</div></div></body></html>`;
     preview.append(frame);
   }
 
