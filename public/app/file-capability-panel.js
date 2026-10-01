@@ -114,7 +114,13 @@ export function createFileCapabilityPanel(options) {
   } catch {}
 
   if (!documentRef || !documentRef.body || !host || !host.fileCapability) {
-    return Object.freeze({ syncSelection() {}, openSearch() {}, destroy() {}, isOpen: () => false });
+    return Object.freeze({
+      syncSelection() {},
+      openSearch() {},
+      refreshPreviewGeometry() {},
+      destroy() {},
+      isOpen: () => false,
+    });
   }
 
   const state = {
@@ -1191,11 +1197,37 @@ export function createFileCapabilityPanel(options) {
     if (!same || state.inspectedPath !== next.path) void inspectPath(next.path, next);
   }
 
+  function refreshPreviewGeometry() {
+    if (!state.expanded) return;
+    const surface = preview.querySelector('.file-capability-native-preview');
+    if (!surface) return;
+    const rect = nativePreviewRect(surface);
+    if (state.nativePreviewSessionId) {
+      void host.fileCapability('preview-native-move', {
+        sessionId: state.nativePreviewSessionId,
+        rect,
+      }).catch(() => {});
+    }
+    if (state.pdfPreviewSessionId) {
+      void host.fileCapability('preview-pdf-move', {
+        sessionId: state.pdfPreviewSessionId,
+        rect,
+      }).catch(() => {});
+    }
+    if (state.htmlPreviewSessionId) {
+      void host.fileCapability('preview-html-move', {
+        sessionId: state.htmlPreviewSessionId,
+        rect,
+      }).catch(() => {});
+    }
+  }
+
   const api = Object.freeze({
     syncSelection,
     openSearch() {
       setExpanded(true);
     },
+    refreshPreviewGeometry,
     destroy() {
       if (state.searchTimer) clearTimeout(state.searchTimer);
       clearPreview();

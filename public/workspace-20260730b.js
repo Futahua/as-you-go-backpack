@@ -180,6 +180,17 @@ const PROJECT_SURFACE_KEY = (() => {
   return value && value.length <= 128 ? value : null;
 })();
 const SCOPE_ROOT_ID = scopeRootFromUrl(window.location);
+const EMBEDDED_SURFACE = new URLSearchParams(window.location.search).get('papers-embedded-surface');
+
+function embeddedParentOrigin() {
+  try {
+    const parsed = new URL(document.referrer);
+    const origin = parsed.origin === 'null' ? `${parsed.protocol}//${parsed.host}` : parsed.origin;
+    return origin && origin !== 'null' ? origin : '*';
+  } catch {
+    return '*';
+  }
+}
 
 const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
 
@@ -5637,7 +5648,12 @@ function selectedFileCapabilityContext() {
 }
 
 function syncFileCapabilitySelection() {
-  fileCapabilityPanel?.syncSelection(selectedFileCapabilityContext());
+  const selection = selectedFileCapabilityContext();
+  if (EMBEDDED_SURFACE === 'proxima') {
+    window.parent.postMessage({ type: 'papers:proxima-preview-selection', selection }, embeddedParentOrigin());
+    return;
+  }
+  fileCapabilityPanel?.syncSelection(selection);
 }
 
 function syncSelection() {
@@ -6601,7 +6617,7 @@ const commands = createWorkspaceCommands({
   setStatus,
 });
 
-if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
+if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay' && EMBEDDED_SURFACE !== 'proxima') {
   fileCapabilityPanel = createFileCapabilityPanel({
     document,
     host,
@@ -6621,8 +6637,8 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
       return true;
     },
   });
-  syncFileCapabilitySelection();
 }
+if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') syncFileCapabilitySelection();
 
 let activeSetRename = null;
 function beginSetRename() {
