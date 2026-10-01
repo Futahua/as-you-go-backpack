@@ -122,7 +122,12 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /FULL_PAGE_PREVIEW_STORAGE_PREFIX/);
   assert.match(source, /workspaceTitle: documentRef\.title/);
   assert.match(source, /workspaceIcon: documentRef\.head\.querySelector\('link\[data-papers-tab-icon\]'/);
+  assert.match(source, /fileCapability\('icon', \{ path: state\.inspectedPath \}\)/);
+  assert.match(source, /previewIcon: iconResult\?\.ok/);
   assert.match(workspace, /function syncWorkspaceTabIdentity\(\)/);
+  assert.match(workspace, /const previewTitle = typeof parsed\?\.name === 'string'/);
+  assert.match(workspace, /const title = previewTitle \|\| workspaceTitle/);
+  assert.match(workspace, /const icon = previewIcon \|\| workspaceIcon/);
   assert.match(workspace, /title = current\?\.name \|\| scopedRoot\?\.name \|\| 'Workspace'/);
   assert.match(workspace, /data-papers-tab-icon/);
   assert.match(workspace, /FULL_PAGE_TAB_IDENTITY/);

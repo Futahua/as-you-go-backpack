@@ -565,8 +565,12 @@ const FULL_PAGE_TAB_IDENTITY = (() => {
     const token = new URL(window.location.href).searchParams.get('papers-file-preview');
     const raw = token ? window.localStorage.getItem('papers:file-preview:' + token) : null;
     const parsed = raw ? JSON.parse(raw) : null;
-    const title = typeof parsed?.workspaceTitle === 'string' ? parsed.workspaceTitle.trim() : '';
-    const icon = typeof parsed?.workspaceIcon === 'string' ? parsed.workspaceIcon : '';
+    const previewTitle = typeof parsed?.name === 'string' ? parsed.name.trim() : '';
+    const workspaceTitle = typeof parsed?.workspaceTitle === 'string' ? parsed.workspaceTitle.trim() : '';
+    const title = previewTitle || workspaceTitle;
+    const previewIcon = typeof parsed?.previewIcon === 'string' ? parsed.previewIcon : '';
+    const workspaceIcon = typeof parsed?.workspaceIcon === 'string' ? parsed.workspaceIcon : '';
+    const icon = previewIcon || workspaceIcon;
     return title ? { title, icon } : null;
   } catch {
     return null;

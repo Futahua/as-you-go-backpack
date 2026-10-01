@@ -1081,17 +1081,19 @@ export function createFileCapabilityPanel(options) {
       void inspectPath(state.inspectedPath, state.context);
     }
   });
-  openTabButton.addEventListener('click', () => {
+  openTabButton.addEventListener('click', async () => {
     if (!state.inspectedPath || !windowRef || typeof host.openNewSurface !== 'function') return;
     const token = typeof windowRef.crypto?.randomUUID === 'function'
       ? windowRef.crypto.randomUUID()
       : Date.now().toString(36) + Math.random().toString(36).slice(2);
     try {
+      const iconResult = await host.fileCapability('icon', { path: state.inspectedPath }).catch(() => null);
       windowRef.localStorage.setItem(
         FULL_PAGE_PREVIEW_STORAGE_PREFIX + token,
         JSON.stringify({
           path: state.inspectedPath,
           name: itemTitle.textContent || basename(state.inspectedPath),
+          previewIcon: iconResult?.ok && typeof iconResult.icon === 'string' ? iconResult.icon : null,
           workspaceTitle: documentRef.title,
           workspaceIcon: documentRef.head.querySelector('link[data-papers-tab-icon]')?.getAttribute('href') || null,
         }),
