@@ -5665,6 +5665,13 @@ function selectedFileCapabilityContext() {
 
 function syncFileCapabilitySelection() {
   const selection = selectedFileCapabilityContext();
+  if (
+    workspaceNavigator?.isMachineMode?.()
+    && selection.mode === 'empty'
+    && selection.selectionCount === 0
+  ) {
+    return;
+  }
   if (EMBEDDED_SURFACE === 'proxima') {
     window.parent.postMessage({ type: 'papers:proxima-preview-selection', selection }, embeddedParentOrigin());
     return;

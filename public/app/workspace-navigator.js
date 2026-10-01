@@ -12,7 +12,11 @@ const parentPath = (value) => {
 
 export function createWorkspaceNavigator(o) {
   const d = o.document, panel = d.querySelector('#workspace-navigator');
-  if (!panel || !o.workspace || !o.host?.fileCapability) return Object.freeze({ render() {}, syncCanvasSelection() {} });
+  if (!panel || !o.workspace || !o.host?.fileCapability) return Object.freeze({
+    render() {},
+    syncCanvasSelection() {},
+    isMachineMode: () => false,
+  });
   o.workspace.classList.add('navigator-docked');
   const s = {
     mode: 'ayg',
@@ -31,7 +35,6 @@ export function createWorkspaceNavigator(o) {
     aygSkipHistory: false,
     gen: 0,
     renderGen: 0,
-    ignore: false,
     icons: new Map(),
     locationKey: '',
     width: 252,
@@ -315,7 +318,7 @@ export function createWorkspaceNavigator(o) {
         }
         return;
       }
-      s.selected=x;s.ignore=true;o.clearCanvasForMachine();o.previewMachinePath(x.path,x.name);render();
+      s.selected=x;o.clearCanvasForMachine();o.previewMachinePath(x.path,x.name);render();
     });
     row.addEventListener('contextmenu',(e)=>{
       if(!e.shiftKey||!folder)return;
@@ -390,7 +393,10 @@ export function createWorkspaceNavigator(o) {
     else render();
   }
   async function syncCanvasSelection(selection) {
-    if (s.ignore) { s.ignore=false; return; }
+    if (selection?.mode === 'empty' && selection.selectionCount === 0) {
+      if (s.mode === 'ayg') render();
+      return;
+    }
     const gen=++s.gen, path=selection?.mode==='single'?selection.item?.path:null;
     if (!path || !o.isAbsoluteWindowsPath(path)) { if(s.mode!=='ayg') setMode('ayg'); else render(); return; }
     const result=await o.host.fileCapability('stat',{path}).catch(()=>null); if(gen!==s.gen) return;
@@ -447,5 +453,9 @@ export function createWorkspaceNavigator(o) {
     else if(s.path)void loadMachine(s.path,false);
   }
   syncChrome(); render();
-  return Object.freeze({render,syncCanvasSelection});
+  return Object.freeze({
+    render,
+    syncCanvasSelection,
+    isMachineMode: () => s.mode === 'machine',
+  });
 }

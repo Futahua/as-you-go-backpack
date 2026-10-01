@@ -61,6 +61,18 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /scrollBy\(\{ left: delta, behavior: 'smooth' \}\)/);
   assert.match(navigator, /loc\.scrollLeft = loc\.scrollWidth/);
   assert.match(navigator, /navigator-collapsed/);
+  assert.match(
+    navigator,
+    /selection\?\.mode === 'empty' && selection\.selectionCount === 0[\s\S]*if \(s\.mode === 'ayg'\) render\(\);[\s\S]*return;/,
+    'clearing the AYG canvas selection must not eject an active external-folder navigator',
+  );
+  assert.doesNotMatch(navigator, /s\.ignore/, 'machine mode must not depend on consuming one lucky selection-sync event');
+  assert.match(workspace, /workspaceNavigator\?\.isMachineMode\?\.\(\)/);
+  assert.match(
+    workspace,
+    /selection\.mode === 'empty'[\s\S]*selection\.selectionCount === 0[\s\S]*return;/,
+    'an empty AYG selection must not blank a preview currently owned by external-folder navigation',
+  );
   assert.match(navigatorCss, /\.workspace-navigator/);
   assert.match(navigatorCss, /workspace-navigator-effective-width/);
   assert.match(navigatorCss, /\.workspace-navigator-resizer/);
