@@ -6667,12 +6667,13 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     itemsIn,
     isWebLink,
     isAbsoluteWindowsPath,
-    selectAyG: (id, visibleIds) => commands.selectItem(id, {
+    selectAyG: (id, visibleIds, modifiers = {}) => commands.selectItem(id, {
       shiftKey: false,
-      ctrlKey: false,
+      ctrlKey: modifiers.ctrlKey === true,
       visibleItemIds: visibleIds,
     }),
-    activateAyG: (id) => commands.activateItem(id, { revealDirectoryTarget: true }),
+    activateAyG: (id) => commands.activateItem(id),
+    navigateAyG: (id) => commands.goToWorkspaceFolder(id),
     renameAyG: () => {
       const onlyId = session.selected.size === 1 ? [...session.selected][0] : null;
       if (!onlyId) return;
