@@ -20,6 +20,8 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   const html = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
   const navigator = await readFile(new URL('./public/app/workspace-navigator.js', import.meta.url), 'utf8');
   const navigatorCss = await readFile(new URL('./public/styles/navigator.css', import.meta.url), 'utf8');
+  const dropController = await readFile(new URL('./public/app/interactions/drop-controller.js', import.meta.url), 'utf8');
+  const workspaceCommands = await readFile(new URL('./public/app/workspace-commands.js', import.meta.url), 'utf8');
 
   assert.doesNotMatch(source, /setOpen\(/, 'selection must never open/reposition a panel during pointerdown');
   assert.doesNotMatch(source, /file-capability-launcher/, 'the old floating launcher is gone');
@@ -54,6 +56,16 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /workspace-navigator-view-toggle/);
   assert.match(navigator, /workspace-navigator-resizer/);
   assert.match(navigator, /fileCapability\('icon'/);
+  assert.match(navigator, /fileCapability\('search',\{query:normalized,limit:200\}\)/);
+  assert.match(navigator, /pickTarget\('folder'\)/);
+  assert.match(navigator, /papers:ayg:navigator-machine-root/);
+  assert.match(navigator, /row\.draggable = true/);
+  assert.match(navigator, /application\/x-papers-native-items/);
+  assert.match(navigatorCss, /\.workspace-navigator-search/);
+  assert.match(dropController, /application\/x-papers-native-items/);
+  assert.match(dropController, /commands\.dropResolvedTargets/);
+  assert.match(workspaceCommands, /async function dropResolvedTargets/);
+  assert.match(workspaceCommands, /createDroppedShortcuts\(before, targets, normalizedDestination\)/);
   assert.match(navigator, /IntersectionObserver/);
   assert.match(navigator, /event\.shiftKey|e\.shiftKey/);
   assert.match(navigator, /contextmenu/);

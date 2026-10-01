@@ -18,6 +18,7 @@ export function createWorkspaceNavigator(o) {
     isMachineMode: () => false,
   });
   o.workspace.classList.add('navigator-docked');
+  const INLINE_NATIVE_ITEMS = 'application/x-papers-native-items';
   const s = {
     mode: 'ayg',
     view: 'tree',
@@ -38,6 +39,10 @@ export function createWorkspaceNavigator(o) {
     icons: new Map(),
     locationKey: '',
     width: 252,
+    searchQuery: '',
+    searchGeneration: 0,
+    searchTimer: null,
+    searchResult: null,
   };
   try {
     const savedWidthRaw = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-width');
@@ -46,12 +51,14 @@ export function createWorkspaceNavigator(o) {
     const savedView = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-view');
     if (savedView === 'nav' || savedView === 'tree') s.view = savedView;
     s.collapsed = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-collapsed') === '1';
+    const savedMachineRoot = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-machine-root');
+    if (o.isAbsoluteWindowsPath(savedMachineRoot)) s.machineRoot = savedMachineRoot;
   } catch {
     // Storage is convenience only.
   }
   const head = d.createElement('header'); head.className = 'workspace-navigator-header';
   const title = d.createElement('strong'); title.textContent = 'Navigator';
-  const provider = d.createElement('span'); provider.className = 'workspace-navigator-provider';
+  const provider = d.createElement('button'); provider.type = 'button'; provider.className = 'workspace-navigator-provider';
   const viewToggle = button(d,'Switch navigation mode',['M4 5h3','M4 10h3','M4 15h3','M9 5h7','M9 10h7','M9 15h7']);
   viewToggle.classList.add('workspace-navigator-view-toggle');
   const viewLabel = d.createElement('span'); viewLabel.className = 'workspace-navigator-view-label'; viewToggle.append(viewLabel);
@@ -65,9 +72,17 @@ export function createWorkspaceNavigator(o) {
   const reveal = button(d,'Reveal',['M3 6h5l1.5 2H17v8H3z','M3 9h14']); tools.append(back,fwd,up,home,refresh,copy,move,paste,rename,del,reveal);
   const loc = d.createElement('div'); loc.className = 'workspace-navigator-location';
   const locTrack = d.createElement('div'); locTrack.className = 'workspace-navigator-location-track'; loc.append(locTrack);
+  const search = d.createElement('div'); search.className = 'workspace-navigator-search';
+  const searchInput = d.createElement('input');
+  searchInput.type = 'search';
+  searchInput.placeholder = 'Everything';
+  searchInput.autocomplete = 'off';
+  searchInput.spellcheck = false;
+  searchInput.setAttribute('aria-label', 'Search files with Everything');
+  search.append(searchInput);
   const body = d.createElement('div'); body.className = 'workspace-navigator-body';
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
-  panel.replaceChildren(head,tools,loc,body,resizer);
+  panel.replaceChildren(head,tools,search,loc,body,resizer);
   o.workspace.style.setProperty('--workspace-navigator-width', `${s.width}px`);
   const icon = (x) => x.icon ? `<img src="${x.icon}" alt="">` : (x.kind === 'group' || x.kind === 'folder')
     ? svg(['M2.5 6h5l1.5 2h8.5v8.5h-15z']) : o.isWebLink(x)
@@ -133,6 +148,8 @@ export function createWorkspaceNavigator(o) {
     panel.dataset.mode = s.mode;
     panel.dataset.view = s.view;
     provider.textContent = s.mode === 'machine' ? 'Opus' : 'As you Go';
+    provider.title = s.mode === 'machine' ? 'Switch to As you Go' : 'Switch to Opus';
+    provider.setAttribute('aria-label', provider.title);
     viewLabel.textContent = s.view === 'tree' ? 'Tree' : 'Nav';
     viewToggle.title = s.view === 'tree' ? 'Switch to navigation mode' : 'Switch to tree mode';
     viewToggle.setAttribute('aria-label', viewToggle.title);
@@ -161,6 +178,34 @@ export function createWorkspaceNavigator(o) {
   }
   function persistUi(key, value) {
     try { d.defaultView?.localStorage?.setItem(key, String(value)); } catch { /* optional */ }
+  }
+  function clearSearch({ renderNow = true } = {}) {
+    if (s.searchTimer) clearTimeout(s.searchTimer);
+    s.searchTimer = null;
+    s.searchQuery = '';
+    s.searchResult = null;
+    ++s.searchGeneration;
+    if (searchInput.value) searchInput.value = '';
+    if (renderNow) render();
+  }
+  async function switchProvider() {
+    if (s.mode === 'machine') {
+      clearSearch({ renderNow: false });
+      setMode('ayg');
+      return;
+    }
+    let root = s.machineRoot;
+    if (root) {
+      const stat = await o.host.fileCapability('stat', { path: root }).catch(() => null);
+      if (!stat?.ok || stat.entry?.kind !== 'folder') root = null;
+    }
+    if (!root) {
+      const picked = await o.host.pickTarget('folder').catch(() => null);
+      root = typeof picked === 'string' ? picked : picked?.path || picked?.target || null;
+    }
+    if (!root || !o.isAbsoluteWindowsPath(root)) return;
+    clearSearch({ renderNow: false });
+    await enterMachine(root, false);
   }
   function setLocation(segments) {
     const key = segments.map((segment) => segment.key || segment.label).join('\u0000');
@@ -299,8 +344,14 @@ export function createWorkspaceNavigator(o) {
     }
     s.path=path;
   }
-  function machineRow(x, depth = 0) {
+  function machineRow(x, depth = 0, { searchResult = false } = {}) {
     const row=d.createElement('div'); row.className='workspace-navigator-row machine-row'; row.style.paddingLeft=`${4+depth*13}px`; row.classList.toggle('selected',s.selected?.path===x.path);
+    row.draggable = true;
+    row.title = x.path;
+    row.addEventListener('dragstart',(event)=>{
+      event.dataTransfer.effectAllowed='link';
+      event.dataTransfer.setData(INLINE_NATIVE_ITEMS, JSON.stringify([{ target:x.path, name:x.name || x.path }]));
+    });
     const folder=x.kind==='folder', lead=d.createElement(folder&&s.view==='tree'?'button':'span'); lead.className=folder&&s.view==='tree'?'navigator-tree-toggle':'navigator-tree-spacer';
     if(folder&&s.view==='tree'){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'▾':'▸';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
     const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x); hydrateMachineArt(art,x);
@@ -311,12 +362,23 @@ export function createWorkspaceNavigator(o) {
         if(folder){
           const nextView=s.view==='tree'?'nav':'tree';
           setView(nextView,false);
-          if(nextView==='nav')void loadMachine(x.path,true);
+          if(searchResult){
+            clearSearch({renderNow:false});
+            void enterMachine(x.path,false);
+          }else if(nextView==='nav')void loadMachine(x.path,true);
           else void revealMachinePathInTree(x.path).then(()=>render());
         }else{
           void o.host.fileCapability('open',{path:x.path});
         }
         return;
+      }
+      if(searchResult&&s.mode!=='machine'){
+        s.mode='machine';
+        if(!s.machineRoot){
+          s.machineRoot=folder?x.path:parentPath(x.path);
+          persistUi('papers:ayg:navigator-machine-root',s.machineRoot);
+        }
+        syncChrome();
       }
       s.selected=x;o.clearCanvasForMachine();o.previewMachinePath(x.path,x.name);render();
     });
@@ -379,13 +441,14 @@ export function createWorkspaceNavigator(o) {
     if (!body.childElementCount) body.innerHTML='<p class="workspace-navigator-empty">This folder is empty.</p>';
   }
   async function enterMachine(path, fromGesture = false) {
-    const changed = !s.machineRoot || s.machineRoot.toLocaleLowerCase() !== path.toLocaleLowerCase();
+    const changed = !s.path || !s.machineRoot || s.machineRoot.toLocaleLowerCase() !== path.toLocaleLowerCase();
     if (changed) {
       s.machineRoot = path; s.path = path; s.selected = null;
       s.history = [path]; s.hi = 0;
       s.machineExpanded = new Set([path]);
       s.machineListings.clear();
     }
+    persistUi('papers:ayg:navigator-machine-root', s.machineRoot);
     s.mode = 'machine';
     if (fromGesture) setView(s.view==='tree'?'nav':'tree', false);
     syncChrome();
@@ -403,7 +466,41 @@ export function createWorkspaceNavigator(o) {
     if(result?.ok && result.entry?.kind==='folder') return enterMachine(path, false);
     if(s.mode!=='ayg') setMode('ayg'); else render();
   }
+  function renderSearch() {
+    setLocation([{key:'everything',label:'Everything'},{key:s.searchQuery,label:s.searchQuery}]);
+    body.replaceChildren();
+    if (!s.searchResult) {
+      body.innerHTML = '<p class="workspace-navigator-empty">Searching…</p>';
+      return;
+    }
+    if (!s.searchResult.ok) {
+      body.innerHTML = `<p class="workspace-navigator-empty">${s.searchResult.message || 'Everything search is unavailable.'}</p>`;
+      return;
+    }
+    for (const item of s.searchResult.results || []) body.append(machineRow(item, 0, { searchResult: true }));
+    if (!body.childElementCount) body.innerHTML = '<p class="workspace-navigator-empty">No results.</p>';
+  }
+  async function runSearch(query) {
+    const normalized=String(query||'').trim();
+    s.searchQuery=normalized;
+    s.searchResult=null;
+    const generation=++s.searchGeneration;
+    if(!normalized){render();return;}
+    renderSearch();
+    const result=await o.host.fileCapability('search',{query:normalized,limit:200}).catch((error)=>({ok:false,message:error instanceof Error?error.message:String(error),results:[]}));
+    if(generation!==s.searchGeneration||s.searchQuery!==normalized)return;
+    s.searchResult=result;
+    renderSearch();
+  }
   const destination=()=>{const ids=[...o.getSession().selected]; return ids.length===1&&o.getState().groups.some((g)=>g.id===ids[0])?ids[0]:(o.getSession().currentId||o.rootId);};
+  provider.addEventListener('click',()=>{void switchProvider();});
+  searchInput.addEventListener('input',()=>{
+    if(s.searchTimer)clearTimeout(s.searchTimer);
+    s.searchTimer=setTimeout(()=>{s.searchTimer=null;void runSearch(searchInput.value);},120);
+  });
+  searchInput.addEventListener('keydown',(event)=>{
+    if(event.key==='Escape'&&searchInput.value){event.preventDefault();clearSearch();}
+  });
   viewToggle.addEventListener('click',()=>setView(s.view==='tree'?'nav':'tree'));
   collapse.addEventListener('click',()=>{
     s.collapsed=!s.collapsed;
@@ -448,6 +545,7 @@ export function createWorkspaceNavigator(o) {
   function render(){
     syncChrome();
     if (s.collapsed) return;
+    if(s.searchQuery){renderSearch();return;}
     if(s.mode==='ayg')renderAyG();
     else if(s.view==='tree')void renderMachineTree();
     else if(s.path)void loadMachine(s.path,false);

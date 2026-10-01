@@ -8,6 +8,7 @@ export function createDropController({
   store,
   commands,
 }) {
+  const INLINE_NATIVE_ITEMS = 'application/x-papers-native-items';
   let abortController = null;
 
   function clearHoverClasses() {
@@ -49,7 +50,7 @@ export function createDropController({
       event.preventDefault();
       clearHoverClasses();
       const types = event.dataTransfer.types;
-      if (types.includes('Files') || types.includes('text/plain') || types.includes('text/uri-list')) {
+      if (types.includes('Files') || types.includes('text/plain') || types.includes('text/uri-list') || types.includes(INLINE_NATIVE_ITEMS)) {
         const tile = event.target.closest('.icon-item');
         const shell = tile?.closest('.graph-node-shell');
         if (tile?.dataset.kind === 'group' && shell) {
@@ -70,6 +71,24 @@ export function createDropController({
       if (store.getSession().binMode) return;
       const droppedFiles = [...event.dataTransfer.files];
       const destination = destinationFor(event);
+      const inlineNative = event.dataTransfer.getData(INLINE_NATIVE_ITEMS);
+
+      if (inlineNative) {
+        event.preventDefault();
+        try {
+          const parsed = JSON.parse(inlineNative);
+          const targets = Array.isArray(parsed) ? parsed : [];
+          await commands.dropResolvedTargets(
+            targets
+              .filter((item) => typeof item?.target === 'string' && item.target)
+              .map((item) => ({ target: item.target, name: typeof item.name === 'string' ? item.name : item.target })),
+            destination,
+          );
+        } finally {
+          clearHoverClasses();
+        }
+        return;
+      }
 
       if (droppedFiles.length === 0) {
         const url = extractDroppedUrl(event.dataTransfer);

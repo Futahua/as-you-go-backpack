@@ -671,8 +671,21 @@ export function createWorkspaceCommands({
     if (!scopeAllowsDestination(normalizedDestination)) return;
     try {
       const targets = await host.resolveDroppedTargets(files);
-      const next = createDroppedShortcuts(store.getSnapshot(), targets, normalizedDestination);
-      if (next.shortcuts.length === store.getSnapshot().shortcuts.length) {
+      await dropResolvedTargets(targets, normalizedDestination);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Same creation path as an OS file drop, but for paths already resolved by
+   * the inline machine explorer / Everything search. */
+  async function dropResolvedTargets(targets, destination) {
+    const normalizedDestination = scopedDestination(destination);
+    if (!scopeAllowsDestination(normalizedDestination)) return;
+    try {
+      const before = store.getSnapshot();
+      const next = createDroppedShortcuts(before, targets, normalizedDestination);
+      if (next.shortcuts.length === before.shortcuts.length) {
         setStatus('Those shortcuts already exist here.');
         return;
       }
@@ -710,6 +723,7 @@ export function createWorkspaceCommands({
     releaseDraggedNodes,
     dropUrl,
     dropFiles,
+    dropResolvedTargets,
     selectedPasteDestinations,
     undo,
     redo,
