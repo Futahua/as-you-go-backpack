@@ -87,6 +87,7 @@ test('file capability panel source keeps destructive retargeting verification-bo
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('./public/app/file-capability-panel.js', import.meta.url), 'utf8');
   const css = await readFile(new URL('./public/styles/file-capability.css', import.meta.url), 'utf8');
+  const workspace = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   assert.match(source, /waitForPathState\(host, \{ present: expectedPath, absent: oldPath \}\)/);
   assert.match(source, /retargetShortcut\(\{[\s\S]*oldPath,[\s\S]*newPath: expectedPath/);
   assert.match(source, /fileCapability\('delete', \{ paths: \[target\] \}\)/);
@@ -114,6 +115,12 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /clearPreview\(\{ preserveBrowser: true \}\)/);
   assert.match(source, /host\.openNewSurface\(next\.toString\(\)\)/);
   assert.match(source, /FULL_PAGE_PREVIEW_STORAGE_PREFIX/);
+  assert.match(source, /workspaceTitle: documentRef\.title/);
+  assert.match(source, /workspaceIcon: documentRef\.head\.querySelector\('link\[data-papers-tab-icon\]'/);
+  assert.match(workspace, /function syncWorkspaceTabIdentity\(\)/);
+  assert.match(workspace, /title = current\?\.name \|\| scopedRoot\?\.name \|\| 'Workspace'/);
+  assert.match(workspace, /data-papers-tab-icon/);
+  assert.match(workspace, /FULL_PAGE_TAB_IDENTITY/);
   assert.match(source, /renderImagePreview\(source\)/);
   assert.match(source, /Zoom out/);
   assert.match(source, /Zoom in/);

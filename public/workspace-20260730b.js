@@ -560,6 +560,55 @@ function pathTo(groupId) {
   return [{ id: ROOT_ID, name: 'As you Go' }, ...result];
 }
 
+const FULL_PAGE_TAB_IDENTITY = (() => {
+  try {
+    const token = new URL(window.location.href).searchParams.get('papers-file-preview');
+    const raw = token ? window.localStorage.getItem('papers:file-preview:' + token) : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    const title = typeof parsed?.workspaceTitle === 'string' ? parsed.workspaceTitle.trim() : '';
+    const icon = typeof parsed?.workspaceIcon === 'string' ? parsed.workspaceIcon : '';
+    return title ? { title, icon } : null;
+  } catch {
+    return null;
+  }
+})();
+
+function generatedWorkspaceTabIcon(kind) {
+  const body = kind === 'root'
+    ? '<circle cx="16" cy="16" r="10" fill="none" stroke="#d8d1bf" stroke-width="3"/><path d="M16 4v12" stroke="#d8d1bf" stroke-width="3" stroke-linecap="round"/>'
+    : '<path d="M3 8h10l3 3h13v15H3z" fill="#b99d54"/><path d="M3 8h10l3 3h13" fill="none" stroke="#e5d391" stroke-width="2"/>';
+  return 'data:image/svg+xml;base64,' + btoa(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' + body + '</svg>',
+  );
+}
+
+function syncWorkspaceTabIdentity() {
+  if (WIDGET_SURFACE) return;
+  let title;
+  let icon;
+  if (FULL_PAGE_TAB_IDENTITY) {
+    ({ title, icon } = FULL_PAGE_TAB_IDENTITY);
+  } else if (session.binMode) {
+    title = 'Bin';
+    icon = generatedWorkspaceTabIcon('root');
+  } else {
+    const currentId = session.currentId ?? ROOT_ID;
+    const current = currentId === ROOT_ID ? null : group(currentId);
+    const scopedRoot = SCOPE_ROOT_ID ? group(SCOPE_ROOT_ID) : null;
+    title = current?.name || scopedRoot?.name || 'Workspace';
+    icon = current?.icon || scopedRoot?.icon || generatedWorkspaceTabIcon(current ? 'folder' : 'root');
+  }
+  if (document.title !== title) document.title = title;
+  let favicon = document.head.querySelector('link[data-papers-tab-icon]');
+  if (!favicon) {
+    favicon = document.createElement('link');
+    favicon.rel = 'icon';
+    favicon.setAttribute('data-papers-tab-icon', 'true');
+    document.head.append(favicon);
+  }
+  if (favicon.getAttribute('href') !== icon) favicon.setAttribute('href', icon);
+}
+
 /** Breadcrumb path while drilled into a folder inside the Bin — walks up
  * from groupId through its real (original) ancestor chain, stopping at
  * the first folder that isn't itself binned (its own placement in the
@@ -5536,6 +5585,7 @@ function applyBackdropOpacity(preferences) {
 function render() {
   applyTheme(state.view?.preferences);
   if (WIDGET_SURFACE) return; // 019C: the widget renders only its own card
+  syncWorkspaceTabIdentity();
   workspaceNavigator?.render();
   renderWindowLayoutPills();
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {

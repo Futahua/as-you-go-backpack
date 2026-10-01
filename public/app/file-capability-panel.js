@@ -1089,7 +1089,12 @@ export function createFileCapabilityPanel(options) {
     try {
       windowRef.localStorage.setItem(
         FULL_PAGE_PREVIEW_STORAGE_PREFIX + token,
-        JSON.stringify({ path: state.inspectedPath, name: itemTitle.textContent || basename(state.inspectedPath) }),
+        JSON.stringify({
+          path: state.inspectedPath,
+          name: itemTitle.textContent || basename(state.inspectedPath),
+          workspaceTitle: documentRef.title,
+          workspaceIcon: documentRef.head.querySelector('link[data-papers-tab-icon]')?.getAttribute('href') || null,
+        }),
       );
       const next = new URL(windowRef.location.href);
       next.searchParams.set(FULL_PAGE_PREVIEW_PARAM, token);
