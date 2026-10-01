@@ -93,6 +93,7 @@ import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
 import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-capability-panel.js';
+import { createWorkspaceNavigator } from './app/workspace-navigator.js';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { createWindowLayoutAutoTracking } from './app/window-layout-auto-tracking.js';
 import { openWindowLayoutPickerSession, toWindowLayoutPickerRows } from './app/window-layout-picker-session.js';
@@ -354,6 +355,7 @@ let suppressBlankClick = false;
 let suppressGraphClick = false;
 let zoomTimer = null;
 let fileCapabilityPanel = null;
+let workspaceNavigator = null;
 
 function setStatus(text = '', options) {
   statusToast.show(text, options);
@@ -5385,9 +5387,11 @@ function createGraphController() {
       // Assignment 003: the ancestors of the current folder join its item
       // list as ordinary bodies. The chain is the path TO here, so the
       // current folder's own entry is sliced off — at root it is empty.
-      session.binMode
-        ? pathToBin(session.binCurrentId === 'bin' ? null : session.binCurrentId).slice(0, -1)
-        : pathTo(session.currentId).slice(0, -1),
+      state.view?.preferences?.parentGraphVisible !== false
+        ? (session.binMode
+          ? pathToBin(session.binCurrentId === 'bin' ? null : session.binCurrentId).slice(0, -1)
+          : pathTo(session.currentId).slice(0, -1))
+        : [],
       trailExpanded,
       {
         rootScale: getBreadcrumbRootScale(state.view?.preferences),
@@ -5532,6 +5536,7 @@ function applyBackdropOpacity(preferences) {
 function render() {
   applyTheme(state.view?.preferences);
   if (WIDGET_SURFACE) return; // 019C: the widget renders only its own card
+  workspaceNavigator?.render();
   renderWindowLayoutPills();
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
@@ -5633,6 +5638,17 @@ windowLayoutPillTray?.addEventListener('click', (event) => {
 function selectedFileCapabilityContext() {
   const selectedIds = [...session.selected];
   if (selectedIds.length === 0) return { mode: 'empty', selectionCount: 0, items: [] };
+  if (selectedIds.length === 1) {
+    const selectedRecord = shortcutByRecordOrPlacementId(selectedIds[0]);
+    if (selectedRecord && isWebLink(selectedRecord)) {
+      return {
+        mode: 'web',
+        selectionCount: 1,
+        item: { shortcutId: selectedRecord.id, url: selectedRecord.target, name: selectedRecord.name },
+        items: [],
+      };
+    }
+  }
   const fileItems = selectedIds.flatMap((selectedId) => {
     const record = shortcutByRecordOrPlacementId(selectedId);
     if (!record || isWebLink(record) || !isAbsoluteWindowsPath(record.target)) return [];
@@ -5671,6 +5687,7 @@ function syncSelection() {
     ? '1 item selected'
     : `${session.selected.size} items selected`;
   syncFileCapabilitySelection();
+  void workspaceNavigator?.syncCanvasSelection(selectedFileCapabilityContext());
 }
 
 async function hydrateIcons() {
@@ -6638,7 +6655,86 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay' && EMBEDDED_SURFACE !== 
     },
   });
 }
-if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') syncFileCapabilitySelection();
+if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
+  const workspaceElement = document.querySelector('.workspace');
+  workspaceNavigator = createWorkspaceNavigator({
+    document,
+    host,
+    workspace: workspaceElement,
+    rootId: SCOPE_ROOT_ID || ROOT_ID,
+    getState: () => state,
+    getSession: () => session,
+    itemsIn,
+    isWebLink,
+    isAbsoluteWindowsPath,
+    selectAyG: (id, visibleIds) => commands.selectItem(id, {
+      shiftKey: false,
+      ctrlKey: false,
+      visibleItemIds: visibleIds,
+    }),
+    activateAyG: (id) => commands.activateItem(id, { revealDirectoryTarget: true }),
+    renameAyG: () => {
+      const onlyId = session.selected.size === 1 ? [...session.selected][0] : null;
+      if (!onlyId) return;
+      const chosen = shortcutByRecordOrPlacementId(onlyId);
+      if (chosen) return editorDialog.showEditor(isWebLink(chosen) ? 'web' : 'shortcut', chosen);
+      const folder = group(onlyId);
+      if (folder) return editorDialog.showEditor('group', folder);
+    },
+    copyAyG: () => commands.copySelection(),
+    cutAyG: () => commands.cutSelection(),
+    pasteAyG: (destination) => commands.pasteInto(destination),
+    deleteAyG: () => commands.moveSelectionToBin(),
+    clearCanvasForMachine: () => {
+      store.clearSelection();
+      commands.clearSetSelection();
+      store.setSelectionAnchor(null);
+      syncSelection();
+      saveWorkspaceView();
+    },
+    previewMachinePath: (path, name) => {
+      const selection = {
+        mode: 'single',
+        selectionCount: 1,
+        item: { shortcutId: null, path, name },
+        items: [{ shortcutId: null, path, name }],
+      };
+      if (EMBEDDED_SURFACE === 'proxima') {
+        window.parent.postMessage({ type: 'papers:proxima-preview-selection', selection }, embeddedParentOrigin());
+      } else {
+        void fileCapabilityPanel?.previewPath(path, name);
+      }
+    },
+    setStatus,
+  });
+  const parentGraphToggle = document.querySelector('#parent-graph-toggle');
+  const parentGraphVisible = () => state.view?.preferences?.parentGraphVisible !== false;
+  parentGraphToggle?.setAttribute('aria-pressed', String(parentGraphVisible()));
+  if (parentGraphToggle) parentGraphToggle.title = parentGraphVisible() ? 'Hide parent folders' : 'Show parent folders';
+  parentGraphToggle?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const nextVisible = !parentGraphVisible();
+    state = store.replace({
+      ...state,
+      view: {
+        ...(state.view ?? {}),
+        preferences: {
+          ...(state.view?.preferences ?? {}),
+          parentGraphVisible: nextVisible,
+        },
+      },
+    });
+    parentGraphToggle.setAttribute('aria-pressed', String(nextVisible));
+    parentGraphToggle.title = nextVisible ? 'Hide parent folders' : 'Show parent folders';
+    void saveWorkspaceView();
+    render();
+  });
+  workspaceNavigator.render();
+  syncFileCapabilitySelection();
+} else {
+  document.querySelector('#workspace-navigator')?.setAttribute('hidden', '');
+  document.querySelector('#parent-graph-toggle')?.setAttribute('hidden', '');
+}
 
 let activeSetRename = null;
 function beginSetRename() {

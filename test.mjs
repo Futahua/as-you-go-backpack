@@ -111,7 +111,7 @@ test('the stylesheet entry aggregates local files in a stable order', async () =
   const imports = [...entry.matchAll(/@import url\('\.\/styles\/([^']+)\.css'\);/g)]
     .map((match) => match[1]);
   const expected = [
-    'tokens', 'base', 'workspace', 'toolbar', 'items', 'file-capability', 'graph', 'quick-run',
+    'tokens', 'base', 'workspace', 'toolbar', 'items', 'file-capability', 'navigator', 'graph', 'quick-run',
     'context-menu', 'dialogs', 'utilities', 'responsive',
   ];
   assert.deepEqual(imports, expected, 'entry @imports must list every style file in order');

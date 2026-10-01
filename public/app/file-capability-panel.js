@@ -131,6 +131,7 @@ export function createFileCapabilityPanel(options) {
     resizing: false,
     context: null,
     inspectedPath: null,
+    inspectedUrl: null,
     searchTimer: null,
     searchGeneration: 0,
     inspectGeneration: 0,
@@ -144,6 +145,8 @@ export function createFileCapabilityPanel(options) {
     pdfPreviewClosePromise: Promise.resolve(),
     htmlPreviewSessionId: null,
     htmlPreviewObserver: null,
+    browserSessionId: null,
+    browserObserver: null,
     imagePreviewObserver: null,
     fullPage: Boolean(launchedPreview),
     lastPreviewResult: null,
@@ -350,10 +353,24 @@ export function createFileCapabilityPanel(options) {
     if (sessionId) void host.fileCapability('preview-html-close', { sessionId }).catch(() => {});
   }
 
-  function clearPreview() {
+  function closeBrowserPreview() {
+    state.browserObserver?.disconnect();
+    state.browserObserver = null;
+    const sessionId = state.browserSessionId;
+    state.browserSessionId = null;
+    if (sessionId) void host.fileCapability('browser-close', { sessionId }).catch(() => {});
+  }
+
+  function clearPreview({ preserveBrowser = false } = {}) {
     closeNativePreview();
     closePdfPreview();
     closeHtmlPreview();
+    if (preserveBrowser) {
+      state.browserObserver?.disconnect();
+      state.browserObserver = null;
+    } else {
+      closeBrowserPreview();
+    }
     state.imagePreviewObserver?.disconnect();
     state.imagePreviewObserver = null;
     releasePreviewResource();
@@ -362,6 +379,75 @@ export function createFileCapabilityPanel(options) {
       state.previewObjectUrl = null;
     }
     preview.replaceChildren();
+  }
+
+  async function startBrowserPreview(url) {
+    const generation = state.inspectGeneration;
+    const surface = documentRef.createElement('div');
+    surface.className = 'file-capability-native-preview file-capability-browser-preview';
+    preview.append(surface);
+    if (!state.expanded) {
+      surface.textContent = 'Expand the preview pane to use this link.';
+      return;
+    }
+    await nextLayoutTick();
+    if (generation !== state.inspectGeneration || state.inspectedUrl !== url) return;
+    const opened = await host.fileCapability('browser-open', {
+      url,
+      rect: nativePreviewRect(surface),
+    }).catch((error) => ({
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    if (generation !== state.inspectGeneration || state.inspectedUrl !== url) {
+      if (opened && opened.ok && typeof opened.sessionId === 'string') {
+        void host.fileCapability('browser-close', { sessionId: opened.sessionId }).catch(() => {});
+      }
+      return;
+    }
+    if (!opened || !opened.ok || typeof opened.sessionId !== 'string') {
+      surface.textContent = opened && (opened.message || opened.error)
+        ? (opened.message || opened.error)
+        : 'This link could not be opened in the viewer.';
+      return;
+    }
+    state.browserSessionId = opened.sessionId;
+    const move = () => {
+      if (!state.browserSessionId || !state.expanded) return;
+      void host.fileCapability('browser-move', {
+        sessionId: state.browserSessionId,
+        rect: nativePreviewRect(surface),
+      }).catch(() => {});
+    };
+    if (typeof ResizeObserver === 'function') {
+      state.browserObserver = new ResizeObserver(move);
+      state.browserObserver.observe(surface);
+    }
+    documentRef.defaultView?.addEventListener('resize', move, { passive: true, once: true });
+  }
+
+  function renderWebSelection(source) {
+    const url = typeof source?.url === 'string' ? source.url : '';
+    if (!/^https?:\/\//i.test(url)) {
+      renderEmptySelection(0);
+      return;
+    }
+    ++state.inspectGeneration;
+    state.context = null;
+    state.inspectedPath = null;
+    state.inspectedUrl = url;
+    state.lastPreviewResult = null;
+    disarmDelete();
+    renameRow.hidden = true;
+    itemTitle.textContent = source.name || url;
+    itemMeta.textContent = 'Web link';
+    pathText.textContent = url;
+    copyPathButton.hidden = false;
+    revealButton.hidden = true;
+    openTabButton.hidden = true;
+    actions.hidden = true;
+    clearPreview({ preserveBrowser: true });
+    void startBrowserPreview(url);
   }
 
   function renderImagePreview(source) {
@@ -832,6 +918,7 @@ export function createFileCapabilityPanel(options) {
     ++state.inspectGeneration;
     state.context = null;
     state.inspectedPath = null;
+    state.inspectedUrl = null;
     state.lastPreviewResult = null;
     disarmDelete();
     renameRow.hidden = true;
@@ -874,6 +961,7 @@ export function createFileCapabilityPanel(options) {
     if (!isAbsoluteWindowsPath(target)) return false;
     const generation = ++state.inspectGeneration;
     state.inspectedPath = target;
+    state.inspectedUrl = null;
     if (context !== undefined) state.context = context;
     disarmDelete();
     renameRow.hidden = true;
@@ -1043,8 +1131,9 @@ export function createFileCapabilityPanel(options) {
   });
 
   copyPathButton.addEventListener('click', () => {
-    if (!state.inspectedPath) return;
-    void host.copyText(state.inspectedPath)
+    const value = state.inspectedPath || state.inspectedUrl;
+    if (!value) return;
+    void host.copyText(value)
       .then(() => setStatus('Path copied.', { level: 'success' }))
       .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
   });
@@ -1171,6 +1260,10 @@ export function createFileCapabilityPanel(options) {
 
   function syncSelection(selection) {
     if (state.fullPage) return;
+    if (selection?.mode === 'web') {
+      renderWebSelection(selection.item);
+      return;
+    }
     if (selection?.mode === 'multiple') {
       renderMultipleSelection({
         selectionCount: selection.selectionCount,
@@ -1220,10 +1313,20 @@ export function createFileCapabilityPanel(options) {
         rect,
       }).catch(() => {});
     }
+    if (state.browserSessionId) {
+      void host.fileCapability('browser-move', {
+        sessionId: state.browserSessionId,
+        rect,
+      }).catch(() => {});
+    }
   }
 
   const api = Object.freeze({
     syncSelection,
+    previewPath(path, name = basename(path)) {
+      if (!isAbsoluteWindowsPath(path)) return false;
+      return inspectPath(path, { shortcutId: null, path, name });
+    },
     openSearch() {
       setExpanded(true);
     },

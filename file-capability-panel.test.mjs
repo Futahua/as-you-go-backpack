@@ -18,6 +18,8 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   const css = await readFile(new URL('./public/styles/file-capability.css', import.meta.url), 'utf8');
   const workspace = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const html = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
+  const navigator = await readFile(new URL('./public/app/workspace-navigator.js', import.meta.url), 'utf8');
+  const navigatorCss = await readFile(new URL('./public/styles/navigator.css', import.meta.url), 'utf8');
 
   assert.doesNotMatch(source, /setOpen\(/, 'selection must never open/reposition a panel during pointerdown');
   assert.doesNotMatch(source, /file-capability-launcher/, 'the old floating launcher is gone');
@@ -40,6 +42,18 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(html, /img-src 'self' data: blob: papers-file-preview: https: http:/);
   assert.match(html, /media-src papers-file-preview: blob:/);
   assert.match(html, /frame-src papers-file-preview: blob:/);
+  assert.match(html, /id="workspace-navigator"/);
+  assert.match(html, /id="parent-graph-toggle"/);
+  assert.match(navigator, /fileCapability\('list'/);
+  assert.match(navigator, /fileCapability\('copy'/);
+  assert.match(navigator, /fileCapability\('move'/);
+  assert.match(navigator, /fileCapability\('rename'/);
+  assert.match(navigator, /fileCapability\('delete'/);
+  assert.match(navigator, /clearCanvasForMachine/);
+  assert.match(navigator, /previewMachinePath/);
+  assert.match(navigatorCss, /\.workspace-navigator/);
+  assert.match(navigatorCss, /\.parent-graph-toggle/);
+  assert.match(workspace, /parentGraphVisible !== false/);
 });
 
 test('file capability panel source keeps destructive retargeting verification-bound', async () => {
@@ -67,6 +81,10 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /fileCapability\('preview-html-open'/);
   assert.match(source, /fileCapability\('preview-html-move'/);
   assert.match(source, /fileCapability\('preview-html-close'/);
+  assert.match(source, /fileCapability\('browser-open'/);
+  assert.match(source, /fileCapability\('browser-move'/);
+  assert.match(source, /fileCapability\('browser-close'/);
+  assert.match(source, /clearPreview\(\{ preserveBrowser: true \}\)/);
   assert.match(source, /host\.openNewSurface\(next\.toString\(\)\)/);
   assert.match(source, /FULL_PAGE_PREVIEW_STORAGE_PREFIX/);
   assert.match(source, /renderImagePreview\(source\)/);
