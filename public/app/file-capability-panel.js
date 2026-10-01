@@ -116,6 +116,8 @@ export function createFileCapabilityPanel(options) {
     previewResourceId: null,
     nativePreviewSessionId: null,
     nativePreviewObserver: null,
+    pdfPreviewSessionId: null,
+    pdfPreviewObserver: null,
     lastPreviewResult: null,
   };
 
@@ -285,8 +287,17 @@ export function createFileCapabilityPanel(options) {
     if (sessionId) void host.fileCapability('preview-native-close', { sessionId }).catch(() => {});
   }
 
+  function closePdfPreview() {
+    state.pdfPreviewObserver?.disconnect();
+    state.pdfPreviewObserver = null;
+    const sessionId = state.pdfPreviewSessionId;
+    state.pdfPreviewSessionId = null;
+    if (sessionId) void host.fileCapability('preview-pdf-close', { sessionId }).catch(() => {});
+  }
+
   function clearPreview() {
     closeNativePreview();
+    closePdfPreview();
     releasePreviewResource();
     if (state.previewObjectUrl) {
       URL.revokeObjectURL(state.previewObjectUrl);
@@ -393,6 +404,63 @@ export function createFileCapabilityPanel(options) {
     documentRef.defaultView?.addEventListener('resize', move, { passive: true, once: true });
   }
 
+  async function startPdfPreview(data) {
+    const target = state.inspectedPath;
+    const generation = state.inspectGeneration;
+    const resourceId = typeof data.resourceId === 'string' ? data.resourceId : null;
+    const surface = documentRef.createElement('div');
+    surface.className = 'file-capability-native-preview';
+    preview.append(surface);
+    if (!resourceId) {
+      surface.textContent = 'PDF preview resource is unavailable.';
+      return;
+    }
+    if (!state.expanded || !target) {
+      surface.textContent = 'Expand the preview pane to show the PDF.';
+      return;
+    }
+    await new Promise((resolve) => (documentRef.defaultView?.requestAnimationFrame ?? ((callback) => setTimeout(callback, 0)))(resolve));
+    if (generation !== state.inspectGeneration || state.inspectedPath !== target) {
+      releasePreviewResource(resourceId);
+      return;
+    }
+
+    if (state.previewResourceId === resourceId) state.previewResourceId = null;
+    const opened = await host.fileCapability('preview-pdf-open', {
+      resourceId,
+      rect: nativePreviewRect(surface),
+    }).catch((error) => {
+      releasePreviewResource(resourceId);
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    });
+    if (generation !== state.inspectGeneration || state.inspectedPath !== target) {
+      if (opened && opened.ok && typeof opened.sessionId === 'string') {
+        void host.fileCapability('preview-pdf-close', { sessionId: opened.sessionId }).catch(() => {});
+      } else {
+        releasePreviewResource(resourceId);
+      }
+      return;
+    }
+    if (!opened || !opened.ok || typeof opened.sessionId !== 'string') {
+      releasePreviewResource(resourceId);
+      surface.textContent = opened && opened.message ? opened.message : 'PDF preview could not be hosted.';
+      return;
+    }
+    state.pdfPreviewSessionId = opened.sessionId;
+    const move = () => {
+      if (!state.pdfPreviewSessionId || !state.expanded) return;
+      void host.fileCapability('preview-pdf-move', {
+        sessionId: state.pdfPreviewSessionId,
+        rect: nativePreviewRect(surface),
+      }).catch(() => {});
+    };
+    if (typeof ResizeObserver === 'function') {
+      state.pdfPreviewObserver = new ResizeObserver(move);
+      state.pdfPreviewObserver.observe(surface);
+    }
+    documentRef.defaultView?.addEventListener('resize', move, { passive: true, once: true });
+  }
+
   function renderPreview(result) {
     clearPreview();
     state.lastPreviewResult = result;
@@ -409,6 +477,10 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     if (typeof data.resourceId === 'string') state.previewResourceId = data.resourceId;
+    if (data.kind === 'hosted-pdf') {
+      void startPdfPreview(data);
+      return;
+    }
     if (data.kind === 'image') {
       const source = previewSource(data);
       if (source) {
@@ -655,8 +727,14 @@ export function createFileCapabilityPanel(options) {
   expandButton.addEventListener('click', () => {
     const next = !state.expanded;
     setExpanded(next);
-    if (!next) closeNativePreview();
+    if (!next) {
+      closeNativePreview();
+      closePdfPreview();
+    }
     else if (state.lastPreviewResult?.preview?.kind === 'windows-preview-handler') renderPreview(state.lastPreviewResult);
+    else if (state.lastPreviewResult?.preview?.kind === 'hosted-pdf' && state.inspectedPath) {
+      void inspectPath(state.inspectedPath, state.context);
+    }
   });
   resizer.addEventListener('pointerdown', (event) => {
     if (!state.expanded || event.button !== 0) return;

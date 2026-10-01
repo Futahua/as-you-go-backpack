@@ -59,6 +59,10 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /fileCapability\('preview-native-open'/);
   assert.match(source, /fileCapability\('preview-native-move'/);
   assert.match(source, /fileCapability\('preview-native-close'/);
+  assert.match(source, /data\.kind === 'hosted-pdf'/);
+  assert.match(source, /fileCapability\('preview-pdf-open'/);
+  assert.match(source, /fileCapability\('preview-pdf-move'/);
+  assert.match(source, /fileCapability\('preview-pdf-close'/);
   assert.match(source, /ResizeObserver/);
   assert.match(css, /\.file-capability-text-scroller/);
   assert.match(css, /\.file-capability-native-preview/);
