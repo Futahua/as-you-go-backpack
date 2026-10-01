@@ -74,6 +74,11 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
     'an empty AYG selection must not blank a preview currently owned by external-folder navigation',
   );
   assert.match(navigatorCss, /\.workspace-navigator/);
+  assert.doesNotMatch(
+    navigatorCss,
+    /\.workspace\.navigator-docked \.explorer\s*\{[^}]*left:/,
+    'the left navigator must overlay the workspace instead of shrinking/pushing the explorer frame',
+  );
   assert.match(navigatorCss, /workspace-navigator-effective-width/);
   assert.match(navigatorCss, /\.workspace-navigator-resizer/);
   assert.match(navigatorCss, /\.workspace-navigator\.collapsed/);
