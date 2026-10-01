@@ -141,6 +141,9 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /clearPreview\(\{ preserveBrowser: true \}\)/);
   assert.match(source, /host\.openNewSurface\(next\.toString\(\)\)/);
   assert.match(source, /FULL_PAGE_PREVIEW_STORAGE_PREFIX/);
+  assert.match(source, /fileCapability\('preview-launch-create', payload\)/);
+  assert.match(source, /fileCapability\('preview-launch-resolve', \{ token: launchToken \}\)/);
+  assert.match(source, /fullPage: Boolean\(launchedPreview \|\| launchToken\)/);
   assert.match(source, /workspaceTitle: documentRef\.title/);
   assert.match(source, /workspaceIcon: documentRef\.head\.querySelector\('link\[data-papers-tab-icon\]'/);
   assert.match(source, /fileCapability\('icon', \{ path: state\.inspectedPath \}\)/);

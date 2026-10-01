@@ -101,10 +101,12 @@ export function createFileCapabilityPanel(options) {
   const retargetShortcut = options.retargetShortcut || (async () => false);
   const windowRef = documentRef?.defaultView ?? null;
   let launchedPreview = null;
+  let launchToken = null;
   let embeddedSurface = null;
   try {
     const currentUrl = new URL(windowRef.location.href);
     const token = currentUrl.searchParams.get(FULL_PAGE_PREVIEW_PARAM);
+    launchToken = token;
     embeddedSurface = currentUrl.searchParams.get('papers-embedded-surface');
     const raw = token ? windowRef.localStorage.getItem(FULL_PAGE_PREVIEW_STORAGE_PREFIX + token) : null;
     const parsed = raw ? JSON.parse(raw) : null;
@@ -148,7 +150,7 @@ export function createFileCapabilityPanel(options) {
     browserSessionId: null,
     browserObserver: null,
     imagePreviewObserver: null,
-    fullPage: Boolean(launchedPreview),
+    fullPage: Boolean(launchedPreview || launchToken),
     lastPreviewResult: null,
   };
 
@@ -1083,21 +1085,21 @@ export function createFileCapabilityPanel(options) {
   });
   openTabButton.addEventListener('click', async () => {
     if (!state.inspectedPath || !windowRef || typeof host.openNewSurface !== 'function') return;
-    const token = typeof windowRef.crypto?.randomUUID === 'function'
-      ? windowRef.crypto.randomUUID()
-      : Date.now().toString(36) + Math.random().toString(36).slice(2);
     try {
       const iconResult = await host.fileCapability('icon', { path: state.inspectedPath }).catch(() => null);
-      windowRef.localStorage.setItem(
-        FULL_PAGE_PREVIEW_STORAGE_PREFIX + token,
-        JSON.stringify({
-          path: state.inspectedPath,
-          name: itemTitle.textContent || basename(state.inspectedPath),
-          previewIcon: iconResult?.ok && typeof iconResult.icon === 'string' ? iconResult.icon : null,
-          workspaceTitle: documentRef.title,
-          workspaceIcon: documentRef.head.querySelector('link[data-papers-tab-icon]')?.getAttribute('href') || null,
-        }),
-      );
+      const payload = {
+        path: state.inspectedPath,
+        name: itemTitle.textContent || basename(state.inspectedPath),
+        previewIcon: iconResult?.ok && typeof iconResult.icon === 'string' ? iconResult.icon : null,
+        workspaceTitle: documentRef.title,
+        workspaceIcon: documentRef.head.querySelector('link[data-papers-tab-icon]')?.getAttribute('href') || null,
+      };
+      const launch = await host.fileCapability('preview-launch-create', payload);
+      if (!launch?.ok || typeof launch.token !== 'string') throw new Error(launch?.message || 'Preview tab state could not be created.');
+      const token = launch.token;
+      try {
+        windowRef.localStorage.setItem(FULL_PAGE_PREVIEW_STORAGE_PREFIX + token, JSON.stringify(payload));
+      } catch { /* optional same-partition fallback only */ }
       const next = new URL(windowRef.location.href);
       next.searchParams.set(FULL_PAGE_PREVIEW_PARAM, token);
       void host.openNewSurface(next.toString()).catch((error) => {
@@ -1356,6 +1358,31 @@ export function createFileCapabilityPanel(options) {
     openTabButton.hidden = true;
     state.context = { shortcutId: null, path: launchedPreview.path, name: launchedPreview.name };
     queueMicrotask(() => void inspectPath(launchedPreview.path, state.context));
+  } else if (launchToken) {
+    setExpanded(true);
+    expandButton.hidden = true;
+    openTabButton.hidden = true;
+    queueMicrotask(async () => {
+      const resolved = await host.fileCapability('preview-launch-resolve', { token: launchToken });
+      if (!resolved?.ok || !isAbsoluteWindowsPath(resolved.path)) {
+        setStatus(resolved?.message || 'Preview launch state is unavailable.');
+        return;
+      }
+      const name = resolved.name || basename(resolved.path);
+      if (name) documentRef.title = name;
+      if (typeof resolved.previewIcon === 'string' && resolved.previewIcon) {
+        let favicon = documentRef.head.querySelector('link[data-papers-tab-icon]');
+        if (!favicon) {
+          favicon = documentRef.createElement('link');
+          favicon.rel = 'icon';
+          favicon.setAttribute('data-papers-tab-icon', 'true');
+          documentRef.head.append(favicon);
+        }
+        favicon.setAttribute('href', resolved.previewIcon);
+      }
+      state.context = { shortcutId: null, path: resolved.path, name };
+      await inspectPath(resolved.path, state.context);
+    });
   }
   return api;
 }
