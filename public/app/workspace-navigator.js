@@ -47,6 +47,7 @@ export function createWorkspaceNavigator(o) {
     searchResult: null,
     searchFilters: { name:'', path:'', type:'', size:'', modified:'' },
     searchSort: { key:null, direction:1 },
+    machineSort: { key:'name', direction:1 },
   };
   try {
     const savedWidthRaw = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-width');
@@ -415,6 +416,42 @@ export function createWorkspaceNavigator(o) {
     });
     return filtered;
   }
+  function machineSortValue(item, key) {
+    if (key === 'type') return searchTypeLabel(item).toLocaleLowerCase();
+    if (key === 'size') return Number.isFinite(item.size) ? item.size : -1;
+    if (key === 'modified') return Number.isFinite(item.modifiedAt) ? item.modifiedAt : -1;
+    return String(item.name || '').toLocaleLowerCase();
+  }
+  function sortedMachineItems(items) {
+    const { key, direction } = s.machineSort;
+    return [...(items || [])].sort((a, b) => {
+      if (a.kind === 'folder' && b.kind !== 'folder') return -1;
+      if (a.kind !== 'folder' && b.kind === 'folder') return 1;
+      const av = machineSortValue(a, key), bv = machineSortValue(b, key);
+      const compared = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      if (compared) return compared * direction;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+  }
+  function machineColumnHeader() {
+    const header=d.createElement('div'); header.className='workspace-navigator-machine-columns';
+    const iconSpacer=d.createElement('span'); iconSpacer.className='workspace-navigator-machine-column-icon';
+    header.append(iconSpacer);
+    for (const [key,label] of [['name','Name'],['type','Type'],['size','Size'],['modified','Date Modified']]) {
+      const sort=d.createElement('button'); sort.type='button'; sort.className='workspace-navigator-machine-sort';
+      sort.textContent=label+(s.machineSort.key===key?(s.machineSort.direction===1?' ↑':' ↓'):'');
+      sort.title=`Sort by ${label}`;
+      sort.addEventListener('click',()=>{
+        if(s.machineSort.key===key)s.machineSort.direction*=-1;
+        else s.machineSort={key,direction:1};
+        if(s.path)void loadMachine(s.path,false);
+      });
+      header.append(sort);
+    }
+    return header;
+  }
   function searchColumnHeader() {
     const header=d.createElement('div'); header.className='workspace-navigator-search-columns';
     const iconSpacer=d.createElement('span'); iconSpacer.className='workspace-navigator-search-column-icon';
@@ -456,6 +493,13 @@ export function createWorkspaceNavigator(o) {
     if(folder&&s.view==='tree'){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'▾':'▸';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
     const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x); hydrateMachineArt(art,x);
     const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name; row.append(lead,art,label);
+    if(!searchResult&&s.view==='nav'){
+      row.classList.add('machine-list-row');
+      const type=d.createElement('span'); type.className='workspace-navigator-machine-type'; type.textContent=searchTypeLabel(x);
+      const size=d.createElement('span'); size.className='workspace-navigator-machine-size'; size.textContent=x.kind==='folder'?'':formatSearchSize(x.size);
+      const modified=d.createElement('span'); modified.className='workspace-navigator-machine-modified'; modified.textContent=formatSearchDate(x.modifiedAt);
+      row.append(type,size,modified);
+    }
     if(searchResult){
       row.replaceChildren(art,label);
       const where=d.createElement('span'); where.className='workspace-navigator-search-path'; where.textContent=parentPath(x.path);
@@ -488,7 +532,23 @@ export function createWorkspaceNavigator(o) {
         }
         syncChrome();
       }
-      s.selected=x;o.clearCanvasForMachine();o.previewMachinePath(x.path,x.name);render();
+      s.selected=x;
+      body.querySelectorAll('.machine-row.selected').forEach((candidate)=>candidate.classList.remove('selected'));
+      row.classList.add('selected');
+      o.clearCanvasForMachine();
+      o.previewMachinePath(x.path,x.name);
+    });
+    row.addEventListener('dblclick',(e)=>{
+      if(e.button!==0)return;
+      e.preventDefault();e.stopPropagation();
+      if(folder){
+        clearSearch({renderNow:false});
+        setView('nav',false);
+        if(searchResult||s.mode!=='machine')void enterMachine(x.path,false);
+        else void loadMachine(x.path,true);
+      }else{
+        void o.host.fileCapability('open',{path:x.path});
+      }
     });
     row.addEventListener('contextmenu',(e)=>{
       if(!e.shiftKey||!folder)return;
@@ -543,10 +603,13 @@ export function createWorkspaceNavigator(o) {
     if (!result?.ok) { body.innerHTML = `<p class="workspace-navigator-empty">${result?.message || 'Could not list this folder.'}</p>`; return; }
     back.disabled=s.hi<=0; fwd.disabled=s.hi>=s.history.length-1; up.disabled=parentPath(path).toLowerCase()===path.toLowerCase();
     body.replaceChildren();
-    for (const x of (result.items || [])) {
-      body.append(machineRow(x));
-    }
-    if (!body.childElementCount) body.innerHTML='<p class="workspace-navigator-empty">This folder is empty.</p>';
+    const items=sortedMachineItems(result.items || []);
+    if(items.length){
+      body.append(machineColumnHeader());
+      const rows=d.createElement('div'); rows.className='workspace-navigator-machine-rows';
+      for (const x of items) rows.append(machineRow(x));
+      body.append(rows);
+    }else body.innerHTML='<p class="workspace-navigator-empty">This folder is empty.</p>';
   }
   async function enterMachine(path, fromGesture = false) {
     const changed = !s.path || !s.machineRoot || s.machineRoot.toLocaleLowerCase() !== path.toLocaleLowerCase();

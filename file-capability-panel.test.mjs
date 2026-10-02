@@ -59,6 +59,15 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /previewMachinePath/);
   assert.match(navigator, /workspace-navigator-view-toggle/);
   assert.match(navigator, /workspace-navigator-resizer/);
+  assert.match(navigator, /machineSort: \{ key:'name', direction:1 \}/);
+  assert.match(navigator, /function machineColumnHeader\(\)/);
+  assert.match(navigator, /\['name','Name'\],\['type','Type'\],\['size','Size'\],\['modified','Date Modified'\]/);
+  assert.match(navigator, /function sortedMachineItems\(items\)/);
+  assert.match(navigator, /a\.kind === 'folder' && b\.kind !== 'folder'/);
+  assert.match(navigator, /row\.addEventListener\('dblclick',[\s\S]*if\(folder\)[\s\S]*loadMachine\(x\.path,true\)/);
+  assert.match(navigator, /row\.addEventListener\('dblclick',[\s\S]*fileCapability\('open',\{path:x\.path\}\)/);
+  assert.match(navigatorCss, /\.workspace-navigator-machine-columns/);
+  assert.match(navigatorCss, /\.workspace-navigator-row\.machine-list-row/);
   assert.match(navigator, /fileCapability\('icon'/);
   assert.match(navigator, /fileCapability\('search',\{query:normalized,limit:1000\}\)/);
   assert.match(navigator, /searchResult\.total/);
