@@ -417,6 +417,14 @@ export function createFileCapabilityPanel(options) {
       }
       return;
     }
+    if (!state.expanded && opened && opened.ok && typeof opened.sessionId === 'string') {
+      state.browserSessionId = opened.sessionId;
+      void host.fileCapability('browser-visibility', {
+        sessionId: opened.sessionId,
+        visible: false,
+      }).catch(() => {});
+      return;
+    }
     if (!opened || !opened.ok || typeof opened.sessionId !== 'string') {
       surface.textContent = opened && (opened.message || opened.error)
         ? (opened.message || opened.error)
@@ -1237,6 +1245,12 @@ export function createFileCapabilityPanel(options) {
       closeNativePreview();
       closePdfPreview();
       closeHtmlPreview();
+      if (state.browserSessionId) {
+        void host.fileCapability('browser-visibility', {
+          sessionId: state.browserSessionId,
+          visible: false,
+        }).catch(() => {});
+      }
     }
     else if (state.lastPreviewResult?.preview?.kind === 'windows-preview-handler') renderPreview(state.lastPreviewResult);
     else if (['hosted-pdf', 'hosted-html'].includes(state.lastPreviewResult?.preview?.kind) && state.inspectedPath) {
