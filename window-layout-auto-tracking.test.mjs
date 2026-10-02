@@ -1,246 +1,292 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+import { createWindowLayoutAutoTracking } from './public/app/window-layout-auto-tracking.js';
 import {
-  createWindowLayoutAutoTracker,
-  windowLayoutTrackingTransitions,
-} from './public/app/window-layout-auto-tracking.js';
-import { createWorkspaceStore } from './public/app/workspace-store.js';
-import { createSurfaceCoordinator, SURFACE_ROLE } from './public/app/workspace-surface-coordinator.js';
+  createWindowLayout,
+  setWindowLayoutInstanceSuppressed,
+  setWindowLayoutTracking,
+} from './public/workspace-model-20260730b.js';
 
-const W = 'W0000000000000001';
+const INSTANCE = 'W0123456789abcdef';
+const descriptor = {
+  version: 1,
+  title: 'Notepad',
+  executableFingerprint: 'a'.repeat(64),
+  windowInstanceId: INSTANCE,
+};
 
-function state({ enabled = true, members = [], suppressed = [] } = {}) {
-  return { windowLayouts: [{
-    id: 'layout-a',
-    tracking: { enabled, suppressedInstanceIds: suppressed },
-    arrangement: { members },
-  }] };
+function stateWithAuto() {
+  const layoutState = createWindowLayout({ groups: [], shortcuts: [], windowLayouts: [] }, { name: 'Auto' });
+  const layout = layoutState.windowLayouts[0];
+  return { ...setWindowLayoutTracking(layoutState, layout.id, true), layoutId: layout.id };
 }
 
-function makeTracker(overrides = {}) {
-  let current = state();
-  let writer = true;
-  let readOnly = false;
-  let token = '1:0';
-  const calls = { read: 0, resolve: 0, observe: 0, commit: 0, persist: 0, cache: [], after: [] };
-  const tracker = createWindowLayoutAutoTracker({
-    getState: () => current,
-    isWriter: () => writer,
-    isReadOnly: () => readOnly,
-    getOperationToken: () => token,
-    readSnapshot: async () => {
-      calls.read += 1;
-      return { outcome: 'success', snapshot: { complete: false, windows: [{ windowInstanceId: W }] } };
+test('Auto lifecycle add resolves and observes a new exact window, then commits before publishing it', async () => {
+  let state = stateWithAuto();
+  const order = [];
+  const diagnostics = [];
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async (id) => {
+      order.push(`resolve:${id}`);
+      return { outcome: 'success', capability: { runtimeToken: 'ephemeral' }, descriptor };
     },
-    resolveWindowInstance: async (windowInstanceId) => {
-      calls.resolve += 1;
-      return { outcome: 'success', capability: { runtimeToken: 'cap-1' }, descriptor: { version: 1, title: 'Notepad', windowInstanceId } };
+    observeWindowCapability: async (capability) => {
+      order.push(`observe:${capability.runtimeToken}`);
+      return { outcome: 'success', observation: { bounds: { x: 4, y: 8, width: 640, height: 480 }, state: 'normal' } };
     },
-    observeWindowCapability: async () => {
-      calls.observe += 1;
-      return { outcome: 'success', observation: { bounds: { x: 1 }, state: 'normal' } };
-    },
-    addMember: (latest, layoutId, member) => ({
-      ...latest,
-      windowLayouts: latest.windowLayouts.map((layout) => layout.id === layoutId
-        ? { ...layout, arrangement: { ...layout.arrangement, members: [...layout.arrangement.members, member] } }
-        : layout),
-    }),
-    commitState: async (next) => {
-      calls.commit += 1;
-      current = next;
+    commit: async (next) => {
+      order.push('commit');
+      state = next;
       return true;
     },
-    persistState: async () => {
-      calls.persist += 1;
-      return true;
-    },
-    cacheCapability: (...args) => calls.cache.push(args),
-    afterCommit: async (layoutId) => calls.after.push(layoutId),
-    createMemberId: () => 'member-new',
-    ...overrides.dependencies,
+    createMemberId: () => 'member-1',
+    onCommitted: async ({ layoutId, capability }) => order.push(`publish:${layoutId}:${capability.runtimeToken}`),
+    onDiagnostic: (value) => diagnostics.push(value),
   });
-  return {
-    tracker,
-    calls,
-    getState: () => current,
-    setState: (next) => { current = next; },
-    setWriter: (next) => { writer = next; },
-    setReadOnly: (next) => { readOnly = next; },
-    setToken: (next) => { token = next; },
-  };
-}
 
-test('snapshot refresh uses identity snapshots only and accepts positive sightings from incomplete lists', async () => {
-  const h = makeTracker();
-  const result = await h.tracker.refresh();
-  assert.deepEqual(result, { outcome: 'success', added: 1 });
-  assert.equal(h.calls.read, 1);
-  assert.equal(h.calls.resolve, 1);
-  assert.equal(h.getState().windowLayouts[0].arrangement.members[0].descriptor.windowInstanceId, W);
-  assert.deepEqual(h.calls.cache, [['layout-a', 'member-new', { runtimeToken: 'cap-1' }]]);
+  const result = await auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE });
+  assert.equal(result.outcome, 'added');
+  const member = state.windowLayouts[0].arrangement.members[0];
+  assert.equal(member.id, 'member-1');
+  assert.deepEqual(member.descriptor, descriptor);
+  assert.deepEqual(member.bounds, { x: 4, y: 8, width: 640, height: 480 });
+  assert.equal(member.state, 'normal');
+  assert.deepEqual(order, [`resolve:${INSTANCE}`, 'observe:ephemeral', 'commit', `publish:${state.layoutId}:ephemeral`]);
+  assert.deepEqual(diagnostics, [
+    { stage: 'auto-add-resolve', outcome: 'success' },
+    { stage: 'auto-add-observe', outcome: 'success' },
+    { stage: 'auto-add-commit', outcome: 'success' },
+  ]);
+  assert.equal(JSON.stringify(state).includes('runtimeToken'), false, 'ephemeral host capability is never persisted');
 });
 
-test('automatic population refuses view surfaces even when optimistic document writes are allowed', async () => {
-  const h = makeTracker();
-  h.setWriter(false);
-  assert.deepEqual(await h.tracker.refresh(), { outcome: 'not-writer', added: 0 });
-  assert.equal(h.calls.read, 0);
-  assert.equal(h.calls.commit, 0);
+test('Auto binds a capability after the capability-free lifecycle probe, then adds the exact new window', async () => {
+  let state = stateWithAuto();
+  const order = [];
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async (id) => {
+      order.push(`probe:${id}`);
+      return { outcome: 'success', descriptor };
+    },
+    resolveWindowDescriptor: async (value) => {
+      order.push(`bind:${value.windowInstanceId}`);
+      return { outcome: 'success', capability: { runtimeToken: 'fresh-binding' }, descriptor: value };
+    },
+    observeWindowCapability: async (capability) => {
+      order.push(`observe:${capability.runtimeToken}`);
+      return { outcome: 'success', observation: { windowInstanceId: INSTANCE, bounds: { x: 1, y: 2, width: 300, height: 200 } } };
+    },
+    commit: async (next) => { order.push('commit'); state = next; return true; },
+    createMemberId: () => 'new-member',
+  });
+
+  const result = await auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE });
+  assert.equal(result.outcome, 'added');
+  assert.deepEqual(order, [
+    `probe:${INSTANCE}`, `bind:${INSTANCE}`, 'observe:fresh-binding', 'commit',
+  ]);
+  assert.equal(state.windowLayouts[0].arrangement.members[0].descriptor.windowInstanceId, INSTANCE);
 });
 
-test('an Auto-off transition during resolution invalidates the delayed addition', async () => {
-  let release;
-  const wait = new Promise((resolve) => { release = resolve; });
-  const h = makeTracker({ dependencies: { resolveWindowInstance: async (windowInstanceId) => {
-    await wait;
-    return { outcome: 'success', capability: { runtimeToken: 'cap-1' }, descriptor: { version: 1, title: 'Notepad', windowInstanceId } };
-  } } });
-  const pending = h.tracker.addVisibleInstance('layout-a', W);
-  await new Promise((resolve) => setImmediate(resolve));
-  h.setState(state({ enabled: false }));
-  h.setToken('1:1');
-  release();
-  assert.equal(await pending, false);
-  assert.equal(h.calls.commit, 0);
-  assert.deepEqual(h.calls.cache, []);
+test('Auto binds directly from the descriptor carried by a lifecycle open without a second existence probe', async () => {
+  let state = stateWithAuto();
+  let probeCalls = 0;
+  const order = [];
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async () => {
+      probeCalls += 1;
+      return { outcome: 'missing' };
+    },
+    resolveWindowDescriptor: async (value) => {
+      order.push(`bind:${value.windowInstanceId}`);
+      return { outcome: 'success', capability: { runtimeToken: 'event-binding' }, descriptor: value };
+    },
+    observeWindowCapability: async (capability) => {
+      order.push(`observe:${capability.runtimeToken}`);
+      return { outcome: 'success', observation: { windowInstanceId: INSTANCE, bounds: { x: 2, y: 3, width: 400, height: 300 } } };
+    },
+    commit: async (next) => { order.push('commit'); state = next; return true; },
+    createMemberId: () => 'event-member',
+  });
+
+  const result = await auto.addFromEvent({
+    kind: 'open',
+    windowInstanceId: INSTANCE,
+    descriptor,
+  });
+  assert.equal(result.outcome, 'added');
+  assert.equal(probeCalls, 0, 'the same-enumeration lifecycle descriptor bypasses the racy existence probe');
+  assert.deepEqual(order, [`bind:${INSTANCE}`, 'observe:event-binding', 'commit']);
+  assert.equal(state.windowLayouts[0].arrangement.members[0].descriptor.windowInstanceId, INSTANCE);
 });
 
-test('delayed observation rebases on current state instead of overwriting a concurrent edit', async () => {
-  let release;
-  const wait = new Promise((resolve) => { release = resolve; });
-  const h = makeTracker({ dependencies: { observeWindowCapability: async () => {
-    await wait;
-    return { outcome: 'success', observation: { state: 'normal' } };
-  } } });
-  const pending = h.tracker.addVisibleInstance('layout-a', W);
-  await new Promise((resolve) => setImmediate(resolve));
-  const withConcurrentEdit = state({ members: [{ id: 'peer-edit', descriptor: { title: 'Other' } }] });
-  h.setState(withConcurrentEdit);
-  release();
-  assert.equal(await pending, true);
-  assert.deepEqual(h.getState().windowLayouts[0].arrangement.members.map((member) => member.id), ['peer-edit', 'member-new']);
+test('Auto rejects a probe or fresh binding for a different instance', async () => {
+  let state = stateWithAuto();
+  let binds = 0;
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async () => ({ outcome: 'success', descriptor: { ...descriptor, windowInstanceId: 'Wffffffffffffffff' } }),
+    resolveWindowDescriptor: async () => { binds += 1; return { outcome: 'success', capability: {}, descriptor }; },
+    observeWindowCapability: async () => ({ outcome: 'success', observation: {} }),
+    commit: async (next) => { state = next; return true; },
+  });
+  assert.deepEqual(await auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE }), { outcome: 'unresolved' });
+  assert.equal(binds, 0, 'a mismatched event identity never gets rebound');
+  assert.equal(state.windowLayouts[0].arrangement.members.length, 0);
 });
 
-test('a transient exact-resolution failure is retried while the identity stays visible', async () => {
-  let attempts = 0;
-  const h = makeTracker({ dependencies: { resolveWindowInstance: async (windowInstanceId) => {
-    attempts += 1;
-    if (attempts === 1) return { outcome: 'timeout' };
-    return { outcome: 'success', capability: { runtimeToken: 'cap-1' }, descriptor: { version: 1, title: 'Notepad', windowInstanceId } };
-  } } });
-  assert.deepEqual(await h.tracker.refresh(), { outcome: 'success', added: 0 });
-  assert.deepEqual(await h.tracker.refresh(), { outcome: 'success', added: 1 });
-  assert.equal(attempts, 2);
-  assert.equal(h.calls.commit, 1);
+test('Auto rechecks its owner after host waits and will not add after the creator disables it', async () => {
+  let state = stateWithAuto();
+  let releaseResolve;
+  const resolved = new Promise((resolve) => { releaseResolve = resolve; });
+  let commits = 0;
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: () => resolved,
+    observeWindowCapability: async () => ({ outcome: 'success', observation: {} }),
+    commit: async (next) => { commits += 1; state = next; return true; },
+    createMemberId: () => 'member-1',
+  });
+  const pending = auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE });
+  state = setWindowLayoutTracking(state, state.layoutId, false);
+  releaseResolve({ outcome: 'success', capability: {}, descriptor });
+  assert.deepEqual(await pending, { outcome: 'disabled' });
+  assert.equal(commits, 0);
+  assert.equal(state.windowLayouts[0].arrangement.members.length, 0);
 });
 
-test('Auto membership retries after real store/coordinator CAS drops and preserves a peer edit', async () => {
+test('Auto skips suppressed and already present window instances', async () => {
+  let state = stateWithAuto();
+  state = setWindowLayoutInstanceSuppressed(state, state.layoutId, INSTANCE, true);
+  let resolveCalls = 0;
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async () => { resolveCalls += 1; return { outcome: 'success', capability: {}, descriptor }; },
+    observeWindowCapability: async () => ({ outcome: 'success', observation: {} }),
+    commit: async () => true,
+  });
+  assert.deepEqual(await auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE }), { outcome: 'suppressed' });
+  state = { ...state, windowLayouts: state.windowLayouts.map((layout) => ({ ...layout, tracking: { ...layout.tracking, suppressedInstanceIds: [] }, arrangement: { ...layout.arrangement, members: [{ id: 'existing', descriptor }] } })) };
+  assert.deepEqual(await auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE }), { outcome: 'duplicate' });
+  assert.equal(resolveCalls, 0);
+});
+
+test('Auto leaves durable membership untouched when persistence refuses the new member', async () => {
+  const state = stateWithAuto();
+  let published = false;
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async () => ({ outcome: 'success', capability: {}, descriptor }),
+    observeWindowCapability: async () => ({ outcome: 'success', observation: {} }),
+    commit: async () => false,
+    createMemberId: () => 'member-1',
+    onCommitted: () => { published = true; },
+  });
+  assert.deepEqual(await auto.addFromEvent({ kind: 'open', windowInstanceId: INSTANCE }), { outcome: 'persistence-failed' });
+  assert.equal(state.windowLayouts[0].arrangement.members.length, 0);
+  assert.equal(published, false);
+});
+
+test('the first complete baseline seeds pre-existing windows without adding them', async () => {
+  const state = stateWithAuto();
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async () => ({ outcome: 'success', capability: {}, descriptor }),
+    observeWindowCapability: async () => ({ outcome: 'success', observation: {} }),
+    commit: async () => true,
+  });
+  assert.deepEqual(await auto.acceptBaseline({
+    complete: true, trackerSessionId: 'session-1', sequence: 0,
+    windows: [{ windowInstanceId: INSTANCE }],
+  }), { outcome: 'seeded', events: [] });
+});
+
+test('a later complete baseline recovers only newly live windows and shares the lifecycle queue', async () => {
+  const newInstance = 'Wfedcba9876543210';
+  let state = stateWithAuto();
+  let commits = 0;
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => state,
+    resolveWindowInstance: async (id) => ({
+      outcome: 'success', capability: { id }, descriptor: { ...descriptor, windowInstanceId: id },
+    }),
+    observeWindowCapability: async () => ({ outcome: 'success', observation: {} }),
+    commit: async (next) => { commits += 1; state = next; return true; },
+    createMemberId: (() => { let id = 0; return () => `member-${++id}`; })(),
+  });
+  const seeded = await auto.acceptBaseline({
+    complete: true, trackerSessionId: 'session-1', sequence: 4,
+    windows: [{ windowInstanceId: INSTANCE }],
+  });
+  assert.deepEqual(seeded.events, []);
+  const recovered = await auto.acceptBaseline({
+    complete: true, trackerSessionId: 'session-2', sequence: 0,
+    windows: [{ windowInstanceId: INSTANCE }, { windowInstanceId: newInstance }],
+  });
+  assert.deepEqual(recovered.events, [{ kind: 'open', windowInstanceId: newInstance }]);
+
+  // The native push may report the same open while catch-up is being queued.
+  // The composition root serializes both sources through its one queue drain.
+  const queue = [...recovered.events, { kind: 'open', windowInstanceId: newInstance }];
+  while (queue.length) await auto.addFromEvent(queue.shift());
+  assert.equal(commits, 1);
+  assert.deepEqual(state.windowLayouts[0].arrangement.members.map((member) => member.descriptor.windowInstanceId), [newInstance]);
+  assert.deepEqual(await auto.acceptBaseline({
+    complete: true, trackerSessionId: 'session-2', sequence: 0,
+    windows: [{ windowInstanceId: INSTANCE }, { windowInstanceId: newInstance }],
+  }), { outcome: 'accepted', events: [] });
+});
+
+test('a failed durable baseline reconciliation leaves its open delta available for retry', async () => {
+  const recoveredInstance = 'Wfedcba9876543210';
+  const auto = createWindowLayoutAutoTracking({
+    getState: () => stateWithAuto(),
+    resolveWindowInstance: async () => ({ outcome: 'missing' }),
+    observeWindowCapability: async () => ({ outcome: 'missing' }),
+    commit: async () => false,
+  });
   const initial = {
-    schemaVersion: 1,
-    groups: [],
-    shortcuts: [],
-    windowLayouts: state().windowLayouts,
-    view: {},
+    complete: true, trackerSessionId: 'session-1', sequence: 2,
+    windows: [{ windowInstanceId: INSTANCE }],
   };
-  let live = structuredClone(initial);
-  let diskState = structuredClone(initial);
-  let revision = 'r0';
-  let revisionNumber = 0;
-  let raceWrites = true;
-  let racingWrites = 0;
-  const host = {
-    async loadVersioned() { return { state: structuredClone(diskState), revision }; },
-    async saveChecked(serialized, expectedRevision) {
-      if (raceWrites) {
-        racingWrites += 1;
-        diskState = { ...diskState, groups: [...diskState.groups, { id: `racer-${racingWrites}` }] };
-        revision = `r${++revisionNumber}`;
-      }
-      if (expectedRevision !== revision) return { ok: false, code: 'STALE_REVISION', revision };
-      diskState = JSON.parse(serialized);
-      revision = `r${++revisionNumber}`;
-      return { ok: true, revision };
-    },
-  };
-  const coordinator = createSurfaceCoordinator({
-    lock: { async request() { return { release() {} }; } },
-    channel: { postMessage() {}, addEventListener() {}, removeEventListener() {} },
-    host,
-    installDocument: (next) => { live = next; },
-    invalidatePendingSaves: () => null,
-    newClientId: () => 'auto-test-writer',
+  assert.deepEqual(await auto.acceptBaseline(initial, async () => false), {
+    outcome: 'reconciliation-failed', events: [],
   });
-  await coordinator.start();
-  let store;
-  const cache = [];
-  const tracker = createWindowLayoutAutoTracker({
-    getState: () => live,
-    isWriter: () => coordinator.role === SURFACE_ROLE.WRITER,
-    isReadOnly: () => false,
-    getOperationToken: () => 'writer-1',
-    readSnapshot: async () => ({
-      outcome: 'success',
-      snapshot: { complete: false, windows: [{ windowInstanceId: W }] },
-    }),
-    resolveWindowInstance: async (windowInstanceId) => ({
-      outcome: 'success',
-      capability: { runtimeToken: 'cap-1' },
-      descriptor: { version: 1, title: 'Notepad', windowInstanceId },
-    }),
-    observeWindowCapability: async () => ({ outcome: 'success', observation: { state: 'normal' } }),
-    addMember: (latest, layoutId, member) => ({
-      ...latest,
-      windowLayouts: latest.windowLayouts.map((layout) => layout.id === layoutId
-        ? { ...layout, arrangement: { ...layout.arrangement, members: [...layout.arrangement.members, member] } }
-        : layout),
-    }),
-    commitState: (next) => store.commit(next, {
-      saveMetadata: { rebaseAutomaticSave: true },
-      requireDurable: true,
-    }),
-    persistState: async (current) => {
-      const result = await store.save(current, { rebaseAutomaticSave: true });
-      return result?.ok === true && result.dropped !== true && result.superseded !== true;
-    },
-    cacheCapability: (...args) => cache.push(args),
-    afterCommit: async () => {},
-    createMemberId: () => 'auto-member-1',
-  });
-  store = createWorkspaceStore({
-    getState: () => live,
-    setState: (next) => { live = next; },
-    persist: (serialized, metadata) => coordinator.saveSerialized(serialized, metadata),
-    normalizeState: (next) => next,
+  assert.deepEqual(await auto.acceptBaseline(initial, async () => true), {
+    outcome: 'seeded', events: [],
   });
 
-  assert.equal(await tracker.addVisibleInstance('layout-a', W), false);
-  assert.equal(coordinator.role, SURFACE_ROLE.WRITER, 'bounded automatic CAS contention does not freeze the writer');
-  assert.ok(racingWrites >= 4, 'the initial CAS and bounded rebase retries all raced');
-  assert.equal(diskState.windowLayouts[0].arrangement.members.length, 0, 'the dropped membership was not durable');
-  assert.equal(live.windowLayouts[0].arrangement.members[0].id, 'auto-member-1', 'store commit installed the optimistic member');
-  assert.deepEqual(cache, [], 'a dropped member is not given a live capability');
-
-  raceWrites = false;
-  diskState = { ...diskState, groups: [...diskState.groups, { id: 'peer-edit' }] };
-  revision = `r${++revisionNumber}`;
-  assert.deepEqual(await tracker.refresh(), { outcome: 'success', added: 1 });
-  assert.ok(diskState.groups.some((group) => group.id === 'peer-edit'), 'retry rebases without losing the unrelated disk edit');
-  assert.equal(diskState.windowLayouts[0].arrangement.members[0].descriptor.windowInstanceId, W);
-  assert.equal(cache.length, 1, 'capability is cached only after the retried write is accepted');
-  coordinator.release();
+  const later = {
+    complete: true, trackerSessionId: 'session-2', sequence: 0,
+    windows: [{ windowInstanceId: INSTANCE }, { windowInstanceId: recoveredInstance }],
+  };
+  assert.deepEqual(await auto.acceptBaseline(later, async () => false), {
+    outcome: 'reconciliation-failed', events: [],
+  });
+  assert.deepEqual(await auto.acceptBaseline(later, async () => true), {
+    outcome: 'accepted', events: [{ kind: 'open', windowInstanceId: recoveredInstance }],
+  });
 });
 
-test('peer document installation reports Auto enable transitions for writer-side population', () => {
-  const previous = state({ enabled: false });
-  const next = state({ enabled: true });
-  assert.deepEqual(windowLayoutTrackingTransitions(previous, next), {
-    enabled: ['layout-a'],
-    disabled: [],
-  });
-  assert.deepEqual(windowLayoutTrackingTransitions(next, state({ enabled: false })), {
-    enabled: [],
-    disabled: ['layout-a'],
-  });
+test('workspace rebinds lifecycle probes and keeps one lifecycle queue drain active', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  assert.match(source, /resolveWindowDescriptor:\s*\(descriptor\)\s*=>\s*host\.resolveWindowDescriptor\(descriptor\)/);
+  assert.match(source, /while \(trackingEventQueue\.length > 0\)\s*\{\s*try\s*\{\s*await processTrackingLifecycleEvent/);
+  const processor = source.match(/async function processTrackingLifecycleEvent\(event\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+  assert.doesNotMatch(processor, /trackingEventInFlight\s*=/,
+    'the queue drain alone owns the in-flight lock while awaiting one event');
+  const baseline = source.match(/async function reconcileTrackingBaseline\(providedSnapshot = null\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+  assert.match(baseline, /acceptBaseline\(snapshot, async \(\) =>/);
+  assert.match(baseline, /if \(next !== before && !\(await store\.commit\(next\)\)\) return false;/);
+  assert.match(baseline, /for \(const event of accepted\.events\) trackingEventQueue\.push\(event\)/);
+  assert.match(baseline, /if \(accepted\.events\.length\) void drainTrackingLifecycleEvents\(\)/);
+  assert.ok(baseline.indexOf('await store.commit(next)') < baseline.indexOf('accepted.events'),
+    'lifecycle opens are queued only after the durable baseline reconciliation succeeds');
+  assert.doesNotMatch(baseline, /populateTrackingLayout\(/,
+    'startup and reconnect baselines must not bulk-add every already-live window');
 });

@@ -165,6 +165,31 @@ test('host bridge unwraps the target+icon shape used by target picking', async (
   });
 });
 
+test('host bridge routes the shared file capability and unwraps its typed result', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+
+  const promise = host.fileCapability('search', { query: 'draft', limit: 25 });
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:file-capability');
+  assert.equal(sent.operation, 'search');
+  assert.deepEqual(sent.params, { query: 'draft', limit: 25 });
+
+  const fileCapability = {
+    ok: true,
+    provider: 'everything',
+    total: 1,
+    results: [{ path: 'D:\\draft.txt', name: 'draft.txt', kind: 'file' }],
+  };
+  mock.dispatchMessage({
+    type: 'papers:host:result',
+    requestId: sent.requestId,
+    ok: true,
+    fileCapability,
+  });
+  assert.deepEqual(await promise, fileCapability);
+});
+
 test('host bridge sends dropped files flat and unwraps the returned targets array', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);
@@ -283,17 +308,18 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
     error: null,
   });
 
-  const picker = host.windowCandidatePicker(['W0000000000000001']);
+  const picker = host.windowCandidatePicker([], 'picker-1');
   const sentPicker = mock.parent.messages[2].message;
   assert.equal(sentPicker.type, 'papers:project:window-candidate-picker');
-  assert.deepEqual(sentPicker.currentWindowInstanceIds, ['W0000000000000001']);
+  assert.deepEqual(sentPicker.candidates, []);
+  assert.equal(sentPicker.pickerId, 'picker-1');
   mock.dispatchMessage({
     type: 'papers:host:result', requestId: sentPicker.requestId, ok: true,
     picker: { action: 'remove', candidateId: 'c1' },
   });
   assert.deepEqual(await picker, { action: 'remove', candidateId: 'c1' });
 
-  const directPicker = host.windowCandidatePicker(['W0000000000000001']);
+  const directPicker = host.windowCandidatePicker([{ id: 'c1', title: 'Window A', icon: null, current: false }], 'picker-2');
   const sentDirectPicker = mock.parent.messages[3].message;
   mock.dispatchMessage({
     type: 'papers:host:result', requestId: sentDirectPicker.requestId, ok: true,
@@ -301,8 +327,16 @@ test('host bridge window candidate methods post the enumerated protocol and unwr
   });
   assert.deepEqual(await directPicker, { action: 'direct-pick', candidateId: null });
 
+  const update = host.windowCandidatePickerUpdate([{ id: 'c1', title: 'Window A', icon: null, current: false }], 'picker-1');
+  const sentUpdate = mock.parent.messages[4].message;
+  assert.equal(sentUpdate.type, 'papers:project:window-candidate-picker-update');
+  assert.equal(sentUpdate.pickerId, 'picker-1');
+  assert.equal(sentUpdate.candidates[0].id, 'c1');
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sentUpdate.requestId, ok: true, outcome: 'success', delivery: 'applied' });
+  assert.deepEqual(await update, { outcome: 'success', delivery: 'applied' });
+
   const closePicker = host.windowCandidatePickerClose();
-  const sentClosePicker = mock.parent.messages[4].message;
+  const sentClosePicker = mock.parent.messages[5].message;
   assert.equal(sentClosePicker.type, 'papers:project:window-candidate-picker-close');
   mock.dispatchMessage({
     type: 'papers:host:result', requestId: sentClosePicker.requestId, ok: true,
@@ -337,6 +371,17 @@ test('host bridge surfaces bounded Quick Run host detail instead of a generic er
   await assert.rejects(promise, /Quick Run could not open from this widget/);
 });
 
+test('candidate picker update keeps typed buffered, stale, and failed receipts', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  for (const [outcome, delivery] of [['success', 'buffered'], ['stale', undefined], ['failed', undefined]]) {
+    const answer = host.windowCandidatePickerUpdate([], 'picker-1');
+    const request = mock.parent.messages.at(-1).message;
+    mock.dispatchMessage({ type: 'papers:host:result', requestId: request.requestId, ok: true, outcome, ...(delivery ? { delivery } : {}) });
+    assert.deepEqual(await answer, { outcome, ...(delivery ? { delivery } : {}) });
+  }
+});
+
 test('direct-pick begin has its own bounded startup timeout instead of the short RPC or human chooser timeout', async () => {
   const source = await readFile(new URL('./public/app/host/host-bridge.js', import.meta.url), 'utf8');
   assert.match(source, /const PICK_BEGIN_REQUEST_TIMEOUT_MS = 30 \* 1000;/,
@@ -347,7 +392,7 @@ test('direct-pick begin has its own bounded startup timeout instead of the short
     'direct-pick begin uses the dedicated bounded setup timeout');
   assert.match(
     source,
-    /windowCandidatePicker: \(currentWindowInstanceIds\) =>[\s\S]*?INTERACTIVE_REQUEST_TIMEOUT_MS/,
+    /windowCandidatePicker: \(candidates, pickerId\) =>[\s\S]*?INTERACTIVE_REQUEST_TIMEOUT_MS/,
     'the human-search chooser keeps its separate interactive timeout');
 });
 
@@ -548,6 +593,53 @@ test('host bridge window observation/control methods carry the capability and un
   });
   assert.deepEqual(await resolved, { outcome: 'missing', observation: null, error: 'no visible window matches' });
 
+});
+
+test('window layout diagnostics send only bounded stage and outcome enums', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const pending = host.windowLayoutDiagnostic({ stage: 'auto-add-resolve', outcome: 'success' });
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:window-diagnostic');
+  assert.deepEqual(Object.keys(sent).sort(), ['outcome', 'requestId', 'stage', 'type'].sort());
+  assert.equal(sent.stage, 'auto-add-resolve');
+  assert.equal(sent.outcome, 'success');
+  mock.dispatchMessage({ type: 'papers:host:result', requestId: sent.requestId, ok: true, outcome: 'success' });
+  assert.deepEqual(await pending, { outcome: 'success', observation: null, error: null });
+
+  assert.deepEqual(await host.windowLayoutDiagnostic({ stage: 'auto-add-resolve', outcome: 'title-secret' }), { outcome: 'skipped' });
+  assert.equal(mock.parent.messages.length, 1);
+});
+
+test('window candidates can explicitly request exact native window icons', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const pending = host.windowCandidates({ includeNativeIcons: true });
+  const request = mock.parent.messages[0].message;
+  assert.equal(request.type, 'papers:project:window-candidates');
+  assert.equal(request.includeNativeIcons, true);
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: request.requestId, ok: true,
+    outcome: 'success',
+    candidates: [{ id: 'cap-1', windowInstanceId: 'W0123456789abcdef', title: 'Notepad', icon: 'data:native-icon' }],
+  });
+  const result = await pending;
+  assert.equal(result.candidates[0].windowInstanceId, 'W0123456789abcdef');
+  assert.equal(result.candidates[0].icon, 'data:native-icon');
+});
+
+test('ending an application process is a separate exact-capability operation from closing one window', async () => {
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  const capability = { version: 1, runtimeToken: 'opaque-exact-instance' };
+  const pending = host.endProcessWindowCapability(capability);
+  const sent = mock.parent.messages[0].message;
+  assert.equal(sent.type, 'papers:project:window-end-process-capability');
+  assert.deepEqual(sent.capability, capability);
+  mock.dispatchMessage({
+    type: 'papers:host:result', requestId: sent.requestId, ok: true, outcome: 'success',
+  });
+  assert.deepEqual(await pending, { outcome: 'success', observation: null, error: null });
 });
 
 test('host bridge surfaces window capability failures as rejected outcomes, never as commands', async () => {

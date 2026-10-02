@@ -1,177 +1,195 @@
-const WINDOW_INSTANCE_ID = /^W[0-9a-f]{16}$/i;
+import { addWindowLayoutMember } from '../workspace-model-20260730b.js';
 
-/**
- * Owns automatic layout additions. Every asynchronous boundary rechecks the
- * elected writer and the latest layout so a delayed host response cannot
- * resurrect a disabled, suppressed, or already-added window.
- */
-export function createWindowLayoutAutoTracker({
+/** Add one host-confirmed window lifecycle event to the durable Auto owner.
+ * Host events are hints: exact instance resolution and a live observation must
+ * both succeed, then owner/duplicate/suppression state is checked again after
+ * the asynchronous calls before a commit is attempted. */
+export function createWindowLayoutAutoTracking({
   getState,
-  isWriter,
-  isReadOnly,
-  getOperationToken = () => null,
-  readSnapshot,
   resolveWindowInstance,
+  resolveWindowDescriptor,
   observeWindowCapability,
-  addMember,
-  commitState,
-  persistState = null,
-  cacheCapability,
-  afterCommit = () => {},
+  commit,
   createMemberId = () => crypto.randomUUID(),
+  onCommitted = () => {},
+  onDiagnostic = () => {},
 }) {
-  const inFlight = new Set();
-  const pendingDurability = new Map();
-
-  function currentTrackingLayout(layoutId, windowInstanceId) {
-    if (isReadOnly() || !isWriter()) return null;
-    const layout = (getState().windowLayouts ?? []).find((entry) => entry.id === layoutId);
-    if (!layout || layout.tracking?.enabled !== true) return null;
-    if ((layout.tracking?.suppressedInstanceIds ?? []).includes(windowInstanceId)) return null;
-    return layout;
+  if (typeof getState !== 'function'
+    || typeof resolveWindowInstance !== 'function'
+    || typeof observeWindowCapability !== 'function'
+    || typeof commit !== 'function') {
+    throw new TypeError('Auto tracking requires state, resolver, observer and durable commit adapters');
   }
 
-  function existingMember(layout, windowInstanceId) {
-    return (layout?.arrangement?.members ?? []).find((member) =>
-      member.descriptor?.windowInstanceId === windowInstanceId) ?? null;
+  // The first complete lifecycle snapshot after this surface starts is only
+  // a seed. It describes windows that may have existed before Auto was enabled.
+  // Later complete snapshots can safely recover opens missed during a watcher
+  // restart or subscription gap by diffing against the last accepted snapshot.
+  let baselineSessionId = null;
+  let baselineSequence = null;
+  let baselineInstanceIds = null;
+
+  async function acceptBaseline(snapshot, reconcile = async () => true) {
+    if (!snapshot || snapshot.complete !== true
+      || typeof snapshot.trackerSessionId !== 'string'
+      || !Array.isArray(snapshot.windows)) return { outcome: 'incomplete', events: [] };
+    const sequence = Number(snapshot.sequence);
+    const isStale = () => baselineInstanceIds && snapshot.trackerSessionId === baselineSessionId
+      && Number.isSafeInteger(sequence) && Number.isSafeInteger(baselineSequence)
+      && sequence < baselineSequence;
+    if (isStale()) return { outcome: 'stale', events: [] };
+    const live = new Set(snapshot.windows.map((entry) => entry?.windowInstanceId)
+      .filter((id) => typeof id === 'string' && /^W[0-9a-f]{16}$/i.test(id)));
+    const first = baselineInstanceIds === null;
+    const events = first ? [] : [...live]
+      .filter((id) => !baselineInstanceIds.has(id))
+      .map((windowInstanceId) => ({ kind: 'open', windowInstanceId }));
+    let reconciled = false;
+    try { reconciled = await reconcile(snapshot) === true; } catch { /* retry from the next complete baseline */ }
+    if (!reconciled) return { outcome: 'reconciliation-failed', events: [] };
+    // Another complete baseline may have finished its durable reconciliation
+    // while this one was awaiting the writer. Do not roll the accepted set back.
+    if (isStale()) return { outcome: 'stale', events: [] };
+    baselineInstanceIds = live;
+    baselineSessionId = snapshot.trackerSessionId;
+    baselineSequence = Number.isSafeInteger(sequence) ? sequence : null;
+    return { outcome: first ? 'seeded' : 'accepted', events };
   }
 
-  async function retryPendingDurability(key, layoutId, windowInstanceId, pending, operationToken) {
-    const isCurrent = () => getOperationToken(layoutId) === operationToken
-      && currentTrackingLayout(layoutId, windowInstanceId);
-    const layout = isCurrent();
-    if (!layout || !persistState) {
-      pendingDurability.delete(key);
-      return false;
+  function report(stage, value) {
+    const outcome = value === 'success' ? 'success'
+      : value === 'ambiguous' ? 'ambiguous'
+        : value === 'timeout' ? 'timeout'
+          : value === 'helper-unavailable' || value === 'resolve-failed' ? 'helper-unavailable'
+            : value === 'missing' || value === 'unresolved' || value === 'invalid' ? 'missing'
+              : value === 'disabled' || value === 'duplicate' || value === 'suppressed' || value === 'skipped' ? 'skipped'
+                : 'failed';
+    try { void Promise.resolve(onDiagnostic({ stage, outcome })).catch(() => {}); } catch { /* diagnostic only */ }
+  }
+
+  async function addFromEvent(event) {
+    const instanceId = event?.windowInstanceId;
+    if (typeof instanceId !== 'string' || !/^W[0-9a-f]{16}$/i.test(instanceId)) {
+      report('auto-add-resolve', 'invalid');
+      return { outcome: 'invalid' };
     }
-    const member = existingMember(layout, windowInstanceId);
-    if (!member || member.id !== pending.member.id) {
-      pendingDurability.delete(key);
-      return false;
+    const initialLayout = (getState().windowLayouts ?? []).find((layout) => layout.tracking?.enabled === true);
+    if (!initialLayout) { report('auto-add-resolve', 'disabled'); return { outcome: 'disabled' }; }
+    if ((initialLayout.arrangement?.members ?? []).some((member) => member.descriptor?.windowInstanceId === instanceId)) {
+      report('auto-add-resolve', 'duplicate');
+      return { outcome: 'duplicate' };
     }
-    try {
-      const persisted = await persistState(getState());
-      if (persisted !== true || !isCurrent()) return false;
-      const stillPresent = existingMember(currentTrackingLayout(layoutId, windowInstanceId), windowInstanceId);
-      if (!stillPresent || stillPresent.id !== pending.member.id) {
-        pendingDurability.delete(key);
-        return false;
+    if (initialLayout.tracking?.suppressedInstanceIds?.includes(instanceId)) {
+      report('auto-add-resolve', 'suppressed');
+      return { outcome: 'suppressed' };
+    }
+
+    // A live lifecycle OPEN now carries the persisted-safe descriptor captured
+    // by the SAME native enumeration that discovered the window. Bind from that
+    // identity directly. Asking a second existence question first races the
+    // event against a later task-list snapshot; a transient omission can answer
+    // `missing` and prevent the exact bind path from ever running.
+    let resolved = null;
+    const lifecycleDescriptor = event?.descriptor;
+    if (lifecycleDescriptor?.version === 1
+      && lifecycleDescriptor.windowInstanceId === instanceId
+      && typeof resolveWindowDescriptor === 'function') {
+      try {
+        resolved = await resolveWindowDescriptor(lifecycleDescriptor);
+      } catch {
+        report('auto-add-resolve', 'helper-unavailable');
+        return { outcome: 'resolve-failed' };
       }
-      pendingDurability.delete(key);
-      cacheCapability(layoutId, member.id, pending.capability);
-      await afterCommit(layoutId);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async function addVisibleInstance(layoutId, windowInstanceId) {
-    if (typeof windowInstanceId !== 'string' || !WINDOW_INSTANCE_ID.test(windowInstanceId)) return false;
-    const key = `${layoutId}\u0000${windowInstanceId}`;
-    const operationToken = getOperationToken(layoutId);
-    const isCurrent = () => getOperationToken(layoutId) === operationToken
-      && currentTrackingLayout(layoutId, windowInstanceId);
-    if (inFlight.has(key)) return false;
-    const initialLayout = isCurrent();
-    if (!initialLayout) {
-      pendingDurability.delete(key);
-      return false;
-    }
-    const pending = pendingDurability.get(key);
-    if (pending) {
-      inFlight.add(key);
-      try { return await retryPendingDurability(key, layoutId, windowInstanceId, pending, operationToken); }
-      finally { inFlight.delete(key); }
-    }
-    if (existingMember(initialLayout, windowInstanceId)) return false;
-    inFlight.add(key);
-    try {
-      const resolved = await resolveWindowInstance(windowInstanceId);
-      if (!isCurrent()
-        || resolved?.outcome !== 'success' || !resolved.capability || !resolved.descriptor
-        || resolved.descriptor.windowInstanceId !== windowInstanceId) return false;
-
-      const observed = await observeWindowCapability(resolved.capability);
-      if (!isCurrent() || observed?.outcome !== 'success') return false;
-
-      const member = {
-        id: createMemberId(),
-        descriptor: resolved.descriptor,
-        bounds: observed.observation?.bounds ?? null,
-        state: observed.observation?.state === 'minimized' ? 'minimized' : 'normal',
-      };
-      // Rebase on the latest state at commit time; never commit a snapshot
-      // captured before the helper awaits above.
-      const current = isCurrent();
-      if (!current || existingMember(current, windowInstanceId)) return false;
-      const next = addMember(getState(), layoutId, member);
-      if (!next) return false;
-      if (await commitState(next) !== true) {
-        const liveMember = existingMember(currentTrackingLayout(layoutId, windowInstanceId), windowInstanceId);
-        if (liveMember?.id === member.id) {
-          pendingDurability.set(key, { member, capability: resolved.capability });
-        }
-        return false;
+    } else {
+      // Compatibility/recovery path for older hosts and baseline-diff events,
+      // which carry only a WID. The existence probe supplies the descriptor;
+      // capability-free probes are then rebound through the exact host path.
+      let probe;
+      try {
+        probe = await resolveWindowInstance(instanceId);
+      } catch {
+        report('auto-add-resolve', 'helper-unavailable');
+        return { outcome: 'resolve-failed' };
       }
-      cacheCapability(layoutId, member.id, resolved.capability);
-      await afterCommit(layoutId);
-      return true;
-    } catch {
-      // A later identity snapshot retries failed resolution/observation.
-      return false;
-    } finally {
-      inFlight.delete(key);
+      if (probe?.outcome !== 'success' || !probe.descriptor
+        || probe.descriptor.windowInstanceId !== instanceId) {
+        report('auto-add-resolve', probe?.outcome && probe.outcome !== 'success' ? probe.outcome : 'missing');
+        return { outcome: 'unresolved' };
+      }
+      resolved = probe;
     }
-  }
-
-  async function refresh(layoutId = null) {
-    if (isReadOnly() || !isWriter()) return { outcome: 'not-writer', added: 0 };
-    const authorityToken = getOperationToken(null);
-    let response;
-    try {
-      response = await readSnapshot();
-    } catch {
-      return { outcome: 'unavailable', added: 0 };
-    }
-    if (isReadOnly() || !isWriter() || getOperationToken(null) !== authorityToken) {
-      return { outcome: 'not-writer', added: 0 };
-    }
-    const snapshot = response?.snapshot;
-    if (response?.outcome !== 'success' || !Array.isArray(snapshot?.windows)) {
-      return { outcome: 'unavailable', added: 0 };
-    }
-
-    const layouts = (getState().windowLayouts ?? [])
-      .filter((entry) => entry.tracking?.enabled === true && (layoutId === null || entry.id === layoutId));
-    const identities = [...new Set(snapshot.windows
-      .map((entry) => entry?.windowInstanceId)
-      .filter((id) => typeof id === 'string' && WINDOW_INSTANCE_ID.test(id)))];
-    let added = 0;
-    for (const layout of layouts) {
-      for (const windowInstanceId of identities) {
-        if (await addVisibleInstance(layout.id, windowInstanceId)) added += 1;
+    if (!resolved?.capability) {
+      if (typeof resolveWindowDescriptor !== 'function') {
+        report('auto-add-resolve', 'missing');
+        return { outcome: 'unresolved' };
+      }
+      try {
+        resolved = await resolveWindowDescriptor(resolved.descriptor);
+      } catch {
+        report('auto-add-resolve', 'helper-unavailable');
+        return { outcome: 'resolve-failed' };
       }
     }
-    return { outcome: 'success', added };
+    if (resolved?.outcome !== 'success' || !resolved.capability || !resolved.descriptor
+      || resolved.descriptor.windowInstanceId !== instanceId) {
+      report('auto-add-resolve', resolved?.outcome && resolved.outcome !== 'success' ? resolved.outcome : 'missing');
+      return { outcome: 'unresolved' };
+    }
+    report('auto-add-resolve', 'success');
+    let observed;
+    try {
+      observed = await observeWindowCapability(resolved.capability);
+    } catch {
+      report('auto-add-observe', 'helper-unavailable');
+      return { outcome: 'unobserved' };
+    }
+    if (observed?.outcome !== 'success') {
+      report('auto-add-observe', observed?.outcome ?? 'failed');
+      return { outcome: 'unobserved' };
+    }
+    if (typeof observed.observation?.windowInstanceId === 'string'
+      && observed.observation.windowInstanceId !== instanceId) {
+      report('auto-add-observe', 'missing');
+      return { outcome: 'unobserved' };
+    }
+    report('auto-add-observe', 'success');
+
+    const currentState = getState();
+    const currentLayout = (currentState.windowLayouts ?? []).find((layout) =>
+      layout.id === initialLayout.id && layout.tracking?.enabled === true);
+    if (!currentLayout) { report('auto-add-commit', 'skipped'); return { outcome: 'disabled' }; }
+    if ((currentLayout.arrangement?.members ?? []).some((member) => member.descriptor?.windowInstanceId === instanceId)) {
+      report('auto-add-commit', 'skipped');
+      return { outcome: 'duplicate' };
+    }
+    if (currentLayout.tracking?.suppressedInstanceIds?.includes(instanceId)) {
+      report('auto-add-commit', 'skipped');
+      return { outcome: 'suppressed' };
+    }
+
+    const member = {
+      id: createMemberId(),
+      descriptor: resolved.descriptor,
+      bounds: observed.observation?.bounds ?? event.observation?.bounds ?? null,
+      state: observed.observation?.state === 'minimized' ? 'minimized' : 'normal',
+    };
+    const nextState = addWindowLayoutMember(currentState, currentLayout.id, member);
+    if (nextState === currentState) { report('auto-add-commit', 'skipped'); return { outcome: 'duplicate' }; }
+    try {
+      if (!(await commit(nextState))) { report('auto-add-commit', 'failed'); return { outcome: 'persistence-failed' }; }
+    } catch {
+      report('auto-add-commit', 'failed');
+      return { outcome: 'persistence-failed' };
+    }
+    report('auto-add-commit', 'success');
+    try {
+      await onCommitted({ layoutId: currentLayout.id, member, capability: resolved.capability });
+    } catch {
+      // Membership is already durable; notification failures cannot turn an
+      // added member into a failed result or prevent later lifecycle events.
+    }
+    return { outcome: 'added', layoutId: currentLayout.id, member };
   }
 
-  return { addVisibleInstance, refresh };
-}
-
-/** Reports Auto transitions when the elected writer installs a peer document. */
-export function windowLayoutTrackingTransitions(previousState, nextState) {
-  const previous = new Map((previousState?.windowLayouts ?? []).map((layout) => [layout.id, layout.tracking?.enabled === true]));
-  const next = new Map((nextState?.windowLayouts ?? []).map((layout) => [layout.id, layout.tracking?.enabled === true]));
-  const enabled = [];
-  const disabled = [];
-  for (const [layoutId, isEnabled] of next) {
-    const wasEnabled = previous.get(layoutId) === true;
-    if (isEnabled && !wasEnabled) enabled.push(layoutId);
-    else if (!isEnabled && wasEnabled) disabled.push(layoutId);
-  }
-  for (const [layoutId, wasEnabled] of previous) {
-    if (wasEnabled && !next.has(layoutId)) disabled.push(layoutId);
-  }
-  return { enabled, disabled };
+  return { addFromEvent, acceptBaseline };
 }

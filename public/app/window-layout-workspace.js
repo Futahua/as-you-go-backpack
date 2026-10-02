@@ -33,27 +33,105 @@ function validWindowInstanceId(value) {
   return typeof value === 'string' && /^W[0-9a-f]{16}$/i.test(value);
 }
 
-/** Match the strongest identity the host actually supplied.
- *
- * Newer Papers helpers attach one opaque, persistable windowInstanceId to a
- * bound descriptor. When it is present, falling back to title+executable would
- * confuse two sibling windows from the same executable with the same title.
- * Legacy descriptors have no instance id, so only those use the older pair.
- */
-function sameWindowDescriptorIdentity(memberDescriptor, pickedDescriptor) {
-  if (!isPlainObject(memberDescriptor) || !isPlainObject(pickedDescriptor)) return false;
-  if (validWindowInstanceId(pickedDescriptor.windowInstanceId)) {
-    return memberDescriptor.windowInstanceId === pickedDescriptor.windowInstanceId;
+function validExecutableFingerprint(value) {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/i.test(value);
+}
+
+/** Compare descriptors across identity generations.
+ * Exact ids decide when both exist. For a mixed WID/legacy pair, a shared
+ * executable fingerprint stays ambiguous across title changes; differing
+ * valid fingerprints allow an add. Papers defines this fingerprint as a hash
+ * of the normalized process image path, so this bridge relies on stable path
+ * reporting across observations. It does not identify file contents or a
+ * process. Missing or malformed fingerprints remain ambiguous. Both-legacy
+ * matching retains the title+fingerprint pair. */
+function windowDescriptorIdentityRelation(memberDescriptor, pickedDescriptor) {
+  if (!isPlainObject(memberDescriptor) || !isPlainObject(pickedDescriptor)) return 'different';
+  const memberHasInstanceIdentity = memberDescriptor.windowInstanceId !== undefined;
+  const pickedHasInstanceIdentity = pickedDescriptor.windowInstanceId !== undefined;
+  const memberHasValidInstanceIdentity = validWindowInstanceId(memberDescriptor.windowInstanceId);
+  const pickedHasValidInstanceIdentity = validWindowInstanceId(pickedDescriptor.windowInstanceId);
+  if (memberHasInstanceIdentity || pickedHasInstanceIdentity) {
+    if ((memberHasInstanceIdentity && !memberHasValidInstanceIdentity)
+      || (pickedHasInstanceIdentity && !pickedHasValidInstanceIdentity)) return 'ambiguous';
+    if (memberHasValidInstanceIdentity && pickedHasValidInstanceIdentity) {
+      return memberDescriptor.windowInstanceId === pickedDescriptor.windowInstanceId ? 'same' : 'different';
+    }
+    const executableIdentityAvailable = validExecutableFingerprint(memberDescriptor.executableFingerprint)
+      && validExecutableFingerprint(pickedDescriptor.executableFingerprint);
+    if (executableIdentityAvailable
+      && memberDescriptor.executableFingerprint !== pickedDescriptor.executableFingerprint) return 'different';
+    return 'ambiguous';
   }
-  return memberDescriptor.title === pickedDescriptor.title
+  const executableIdentityAvailable = validExecutableFingerprint(memberDescriptor.executableFingerprint)
+    && validExecutableFingerprint(pickedDescriptor.executableFingerprint);
+  const executableMatches = executableIdentityAvailable
     && memberDescriptor.executableFingerprint === pickedDescriptor.executableFingerprint;
+  const pairMatches = typeof memberDescriptor.title === 'string'
+    && typeof pickedDescriptor.title === 'string'
+    && executableMatches
+    && memberDescriptor.title === pickedDescriptor.title;
+  return pairMatches ? 'same' : 'different';
+}
+
+export function windowLayoutHasValidInstanceId(value) {
+  return isPlainObject(value) && validWindowInstanceId(value.windowInstanceId);
+}
+
+/** The native Direct Pick seed keeps exact instance ids when available so the
+ * host can distinguish same-title siblings. Legacy descriptors still collapse
+ * by title and executable fingerprint; malformed present ids fail closed
+ * rather than being silently downgraded to that weaker identity. */
+export function windowLayoutPickMemberDescriptors(members) {
+  const unique = new Map();
+  for (const member of Array.isArray(members) ? members : []) {
+    const descriptor = member?.descriptor ?? member;
+    if (!isPlainObject(descriptor) || descriptor.version !== 1
+      || typeof descriptor.title !== 'string'
+      || typeof descriptor.executableFingerprint !== 'string') continue;
+    const hasInstanceId = descriptor.windowInstanceId !== undefined;
+    if (hasInstanceId && !validWindowInstanceId(descriptor.windowInstanceId)) return null;
+    const identity = hasInstanceId
+      ? `window:${descriptor.windowInstanceId}`
+      : `legacy:${descriptor.executableFingerprint}|${descriptor.title}`;
+    if (!unique.has(identity)) {
+      unique.set(identity, {
+        version: 1,
+        title: descriptor.title,
+        executableFingerprint: descriptor.executableFingerprint,
+        ...(hasInstanceId ? { windowInstanceId: descriptor.windowInstanceId } : {}),
+      });
+    }
+  }
+  return [...unique.values()];
+}
+
+/** Candidate rows have an exact host-observed identity, but no persisted
+ * executable fingerprint. Only an exact, valid instance id can establish
+ * current membership before binding; title-only matching can confuse sibling
+ * windows and retitled members. Duplicate persisted ids still count as current
+ * here, while the commit applier refuses their ambiguous removal. */
+export function windowLayoutCandidateIsMember(members, candidate) {
+  if (!windowLayoutHasValidInstanceId(candidate)) return false;
+  return (Array.isArray(members) ? members : []).some((member) =>
+    windowDescriptorIdentityRelation(member?.descriptor, candidate) === 'same');
 }
 
 export function windowLayoutPickForBoundCandidate(members, bound, candidate = null) {
   if (!isPlainObject(bound) || !isPlainObject(bound.descriptor)) return null;
   const descriptor = bound.descriptor;
   const current = Array.isArray(members) ? members : [];
-  const isMember = current.some((member) => sameWindowDescriptorIdentity(member?.descriptor, descriptor));
+  if (descriptor.windowInstanceId !== undefined && !validWindowInstanceId(descriptor.windowInstanceId)) return null;
+  if (descriptor.windowInstanceId === undefined
+    && !validExecutableFingerprint(descriptor.executableFingerprint)) return null;
+  if (isPlainObject(candidate) && candidate.windowInstanceId !== undefined
+    && (!validWindowInstanceId(candidate.windowInstanceId)
+      || !validWindowInstanceId(descriptor.windowInstanceId)
+      || candidate.windowInstanceId !== descriptor.windowInstanceId)) return null;
+  const relations = current.map((member) =>
+    windowDescriptorIdentityRelation(member?.descriptor, descriptor));
+  if (relations.includes('ambiguous')) return null;
+  const isMember = relations.includes('same');
   return isMember
     ? { outcome: 'committed', adds: [], removes: [{ descriptor }] }
     : { outcome: 'committed', adds: [{ descriptor, capability: bound.capability, candidate }], removes: [] };
@@ -80,6 +158,7 @@ export function createWindowLayoutPickApplier({
   model,
   capabilities,
   icons,
+  iconCacheEntry = (_member, icon) => icon,
   isReadOnly = () => false,
   memberKey = windowLayoutMemberKey,
 }) {
@@ -95,14 +174,15 @@ export function createWindowLayoutPickApplier({
    * on its session-token path. Returning every match is what lets the caller refuse rather than take whichever
    * happened to come first in the layout.
    */
-  function membersMatchingDescriptor(next, layoutId, descriptor) {
+  function membersForDescriptor(next, layoutId, descriptor) {
     if (!isPlainObject(descriptor)) return [];
-    if (!validWindowInstanceId(descriptor.windowInstanceId)
-      && (typeof descriptor.executableFingerprint !== 'string' || typeof descriptor.title !== 'string')) return [];
+    if (descriptor.windowInstanceId !== undefined && !validWindowInstanceId(descriptor.windowInstanceId)) return [];
+    if (descriptor.windowInstanceId === undefined
+      && (!validExecutableFingerprint(descriptor.executableFingerprint) || typeof descriptor.title !== 'string')) return [];
     return (next.windowLayouts ?? [])
       .find((layout) => layout.id === layoutId)
       ?.arrangement?.members
-      ?.filter((member) => sameWindowDescriptorIdentity(member?.descriptor, descriptor)) ?? [];
+      ?.map((member) => ({ member, relation: windowDescriptorIdentityRelation(member?.descriptor, descriptor) })) ?? [];
   }
   async function apply(layoutId, result) {
     if (!isPlainObject(result) || result.outcome === 'cancelled') return { outcome: 'cancelled' };
@@ -132,6 +212,12 @@ export function createWindowLayoutPickApplier({
         failures += 1;
         continue;
       }
+      if ((add.descriptor.windowInstanceId !== undefined && !validWindowInstanceId(add.descriptor.windowInstanceId))
+        || (add.descriptor.windowInstanceId === undefined
+          && !validExecutableFingerprint(add.descriptor.executableFingerprint))) {
+        failures += 1;
+        continue;
+      }
       let observed;
       try {
         observed = await observeCapability(add.capability);
@@ -157,7 +243,12 @@ export function createWindowLayoutPickApplier({
     const baseState = getState();
     let next = baseState;
     for (const remove of removes) {
-      const matches = membersMatchingDescriptor(next, layoutId, remove?.descriptor);
+      const classified = membersForDescriptor(next, layoutId, remove?.descriptor);
+      if (classified.some((entry) => entry.relation === 'ambiguous')) {
+        ambiguous += 1;
+        continue;
+      }
+      const matches = classified.filter((entry) => entry.relation === 'same').map((entry) => entry.member);
       if (matches.length === 0) {
         // No member carries this descriptor: the window was retitled, or it is not in this layout at all.
         // Removing nothing is the only safe answer - the pick cannot name a member it did not match.
@@ -171,16 +262,28 @@ export function createWindowLayoutPickApplier({
         continue;
       }
       const existing = matches[0];
-      next = model.removeWindowLayoutMember(next, layoutId, existing.id);
+      next = model.removeWindowLayoutMember(next, layoutId, existing.id, { source: 'pick-remove', reason: 'the pick asked for this window to be removed' });
       capabilityDeletes.add(memberKey(layoutId, existing.id));
       iconDeletes.add(memberKey(layoutId, existing.id));
       removed += 1;
     }
     for (const { member, capability, icon } of stagedAdds) {
+      const existingMembers = (next.windowLayouts ?? [])
+        .find((layout) => layout.id === layoutId)
+        ?.arrangement?.members ?? [];
+      const relations = existingMembers.map((existing) =>
+        windowDescriptorIdentityRelation(existing?.descriptor, member.descriptor));
+      if (relations.includes('ambiguous')) {
+        // State may have gained a same-title/executable member of another
+        // identity generation while this add was observing its capability.
+        // Refuse that plausible alias after rebasing as well.
+        failures += 1;
+        continue;
+      }
       // A peer may have committed the same pick while our host observation
       // was pending. Treat that as idempotent rather than overwriting the
       // peer's newer member list or adding a duplicate.
-      if (membersMatchingDescriptor(next, layoutId, member.descriptor).length > 0) continue;
+      if (relations.includes('same')) continue;
       try {
         next = model.addWindowLayoutMember(next, layoutId, member);
       } catch {
@@ -188,7 +291,7 @@ export function createWindowLayoutPickApplier({
         continue;
       }
       capabilitySets.set(memberKey(layoutId, member.id), capability);
-      if (icon) iconSets.set(memberKey(layoutId, member.id), icon);
+      if (icon) iconSets.set(memberKey(layoutId, member.id), iconCacheEntry(member, icon));
       added += 1;
     }
     // 019DR2 transactional boundary: re-check read-only, THEN commit state and
@@ -295,7 +398,7 @@ export function createWindowLayoutRetirementWriter({
     const layout = getState().windowLayouts?.find((candidate) => candidate.id === layoutId);
     const member = layout?.arrangement?.members?.find((candidate) => candidate.id === memberId);
     if (!member) return { outcome: 'ignored' };
-    const next = model.removeWindowLayoutMember(getState(), layoutId, memberId);
+    const next = model.removeWindowLayoutMember(getState(), layoutId, memberId, { source: 'watcher-retire', reason: 'a retirement command removed this member' });
     capabilities?.delete(memberKey(layoutId, memberId));
     icons?.delete(memberKey(layoutId, memberId));
     if (next !== getState()) commitState(next);

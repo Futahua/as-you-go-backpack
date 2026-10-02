@@ -40,12 +40,16 @@ test('the local project owns its exact interface, pickup prompt and prepared act
     await access(action.target);
   }
 
-  // Security boundary: a Content-Security-Policy that forbids inline and
-  // remote scripts, and script/style references that stay local.
+  // Security boundary: scripts stay local and may never use unsafe-inline or
+  // unsafe-eval. Inline CSS remains allowed because Papers' own project CSP
+  // already permits it and nested srcdoc previews inherit the project CSP.
   const csp = html.match(/<meta http-equiv="Content-Security-Policy"[^>]*content="([^"]*)"/i);
   assert.ok(csp, 'a Content-Security-Policy meta tag is required');
   assert.match(csp[1], /script-src\s+'self'/i);
-  assert.doesNotMatch(csp[1], /'unsafe-inline'|'unsafe-eval'/i);
+  const scriptSrc = csp[1].split(';').map((part) => part.trim()).find((part) => part.startsWith('script-src ')) ?? '';
+  assert.doesNotMatch(scriptSrc, /'unsafe-inline'|'unsafe-eval'/i);
+  assert.doesNotMatch(csp[1], /'unsafe-eval'/i);
+  assert.match(csp[1], /style-src\s+'self'\s+'unsafe-inline'/i);
   assert.match(html, /<script type="module" src="workspace-20260730b\.js(\?build=[^"]+)?"><\/script>/);
   assert.match(html, /<link rel="stylesheet" href="workspace-20260730b\.css(\?build=[^"]+)?" \/>/);
   assert.doesNotMatch(html, /<(script|link)[^>]+(src|href)="https?:/i);
@@ -111,7 +115,7 @@ test('the stylesheet entry aggregates local files in a stable order', async () =
   const imports = [...entry.matchAll(/@import url\('\.\/styles\/([^']+)\.css'\);/g)]
     .map((match) => match[1]);
   const expected = [
-    'tokens', 'base', 'workspace', 'toolbar', 'items', 'graph', 'quick-run',
+    'tokens', 'base', 'workspace', 'toolbar', 'items', 'file-capability', 'navigator', 'graph', 'quick-run',
     'context-menu', 'dialogs', 'utilities', 'responsive',
   ];
   assert.deepEqual(imports, expected, 'entry @imports must list every style file in order');

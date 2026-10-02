@@ -7,20 +7,21 @@ function fakeNode() {
   return { hidden: true };
 }
 
-function createHarness({ binMode = false, initialState = null, membershipMode = null, activeElement = null, commandSurface = false } = {}) {
+function createHarness({ binMode = false, initialState = null, membershipMode = null, activeElement = null, commandSurface = false, beforeMount = null, afterMount = null } = {}) {
   const listeners = [];
-  const documentMock = {
-    activeElement,
-    addEventListener(type, handler, options) {
-      const entry = { type, handler, options };
-      listeners.push(entry);
-      if (options?.signal) {
-        options.signal.addEventListener('abort', () => {
-          const index = listeners.indexOf(entry);
-          if (index >= 0) listeners.splice(index, 1);
-        });
-      }
-    },
+  const documentMock = new EventTarget();
+  documentMock.activeElement = activeElement;
+  const addEventListener = documentMock.addEventListener.bind(documentMock);
+  documentMock.addEventListener = (type, handler, options) => {
+    const entry = { type, handler, options };
+    listeners.push(entry);
+    if (options?.signal) {
+      options.signal.addEventListener('abort', () => {
+        const index = listeners.indexOf(entry);
+        if (index >= 0) listeners.splice(index, 1);
+      });
+    }
+    addEventListener(type, handler, options);
   };
   const elements = {
     editorLayer: fakeNode(), confirmLayer: fakeNode(), linkEditLayer: fakeNode(), promptLayer: fakeNode(),
@@ -38,12 +39,12 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
   });
   const called = {
   quickRun: 0, quickRunSeeds: [],
-    close: 0, permanentDelete: 0, beginPicker: 0, beginRename: 0, pickerOpens: true, status: [],
+    close: 0, permanentDelete: 0, beginPicker: 0, beginRename: 0, pickerOpens: true, status: [], paneToggles: 0,
   };
   const commandSpies = {};
   for (const name of [
     'clearSelection', 'selectAllVisible', 'copySelection', 'cutSelection',
-    'pasteInto', 'undo', 'redo', 'moveSelectionToBin', 'revealSelection',
+    'pasteInto', 'pasteExternalClipboard', 'pasteClipboard', 'undo', 'redo', 'moveSelectionToBin', 'revealSelection',
     'activateItem', 'activateSelection', 'selectedPasteDestinations',
     'groupSelectionIntoSet', 'clearSetSelection', 'deleteSelectedSets',
   ]) {
@@ -69,9 +70,12 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     beginSetRename: () => { called.beginRename += 1; return true; },
     commandSurface,
     openQuickRun: (seed) => { called.quickRun += 1; called.quickRunSeeds.push(seed); return true; },
+    toggleSidePanes: () => { called.paneToggles += 1; return true; },
   });
+  beforeMount?.(documentMock);
   controller.mount();
-  return { controller, store, elements, commandSpies, called, listeners };
+  afterMount?.(documentMock);
+  return { controller, store, elements, commandSpies, called, listeners, document: documentMock };
 }
 
 function key(event) {
@@ -104,14 +108,38 @@ test('Ctrl+A selects all visible items', () => {
   assert.equal(h.commandSpies['selectAllVisible:calls'], 1);
 });
 
-test('Ctrl+C, Ctrl+X, Ctrl+V route to copy/cut/paste commands', () => {
+test('Ctrl+C and Ctrl+X stay internal while Ctrl+V defers to the paste event', () => {
   const h = createHarness();
-  h.listeners[0].handler(key({ key: 'c', ctrlKey: true }));
-  h.listeners[0].handler(key({ key: 'x', ctrlKey: true }));
-  h.listeners[0].handler(key({ key: 'v', ctrlKey: true }));
+  const keydown = h.listeners.find((entry) => entry.type === 'keydown');
+  keydown.handler(key({ key: 'c', ctrlKey: true }));
+  keydown.handler(key({ key: 'x', ctrlKey: true }));
+  keydown.handler(key({ key: 'v', ctrlKey: true }));
   assert.equal(h.commandSpies['copySelection:calls'], 1);
   assert.equal(h.commandSpies['cutSelection:calls'], 1);
-  assert.equal(h.commandSpies['pasteInto:calls'], 1);
+  assert.equal(h.commandSpies['pasteInto:calls'], 0);
+  assert.equal(h.commandSpies['pasteClipboard:calls'], 0);
+});
+
+test('paste event forwards browser clipboard files and text to clipboard arbitration', () => {
+  const h = createHarness();
+  let prevented = false;
+  const pastedFile = { name: 'drawing.rvt' };
+  const paste = h.listeners.find((entry) => entry.type === 'paste');
+  paste.handler({
+    defaultPrevented: false,
+    target: { matches: () => false },
+    clipboardData: {
+      files: [pastedFile],
+      getData: () => 'D:\\ignored-when-file-exists.txt',
+    },
+    preventDefault: () => { prevented = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(h.commandSpies['pasteClipboard:calls'], 1);
+  assert.deepEqual(h.commandSpies['pasteClipboard:args'][0], [
+    { files: [pastedFile], text: 'D:\\ignored-when-file-exists.txt' },
+    ['dest'],
+  ]);
 });
 
 test('Ctrl+Z and Ctrl+Y route to undo/redo', () => {
@@ -149,6 +177,23 @@ test('Ctrl+Enter reveals the selection', () => {
   h.store.setSelection(['a']);
   h.listeners[0].handler(key({ key: 'Enter', ctrlKey: true }));
   assert.equal(h.commandSpies['revealSelection:calls'], 1);
+});
+
+test('plain Tab toggles the paired Navigator and Preview panes only from workspace chrome', () => {
+  const h = createHarness();
+  let prevented = false;
+  const event = key({ key: 'Tab' });
+  event.preventDefault = () => { prevented = true; };
+  h.listeners[0].handler(event);
+  assert.equal(h.called.paneToggles, 1);
+  assert.equal(prevented, true);
+
+  const editing = createHarness({ activeElement: { matches: (selector) => selector.includes('input') } });
+  editing.listeners[0].handler(key({ key: 'Tab' }));
+  assert.equal(editing.called.paneToggles, 0, 'Tab remains native while an editable control owns focus');
+
+  h.listeners[0].handler(key({ key: 'Tab', shiftKey: true }));
+  assert.equal(h.called.paneToggles, 1, 'Shift+Tab remains native reverse focus');
 });
 
 test('Bin mode suppresses copy/cut/paste and destroys the listener', () => {
@@ -227,10 +272,16 @@ test('Ctrl+Shift+Z routes only to redo', () => {
   assert.equal(h.commandSpies['undo:calls'], 0);
 });
 
-test('Ctrl+V passes the selected paste destinations to pasteInto', () => {
+test('paste event passes selected destinations even when AYG has an internal clipboard', () => {
   const h = createHarness();
-  h.listeners[0].handler(key({ key: 'v', ctrlKey: true }));
-  assert.deepEqual(h.commandSpies['pasteInto:args'][0], [['dest']]);
+  h.store.setClipboard({ mode: 'copy', ids: ['a'], collapseWhole: new Set(), placementIds: new Map() });
+  h.listeners.find((entry) => entry.type === 'paste').handler({
+    defaultPrevented: false,
+    target: { matches: () => false },
+    clipboardData: { files: [], getData: () => '' },
+    preventDefault() {},
+  });
+  assert.deepEqual(h.commandSpies['pasteClipboard:args'][0], [{ files: [], text: '' }, ['dest']]);
 });
 
 // ===========================================================================
@@ -576,6 +627,47 @@ test('the two editable selectors are the shapes they claim to be', () => {
     assert.equal(TEXT_ENTRY_SELECTOR.includes(`[type="${excluded}"]`), true, `${excluded} is excluded`);
   }
   assert.equal(EDITABLE_SELECTOR, 'input, textarea, [contenteditable="true"], .set-name-editor', 'the wider guard is unchanged');
+});
+
+test('a claimed picker Delete keydown is not also dispatched as a workspace delete', () => {
+  let pickerCommits = 0;
+  let sameTargetListenerRanAfterPicker = false;
+  const h = createHarness({
+    beforeMount(document) {
+      // The picker listener is registered on the same document before the
+      // workspace controller. stopPropagation must not suppress later listeners
+      // on this target, so the controller must honor defaultPrevented itself.
+      document.addEventListener('keydown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        pickerCommits += 1;
+      });
+    },
+    afterMount(document) {
+      document.addEventListener('keydown', () => { sameTargetListenerRanAfterPicker = true; });
+    },
+  });
+  h.store.setSelection(['a']);
+  const event = new Event('keydown', { cancelable: true });
+  Object.defineProperties(event, {
+    key: { value: 'Delete' },
+    ctrlKey: { value: false },
+    shiftKey: { value: false },
+    altKey: { value: false },
+    metaKey: { value: false },
+    isComposing: { value: false },
+    keyCode: { value: 0 },
+    repeat: { value: false },
+  });
+
+  h.document.dispatchEvent(event);
+
+  assert.equal(pickerCommits, 1, 'picker owns the key once');
+  assert.equal(sameTargetListenerRanAfterPicker, true, 'stopPropagation does not stop same-document listeners');
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0);
+  assert.equal(h.called.permanentDelete, 0);
+  assert.equal(h.commandSpies['deleteSelectedSets:calls'], 0);
 });
 
 test('the global command surface does not let the host Alt+A keydown toggle Quick Run closed', () => {

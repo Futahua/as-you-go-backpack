@@ -83,7 +83,7 @@ export function createSetMembershipMode({
     if (!active) return;
     const sets = setsContaining(getSets(), itemId, ancestorsOf);
     if (sets.length === 0) {
-      setStatus('That item is in no set. Click an item inside the set you want.', { persistent: true });
+      setStatus('That item is in no set. Click an item inside the set you want.', { persistent: true, level: 'info' });
       return;
     }
     for (const set of sets) {
@@ -98,7 +98,7 @@ export function createSetMembershipMode({
     const mixedCount = mixedSetIds().length;
     const subject = itemIds.length === 1 ? '1 item' : `${itemIds.length} items`;
     if (chosenCount === 0 && mixedCount === 0) {
-      setStatus(`${subject}: no sets chosen — Enter removes them from every set, Escape cancels.`, { persistent: true });
+      setStatus(`${subject}: no sets chosen — Enter removes them from every set, Escape cancels.`, { persistent: true, level: 'info' });
       return;
     }
     const parts = [];
@@ -106,7 +106,7 @@ export function createSetMembershipMode({
     // Naming the partial sets matters: they are the ones Enter will leave
     // alone, which is not obvious from an outline that is neither lit nor dark.
     if (mixedCount > 0) parts.push(`${mixedCount} partly, left unchanged`);
-    setStatus(`${subject} ${parts.join(', ')} — Enter confirms, Escape cancels.`, { persistent: true });
+    setStatus(`${subject} ${parts.join(', ')} — Enter confirms, Escape cancels.`, { persistent: true, level: 'info' });
   }
 
   /** Enter: applies only the states the user actually changed. Setting every

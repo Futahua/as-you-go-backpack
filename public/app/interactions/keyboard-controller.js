@@ -49,12 +49,17 @@ export function createKeyboardController({
   // Quick Run (STAGE 5). The controller reports the chord and nothing more: opening the
   // surface is the entry file's job, so this stays inert until something passes a callback.
   openQuickRun = () => false,
+  toggleSidePanes = () => false,
 }) {
   let abortController = null;
 
   function mount() {
     abortController = new AbortController();
     document.addEventListener('keydown', (event) => {
+      // A picker can claim a keydown earlier on this same document. preventDefault
+      // does not stop other listeners on the target, and stopPropagation only
+      // affects later targets, so do not also route that key into the workspace.
+      if (event.defaultPrevented) return;
       // Alt+A is owned by the Papers host while this renderer is the global
       // command surface. The native accelerator opened this page and the
       // Quick Run surface is already visible; letting the same keydown reach
@@ -113,6 +118,17 @@ export function createKeyboardController({
         // sort, so a letter goes to type-to-run rather than nowhere. Measured in the host: with an opacity
         // slider focused, a letter did nothing at all before this line existed.
         if (!typingTarget) openOnTypedCharacter();
+        return;
+      }
+      if (
+        event.key === 'Tab'
+        && !event.shiftKey
+        && !event.ctrlKey
+        && !event.altKey
+        && !event.metaKey
+        && toggleSidePanes()
+      ) {
+        event.preventDefault();
         return;
       }
 
@@ -185,8 +201,6 @@ export function createKeyboardController({
         return;
       }
       if (matches('workspace.paste')) {
-        event.preventDefault();
-        commands.pasteInto(commands.selectedPasteDestinations());
         return;
       }
       if (matches('workspace.undo')) {
@@ -233,6 +247,28 @@ export function createKeyboardController({
       // so a key that a binding in force claims does its action and never types, by construction rather than
       // by a list kept in step by hand.
       openOnTypedCharacter();
+    }, { signal: abortController.signal });
+
+    document.addEventListener('paste', (event) => {
+      if (event.defaultPrevented || commandSurface) return;
+      const session = store.getSession();
+      if (session.binMode) return;
+      const modalOpen = !elements.editorLayer.hidden || !elements.confirmLayer.hidden
+        || !elements.linkEditLayer.hidden || !elements.promptLayer.hidden;
+      if (modalOpen || elements.quickRunLayer?.hidden === false) return;
+      const editingTarget = isOneOf(event.target, EDITABLE_SELECTOR)
+        || isOneOf(document.activeElement, EDITABLE_SELECTOR);
+      if (editingTarget) return;
+
+      const clipboardData = event.clipboardData;
+      const files = clipboardData ? [...clipboardData.files] : [];
+      const text = clipboardData?.getData?.('text/plain') ?? '';
+
+      event.preventDefault();
+      void commands.pasteClipboard(
+        { files, text },
+        commands.selectedPasteDestinations(),
+      );
     }, { signal: abortController.signal });
   }
 

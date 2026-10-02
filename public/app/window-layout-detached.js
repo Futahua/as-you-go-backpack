@@ -223,25 +223,106 @@ export function createWindowLayoutGroupActionRunner({ isReadOnly, host }) {
  * restoring follows the same saved-bounds + restore path used by the working
  * Restore all control, so the exact window is shown in front at its remembered
  * location. The caller serializes repeated clicks for one member. */
-export async function toggleWindowLayoutMemberVisibility({ host, capability, member, isReadOnly }) {
+export async function toggleWindowLayoutMemberVisibility({
+  host,
+  capability,
+  member,
+  isReadOnly,
+  resolveCapability = null,
+  isMemberCurrent = () => true,
+}) {
   const aborted = () => isReadOnly() ? 'superseded' : null;
-  if (aborted()) return { outcome: 'superseded' };
-  const observed = await host.observeWindowCapability(capability);
-  if (aborted()) return { outcome: 'superseded' };
-  if (observed.outcome !== 'success' || !observed.observation) return observed;
+  const stillCurrent = () => isMemberCurrent() === true;
+  if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
+  let activeCapability = capability;
+  let observed = null;
+  let observationFailed = false;
+  // ONE transaction decides and acts. The helper reads the live state and toggles
+  // inside a single request, returning the pre-mutation observation and the action
+  // it took. The old path observed here, carried the answer back across IPC,
+  // decided in the page and returned to mutate - two or three full round trips for
+  // one click - and Papers' observe also started a thumbnail capture on the
+  // click's own lane.
+  if (typeof host.toggleWindowCapability === 'function' && activeCapability) {
+    let toggled = null;
+    try {
+      toggled = await host.toggleWindowCapability(activeCapability);
+    } catch {
+      // The request may have reached the native helper before its response was
+      // lost. Never replay a visibility mutation with an unknown outcome.
+      return { outcome: 'uncertain' };
+    }
+    if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
+    if (toggled?.outcome !== 'success') return toggled ?? { outcome: 'failed' };
+    const tookAction = toggled.action === 'restore' ? 'restore' : 'minimize';
+    // Restoring is the only case that still needs a second request: the window is
+    // put back at its remembered rectangle. Minimizing is complete.
+    if (tookAction === 'restore' && member.bounds) {
+      let applied = null;
+      try {
+        applied = await host.applyWindowCapability(activeCapability, member.bounds);
+      } catch {
+        return { outcome: 'uncertain', action: tookAction };
+      }
+      if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
+      if (applied?.outcome !== 'success') return applied ?? { outcome: 'failed' };
+    }
+    return {
+      ...toggled,
+      action: tookAction,
+      observation: toggled.observation ?? null,
+    };
+  }
+  for (let attempt = 0; attempt < (typeof resolveCapability === 'function' ? 2 : 1); attempt += 1) {
+    if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
+    if (attempt > 0 || !activeCapability) {
+      try {
+        const resolved = await resolveCapability();
+        if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
+        if (resolved?.outcome !== 'success' || !resolved.capability) {
+          if (attempt === 0) continue;
+          return resolved ?? { outcome: 'failed' };
+        }
+        activeCapability = resolved.capability;
+      } catch {
+        if (attempt === 0) continue;
+        return { outcome: 'failed' };
+      }
+    }
+    try {
+      observed = await host.observeWindowCapability(activeCapability);
+    } catch {
+      observationFailed = true;
+      observed = null;
+    }
+    if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
+    if (observed?.outcome === 'success' && observed.observation) break;
+    observationFailed = true;
+    if (attempt > 0 || typeof resolveCapability !== 'function') return observed ?? { outcome: 'failed' };
+    activeCapability = null;
+  }
+  if (!observed?.observation || observed.outcome !== 'success') {
+    return observed ?? { outcome: observationFailed ? 'failed' : 'missing' };
+  }
   const action = observed.observation.state === 'minimized' ? 'restore' : 'minimize';
   let result;
-  if (action === 'restore') {
-    if (member.bounds) {
-      result = await host.applyWindowCapability(capability, member.bounds);
-      if (aborted()) return { outcome: 'superseded' };
-      if (result.outcome !== 'success') return result;
+  try {
+    if (action === 'restore') {
+      if (member.bounds) {
+        result = await host.applyWindowCapability(activeCapability, member.bounds);
+        if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
+        if (result.outcome !== 'success') return result;
+      }
+      result = await host.restoreWindowCapability(activeCapability);
+    } else {
+      result = await host.minimizeWindowCapability(activeCapability);
     }
-    result = await host.restoreWindowCapability(capability);
-  } else {
-    result = await host.minimizeWindowCapability(capability);
+  } catch {
+    // The request may have reached the native helper before its response was
+    // lost. Never replay a visibility mutation with an unknown outcome.
+    return { outcome: 'uncertain', action };
   }
-  if (aborted()) return { outcome: 'superseded' };
+  if (aborted() || !stillCurrent()) return { outcome: 'superseded' };
   return result.outcome === 'success'
     ? { ...result, observation: observed.observation, action }
     : result;

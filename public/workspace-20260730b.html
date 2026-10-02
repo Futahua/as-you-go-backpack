@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https: http:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: papers-file-preview: https: http:; media-src papers-file-preview: blob:; frame-src papers-file-preview: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>As you Go</title>
     <link rel="stylesheet" href="workspace-20260730b.css?build=widget-picker-silent-v1" />
@@ -56,6 +56,11 @@
       <div class="window-layout-pill-tray" id="window-layout-pills" aria-label="Docked window layouts"></div>
 
       <p class="status" id="status" role="status" aria-live="polite"></p>
+      <aside class="workspace-navigator" id="workspace-navigator" aria-label="Navigator"></aside>
+      <button class="parent-graph-toggle" id="parent-graph-toggle" type="button" aria-pressed="true" title="Show or hide parent folders">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5 10 10M10 10l5-5M10 10l5 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="5" cy="5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="15" cy="5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="15" cy="15" r="2.2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+        <span class="sr-only">Show or hide parent folders</span>
+      </button>
 
       <section class="explorer" id="explorer" aria-label="As you Go explorer">
         <div

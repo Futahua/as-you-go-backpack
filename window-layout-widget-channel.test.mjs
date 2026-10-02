@@ -457,6 +457,28 @@ test('windowLayoutWidgetParseCommand bounds the exact vocabulary', () => {
   assert.equal(windowLayoutWidgetParseCommand('command'), null);
 });
 
+test('clear-layout uses the normal revisioned command path and returns its committed empty snapshot', async () => {
+  const layouts = [makeLayout('L1', [{ id: 'm1', title: 'Notepad' }, { id: 'm2', title: 'Calculator' }])];
+  const { workspace, clientChannel, applied } = makeBus(layouts, (layoutId, command) => {
+    assert.equal(layoutId, 'L1');
+    assert.deepEqual(command, { kind: 'clear-layout' });
+    layouts[0].arrangement.members = [];
+    return { ok: true };
+  });
+  const received = [];
+  const client = createWindowLayoutWidgetChannelClient({ channel: clientChannel, layoutId: 'L1', onMessage: (message) => received.push(message) });
+  client.ready();
+  client.sendCommand({ kind: 'clear-layout' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(applied.length, 1);
+  const committed = received.find((message) => message.type === 'committed');
+  assert.ok(committed);
+  assert.equal(committed.commandKind, 'clear-layout');
+  assert.deepEqual(committed.snapshot.members, []);
+  workspace.close();
+  client.close();
+});
+
 test('committed responses carry the origin client id and a fresh snapshot', async () => {
   const layouts = [makeLayout('L1', [{ id: 'm1', title: 'Notepad' }])];
   const { workspace, clientChannel } = makeBus(layouts);
@@ -690,6 +712,7 @@ test('persisted runtime identity does not hide a real widget member', () => {
     version: 1,
     title: 'Papers',
     executableFingerprint: fingerprint('Papers'),
+    windowInstanceId: 'W0123456789abcdef',
   });
   assert.equal(snapshot.members[0].windowInstanceId, 'W0123456789abcdef');
 });

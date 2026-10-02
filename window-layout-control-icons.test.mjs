@@ -149,7 +149,7 @@ test('member markup: bottom indicator, accessible name, centered icon, no duplic
   assert.ok(html.includes('aria-label="Notepad"'), 'aria-label carries the full name');
   assert.ok(html.includes('aria-pressed="false"'), 'normal state is not pressed');
   assert.ok(html.includes('aria-selected="false"'), 'not selected by default');
-  assert.ok(html.includes('data-wl-member-state="normal"'), 'stable indicator identifier reflects the known state');
+  assert.ok(html.includes('data-wl-live-state="normal"'), 'stable indicator identifier reflects the known state');
   assert.ok(html.includes('<img class="window-layout-member-icon" src="data:icon"'), 'native artwork is an unfiltered img');
   assert.ok(html.includes('<span class="window-layout-member-state normal"'), 'the running indicator span is present');
   assert.ok(!/<span[^>]*class="[^"]*window-layout-member-label/.test(html), 'no text label inside the strip');
@@ -159,7 +159,7 @@ test('member markup: bottom indicator, accessible name, centered icon, no duplic
   assert.ok(minimized.includes('aria-pressed="true"'), 'minimized state is pressed');
   assert.ok(!minimized.includes('data-wl-member-state="minimized"'), 'minimized members omit the running indicator');
   assert.ok(minimized.includes('class="window-layout-member-icon placeholder"'), 'placeholder when no icon');
-  assert.ok(!minimized.includes('window-layout-member-state'), 'minimized members have no running bar');
+  assert.ok(minimized.includes('class="window-layout-member-state minimized"'), 'the bar exists but is hidden by its own state class');
 });
 
 test('member state is independent and fails closed for unknown values', () => {
@@ -171,7 +171,7 @@ test('member state is independent and fails closed for unknown values', () => {
   const normal = windowLayoutMemberMarkup('L1', { id: 'normal', descriptor: { title: 'Open' }, state: 'normal' });
   const minimized = windowLayoutMemberMarkup('L1', { id: 'min', descriptor: { title: 'Minimized' }, state: 'minimized' });
   assert.equal((normal.match(/window-layout-member-state/g) ?? []).length, 1, 'normal gets one marker');
-  assert.equal(minimized.includes('window-layout-member-state'), false, 'minimized gets no marker at all');
+  assert.equal((minimized.match(/window-layout-member-state/g) ?? []).length, 1, 'minimized keeps exactly one marker, painted unknown/minimized rather than removed');
 });
 
 test('member markup handles missing descriptors without throwing', () => {
@@ -187,4 +187,14 @@ test('035: a placeholder member is the same compact button, marked inert (disabl
   assert.ok(html.includes('data-wl-member="m1"'), 'same stable identity for parity');
   const live = windowLayoutMemberMarkup('L1', member, 'data:icon');
   assert.ok(!live.includes(' disabled'), 'a live member is never disabled');
+});
+
+test('member warning notes stay out of accessible and hover names while title and state remain', () => {
+  const html = windowLayoutMemberMarkup('L1', {
+    id: 'm1', descriptor: { title: 'Notepad' }, state: 'normal',
+  }, null, false, 'This window could not be confirmed');
+  assert.match(html, /aria-label="Notepad"/, 'the custom hover popover and screen reader keep the title');
+  assert.match(html, /class="window-layout-member normal"/, 'the running state remains identified');
+  assert.doesNotMatch(html, /could not be confirmed|data-wl-member-note|wl-member-unconfirmed/,
+    'the warning is not rendered or exposed through hover metadata');
 });

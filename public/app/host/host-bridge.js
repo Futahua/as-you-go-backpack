@@ -26,6 +26,8 @@ export function createHostBridge(window) {
   // Keep it bounded, but do not let the ordinary quick-RPC timeout make a
   // still-open list silently reject after 15 seconds.
   const INTERACTIVE_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+  const FILE_PREVIEW_REQUEST_TIMEOUT_MS = 45 * 1000;
+  const FILE_MUTATION_REQUEST_TIMEOUT_MS = 30 * 1000;
   const pickListeners = new Set();
   const detachListeners = new Set();
   // The launcher overlay's invocation (the creator's "Alt+A anywhere", host side). A push, like the detach
@@ -35,6 +37,9 @@ export function createHostBridge(window) {
   const widgetQuickRunSealListeners = new Set();
   const lifecycleListeners = new Set();
   const lifecycleBaselineListeners = new Set();
+  const windowControlListeners = new Set();
+  const windowControlShiftListeners = new Set();
+  const windowControlUnavailableListeners = new Set();
 
   function parentOrigin() {
     try {
@@ -108,6 +113,20 @@ export function createHostBridge(window) {
       for (const listener of lifecycleBaselineListeners) listener(event.data.baseline);
       return;
     }
+    if (event.data?.type === 'papers:project:window-control-event') {
+      for (const listener of windowControlListeners) listener(event.data.event);
+      return;
+    }
+    if (event.data?.type === 'papers:project:window-control-shift') {
+      if (typeof event.data.held === 'boolean') {
+        for (const listener of windowControlShiftListeners) listener(event.data.held);
+      }
+      return;
+    }
+    if (event.data?.type === 'papers:project:window-control-unavailable') {
+      for (const listener of windowControlUnavailableListeners) listener(event.data.reason);
+      return;
+    }
     if (event.data?.type !== HOST_RESULT) return;
     const task = pending.get(event.data.requestId);
     if (!task) return;
@@ -142,7 +161,8 @@ export function createHostBridge(window) {
       task.resolve(event.data.writerLease);
       return;
     }
-    if (task.type === 'papers:project:window-thumbnail') {
+    if (task.type === 'papers:project:window-thumbnail'
+      || task.type === 'papers:project:window-thumbnail-cache') {
       // 019GR: the compact hover preview consumes ONLY the exact shared result.
       // Success is exactly { outcome, imageUrl, width, height }; a fallback is
       // exactly { outcome } plus an optional bounded error - never generic
@@ -162,6 +182,13 @@ export function createHostBridge(window) {
       }
       return;
     }
+    if (task.type === 'papers:project:window-candidate-picker-update') {
+      task.resolve({
+        outcome: event.data.outcome,
+        ...(event.data.delivery !== undefined ? { delivery: event.data.delivery } : {}),
+      });
+      return;
+    }
     if ('target' in event.data && 'icon' in event.data) {
       task.resolve({ target: event.data.target, icon: event.data.icon });
       return;
@@ -173,6 +200,10 @@ export function createHostBridge(window) {
         finalOrigin: event.data.finalOrigin,
         title: event.data.title ?? null,
       });
+      return;
+    }
+    if ('fileCapability' in event.data) {
+      task.resolve(event.data.fileCapability);
       return;
     }
     if ('candidates' in event.data) {
@@ -197,6 +228,11 @@ export function createHostBridge(window) {
       task.resolve({
         outcome: event.data.outcome,
         observation: event.data.observation ?? null,
+        // `results` is the per-member answer the control sync returns, and this
+        // branch used to drop it - so even a successful sync arrived with no
+        // members in it. Added only when the reply carries it, so every other
+        // channel keeps exactly the shape it had.
+        ...(event.data.results !== undefined ? { results: event.data.results } : {}),
         error: event.data.error ?? null,
       });
       return;
@@ -273,7 +309,20 @@ export function createHostBridge(window) {
     resolveDroppedTargets: (files) =>
       request('papers:project:resolve-dropped-targets', { files }),
     copyText: (text) => request('papers:project:copy-text', { text }),
-    windowCandidates: () => request('papers:project:window-candidates'),
+    fileCapability: (operation, params = {}) =>
+      request(
+        'papers:project:file-capability',
+        { operation, params },
+        operation === 'native-drag'
+          ? null
+          : operation === 'preview'
+            ? FILE_PREVIEW_REQUEST_TIMEOUT_MS
+            : ['copy', 'move', 'rename', 'delete'].includes(operation)
+              ? FILE_MUTATION_REQUEST_TIMEOUT_MS
+              : REQUEST_TIMEOUT_MS,
+      ),
+    windowCandidates: ({ includeNativeIcons } = {}) => request('papers:project:window-candidates',
+      typeof includeNativeIcons === 'boolean' ? { includeNativeIcons } : {}),
     windowLifecycleSnapshot: () => request('papers:project:window-lifecycle-snapshot'),
     onWindowLifecycleEvent: (callback) => {
       lifecycleListeners.add(callback);
@@ -283,12 +332,42 @@ export function createHostBridge(window) {
       lifecycleBaselineListeners.add(callback);
       return () => lifecycleBaselineListeners.delete(callback);
     },
+    windowControlSync: (controls) => request('papers:project:window-control-sync', { controls }),
+    windowControlActivate: (layoutId, memberId) =>
+      request('papers:project:window-control-activate', { layoutId, memberId }),    windowControlGroup: (layoutId, actions) =>
+      request('papers:project:window-control-group', { layoutId, actions }),
+    onWindowControlEvent: (callback) => {
+      windowControlListeners.add(callback);
+      return () => windowControlListeners.delete(callback);
+    },
+    onWindowControlShift: (callback) => {
+      windowControlShiftListeners.add(callback);
+      return () => windowControlShiftListeners.delete(callback);
+    },
+    onWindowControlUnavailable: (callback) => {
+      windowControlUnavailableListeners.add(callback);
+      return () => windowControlUnavailableListeners.delete(callback);
+    },
     bindWindowCandidate: (candidateId) =>
       request('papers:project:window-bind-candidate', { candidateId }),
     activateWindowCapability: (capability) =>
       request('papers:project:window-activate-capability', { capability }),
     observeWindowCapability: (capability) =>
       request('papers:project:window-observe-capability', { capability }),
+    /** Hover intent: while this is held, Papers keeps its periodic desktop scan
+     * off, so a scan cannot start during the preview dwell and land in front of
+     * the capture. Reference counted by the caller; paired with the release. */
+    windowPreviewHold: () =>
+      request('papers:project:window-preview-hold', {}),
+    windowPreviewRelease: () =>
+      request('papers:project:window-preview-release', {}),
+    /** The project's own hover preview, in Papers' always-on-top preview window
+     * rather than an in-page popover: a popover can only ever be as visible as
+     * this window, so another application could hide it. */
+    windowPreviewShow: (imageUrl, title, width, height, anchor) =>
+      request('papers:project:window-preview-show', { imageUrl, title, width, height, anchor }),
+    windowPreviewHide: () =>
+      request('papers:project:window-preview-hide', {}),
     minimizeWindowCapability: (capability) =>
       request('papers:project:window-minimize-capability', { capability }),
     /** One request: the helper reads the live state and minimizes or restores
@@ -301,6 +380,8 @@ export function createHostBridge(window) {
       request('papers:project:window-restore-capability', { capability }),
     closeWindowCapability: (capability) =>
       request('papers:project:window-close-capability', { capability }),
+    endProcessWindowCapability: (capability) =>
+      request('papers:project:window-end-process-capability', { capability }),
     applyWindowCapability: (capability, bounds) =>
       request('papers:project:window-apply-capability', { capability, bounds }),
     resolveWindowDescriptor: (descriptor) =>
@@ -378,8 +459,13 @@ export function createHostBridge(window) {
     }),
     widgetPreviewHide: () => request('papers:project:widget-preview-hide'),
     widgetContextMenu: () => request('papers:project:widget-context-menu'),
-    windowCandidatePicker: (currentWindowInstanceIds) =>
-      request('papers:project:window-candidate-picker', { currentWindowInstanceIds }, INTERACTIVE_REQUEST_TIMEOUT_MS),
+    windowCandidatePicker: (candidates, pickerId) => request(
+      'papers:project:window-candidate-picker',
+      { candidates, ...(typeof pickerId === 'string' ? { pickerId } : {}) },
+      INTERACTIVE_REQUEST_TIMEOUT_MS,
+    ),
+    windowCandidatePickerUpdate: (candidates, pickerId) =>
+      request('papers:project:window-candidate-picker-update', { candidates, pickerId }),
     windowCandidatePickerClose: () => request('papers:project:window-candidate-picker-close'),
     // 019G: real window thumbnail (Windows-taskbar-like hover preview). Consumes
     // ONLY the exact shared API: page request `papers:project:window-thumbnail`
@@ -393,6 +479,17 @@ export function createHostBridge(window) {
         maxHeight: options.maxHeight ?? 135,
       },
     }),
+    // Read the safe persisted frame for an already freshly resolved live
+    // capability. This never triggers capture; the following thumbnail request
+    // replaces it in the same preview window when fresh pixels arrive.
+    windowThumbnailCacheCapability: (capability) => request('papers:project:window-thumbnail-cache', { capability }),
+    // Fixed enum-only telemetry; never include a window title, path, identity or image.
+    windowLayoutDiagnostic: ({ stage, outcome } = {}) => {
+      const stages = new Set(['auto-add-resolve', 'auto-add-observe', 'auto-add-commit']);
+      const outcomes = new Set(['success', 'missing', 'ambiguous', 'helper-unavailable', 'timeout', 'failed', 'skipped']);
+      if (!stages.has(stage) || !outcomes.has(outcome)) return Promise.resolve({ outcome: 'skipped' });
+      return request('papers:project:window-diagnostic', { stage, outcome });
+    },
     windowPeekBeginCapability: (capability) => request('papers:project:window-peek-begin', { capability }),
     windowPeekEnd: () => request('papers:project:window-peek-end'),
   };

@@ -77,18 +77,16 @@ export function windowLayoutMemberMarkup(layoutId, member, icon = null, disabled
     : `<span class="window-layout-member-icon placeholder" data-wl-member-icon="${escapeHtml(member.id)}" aria-hidden="true"></span>`;
   const stateClass = windowLayoutMemberState(member);
   const title = member.descriptor?.title ?? member.title ?? 'Untitled';
-  const runningIndicator = stateClass === 'normal'
-    ? `<span class="window-layout-member-state ${stateClass}" data-wl-member-state="${stateClass}" aria-hidden="true"></span>`
-    : '';
-  // A member this surface cannot confirm still looks like a member, and the sentence rides where this widget
-  // can carry words: the accessible label (which is also the hover popover seam, so no duplicate native
-  // tooltip appears) and a data attribute for anything that needs to read it. The strip itself takes no text
-  // by the creator's own correction, so the visible sentence is the card's status line - see
-  // windowLayoutStatusForOutcome, which answers this same note. `note` is null for every healthy member and
-  // for every transient that is not this state, and the class only marks the one state that has words.
-  const noteText = typeof note === 'string' && note.trim() !== '' ? note.trim() : null;
-  const label = noteText === null ? escapeHtml(title) : escapeHtml(`${title} — ${noteText}`);
-  return `<button class="window-layout-member ${stateClass}${noteText === null ? '' : ' wl-member-unconfirmed'}" data-wl-member="${escapeHtml(member.id)}" data-wl-layout="${escapeHtml(layoutId)}" type="button" aria-label="${label}" aria-pressed="${stateClass === 'minimized' ? 'true' : 'false'}" aria-selected="false"${noteText === null ? '' : ` data-wl-member-note="${escapeHtml(noteText)}"`}${disabled ? ' disabled' : ''}>
+  // ONE stable marker, always present, carrying the LIVE state. It used to be
+  // omitted entirely for a minimized member, so the markup could not express
+  // "the app cannot see this window right now" - and the underline renders from
+  // live observation, never from the persisted member state.
+  const runningIndicator = `<span class="window-layout-member-state ${stateClass}" data-wl-live-state="${stateClass}" aria-hidden="true"></span>`;
+  // Warning notes are suppressed on every AYG surface, including the accessible
+  // label that also supplies the custom hover popover. Keep the member title as
+  // its accessible and hover name, with state still communicated by the button.
+  void note;
+  return `<button class="window-layout-member ${stateClass}" data-wl-member="${escapeHtml(member.id)}" data-wl-layout="${escapeHtml(layoutId)}" type="button" aria-label="${escapeHtml(title)}" aria-pressed="${stateClass === 'minimized' ? 'true' : 'false'}" aria-selected="false"${disabled ? ' disabled' : ''}>
     ${iconMarkup}
     ${runningIndicator}
   </button>`;

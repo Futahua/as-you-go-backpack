@@ -12,6 +12,7 @@ export function createStatusToast({
   element,
   visibleMs = DEFAULT_VISIBLE_MS,
   fadeMs = DEFAULT_FADE_MS,
+  suppressWarnings = false,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 } = {}) {
@@ -31,13 +32,17 @@ export function createStatusToast({
     removeTimer = null;
   }
 
-  function show(text = '', { persistent = false } = {}) {
+  function show(text = '', { persistent = false, level = 'warning' } = {}) {
     const nextText = text == null ? '' : String(text);
+    // The As you Go workspace opts out of transient warning toasts while its
+    // form validation and success notices remain available by explicit level.
+    if (suppressWarnings && nextText !== '' && level === 'warning') return;
     if (nextText !== '' && nextText === announcedText) return;
     revision += 1;
     const ownRevision = revision;
     cancelTimers();
-    element.classList.remove('status-fading', 'status-copied');
+    element.classList.remove('status-fading', 'status-copied', 'status-success', 'status-info');
+    if (level === 'success' || level === 'info') element.classList.add(`status-${level}`);
     element.textContent = nextText;
     announcedText = nextText;
     if (element.textContent === '' || persistent) return;
@@ -51,7 +56,7 @@ export function createStatusToast({
         removeTimer = null;
         if (revision !== ownRevision || element.textContent !== ownText) return;
         element.textContent = '';
-        element.classList.remove('status-fading', 'status-copied');
+        element.classList.remove('status-fading', 'status-copied', 'status-success', 'status-info');
       }, fadeMs);
     }, visibleMs);
   }
@@ -61,7 +66,7 @@ export function createStatusToast({
     cancelTimers();
     announcedText = '';
     element.textContent = '';
-    element.classList.remove('status-fading', 'status-copied');
+    element.classList.remove('status-fading', 'status-copied', 'status-success', 'status-info');
   }
 
   return { show, destroy };

@@ -59,6 +59,7 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     revealShortcut: async (id) => { effects.reveal.push(id); },
     resolveWebIcon: async (url) => ({ title: 'Site', icon: 'data:icon' }),
     resolveDroppedTargets: async (files) => files.map((f) => ({ name: f.name, target: f.name })),
+    fileCapability: async () => ({ ok: false }),
   };
   if (model.host) Object.assign(host, model.host);
   const graphNodes = new Map();
@@ -224,6 +225,91 @@ test('pasteInto cut moves to the first destination and clears the clipboard', as
   await h.commands.pasteInto(['g1', 'g2']);
   assert.deepEqual(h.store.getSnapshot().moved, ['p-s1', 'g1']);
   assert.equal(h.store.getSession().clipboard, null);
+});
+
+test('external clipboard file paste reuses dropped-file resolution', async () => {
+  const h = createHarness();
+  await h.commands.pasteExternalClipboard({ files: [{ name: 'model.rvt' }], text: '' }, ['root']);
+  assert.equal(h.store.getSnapshot().dropped.destination, 'root');
+  assert.deepEqual(h.store.getSnapshot().dropped.targets, [{ name: 'model.rvt', target: 'model.rvt' }]);
+});
+
+test('external clipboard text resolves an existing machine path before treating it as a link', async () => {
+  const h = createHarness({
+    model: {
+      host: {
+        fileCapability: async (operation, params) => operation === 'stat'
+          ? { ok: true, entry: { path: params.path, name: 'plan.dwg', kind: 'file' } }
+          : { ok: false },
+      },
+    },
+  });
+  await h.commands.pasteExternalClipboard({ text: '"D:\\work\\plan.dwg"' }, ['root']);
+  assert.equal(h.store.getSnapshot().dropped.targets[0].target, 'D:\\work\\plan.dwg');
+  assert.equal(h.store.getSnapshot().webLink, undefined);
+});
+
+test('external clipboard text falls back to the existing web-link path when no file exists', async () => {
+  const h = createHarness();
+  await h.commands.pasteExternalClipboard({ text: 'example.com' }, ['root']);
+  assert.equal(h.store.getSnapshot().webLink.target, 'example.com');
+  assert.equal(h.store.getSnapshot().webLink.parentId, 'root');
+});
+
+test('pasteClipboard keeps internal AYG copy when the Windows clipboard is unchanged', async () => {
+  const snapshots = [
+    { ok: true, kind: 'text', text: 'old clipboard', fingerprint: 'same' },
+    { ok: true, kind: 'text', text: 'old clipboard', fingerprint: 'same' },
+  ];
+  const h = createHarness({
+    shortcuts: [{ id: 's1', name: 'S', target: 'C:\\s.exe' }],
+    model: { host: { fileCapability: async (operation) => operation === 'clipboard-read' ? snapshots.shift() : { ok: false } } },
+  });
+  h.store.setSelection(['s1']);
+  h.commands.copySelection();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await h.commands.pasteClipboard({ text: 'old clipboard' }, ['g1']);
+
+  assert.deepEqual(h.store.getSnapshot().pastes, [{ ids: ['p-s1'], parentId: 'g1' }]);
+  assert.equal(h.store.getSnapshot().webLink, undefined);
+});
+
+test('pasteClipboard lets a newer system clipboard override stale internal AYG copy data', async () => {
+  const snapshots = [
+    { ok: true, kind: 'text', text: 'before', fingerprint: 'before' },
+    { ok: true, kind: 'text', text: 'example.com', fingerprint: 'after' },
+  ];
+  const h = createHarness({
+    shortcuts: [{ id: 's1', name: 'S', target: 'C:\\s.exe' }],
+    model: { host: { fileCapability: async (operation) => operation === 'clipboard-read' ? snapshots.shift() : { ok: false } } },
+  });
+  h.store.setSelection(['s1']);
+  h.commands.copySelection();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await h.commands.pasteClipboard({ text: 'example.com' }, ['root']);
+
+  assert.equal(h.store.getSnapshot().webLink.target, 'example.com');
+  assert.equal(h.store.getSnapshot().pastes, undefined);
+});
+
+test('pasteClipboard uses Papers native clipboard fallback when Chromium exposes no payload', async () => {
+  const target = { target: 'D:\\phone\\photo.jpg', name: 'photo.jpg', kind: 'file' };
+  const h = createHarness({
+    model: {
+      host: {
+        fileCapability: async (operation) => operation === 'clipboard-read'
+          ? { ok: true, kind: 'files', targets: [target], fingerprint: 'phone-file' }
+          : { ok: false },
+      },
+    },
+  });
+
+  await h.commands.pasteClipboard({}, ['root']);
+
+  assert.equal(h.store.getSnapshot().dropped.destination, 'root');
+  assert.deepEqual(h.store.getSnapshot().dropped.targets, [target]);
 });
 
 test('moveSelectionToBin bins the resolved targets and commits', async () => {

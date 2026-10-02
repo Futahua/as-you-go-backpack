@@ -60,6 +60,25 @@ export function createWorkspaceCommands({
   render,
   setStatus,
 }) {
+  let internalClipboardFingerprint = null;
+  let internalClipboardFingerprintPending = false;
+
+  async function readClipboardSnapshot() {
+    try {
+      const snapshot = await host.fileCapability?.('clipboard-read', {});
+      return snapshot?.ok === true ? snapshot : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function rememberClipboardAtInternalCopy() {
+    internalClipboardFingerprintPending = true;
+    void readClipboardSnapshot()
+      .then((snapshot) => { internalClipboardFingerprint = snapshot?.fingerprint ?? null; })
+      .finally(() => { internalClipboardFingerprintPending = false; });
+  }
+
   function scopeAllowsSelection(ids) {
     if (!scopeRootId || ids.every((id) => isItemInScope(id))) return true;
     setStatus('That item is outside this project folder.');
@@ -157,7 +176,7 @@ export function createWorkspaceCommands({
       ]);
       await store.commit(next);
       const count = next.view?.itemSets?.length ?? 0;
-      setStatus(`Grouped ${selected.length} item${selected.length === 1 ? '' : 's'} (${count} set${count === 1 ? '' : 's'}).`);
+      setStatus(`Grouped ${selected.length} item${selected.length === 1 ? '' : 's'} (${count} set${count === 1 ? '' : 's'}).`, { level: 'success' });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -209,7 +228,7 @@ export function createWorkspaceCommands({
       if (next.length === current.length) return;
       store.clearSelectedSets();
       await store.commit(setItemSets(snapshot, next));
-      setStatus(`Deleted ${setIds.length} ${setIds.length === 1 ? 'set' : 'sets'}. The items are unchanged.`);
+      setStatus(`Deleted ${setIds.length} ${setIds.length === 1 ? 'set' : 'sets'}. The items are unchanged.`, { level: 'success' });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -441,6 +460,7 @@ export function createWorkspaceCommands({
       collapseWhole,
       placementIds,
     });
+    rememberClipboardAtInternalCopy();
 
     setStatus('');
     closeMenu();
@@ -498,6 +518,88 @@ export function createWorkspaceCommands({
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  async function pasteExternalClipboard({ files = [], text = '' } = {}, parentIds) {
+    const destinations = (Array.isArray(parentIds) ? parentIds : [parentIds])
+      .map(scopedDestination)
+      .filter(Boolean);
+    if (destinations.length === 0 || destinations.includes('bin')) return false;
+    if (!destinations.every((destinationId) => scopeAllowsDestination(destinationId))) return false;
+
+    try {
+      if (Array.isArray(files) && files.length > 0) {
+        const targets = await host.resolveDroppedTargets(files);
+        for (const destination of destinations) await dropResolvedTargets(targets, destination);
+        return true;
+      }
+
+      const rawText = String(text ?? '').trim();
+      if (!rawText) return false;
+      const unquoted = rawText.length >= 2
+        && ((rawText.startsWith('"') && rawText.endsWith('"')) || (rawText.startsWith("'") && rawText.endsWith("'")))
+        ? rawText.slice(1, -1).trim()
+        : rawText;
+      const stat = await host.fileCapability?.('stat', { path: unquoted }).catch(() => null);
+      if (stat?.ok === true && stat.entry?.path) {
+        const target = {
+          target: stat.entry.path,
+          name: stat.entry.name || stat.entry.path,
+          kind: stat.entry.kind,
+        };
+        for (const destination of destinations) await dropResolvedTargets([target], destination);
+        return true;
+      }
+
+      for (const destination of destinations) await dropUrl(rawText, destination);
+      return true;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
+
+  async function pasteClipboard({ files = [], text = '' } = {}, parentIds) {
+    const internal = store.getSession().clipboard;
+    const snapshot = await readClipboardSnapshot();
+    const sameAsInternalCopy = Boolean(
+      internal
+      && (internalClipboardFingerprintPending
+        || (internalClipboardFingerprint
+          && snapshot?.fingerprint === internalClipboardFingerprint)),
+    );
+
+    if (sameAsInternalCopy) {
+      await pasteInto(parentIds);
+      return true;
+    }
+
+    if (Array.isArray(files) && files.length > 0) {
+      return pasteExternalClipboard({ files, text }, parentIds);
+    }
+
+    if (typeof text === 'string' && text.trim()) {
+      return pasteExternalClipboard({ files: [], text }, parentIds);
+    }
+
+    if (snapshot?.kind === 'files' && Array.isArray(snapshot.targets) && snapshot.targets.length > 0) {
+      const destinations = (Array.isArray(parentIds) ? parentIds : [parentIds])
+        .map(scopedDestination)
+        .filter(Boolean);
+      if (!destinations.every((destinationId) => scopeAllowsDestination(destinationId))) return false;
+      for (const destination of destinations) await dropResolvedTargets(snapshot.targets, destination);
+      return true;
+    }
+
+    if (snapshot?.kind === 'text' && typeof snapshot.text === 'string' && snapshot.text.trim()) {
+      return pasteExternalClipboard({ text: snapshot.text }, parentIds);
+    }
+
+    if (internal) {
+      await pasteInto(parentIds);
+      return true;
+    }
+    return false;
   }
 
   async function moveSelectionToBin() {
@@ -671,8 +773,21 @@ export function createWorkspaceCommands({
     if (!scopeAllowsDestination(normalizedDestination)) return;
     try {
       const targets = await host.resolveDroppedTargets(files);
-      const next = createDroppedShortcuts(store.getSnapshot(), targets, normalizedDestination);
-      if (next.shortcuts.length === store.getSnapshot().shortcuts.length) {
+      await dropResolvedTargets(targets, normalizedDestination);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Same creation path as an OS file drop, but for paths already resolved by
+   * the inline machine explorer / Everything search. */
+  async function dropResolvedTargets(targets, destination) {
+    const normalizedDestination = scopedDestination(destination);
+    if (!scopeAllowsDestination(normalizedDestination)) return;
+    try {
+      const before = store.getSnapshot();
+      const next = createDroppedShortcuts(before, targets, normalizedDestination);
+      if (next.shortcuts.length === before.shortcuts.length) {
         setStatus('Those shortcuts already exist here.');
         return;
       }
@@ -702,6 +817,8 @@ export function createWorkspaceCommands({
     copySelection,
     cutSelection,
     pasteInto,
+    pasteExternalClipboard,
+    pasteClipboard,
     moveSelectionToBin,
     resetGraphPositions,
     dragDropToBin,
@@ -710,6 +827,7 @@ export function createWorkspaceCommands({
     releaseDraggedNodes,
     dropUrl,
     dropFiles,
+    dropResolvedTargets,
     selectedPasteDestinations,
     undo,
     redo,
