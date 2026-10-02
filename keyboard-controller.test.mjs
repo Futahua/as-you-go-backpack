@@ -44,7 +44,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
   const commandSpies = {};
   for (const name of [
     'clearSelection', 'selectAllVisible', 'copySelection', 'cutSelection',
-    'pasteInto', 'undo', 'redo', 'moveSelectionToBin', 'revealSelection',
+    'pasteInto', 'pasteExternalClipboard', 'undo', 'redo', 'moveSelectionToBin', 'revealSelection',
     'activateItem', 'activateSelection', 'selectedPasteDestinations',
     'groupSelectionIntoSet', 'clearSetSelection', 'deleteSelectedSets',
   ]) {
@@ -108,14 +108,39 @@ test('Ctrl+A selects all visible items', () => {
   assert.equal(h.commandSpies['selectAllVisible:calls'], 1);
 });
 
-test('Ctrl+C, Ctrl+X, Ctrl+V route to copy/cut/paste commands', () => {
+test('Ctrl+C, Ctrl+X, Ctrl+V preserve the internal AYG clipboard path', () => {
   const h = createHarness();
-  h.listeners[0].handler(key({ key: 'c', ctrlKey: true }));
-  h.listeners[0].handler(key({ key: 'x', ctrlKey: true }));
-  h.listeners[0].handler(key({ key: 'v', ctrlKey: true }));
+  const keydown = h.listeners.find((entry) => entry.type === 'keydown');
+  keydown.handler(key({ key: 'c', ctrlKey: true }));
+  keydown.handler(key({ key: 'x', ctrlKey: true }));
+  h.store.setClipboard({ mode: 'copy', ids: ['a'], collapseWhole: new Set(), placementIds: new Map() });
+  keydown.handler(key({ key: 'v', ctrlKey: true }));
   assert.equal(h.commandSpies['copySelection:calls'], 1);
   assert.equal(h.commandSpies['cutSelection:calls'], 1);
   assert.equal(h.commandSpies['pasteInto:calls'], 1);
+  assert.equal(h.commandSpies['pasteExternalClipboard:calls'], 0);
+});
+
+test('external clipboard paste is used only when AYG has no internal clipboard', () => {
+  const h = createHarness();
+  let prevented = false;
+  const pastedFile = { name: 'drawing.rvt' };
+  const paste = h.listeners.find((entry) => entry.type === 'paste');
+  paste.handler({
+    defaultPrevented: false,
+    target: { matches: () => false },
+    clipboardData: {
+      files: [pastedFile],
+      getData: () => 'D:\\ignored-when-file-exists.txt',
+    },
+    preventDefault: () => { prevented = true; },
+  });
+  assert.equal(prevented, true);
+  assert.equal(h.commandSpies['pasteExternalClipboard:calls'], 1);
+  assert.deepEqual(h.commandSpies['pasteExternalClipboard:args'][0], [
+    { files: [pastedFile], text: 'D:\\ignored-when-file-exists.txt' },
+    ['dest'],
+  ]);
 });
 
 test('Ctrl+Z and Ctrl+Y route to undo/redo', () => {
@@ -248,9 +273,10 @@ test('Ctrl+Shift+Z routes only to redo', () => {
   assert.equal(h.commandSpies['undo:calls'], 0);
 });
 
-test('Ctrl+V passes the selected paste destinations to pasteInto', () => {
+test('Ctrl+V passes the selected paste destinations to pasteInto when AYG owns the clipboard', () => {
   const h = createHarness();
-  h.listeners[0].handler(key({ key: 'v', ctrlKey: true }));
+  h.store.setClipboard({ mode: 'copy', ids: ['a'], collapseWhole: new Set(), placementIds: new Map() });
+  h.listeners.find((entry) => entry.type === 'keydown').handler(key({ key: 'v', ctrlKey: true }));
   assert.deepEqual(h.commandSpies['pasteInto:args'][0], [['dest']]);
 });
 

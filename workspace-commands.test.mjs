@@ -59,6 +59,7 @@ function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
     revealShortcut: async (id) => { effects.reveal.push(id); },
     resolveWebIcon: async (url) => ({ title: 'Site', icon: 'data:icon' }),
     resolveDroppedTargets: async (files) => files.map((f) => ({ name: f.name, target: f.name })),
+    fileCapability: async () => ({ ok: false }),
   };
   if (model.host) Object.assign(host, model.host);
   const graphNodes = new Map();
@@ -224,6 +225,35 @@ test('pasteInto cut moves to the first destination and clears the clipboard', as
   await h.commands.pasteInto(['g1', 'g2']);
   assert.deepEqual(h.store.getSnapshot().moved, ['p-s1', 'g1']);
   assert.equal(h.store.getSession().clipboard, null);
+});
+
+test('external clipboard file paste reuses dropped-file resolution', async () => {
+  const h = createHarness();
+  await h.commands.pasteExternalClipboard({ files: [{ name: 'model.rvt' }], text: '' }, ['root']);
+  assert.equal(h.store.getSnapshot().dropped.destination, 'root');
+  assert.deepEqual(h.store.getSnapshot().dropped.targets, [{ name: 'model.rvt', target: 'model.rvt' }]);
+});
+
+test('external clipboard text resolves an existing machine path before treating it as a link', async () => {
+  const h = createHarness({
+    model: {
+      host: {
+        fileCapability: async (operation, params) => operation === 'stat'
+          ? { ok: true, entry: { path: params.path, name: 'plan.dwg', kind: 'file' } }
+          : { ok: false },
+      },
+    },
+  });
+  await h.commands.pasteExternalClipboard({ text: '"D:\\work\\plan.dwg"' }, ['root']);
+  assert.equal(h.store.getSnapshot().dropped.targets[0].target, 'D:\\work\\plan.dwg');
+  assert.equal(h.store.getSnapshot().webLink, undefined);
+});
+
+test('external clipboard text falls back to the existing web-link path when no file exists', async () => {
+  const h = createHarness();
+  await h.commands.pasteExternalClipboard({ text: 'example.com' }, ['root']);
+  assert.equal(h.store.getSnapshot().webLink.target, 'example.com');
+  assert.equal(h.store.getSnapshot().webLink.parentId, 'root');
 });
 
 test('moveSelectionToBin bins the resolved targets and commits', async () => {

@@ -201,8 +201,10 @@ export function createKeyboardController({
         return;
       }
       if (matches('workspace.paste')) {
-        event.preventDefault();
-        commands.pasteInto(commands.selectedPasteDestinations());
+        if (session.clipboard) {
+          event.preventDefault();
+          commands.pasteInto(commands.selectedPasteDestinations());
+        }
         return;
       }
       if (matches('workspace.undo')) {
@@ -249,6 +251,29 @@ export function createKeyboardController({
       // so a key that a binding in force claims does its action and never types, by construction rather than
       // by a list kept in step by hand.
       openOnTypedCharacter();
+    }, { signal: abortController.signal });
+
+    document.addEventListener('paste', (event) => {
+      if (event.defaultPrevented || commandSurface) return;
+      const session = store.getSession();
+      if (session.binMode || session.clipboard) return;
+      const modalOpen = !elements.editorLayer.hidden || !elements.confirmLayer.hidden
+        || !elements.linkEditLayer.hidden || !elements.promptLayer.hidden;
+      if (modalOpen || elements.quickRunLayer?.hidden === false) return;
+      const editingTarget = isOneOf(event.target, EDITABLE_SELECTOR)
+        || isOneOf(document.activeElement, EDITABLE_SELECTOR);
+      if (editingTarget) return;
+
+      const clipboardData = event.clipboardData;
+      const files = clipboardData ? [...clipboardData.files] : [];
+      const text = clipboardData?.getData?.('text/plain') ?? '';
+      if (files.length === 0 && !text.trim()) return;
+
+      event.preventDefault();
+      void commands.pasteExternalClipboard(
+        { files, text },
+        commands.selectedPasteDestinations(),
+      );
     }, { signal: abortController.signal });
   }
 

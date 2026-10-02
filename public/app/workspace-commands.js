@@ -500,6 +500,45 @@ export function createWorkspaceCommands({
     }
   }
 
+  async function pasteExternalClipboard({ files = [], text = '' } = {}, parentIds) {
+    const destinations = (Array.isArray(parentIds) ? parentIds : [parentIds])
+      .map(scopedDestination)
+      .filter(Boolean);
+    if (destinations.length === 0 || destinations.includes('bin')) return false;
+    if (!destinations.every((destinationId) => scopeAllowsDestination(destinationId))) return false;
+
+    try {
+      if (Array.isArray(files) && files.length > 0) {
+        const targets = await host.resolveDroppedTargets(files);
+        for (const destination of destinations) await dropResolvedTargets(targets, destination);
+        return true;
+      }
+
+      const rawText = String(text ?? '').trim();
+      if (!rawText) return false;
+      const unquoted = rawText.length >= 2
+        && ((rawText.startsWith('"') && rawText.endsWith('"')) || (rawText.startsWith("'") && rawText.endsWith("'")))
+        ? rawText.slice(1, -1).trim()
+        : rawText;
+      const stat = await host.fileCapability?.('stat', { path: unquoted }).catch(() => null);
+      if (stat?.ok === true && stat.entry?.path) {
+        const target = {
+          target: stat.entry.path,
+          name: stat.entry.name || stat.entry.path,
+          kind: stat.entry.kind,
+        };
+        for (const destination of destinations) await dropResolvedTargets([target], destination);
+        return true;
+      }
+
+      for (const destination of destinations) await dropUrl(rawText, destination);
+      return true;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
+
   async function moveSelectionToBin() {
     if (store.getSession().selected.size === 0) return;
     const selected = [...store.getSession().selected]
@@ -715,6 +754,7 @@ export function createWorkspaceCommands({
     copySelection,
     cutSelection,
     pasteInto,
+    pasteExternalClipboard,
     moveSelectionToBin,
     resetGraphPositions,
     dragDropToBin,
