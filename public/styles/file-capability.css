@@ -1,5 +1,5 @@
 .workspace.file-capability-docked .explorer {
-  right: 46px;
+  right: 0;
   transition: right 160ms ease;
 }
 
@@ -13,7 +13,7 @@
   z-index: 905;
   top: 60px;
   right: 8px;
-  bottom: 8px;
+  bottom: auto;
   width: 38px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -26,6 +26,7 @@
 }
 
 .file-capability-panel.expanded {
+  bottom: 8px;
   width: min(var(--file-capability-width), calc(100vw - 24px));
 }
 
@@ -65,26 +66,17 @@
 .file-capability-header {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   padding: 9px 10px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.file-capability-header > strong {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-}
-
 .file-capability-expand {
   flex: 0 0 auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 5px 8px;
+  border-color: var(--border);
   background: var(--surface);
   color: var(--text);
-  cursor: pointer;
-  font-size: 10px;
 }
 
 .file-capability-expand:hover {
@@ -100,7 +92,6 @@
   border-bottom: 0;
 }
 
-.file-capability-panel:not(.expanded) .file-capability-header > strong,
 .file-capability-panel:not(.expanded) .file-capability-body {
   display: none;
 }
@@ -110,15 +101,6 @@
   min-width: 28px;
   height: 28px;
   padding: 0;
-  overflow: hidden;
-  font-size: 0;
-}
-
-.file-capability-panel:not(.expanded) .file-capability-expand::before {
-  content: '›';
-  display: block;
-  font-size: 18px;
-  line-height: 26px;
 }
 
 .file-capability-resizer {

@@ -61,13 +61,12 @@ export function createWorkspaceNavigator(o) {
     // Storage is convenience only.
   }
   const head = d.createElement('header'); head.className = 'workspace-navigator-header';
-  const title = d.createElement('strong'); title.textContent = 'Navigator';
   const provider = d.createElement('button'); provider.type = 'button'; provider.className = 'workspace-navigator-provider';
   const viewToggle = button(d,'Switch navigation mode',['M4 5h3','M4 10h3','M4 15h3','M9 5h7','M9 10h7','M9 15h7']);
   viewToggle.classList.add('workspace-navigator-view-toggle');
   const viewLabel = d.createElement('span'); viewLabel.className = 'workspace-navigator-view-label'; viewToggle.append(viewLabel);
   const collapse = button(d,'Collapse navigator',['M12.5 4.5 7 10l5.5 5.5']); collapse.classList.add('workspace-navigator-collapse');
-  head.append(title, provider, viewToggle, collapse);
+  head.append(provider, viewToggle, collapse);
   const tools = d.createElement('div'); tools.className = 'workspace-navigator-toolbar';
   const back = button(d,'Back',['M12.5 4.5 7 10l5.5 5.5']), fwd = button(d,'Forward',['M7.5 4.5 13 10l-5.5 5.5']);
   const up = button(d,'Up',['M5 11l5-5 5 5','M10 6v9']), home = button(d,'Home',['M3.5 9.5 10 4l6.5 5.5','M5.5 8.5v7h9v-7']), refresh = button(d,'Refresh',['M15.5 7A6 6 0 1 0 16 12','M15.5 7V3.5','M15.5 7H12']), copy = button(d,'Copy',['M7 7h9v9H7z','M4 13H3.5A1.5 1.5 0 0 1 2 11.5v-8A1.5 1.5 0 0 1 3.5 2h8A1.5 1.5 0 0 1 13 3.5V4']);
@@ -163,7 +162,7 @@ export function createWorkspaceNavigator(o) {
     collapse.title = s.collapsed ? 'Expand navigator' : 'Collapse navigator';
     collapse.setAttribute('aria-label', collapse.title);
     collapse.innerHTML = s.collapsed
-      ? svg(['M7.5 4.5 13 10l-5.5 5.5'])
+      ? svg(['M8.5 3.5a5 5 0 1 0 0 10a5 5 0 1 0 0-10', 'M12.2 12.2 16.5 16.5'])
       : svg(['M12.5 4.5 7 10l5.5 5.5']);
     const nav = s.view === 'nav';
     back.hidden = fwd.hidden = up.hidden = home.hidden = !nav;

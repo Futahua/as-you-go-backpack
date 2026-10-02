@@ -172,8 +172,6 @@ export function createFileCapabilityPanel(options) {
 
   const header = documentRef.createElement('header');
   header.className = 'file-capability-header';
-  const title = documentRef.createElement('strong');
-  title.textContent = 'Preview';
   const providerStatus = documentRef.createElement('span');
   providerStatus.className = 'file-capability-provider-status';
   const openTabButton = createButton(documentRef, 'Full screen', 'file-capability-icon-button file-capability-open-tab');
@@ -183,10 +181,10 @@ export function createFileCapabilityPanel(options) {
     'M10 3h7v7',
     'M9 11l8-8',
   ]);
-  const expandButton = createButton(documentRef, 'Expand', 'file-capability-expand');
-  expandButton.setAttribute('aria-label', 'Expand file preview');
+  const expandButton = createButton(documentRef, '', 'file-capability-icon-button file-capability-expand');
+  setButtonSvg(documentRef, expandButton, 'Expand file preview', ['M3.5 4.5h13v11h-13z']);
   expandButton.setAttribute('aria-pressed', 'false');
-  header.append(title, openTabButton, expandButton);
+  header.append(openTabButton, expandButton);
 
   const searchWrap = documentRef.createElement('div');
   searchWrap.className = 'file-capability-search';
@@ -287,8 +285,14 @@ export function createFileCapabilityPanel(options) {
     state.expanded = Boolean(expanded);
     panel.classList.toggle('expanded', state.expanded);
     workspace?.classList.toggle('file-capability-expanded', state.expanded);
-    expandButton.textContent = state.expanded ? 'Collapse' : 'Expand';
-    expandButton.setAttribute('aria-label', state.expanded ? 'Collapse file preview' : 'Expand file preview');
+    setButtonSvg(
+      documentRef,
+      expandButton,
+      state.expanded ? 'Collapse file preview' : 'Expand file preview',
+      state.expanded
+        ? ['M3.5 4.5h13v11h-13z', 'M12.5 4.5v11']
+        : ['M3.5 4.5h13v11h-13z'],
+    );
     expandButton.setAttribute('aria-pressed', String(state.expanded));
     openTabButton.hidden = state.fullPage || !state.expanded || !state.inspectedPath;
   }

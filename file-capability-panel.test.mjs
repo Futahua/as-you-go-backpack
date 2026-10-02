@@ -37,8 +37,9 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(source, /Folder navigation stays in your file manager\./);
   assert.match(source, /Multiple preview will take shape here\./);
   assert.match(css, /\.file-capability-panel \{[\s\S]*width: 38px/);
-  assert.match(css, /\.file-capability-panel\.expanded \{[\s\S]*var\(--file-capability-width/);
-  assert.match(css, /\.workspace\.file-capability-docked \.explorer \{[\s\S]*right: 46px/);
+  assert.match(css, /\.file-capability-panel\.expanded \{[\s\S]*bottom: 8px[\s\S]*var\(--file-capability-width/);
+  assert.match(css, /\.file-capability-panel \{[\s\S]*bottom: auto/);
+  assert.match(css, /\.workspace\.file-capability-docked \.explorer \{[\s\S]*right: 0/);
   assert.match(css, /file-capability-expanded \.explorer \{[\s\S]*right: calc\(var\(--file-capability-width/);
   assert.match(workspace, /mode: 'single'/);
   assert.match(workspace, /mode: 'multiple'/);
@@ -105,7 +106,9 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   );
   assert.match(navigatorCss, /workspace-navigator-effective-width/);
   assert.match(navigatorCss, /\.workspace-navigator-resizer/);
-  assert.match(navigatorCss, /\.workspace-navigator\.collapsed/);
+  assert.match(navigatorCss, /\.workspace-navigator\.collapsed\{[^}]*width:34px[^}]*height:34px[^}]*background:transparent/);
+  assert.match(navigator, /M8\.5 3\.5a5 5 0 1 0 0 10a5 5 0 1 0 0-10/);
+  assert.doesNotMatch(navigator, /title\.textContent = 'Navigator'/);
   assert.match(navigatorCss, /overflow-x:auto/);
   assert.match(navigatorCss, /\.workspace-navigator-location-track/);
   assert.match(navigatorCss, /\.parent-graph-toggle/);
@@ -201,6 +204,9 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(navigator, /isCollapsed: \(\) => s\.collapsed/);
   assert.match(navigator, /setCollapsed/);
   assert.match(source, /setExpanded: setExpandedWithPreviewLifecycle/);
+  assert.doesNotMatch(source, /title\.textContent = 'Preview'/);
+  assert.match(source, /setButtonSvg\(documentRef, expandButton, 'Expand file preview'/);
+  assert.doesNotMatch(css, /file-capability-expand::before/);
   assert.match(source, /isFullPage: \(\) => state\.fullPage/);
   assert.match(workspace, /toggleSidePanes:[\s\S]*fileCapabilityPanel\.isFullPage/);
   assert.match(workspace, /workspaceNavigator\.setCollapsed\?\.\(!bothCollapsed\)/);
