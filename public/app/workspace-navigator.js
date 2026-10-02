@@ -24,6 +24,25 @@ const parentPath = (value) => {
   return i <= 0 ? p : p.slice(0, i);
 };
 
+export function beginMachineRowDrag({ event, item, host }) {
+  if (!event?.dataTransfer || typeof item?.path !== 'string' || !item.path) return false;
+  const name = typeof item.name === 'string' && item.name ? item.name : item.path;
+  event.dataTransfer.effectAllowed = 'link';
+  event.dataTransfer.setData(
+    'application/x-papers-native-items',
+    JSON.stringify([{ target: item.path, name }]),
+  );
+
+  // Keep the private payload for drops back into As you Go, while also
+  // starting the same native Windows file drag the main canvas already uses.
+  try {
+    void Promise.resolve(host?.fileCapability?.('native-drag', { paths: [item.path] })).catch(() => {});
+  } catch {
+    // Inline AYG dragging still works if the native host seam is unavailable.
+  }
+  return true;
+}
+
 export function createWorkspaceNavigator(o) {
   const d = o.document, panel = d.querySelector('#workspace-navigator');
   if (!panel || !o.workspace || !o.host?.fileCapability) return Object.freeze({
@@ -34,7 +53,6 @@ export function createWorkspaceNavigator(o) {
     setCollapsed() {},
   });
   o.workspace.classList.add('navigator-docked');
-  const INLINE_NATIVE_ITEMS = 'application/x-papers-native-items';
   const s = {
     mode: 'ayg',
     view: 'tree',
@@ -500,8 +518,7 @@ export function createWorkspaceNavigator(o) {
     row.draggable = true;
     row.title = x.path;
     row.addEventListener('dragstart',(event)=>{
-      event.dataTransfer.effectAllowed='link';
-      event.dataTransfer.setData(INLINE_NATIVE_ITEMS, JSON.stringify([{ target:x.path, name:x.name || x.path }]));
+      beginMachineRowDrag({ event, item: x, host: o.host });
     });
     const folder=x.kind==='folder', lead=d.createElement(folder&&s.view==='tree'?'button':'span'); lead.className=folder&&s.view==='tree'?'navigator-tree-toggle':'navigator-tree-spacer';
     if(folder&&s.view==='tree'){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'▾':'▸';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
