@@ -3942,8 +3942,7 @@ async function openWindowLayoutWidgetWithRetry(layoutId, options = {}) {
 
 async function ensureStartupWindowLayoutWidget() {
   if (windowLayoutDetachment.getState().mode === 'detached'
-    || windowLayoutDetachment.isReadOnly()
-    || !hasDocumentWriteAuthority()) return;
+    || windowLayoutDetachment.isReadOnly()) return;
   // Every layout is a native widget by default. Only layouts explicitly
   // middle-clicked into the AYG pill tray stay docked across startup.
   const docked = new Set(state.windowLayoutPillIds ?? []);
@@ -8586,6 +8585,7 @@ if (WIDGET_SURFACE) {
     // giving a detached surface a lock to wait on could deadlock against a
     // workspace that never releases. That integration is deliberately separate.
     if (!DETACHED_SURFACE) startSurfaceCoordination();
+    if (!DETACHED_SURFACE && !SCOPE_ROOT_ID) void ensureStartupWindowLayoutWidget();
     // 019G/021: after durable state loads, broadcast a real snapshot for every
     // layout so an already-open widget is never stuck on `unknown-layout` /
     // the empty default card (cold-open readiness race).
