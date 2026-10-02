@@ -18,6 +18,7 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   const css = await readFile(new URL('./public/styles/file-capability.css', import.meta.url), 'utf8');
   const workspace = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const html = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
+  const proximaPreviewHtml = await readFile(new URL('./public/proxima-preview.html', import.meta.url), 'utf8');
   const navigator = await readFile(new URL('./public/app/workspace-navigator.js', import.meta.url), 'utf8');
   const navigatorCss = await readFile(new URL('./public/styles/navigator.css', import.meta.url), 'utf8');
   const dropController = await readFile(new URL('./public/app/interactions/drop-controller.js', import.meta.url), 'utf8');
@@ -44,6 +45,8 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(html, /img-src 'self' data: blob: papers-file-preview: https: http:/);
   assert.match(html, /media-src papers-file-preview: blob:/);
   assert.match(html, /frame-src papers-file-preview: blob:/);
+  assert.match(html, /style-src 'self' 'unsafe-inline'/);
+  assert.match(proximaPreviewHtml, /style-src 'self' 'unsafe-inline'/);
   assert.match(html, /id="workspace-navigator"/);
   assert.match(html, /id="parent-graph-toggle"/);
   assert.match(navigator, /fileCapability\('list'/);
