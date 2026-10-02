@@ -59,6 +59,12 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /previewMachinePath/);
   assert.match(navigator, /workspace-navigator-view-toggle/);
   assert.match(navigator, /workspace-navigator-resizer/);
+  assert.match(navigator, /head\.append\(provider, tools, viewToggle, collapse\)/);
+  assert.match(navigator, /panel\.replaceChildren\(head,search,loc,body,resizer\)/);
+  assert.doesNotMatch(navigator, /panel\.replaceChildren\(head,tools,search/);
+  assert.match(navigator, /const move = button\(d,'Move',\['M4 2\.5h7l3 3v12H4z','M11 2\.5v4h4','M8 11h8','M13 8l3 3-3 3'\]\)/);
+  assert.doesNotMatch(navigator, /Filters: ext:/);
+  assert.match(navigatorCss, /\.workspace-navigator-search-info:empty\{display:none\}/);
   assert.match(navigator, /machineSort: \{ key:'name', direction:1 \}/);
   assert.match(navigator, /function machineColumnHeader\(\)/);
   assert.match(navigator, /\['name','Name'\],\['type','Type'\],\['size','Size'\],\['modified','Date Modified'\]/);

@@ -81,13 +81,13 @@ export function createWorkspaceNavigator(o) {
   viewToggle.classList.add('workspace-navigator-view-toggle');
   const viewLabel = d.createElement('span'); viewLabel.className = 'workspace-navigator-view-label'; viewToggle.append(viewLabel);
   const collapse = button(d,'Collapse navigator',['M12.5 4.5 7 10l5.5 5.5']); collapse.classList.add('workspace-navigator-collapse');
-  head.append(provider, viewToggle, collapse);
   const tools = d.createElement('div'); tools.className = 'workspace-navigator-toolbar';
   const back = button(d,'Back',['M12.5 4.5 7 10l5.5 5.5']), fwd = button(d,'Forward',['M7.5 4.5 13 10l-5.5 5.5']);
   const up = button(d,'Up',['M5 11l5-5 5 5','M10 6v9']), home = button(d,'Home',['M3.5 9.5 10 4l6.5 5.5','M5.5 8.5v7h9v-7']), refresh = button(d,'Refresh',['M15.5 7A6 6 0 1 0 16 12','M15.5 7V3.5','M15.5 7H12']), copy = button(d,'Copy',['M7 7h9v9H7z','M4 13H3.5A1.5 1.5 0 0 1 2 11.5v-8A1.5 1.5 0 0 1 3.5 2h8A1.5 1.5 0 0 1 13 3.5V4']);
-  const move = button(d,'Move',['M4 4l12 12','M16 4 4 16']), paste = button(d,'Paste',['M6 5h8v12H6z','M8 5V3h4v2']);
+  const move = button(d,'Move',['M4 2.5h7l3 3v12H4z','M11 2.5v4h4','M8 11h8','M13 8l3 3-3 3']), paste = button(d,'Paste',['M6 5h8v12H6z','M8 5V3h4v2']);
   const rename = button(d,'Rename',['M4 15h4l8-8-4-4-8 8z','M11 4l4 4']), del = button(d,'Delete',['M4 6h12','M7 6v10h6V6','M8 4h4']);
   const reveal = button(d,'Reveal',['M3 6h5l1.5 2H17v8H3z','M3 9h14']); tools.append(back,fwd,up,home,refresh,copy,move,paste,rename,del,reveal);
+  head.append(provider, tools, viewToggle, collapse);
   const loc = d.createElement('div'); loc.className = 'workspace-navigator-location';
   const locTrack = d.createElement('div'); locTrack.className = 'workspace-navigator-location-track'; loc.append(locTrack);
   const search = d.createElement('div'); search.className = 'workspace-navigator-search';
@@ -101,7 +101,7 @@ export function createWorkspaceNavigator(o) {
   search.append(searchInput, searchInfo);
   const body = d.createElement('div'); body.className = 'workspace-navigator-body';
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
-  panel.replaceChildren(head,tools,search,loc,body,resizer);
+  panel.replaceChildren(head,search,loc,body,resizer);
   o.workspace.style.setProperty('--workspace-navigator-width', `${s.width}px`);
   const icon = (x) => x.icon ? `<img src="${x.icon}" alt="">` : (x.kind === 'group' || x.kind === 'folder')
     ? svg(['M2.5 6h5l1.5 2h8.5v8.5h-15z']) : o.isWebLink(x)
@@ -761,7 +761,7 @@ export function createWorkspaceNavigator(o) {
     syncChrome();
     if (s.collapsed) return;
     if(s.searchQuery){renderSearch();return;}
-    searchInfo.textContent = 'Filters: ext: · path: · folder: · file: · size: · dm: · regex:';
+    searchInfo.textContent = '';
     if(s.mode==='ayg')renderAyG();
     else if(s.view==='tree')void renderMachineTree();
     else if(s.path)void loadMachine(s.path,false);
