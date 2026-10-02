@@ -201,10 +201,6 @@ export function createKeyboardController({
         return;
       }
       if (matches('workspace.paste')) {
-        if (session.clipboard) {
-          event.preventDefault();
-          commands.pasteInto(commands.selectedPasteDestinations());
-        }
         return;
       }
       if (matches('workspace.undo')) {
@@ -256,7 +252,7 @@ export function createKeyboardController({
     document.addEventListener('paste', (event) => {
       if (event.defaultPrevented || commandSurface) return;
       const session = store.getSession();
-      if (session.binMode || session.clipboard) return;
+      if (session.binMode) return;
       const modalOpen = !elements.editorLayer.hidden || !elements.confirmLayer.hidden
         || !elements.linkEditLayer.hidden || !elements.promptLayer.hidden;
       if (modalOpen || elements.quickRunLayer?.hidden === false) return;
@@ -267,10 +263,9 @@ export function createKeyboardController({
       const clipboardData = event.clipboardData;
       const files = clipboardData ? [...clipboardData.files] : [];
       const text = clipboardData?.getData?.('text/plain') ?? '';
-      if (files.length === 0 && !text.trim()) return;
 
       event.preventDefault();
-      void commands.pasteExternalClipboard(
+      void commands.pasteClipboard(
         { files, text },
         commands.selectedPasteDestinations(),
       );

@@ -60,6 +60,25 @@ export function createWorkspaceCommands({
   render,
   setStatus,
 }) {
+  let internalClipboardFingerprint = null;
+  let internalClipboardFingerprintPending = false;
+
+  async function readClipboardSnapshot() {
+    try {
+      const snapshot = await host.fileCapability?.('clipboard-read', {});
+      return snapshot?.ok === true ? snapshot : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function rememberClipboardAtInternalCopy() {
+    internalClipboardFingerprintPending = true;
+    void readClipboardSnapshot()
+      .then((snapshot) => { internalClipboardFingerprint = snapshot?.fingerprint ?? null; })
+      .finally(() => { internalClipboardFingerprintPending = false; });
+  }
+
   function scopeAllowsSelection(ids) {
     if (!scopeRootId || ids.every((id) => isItemInScope(id))) return true;
     setStatus('That item is outside this project folder.');
@@ -441,6 +460,7 @@ export function createWorkspaceCommands({
       collapseWhole,
       placementIds,
     });
+    rememberClipboardAtInternalCopy();
 
     setStatus('');
     closeMenu();
@@ -537,6 +557,49 @@ export function createWorkspaceCommands({
       setStatus(error instanceof Error ? error.message : String(error));
       return false;
     }
+  }
+
+  async function pasteClipboard({ files = [], text = '' } = {}, parentIds) {
+    const internal = store.getSession().clipboard;
+    const snapshot = await readClipboardSnapshot();
+    const sameAsInternalCopy = Boolean(
+      internal
+      && (internalClipboardFingerprintPending
+        || (internalClipboardFingerprint
+          && snapshot?.fingerprint === internalClipboardFingerprint)),
+    );
+
+    if (sameAsInternalCopy) {
+      await pasteInto(parentIds);
+      return true;
+    }
+
+    if (Array.isArray(files) && files.length > 0) {
+      return pasteExternalClipboard({ files, text }, parentIds);
+    }
+
+    if (typeof text === 'string' && text.trim()) {
+      return pasteExternalClipboard({ files: [], text }, parentIds);
+    }
+
+    if (snapshot?.kind === 'files' && Array.isArray(snapshot.targets) && snapshot.targets.length > 0) {
+      const destinations = (Array.isArray(parentIds) ? parentIds : [parentIds])
+        .map(scopedDestination)
+        .filter(Boolean);
+      if (!destinations.every((destinationId) => scopeAllowsDestination(destinationId))) return false;
+      for (const destination of destinations) await dropResolvedTargets(snapshot.targets, destination);
+      return true;
+    }
+
+    if (snapshot?.kind === 'text' && typeof snapshot.text === 'string' && snapshot.text.trim()) {
+      return pasteExternalClipboard({ text: snapshot.text }, parentIds);
+    }
+
+    if (internal) {
+      await pasteInto(parentIds);
+      return true;
+    }
+    return false;
   }
 
   async function moveSelectionToBin() {
@@ -755,6 +818,7 @@ export function createWorkspaceCommands({
     cutSelection,
     pasteInto,
     pasteExternalClipboard,
+    pasteClipboard,
     moveSelectionToBin,
     resetGraphPositions,
     dragDropToBin,

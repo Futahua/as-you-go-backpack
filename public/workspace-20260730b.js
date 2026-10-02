@@ -6753,7 +6753,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     },
     copyAyG: () => commands.copySelection(),
     cutAyG: () => commands.cutSelection(),
-    pasteAyG: (destination) => commands.pasteInto(destination),
+    pasteAyG: (destination) => commands.pasteClipboard({}, destination),
     deleteAyG: () => commands.moveSelectionToBin(),
     clearCanvasForMachine: () => {
       store.clearSelection();
