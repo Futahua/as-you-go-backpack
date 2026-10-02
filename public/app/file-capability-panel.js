@@ -134,7 +134,6 @@ export function createFileCapabilityPanel(options) {
     context: null,
     inspectedPath: null,
     inspectedUrl: null,
-    webShortcutId: null,
     searchTimer: null,
     searchGeneration: 0,
     inspectGeneration: 0,
@@ -457,7 +456,6 @@ export function createFileCapabilityPanel(options) {
     state.context = null;
     state.inspectedPath = null;
     state.inspectedUrl = url;
-    state.webShortcutId = source?.shortcutId || null;
     state.lastPreviewResult = null;
     disarmDelete();
     renameRow.hidden = true;
@@ -1078,7 +1076,6 @@ export function createFileCapabilityPanel(options) {
     state.context = null;
     state.inspectedPath = null;
     state.inspectedUrl = null;
-    state.webShortcutId = null;
     state.lastPreviewResult = null;
     disarmDelete();
     renameRow.hidden = true;
@@ -1122,7 +1119,6 @@ export function createFileCapabilityPanel(options) {
     const generation = ++state.inspectGeneration;
     state.inspectedPath = target;
     state.inspectedUrl = null;
-    state.webShortcutId = null;
     if (context !== undefined) state.context = context;
     disarmDelete();
     renameRow.hidden = true;
@@ -1259,10 +1255,6 @@ export function createFileCapabilityPanel(options) {
     else if (state.lastPreviewResult?.preview?.kind === 'windows-preview-handler') renderPreview(state.lastPreviewResult);
     else if (['hosted-pdf', 'hosted-html'].includes(state.lastPreviewResult?.preview?.kind) && state.inspectedPath) {
       void inspectPath(state.inspectedPath, state.context);
-    }
-    else if (state.inspectedUrl) {
-      clearPreview({ preserveBrowser: true });
-      void startBrowserPreview(state.inspectedUrl);
     }
   }
   expandButton.addEventListener('click', () => {
@@ -1455,12 +1447,6 @@ export function createFileCapabilityPanel(options) {
   function syncSelection(selection) {
     if (state.fullPage) return;
     if (selection?.mode === 'web') {
-      const url = typeof selection.item?.url === 'string' ? selection.item.url : '';
-      const shortcutId = selection.item?.shortcutId || null;
-      if (url && state.inspectedUrl === url && state.webShortcutId === shortcutId) {
-        itemTitle.textContent = selection.item?.name || url;
-        return;
-      }
       renderWebSelection(selection.item);
       return;
     }
