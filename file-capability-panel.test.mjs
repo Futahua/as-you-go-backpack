@@ -165,6 +165,8 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /fileCapability\('preview-html-close'/);
   assert.match(source, /fileCapability\('browser-open'/);
   assert.match(source, /fileCapability\('browser-move'/);
+  assert.match(source, /fileCapability\('browser-visibility'/);
+  assert.match(source, /visible: false/);
   assert.match(source, /fileCapability\('browser-close'/);
   assert.match(source, /clearPreview\(\{ preserveBrowser: true \}\)/);
   assert.match(source, /state\.inspectedUrl === url && state\.webShortcutId === shortcutId/);
