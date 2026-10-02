@@ -64,6 +64,11 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /\['name','Name'\],\['type','Type'\],\['size','Size'\],\['modified','Date Modified'\]/);
   assert.match(navigator, /function sortedMachineItems\(items\)/);
   assert.match(navigator, /a\.kind === 'folder' && b\.kind !== 'folder'/);
+  assert.match(navigator, /function machinePathCrumbs\(path\)/);
+  assert.match(navigator, /const driveRoot = `\$\{drive\[0\]\}\\\\`/);
+  assert.match(navigator, /const shareRoot = `\\\\\\\\\$\{unc\[1\]\}\\\\\$\{unc\[2\]\}`/);
+  assert.match(navigator, /const p=parentPath\(s\.path\);if\(p&&p\.toLocaleLowerCase\(\)!==s\.path\.toLocaleLowerCase\(\)\)void loadMachine\(p,true\)/);
+  assert.doesNotMatch(navigator, /parentPath\(s\.path\)[^\n]*startsWith\(s\.machineRoot/);
   assert.match(navigator, /row\.addEventListener\('dblclick',[\s\S]*if\(folder\)[\s\S]*loadMachine\(x\.path,true\)/);
   assert.match(navigator, /row\.addEventListener\('dblclick',[\s\S]*fileCapability\('open',\{path:x\.path\}\)/);
   assert.match(navigatorCss, /\.workspace-navigator-machine-columns/);

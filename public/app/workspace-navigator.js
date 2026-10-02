@@ -5,9 +5,23 @@ function button(doc, title, paths) {
   b.setAttribute('aria-label', title); b.innerHTML = svg(paths); return b;
 }
 const parentPath = (value) => {
-  const p = String(value || '').replace(/[\\/]+$/, '');
-  const i = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'));
-  return i < 3 ? p.slice(0, 3) : p.slice(0, i);
+  const p = String(value || '').replace(/\//g, '\\').replace(/\\+$/, '');
+  const unc = p.match(/^\\\\([^\\]+)\\([^\\]+)(?:\\.*)?$/);
+  if (unc) {
+    const shareRoot = `\\\\${unc[1]}\\${unc[2]}`;
+    if (p.toLocaleLowerCase() === shareRoot.toLocaleLowerCase()) return shareRoot;
+    const i = p.lastIndexOf('\\');
+    return i < shareRoot.length ? shareRoot : p.slice(0, i);
+  }
+  const drive = p.match(/^[A-Za-z]:/);
+  if (drive) {
+    const driveRoot = `${drive[0]}\\`;
+    if (p.length <= driveRoot.length) return driveRoot;
+    const i = p.lastIndexOf('\\');
+    return i < driveRoot.length ? driveRoot : p.slice(0, i);
+  }
+  const i = p.lastIndexOf('\\');
+  return i <= 0 ? p : p.slice(0, i);
 };
 
 export function createWorkspaceNavigator(o) {
@@ -575,13 +589,27 @@ export function createWorkspaceNavigator(o) {
     if(s.machineExpanded.has(root))fragment.append(await machineTree(root,1,generation));
     if(generation===s.renderGen&&s.mode==='machine'&&s.view==='tree')body.replaceChildren(fragment);
   }
-  function renderMachineCrumbs(path) {
-    const root=s.machineRoot, entries=[{path:root,name:root}];
-    if(path!==root){
-      let cursor=root.replace(/[\\/]+$/,'');
-      for(const part of path.slice(root.length).split(/[\\/]+/).filter(Boolean)){cursor+='\\'+part;entries.push({path:cursor,name:part});}
+  function machinePathCrumbs(path) {
+    const normalized=String(path||'').replace(/\//g,'\\').replace(/\\+$/,'');
+    const unc=normalized.match(/^\\\\([^\\]+)\\([^\\]+)(?:\\(.*))?$/);
+    if(unc){
+      let cursor=`\\\\${unc[1]}\\${unc[2]}`;
+      const entries=[{path:cursor,name:cursor}];
+      for(const part of String(unc[3]||'').split('\\').filter(Boolean)){cursor+='\\'+part;entries.push({path:cursor,name:part});}
+      return entries;
     }
-    setLocation(entries.map((entry)=>({
+    const drive=normalized.match(/^([A-Za-z]:)(?:\\(.*))?$/);
+    if(drive){
+      let cursor=drive[1]+'\\';
+      const entries=[{path:cursor,name:cursor}];
+      for(const part of String(drive[2]||'').split('\\').filter(Boolean)){cursor+=part;entries.push({path:cursor,name:part});cursor+='\\';}
+      for(let i=1;i<entries.length;i++)entries[i].path=entries[i].path.replace(/\\+$/,'');
+      return entries;
+    }
+    return [{path:normalized,name:normalized}];
+  }
+  function renderMachineCrumbs(path) {
+    setLocation(machinePathCrumbs(path).map((entry)=>({
       key:entry.path.toLocaleLowerCase(),
       label:entry.name,
       title:entry.path,
@@ -719,7 +747,7 @@ export function createWorkspaceNavigator(o) {
   });
   up.addEventListener('click',()=>{
     if(s.mode==='ayg'){const g=o.getState().groups.find((x)=>x.id===currentAyG());navigateAyG(g?.parentId||o.rootId);return;}
-    const p=parentPath(s.path);if(p&&p.toLocaleLowerCase().startsWith(s.machineRoot.toLocaleLowerCase()))void loadMachine(p,true);
+    const p=parentPath(s.path);if(p&&p.toLocaleLowerCase()!==s.path.toLocaleLowerCase())void loadMachine(p,true);
   });
   home.addEventListener('click',()=>{if(s.mode==='ayg')navigateAyG(o.rootId);else if(s.machineRoot)void loadMachine(s.machineRoot,true);});
   refresh.addEventListener('click',()=>{if(s.mode==='machine'&&s.path)s.machineListings.delete(s.path.toLocaleLowerCase());render();});
