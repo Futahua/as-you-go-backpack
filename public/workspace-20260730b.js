@@ -6786,6 +6786,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     itemsIn,
     isWebLink,
     isAbsoluteWindowsPath,
+    nativeDragPaths: nativeDragPathsForItemIds,
     selectAyG: (id, visibleIds, modifiers = {}) => commands.selectItem(id, {
       shiftKey: false,
       ctrlKey: modifiers.ctrlKey === true,

@@ -24,23 +24,26 @@ const parentPath = (value) => {
   return i <= 0 ? p : p.slice(0, i);
 };
 
-export function beginMachineRowDrag({ event, item, host }) {
-  if (!event?.dataTransfer || typeof item?.path !== 'string' || !item.path) return false;
-  const name = typeof item.name === 'string' && item.name ? item.name : item.path;
-  event.dataTransfer.effectAllowed = 'link';
-  event.dataTransfer.setData(
-    'application/x-papers-native-items',
-    JSON.stringify([{ target: item.path, name }]),
-  );
+export function beginNavigatorNativeDrag({ event, paths, host }) {
+  const unique = [...new Set((paths || []).filter((path) => typeof path === 'string' && path))];
+  if (!event?.dataTransfer || unique.length === 0) return false;
 
-  // Keep the private payload for drops back into As you Go, while also
-  // starting the same native Windows file drag the main canvas already uses.
+  // Electron's native file-drag handoff replaces Chromium's HTML5 drag.
+  // If both are left alive, two drag loops overlap and can strand the Chromium
+  // drag image or tear down the renderer. Cancel the browser drag first.
+  event.preventDefault();
   try {
-    void Promise.resolve(host?.fileCapability?.('native-drag', { paths: [item.path] })).catch(() => {});
+    void Promise.resolve(host?.fileCapability?.('native-drag', { paths: unique })).catch(() => {});
   } catch {
-    // Inline AYG dragging still works if the native host seam is unavailable.
+    // The cancelled HTML5 drag stays cancelled if the host seam is unavailable.
   }
   return true;
+}
+
+export function aygNavigatorNativePaths({ itemId, selectedIds, resolvePaths }) {
+  if (typeof itemId !== 'string' || typeof resolvePaths !== 'function') return [];
+  const selected = selectedIds instanceof Set ? selectedIds : new Set(selectedIds || []);
+  return resolvePaths(selected.has(itemId) ? [...selected] : [itemId]);
 }
 
 export function createWorkspaceNavigator(o) {
@@ -309,6 +312,21 @@ export function createWorkspaceNavigator(o) {
     for (const x of o.itemsIn(o.getState(), parent).filter((v) => v.kind !== 'window-layout')) {
       const id = x.id, row = d.createElement('div');
       row.className = 'workspace-navigator-row'; row.dataset.id = id; row.style.paddingLeft = `${4 + depth * 13}px`; row.classList.toggle('selected', o.getSession().selected.has(id));
+      const ownNativePaths = o.nativeDragPaths?.([id]) || [];
+      if (ownNativePaths.length > 0) {
+        row.draggable = true;
+        row.addEventListener('dragstart', (event) => {
+          beginNavigatorNativeDrag({
+            event,
+            paths: aygNavigatorNativePaths({
+              itemId: id,
+              selectedIds: o.getSession().selected,
+              resolvePaths: o.nativeDragPaths,
+            }),
+            host: o.host,
+          });
+        });
+      }
       if (x.kind === 'group' && s.view === 'tree') {
         const t = d.createElement('button'); t.type='button'; t.className='navigator-tree-toggle'; t.textContent=s.expanded.has(x.id)?'▾':'▸';
         t.addEventListener('click',(e)=>{e.stopPropagation(); s.expanded.has(x.id)?s.expanded.delete(x.id):s.expanded.add(x.id); render();}); row.append(t);
@@ -518,7 +536,7 @@ export function createWorkspaceNavigator(o) {
     row.draggable = true;
     row.title = x.path;
     row.addEventListener('dragstart',(event)=>{
-      beginMachineRowDrag({ event, item: x, host: o.host });
+      beginNavigatorNativeDrag({ event, paths: [x.path], host: o.host });
     });
     const folder=x.kind==='folder', lead=d.createElement(folder&&s.view==='tree'?'button':'span'); lead.className=folder&&s.view==='tree'?'navigator-tree-toggle':'navigator-tree-spacer';
     if(folder&&s.view==='tree'){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'▾':'▸';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}

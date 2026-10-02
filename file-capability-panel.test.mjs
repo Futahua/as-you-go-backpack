@@ -93,7 +93,10 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /pickTarget\('folder'\)/);
   assert.match(navigator, /papers:ayg:navigator-machine-root/);
   assert.match(navigator, /row\.draggable = true/);
-  assert.match(navigator, /application\/x-papers-native-items/);
+  assert.match(navigator, /beginNavigatorNativeDrag/);
+  assert.match(navigator, /event\.preventDefault\(\)/);
+  assert.match(navigator, /fileCapability\?\.\('native-drag', \{ paths: unique \}\)/);
+  assert.match(navigator, /nativeDragPaths/);
   assert.match(navigatorCss, /\.workspace-navigator-search/);
   assert.match(dropController, /application\/x-papers-native-items/);
   assert.match(dropController, /commands\.dropResolvedTargets/);
