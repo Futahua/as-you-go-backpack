@@ -117,6 +117,8 @@ test('file capability panel source keeps destructive retargeting verification-bo
   const source = await readFile(new URL('./public/app/file-capability-panel.js', import.meta.url), 'utf8');
   const css = await readFile(new URL('./public/styles/file-capability.css', import.meta.url), 'utf8');
   const workspace = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const navigator = await readFile(new URL('./public/app/workspace-navigator.js', import.meta.url), 'utf8');
+  const navigatorCss = await readFile(new URL('./public/styles/navigator.css', import.meta.url), 'utf8');
   assert.match(source, /waitForPathState\(host, \{ present: expectedPath, absent: oldPath \}\)/);
   assert.match(source, /retargetShortcut\(\{[\s\S]*oldPath,[\s\S]*newPath: expectedPath/);
   assert.match(source, /fileCapability\('delete', \{ paths: \[target\] \}\)/);
@@ -155,6 +157,10 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /event\.ctrlKey/);
   assert.match(source, /child\.documentElement\.style\.zoom/);
   assert.match(source, /preview\.scrollTop \+= event\.deltaY/);
+  assert.match(source, /event\.button === 1/);
+  assert.match(source, /papers-markdown-autoscroll-indicator/);
+  assert.match(source, /requestAnimationFrame\?\.\(tickAutoscroll\)/);
+  assert.match(source, /preview\.scrollBy\(/);
   assert.match(source, /ResizeObserver\(resizeToContent\)/);
   assert.match(css, /\.file-capability-obsidian-markdown/);
   assert.match(source, /fullPage: Boolean\(launchedPreview \|\| launchToken\)/);
@@ -189,6 +195,16 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(sidecarHtml, /data-theme="dark"/);
   assert.match(sidecarCss, /--surface:\s*#272c37/);
   assert.match(css, /\.file-capability-text-scroller/);
+  assert.match(css, /scrollbar-color: var\(--border-strong\) transparent/);
+  assert.match(css, /::-webkit-scrollbar-thumb/);
+  assert.match(navigatorCss, /workspace-navigator-body::-webkit-scrollbar-thumb/);
+  assert.match(navigator, /isCollapsed: \(\) => s\.collapsed/);
+  assert.match(navigator, /setCollapsed/);
+  assert.match(source, /setExpanded: setExpandedWithPreviewLifecycle/);
+  assert.match(source, /isFullPage: \(\) => state\.fullPage/);
+  assert.match(workspace, /toggleSidePanes:[\s\S]*fileCapabilityPanel\.isFullPage/);
+  assert.match(workspace, /workspaceNavigator\.setCollapsed\?\.\(!bothCollapsed\)/);
+  assert.match(workspace, /fileCapabilityPanel\.setExpanded\?\.\(bothCollapsed\)/);
   assert.match(css, /\.file-capability-native-preview/);
   assert.doesNotMatch(source, /frame\.src = data\.dataUrl/);
 });

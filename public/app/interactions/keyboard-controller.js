@@ -49,6 +49,7 @@ export function createKeyboardController({
   // Quick Run (STAGE 5). The controller reports the chord and nothing more: opening the
   // surface is the entry file's job, so this stays inert until something passes a callback.
   openQuickRun = () => false,
+  toggleSidePanes = () => false,
 }) {
   let abortController = null;
 
@@ -117,6 +118,17 @@ export function createKeyboardController({
         // sort, so a letter goes to type-to-run rather than nowhere. Measured in the host: with an opacity
         // slider focused, a letter did nothing at all before this line existed.
         if (!typingTarget) openOnTypedCharacter();
+        return;
+      }
+      if (
+        event.key === 'Tab'
+        && !event.shiftKey
+        && !event.ctrlKey
+        && !event.altKey
+        && !event.metaKey
+        && toggleSidePanes()
+      ) {
+        event.preventDefault();
         return;
       }
 

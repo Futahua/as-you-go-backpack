@@ -16,6 +16,8 @@ export function createWorkspaceNavigator(o) {
     render() {},
     syncCanvasSelection() {},
     isMachineMode: () => false,
+    isCollapsed: () => true,
+    setCollapsed() {},
   });
   o.workspace.classList.add('navigator-docked');
   const INLINE_NATIVE_ITEMS = 'application/x-papers-native-items';
@@ -624,11 +626,12 @@ export function createWorkspaceNavigator(o) {
     if(event.key==='Escape'&&searchInput.value){event.preventDefault();clearSearch();}
   });
   viewToggle.addEventListener('click',()=>setView(s.view==='tree'?'nav':'tree'));
-  collapse.addEventListener('click',()=>{
-    s.collapsed=!s.collapsed;
+  function setCollapsed(collapsed){
+    s.collapsed=Boolean(collapsed);
     persistUi('papers:ayg:navigator-collapsed',s.collapsed?'1':'0');
     render();
-  });
+  }
+  collapse.addEventListener('click',()=>setCollapsed(!s.collapsed));
   resizer.addEventListener('pointerdown',(e)=>{if(e.button!==0||s.collapsed)return;resizer.setPointerCapture?.(e.pointerId);panel.classList.add('resizing');e.preventDefault();});
   resizer.addEventListener('pointermove',(e)=>{
     if(!resizer.hasPointerCapture?.(e.pointerId)||s.collapsed)return;
@@ -678,5 +681,7 @@ export function createWorkspaceNavigator(o) {
     render,
     syncCanvasSelection,
     isMachineMode: () => s.mode === 'machine',
+    isCollapsed: () => s.collapsed,
+    setCollapsed,
   });
 }

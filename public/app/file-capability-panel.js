@@ -151,6 +151,7 @@ export function createFileCapabilityPanel(options) {
     browserObserver: null,
     imagePreviewObserver: null,
     markdownPreviewObserver: null,
+    markdownAutoscrollCancel: null,
     fullPage: Boolean(launchedPreview || launchToken),
     lastPreviewResult: null,
   };
@@ -378,6 +379,8 @@ export function createFileCapabilityPanel(options) {
     state.imagePreviewObserver = null;
     state.markdownPreviewObserver?.disconnect();
     state.markdownPreviewObserver = null;
+    state.markdownAutoscrollCancel?.();
+    state.markdownAutoscrollCancel = null;
     releasePreviewResource();
     if (state.previewObjectUrl) {
       URL.revokeObjectURL(state.previewObjectUrl);
@@ -955,6 +958,9 @@ export function createFileCapabilityPanel(options) {
       .markdown-reading-view h6{color:var(--h6-color,var(--text-normal))!important}
       .markdown-reading-view img{max-width:100%!important;height:auto}
       .markdown-reading-view pre,.markdown-reading-view table{max-width:100%}
+      .papers-markdown-autoscroll-indicator{position:fixed!important;z-index:2147483647!important;width:20px!important;height:20px!important;margin:-10px 0 0 -10px!important;border:1px solid var(--background-modifier-border-focus,var(--background-modifier-border))!important;border-radius:999px!important;background:var(--background-secondary)!important;box-shadow:0 4px 14px rgba(0,0,0,.35)!important;pointer-events:none!important}
+      .papers-markdown-autoscroll-indicator::before{content:'';position:absolute;inset:5px;border:1px solid var(--text-muted)!important;border-radius:999px;opacity:.8}
+      html.papers-markdown-autoscrolling,html.papers-markdown-autoscrolling *{cursor:all-scroll!important}
     </style></head><body class="${bodyClass}"><div class="markdown-reading-view"><div class="${previewClass}">${html}</div></div></body></html>`;
     preview.append(frame);
     frame.addEventListener('load', () => {
@@ -983,6 +989,70 @@ export function createFileCapabilityPanel(options) {
         }
         if (event.deltaX) preview.scrollLeft += event.deltaX;
       }, { passive: false });
+      const childView = child.defaultView || windowRef;
+      const indicator = child.createElement('div');
+      indicator.className = 'papers-markdown-autoscroll-indicator';
+      indicator.hidden = true;
+      child.body.append(indicator);
+      let autoscroll = null;
+      let autoscrollFrame = 0;
+      const axisSpeed = (delta) => {
+        const magnitude = Math.max(0, Math.abs(delta) - 10);
+        return magnitude === 0 ? 0 : Math.sign(delta) * Math.min(36, magnitude * 0.16);
+      };
+      const stopAutoscroll = () => {
+        autoscroll = null;
+        indicator.hidden = true;
+        child.documentElement.classList.remove('papers-markdown-autoscrolling');
+        if (autoscrollFrame) childView?.cancelAnimationFrame?.(autoscrollFrame);
+        autoscrollFrame = 0;
+      };
+      const tickAutoscroll = () => {
+        if (!autoscroll || !frame.isConnected) {
+          stopAutoscroll();
+          return;
+        }
+        preview.scrollBy(
+          axisSpeed(autoscroll.x - autoscroll.originX),
+          axisSpeed(autoscroll.y - autoscroll.originY),
+        );
+        autoscrollFrame = childView?.requestAnimationFrame?.(tickAutoscroll) || 0;
+      };
+      child.addEventListener('pointerdown', (event) => {
+        if (event.button === 1) {
+          event.preventDefault();
+          if (autoscroll) {
+            stopAutoscroll();
+            return;
+          }
+          autoscroll = {
+            originX: event.clientX,
+            originY: event.clientY,
+            x: event.clientX,
+            y: event.clientY,
+          };
+          indicator.style.left = event.clientX + 'px';
+          indicator.style.top = event.clientY + 'px';
+          indicator.hidden = false;
+          child.documentElement.classList.add('papers-markdown-autoscrolling');
+          autoscrollFrame = childView?.requestAnimationFrame?.(tickAutoscroll) || 0;
+          return;
+        }
+        if (autoscroll) stopAutoscroll();
+      }, { capture: true });
+      child.addEventListener('pointermove', (event) => {
+        if (!autoscroll) return;
+        autoscroll.x = event.clientX;
+        autoscroll.y = event.clientY;
+      }, { passive: true });
+      child.addEventListener('auxclick', (event) => {
+        if (event.button === 1) event.preventDefault();
+      }, { capture: true });
+      child.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && autoscroll) stopAutoscroll();
+      });
+      childView?.addEventListener?.('blur', stopAutoscroll);
+      state.markdownAutoscrollCancel = stopAutoscroll;
       resizeToContent();
       state.markdownPreviewObserver = new ResizeObserver(resizeToContent);
       state.markdownPreviewObserver.observe(child.body);
@@ -1155,8 +1225,9 @@ export function createFileCapabilityPanel(options) {
     return changed;
   }
 
-  expandButton.addEventListener('click', () => {
-    const next = !state.expanded;
+  function setExpandedWithPreviewLifecycle(expanded) {
+    const next = Boolean(expanded);
+    if (next === state.expanded) return;
     setExpanded(next);
     if (!next) {
       closeNativePreview();
@@ -1167,6 +1238,9 @@ export function createFileCapabilityPanel(options) {
     else if (['hosted-pdf', 'hosted-html'].includes(state.lastPreviewResult?.preview?.kind) && state.inspectedPath) {
       void inspectPath(state.inspectedPath, state.context);
     }
+  }
+  expandButton.addEventListener('click', () => {
+    setExpandedWithPreviewLifecycle(!state.expanded);
   });
   openTabButton.addEventListener('click', async () => {
     if (!state.inspectedPath || !windowRef || typeof host.openNewSurface !== 'function') return;
@@ -1422,8 +1496,9 @@ export function createFileCapabilityPanel(options) {
       return inspectPath(path, { shortcutId: null, path, name });
     },
     openSearch() {
-      setExpanded(true);
+      setExpandedWithPreviewLifecycle(true);
     },
+    setExpanded: setExpandedWithPreviewLifecycle,
     refreshPreviewGeometry,
     destroy() {
       if (state.searchTimer) clearTimeout(state.searchTimer);
@@ -1435,6 +1510,7 @@ export function createFileCapabilityPanel(options) {
     },
     isOpen: () => true,
     isExpanded: () => state.expanded,
+    isFullPage: () => state.fullPage,
   });
 
   if (launchedPreview) {

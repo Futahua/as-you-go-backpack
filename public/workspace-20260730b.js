@@ -7085,6 +7085,14 @@ const keyboard = createKeyboardController({
   beginSetRename,
   commandSurface: commandSurfaceMode === 'overlay',
   openQuickRun,
+  toggleSidePanes: () => {
+    if (!workspaceNavigator || !fileCapabilityPanel || fileCapabilityPanel.isFullPage?.()) return false;
+    const bothCollapsed = workspaceNavigator.isCollapsed?.() === true
+      && fileCapabilityPanel.isExpanded?.() === false;
+    workspaceNavigator.setCollapsed?.(!bothCollapsed);
+    fileCapabilityPanel.setExpanded?.(bothCollapsed);
+    return true;
+  },
 });
 
 // The three entrances to one surface, in one place.

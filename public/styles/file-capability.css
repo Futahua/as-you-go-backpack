@@ -234,6 +234,43 @@
   border: 1px solid var(--border-subtle);
   border-radius: 9px;
   background: var(--surface);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.file-capability-preview::-webkit-scrollbar,
+.file-capability-text-scroller::-webkit-scrollbar,
+.file-capability-image-viewport::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.file-capability-preview::-webkit-scrollbar-track,
+.file-capability-text-scroller::-webkit-scrollbar-track,
+.file-capability-image-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.file-capability-preview::-webkit-scrollbar-thumb,
+.file-capability-text-scroller::-webkit-scrollbar-thumb,
+.file-capability-image-viewport::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+
+.file-capability-preview::-webkit-scrollbar-thumb:hover,
+.file-capability-text-scroller::-webkit-scrollbar-thumb:hover,
+.file-capability-image-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+  background-clip: padding-box;
+}
+
+.file-capability-preview::-webkit-scrollbar-corner,
+.file-capability-text-scroller::-webkit-scrollbar-corner,
+.file-capability-image-viewport::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .file-capability-preview-video {
@@ -297,6 +334,8 @@
   touch-action: none;
   overscroll-behavior: contain;
   user-select: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .file-capability-image-viewport.panning {
@@ -348,6 +387,8 @@
   height: 100%;
   min-height: 0;
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .file-capability-preview-text {

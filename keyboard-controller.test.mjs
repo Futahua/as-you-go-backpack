@@ -39,7 +39,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
   });
   const called = {
   quickRun: 0, quickRunSeeds: [],
-    close: 0, permanentDelete: 0, beginPicker: 0, beginRename: 0, pickerOpens: true, status: [],
+    close: 0, permanentDelete: 0, beginPicker: 0, beginRename: 0, pickerOpens: true, status: [], paneToggles: 0,
   };
   const commandSpies = {};
   for (const name of [
@@ -70,6 +70,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     beginSetRename: () => { called.beginRename += 1; return true; },
     commandSurface,
     openQuickRun: (seed) => { called.quickRun += 1; called.quickRunSeeds.push(seed); return true; },
+    toggleSidePanes: () => { called.paneToggles += 1; return true; },
   });
   beforeMount?.(documentMock);
   controller.mount();
@@ -152,6 +153,23 @@ test('Ctrl+Enter reveals the selection', () => {
   h.store.setSelection(['a']);
   h.listeners[0].handler(key({ key: 'Enter', ctrlKey: true }));
   assert.equal(h.commandSpies['revealSelection:calls'], 1);
+});
+
+test('plain Tab toggles the paired Navigator and Preview panes only from workspace chrome', () => {
+  const h = createHarness();
+  let prevented = false;
+  const event = key({ key: 'Tab' });
+  event.preventDefault = () => { prevented = true; };
+  h.listeners[0].handler(event);
+  assert.equal(h.called.paneToggles, 1);
+  assert.equal(prevented, true);
+
+  const editing = createHarness({ activeElement: { matches: (selector) => selector.includes('input') } });
+  editing.listeners[0].handler(key({ key: 'Tab' }));
+  assert.equal(editing.called.paneToggles, 0, 'Tab remains native while an editable control owns focus');
+
+  h.listeners[0].handler(key({ key: 'Tab', shiftKey: true }));
+  assert.equal(h.called.paneToggles, 1, 'Shift+Tab remains native reverse focus');
 });
 
 test('Bin mode suppresses copy/cut/paste and destroys the listener', () => {
