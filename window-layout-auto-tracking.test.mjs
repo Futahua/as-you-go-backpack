@@ -10,6 +10,12 @@ import {
 } from './public/workspace-model-20260730b.js';
 
 const INSTANCE = 'W0123456789abcdef';
+
+test('workspace imports only the current automatic tracking API', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  assert.match(source, /import \{ createWindowLayoutAutoTracking \} from '\.\/app\/window-layout-auto-tracking\.js';/);
+  assert.doesNotMatch(source, /createWindowLayoutAutoTracker|windowLayoutTrackingTransitions/);
+});
 const descriptor = {
   version: 1,
   title: 'Notepad',

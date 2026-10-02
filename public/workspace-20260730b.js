@@ -114,10 +114,6 @@ import {
   windowLayoutHasValidInstanceId,
   windowLayoutPickMemberDescriptors,
 } from './app/window-layout-workspace.js';
-import {
-  createWindowLayoutAutoTracker,
-  windowLayoutTrackingTransitions,
-} from './app/window-layout-auto-tracking.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup, windowLayoutMemberState } from './app/window-layout-control-icons.js';
 import {
   WINDOW_LAYOUT_MEMBER_NOTE_UNCONFIRMED,
@@ -3922,84 +3918,6 @@ async function reconcileTrackingBaseline(providedSnapshot = null) {
   if (accepted.events.length) void drainTrackingLifecycleEvents();
 }
 
-const TRACKING_LIFECYCLE_POLL_MS = 2000;
-let trackingLifecyclePollTimer = null;
-let trackingLifecyclePollInFlight = false;
-let trackingWriterEpoch = 0;
-const trackingLayoutEpochs = new Map();
-
-function trackingOperationToken(layoutId) {
-  return `${trackingWriterEpoch}:${layoutId === null ? '' : trackingLayoutEpochs.get(layoutId) ?? 0}`;
-}
-
-const windowLayoutAutoTracker = createWindowLayoutAutoTracker({
-  getState: () => state,
-  isWriter: isCurrentDocumentWriter,
-  isReadOnly: () => windowLayoutDetachment.isReadOnly(),
-  getOperationToken: trackingOperationToken,
-  readSnapshot: () => host.windowLifecycleSnapshot?.(),
-  resolveWindowInstance: (windowInstanceId) => host.resolveWindowInstance(windowInstanceId),
-  observeWindowCapability: (capability) => host.observeWindowCapability(capability),
-  addMember: addWindowLayoutMember,
-  commitState: (next) => store.commit(next, {
-    saveMetadata: { rebaseAutomaticSave: true },
-    requireDurable: true,
-  }),
-  cacheCapability: (layoutId, memberId, capability) => {
-    windowLayoutRuntime.capabilities.set(windowLayoutMemberKey(layoutId, memberId), capability);
-  },
-  persistState: async (current) => {
-    const result = await store.save(current, { rebaseAutomaticSave: true });
-    return result?.ok === true && result.dropped !== true && result.superseded !== true;
-  },
-  afterCommit: async (layoutId) => {
-    saveWorkspaceView();
-    noteWindowLayoutCommit(layoutId);
-    await windowLayoutRecording.ensureRecording(layoutId);
-  },
-});
-
-async function pollTrackingLifecycleSnapshot() {
-  if (trackingLifecyclePollInFlight || !isCurrentDocumentWriter()) return;
-  trackingLifecyclePollInFlight = true;
-  try {
-    // Every identity in even an incomplete snapshot is positive evidence.
-    // The tracker derives work from live-visible minus current members each
-    // time, so transient resolution failures are retried on the next poll.
-    await windowLayoutAutoTracker.refresh();
-  } finally {
-    trackingLifecyclePollInFlight = false;
-  }
-}
-
-function scheduleTrackingLifecyclePoll() {
-  if (trackingLifecyclePollTimer !== null || !isCurrentDocumentWriter()
-    || !(state.windowLayouts ?? []).some((layout) => layout.tracking?.enabled === true)) return;
-  const tick = async () => {
-    trackingLifecyclePollTimer = null;
-    if (windowLayoutDetachment.isStopped() || !isCurrentDocumentWriter()
-      || !(state.windowLayouts ?? []).some((layout) => layout.tracking?.enabled === true)) {
-      return;
-    }
-    try {
-      await pollTrackingLifecycleSnapshot();
-    } catch (error) {
-      console.warn('[AsYouGo] window lifecycle snapshot failed', error);
-    } finally {
-      if (isCurrentDocumentWriter()
-        && (state.windowLayouts ?? []).some((layout) => layout.tracking?.enabled === true)) {
-        trackingLifecyclePollTimer = window.setTimeout(tick, TRACKING_LIFECYCLE_POLL_MS);
-      }
-    }
-  };
-  trackingLifecyclePollTimer = window.setTimeout(tick, TRACKING_LIFECYCLE_POLL_MS);
-}
-
-function stopTrackingLifecyclePoll() {
-  if (trackingLifecyclePollTimer !== null) window.clearTimeout(trackingLifecyclePollTimer);
-  trackingLifecyclePollTimer = null;
-}
-
 async function ensureStartupWindowLayoutWidget() {
   if (windowLayoutDetachment.getState().mode === 'detached'
     || windowLayoutDetachment.isReadOnly()
@@ -4086,7 +4004,6 @@ async function handleWindowLayoutTrackingToggle(layoutId) {
   const layout = windowLayoutFromState(layoutId);
   if (!layout) return false;
   const nextEnabled = layout.tracking?.enabled !== true;
-  trackingLayoutEpochs.set(layoutId, (trackingLayoutEpochs.get(layoutId) ?? 0) + 1);
   const next = setWindowLayoutTracking(state, layoutId, nextEnabled);
   const persisted = await store.commit(next);
   if (!persisted) return false;
@@ -4096,7 +4013,7 @@ async function handleWindowLayoutTrackingToggle(layoutId) {
   // additions and deliberately keeps its current members.
   if (nextEnabled) {
     void windowLayoutRecording.ensureRecording(layoutId);
-    void populateTrackingLayout(layoutId).finally(() => scheduleTrackingLifecyclePoll());
+    void populateTrackingLayout(layoutId);
   }
   return true;
 }
@@ -8525,7 +8442,6 @@ if (WIDGET_SURFACE) {
       onHydrationFailed: (stage, code, revision) => visualObservability.hydrationFailed(stage, code, revision),
       invalidatePendingSaves: () => store.invalidatePendingSaves(),
       onRoleChange: (role) => {
-        trackingWriterEpoch += 1;
         conflictPanel.syncToRole(role, elements.explorer);
         // On takeover, hand every open widget an authoritative snapshot at once
         // instead of leaving it on the dead writer's last revision until it
@@ -8534,11 +8450,9 @@ if (WIDGET_SURFACE) {
           for (const layout of state.windowLayouts ?? []) {
             windowLayoutWidgetChannelWorkspace.broadcast(layout.id);
           }
-          void reconcileTrackingBaseline().finally(() => scheduleTrackingLifecyclePoll());
+          void reconcileTrackingBaseline();
           void ensureStartupWindowLayoutWidget();
           scheduleClosedWindowReconcile();
-        } else {
-          stopTrackingLifecyclePoll();
         }
         render();
       },
@@ -8570,7 +8484,6 @@ if (WIDGET_SURFACE) {
       // helper is unavailable or still restarting.
       try {
         await reconcileTrackingBaseline();
-        scheduleTrackingLifecyclePoll();
         await ensureStartupWindowLayoutWidget();
         scheduleClosedWindowReconcile();
       } catch (error) {
