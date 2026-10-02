@@ -150,6 +150,12 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /renderObsidianMarkdown/);
   assert.match(source, /class="markdown-reading-view"/);
   assert.match(source, /previewClass/);
+  assert.match(source, /sandbox', 'allow-same-origin'/);
+  assert.match(source, /child\.addEventListener\('wheel'/);
+  assert.match(source, /event\.ctrlKey/);
+  assert.match(source, /child\.documentElement\.style\.zoom/);
+  assert.match(source, /preview\.scrollTop \+= event\.deltaY/);
+  assert.match(source, /ResizeObserver\(resizeToContent\)/);
   assert.match(css, /\.file-capability-obsidian-markdown/);
   assert.match(source, /fullPage: Boolean\(launchedPreview \|\| launchToken\)/);
   assert.match(source, /workspaceTitle: documentRef\.title/);

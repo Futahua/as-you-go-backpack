@@ -150,6 +150,7 @@ export function createFileCapabilityPanel(options) {
     browserSessionId: null,
     browserObserver: null,
     imagePreviewObserver: null,
+    markdownPreviewObserver: null,
     fullPage: Boolean(launchedPreview || launchToken),
     lastPreviewResult: null,
   };
@@ -375,6 +376,8 @@ export function createFileCapabilityPanel(options) {
     }
     state.imagePreviewObserver?.disconnect();
     state.imagePreviewObserver = null;
+    state.markdownPreviewObserver?.disconnect();
+    state.markdownPreviewObserver = null;
     releasePreviewResource();
     if (state.previewObjectUrl) {
       URL.revokeObjectURL(state.previewObjectUrl);
@@ -929,7 +932,7 @@ export function createFileCapabilityPanel(options) {
     const frame = documentRef.createElement('iframe');
     frame.className = 'file-capability-obsidian-markdown';
     frame.title = itemTitle.textContent || 'Obsidian Markdown preview';
-    frame.setAttribute('sandbox', '');
+    frame.setAttribute('sandbox', 'allow-same-origin');
     const bodyClass = escapeHtmlAttribute(result.bodyClass || '');
     const previewClass = escapeHtmlAttribute(result.previewClass || 'markdown-preview-view markdown-rendered is-readable-line-width');
     const variables = typeof result.variables === 'string' ? result.variables : '';
@@ -940,7 +943,7 @@ export function createFileCapabilityPanel(options) {
     frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>
       :root{${variables}}
       ${obsidianCss}
-      html,body{margin:0!important;width:100%!important;min-height:100%!important;overflow-x:hidden!important;background:var(--background-primary)!important;color:var(--text-normal)!important}
+      html,body{margin:0!important;width:100%!important;min-height:100%!important;overflow:hidden!important;background:var(--background-primary)!important;color:var(--text-normal)!important}
       body{box-sizing:border-box!important;padding:16px!important}
       .markdown-reading-view{position:static!important;display:block!important;width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;transform:none!important}
       .markdown-reading-view>.markdown-preview-view{position:static!important;display:block!important;box-sizing:border-box!important;width:100%!important;max-width:none!important;height:auto!important;min-height:100%!important;overflow:visible!important;color:var(--text-normal)!important;font-family:var(--font-text)!important}
@@ -954,6 +957,36 @@ export function createFileCapabilityPanel(options) {
       .markdown-reading-view pre,.markdown-reading-view table{max-width:100%}
     </style></head><body class="${bodyClass}"><div class="markdown-reading-view"><div class="${previewClass}">${html}</div></div></body></html>`;
     preview.append(frame);
+    frame.addEventListener('load', () => {
+      const child = frame.contentDocument;
+      if (!child?.documentElement || !child.body) return;
+      let scale = 1;
+      const resizeToContent = () => {
+        frame.style.height = '1px';
+        const height = Math.max(260, child.documentElement.scrollHeight, child.body.scrollHeight);
+        frame.style.height = `${Math.ceil(height)}px`;
+      };
+      const applyScale = (nextScale) => {
+        scale = Math.max(0.5, Math.min(2, nextScale));
+        child.documentElement.style.zoom = String(scale);
+        resizeToContent();
+      };
+      child.addEventListener('wheel', (event) => {
+        if (event.ctrlKey) {
+          event.preventDefault();
+          applyScale(scale * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
+          return;
+        }
+        if (event.deltaY) {
+          event.preventDefault();
+          preview.scrollTop += event.deltaY;
+        }
+        if (event.deltaX) preview.scrollLeft += event.deltaX;
+      }, { passive: false });
+      resizeToContent();
+      state.markdownPreviewObserver = new ResizeObserver(resizeToContent);
+      state.markdownPreviewObserver.observe(child.body);
+    }, { once: true });
   }
 
   function renderEmptySelection(selectionCount = 0) {
