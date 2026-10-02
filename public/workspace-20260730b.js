@@ -8410,9 +8410,7 @@ if (WIDGET_SURFACE) {
         ...document_,
         view: { ...(document_.view ?? {}), ...preserved },
       };
-      const previousState = state;
       state = store.installExternal(next, { authoritativeSerialized });
-      syncTrackingAfterDocumentInstall(previousState, state);
       render();
     };
     surfaceCoordinator = createSurfaceCoordinator({
@@ -8429,7 +8427,6 @@ if (WIDGET_SURFACE) {
       // must not reset a newer trail interaction when its authoritative bytes
       // are reinstalled.
       installDocument: (document_, authoritativeSerialized) => {
-        const previousState = state;
         const trailExpandedByContext = state.view?.trailExpandedByContext;
         const next = trailExpandedByContext === undefined
           ? document_
@@ -8443,7 +8440,6 @@ if (WIDGET_SURFACE) {
         // state, never speculatively ahead of it.
         const before = windowLayoutDurableSignatures(state);
         state = store.install(next, { authoritativeSerialized });
-        syncTrackingAfterDocumentInstall(previousState, state);
         const after = windowLayoutDurableSignatures(state);
         for (const [layoutId, signature] of after) {
           if (before.get(layoutId) !== signature) windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
