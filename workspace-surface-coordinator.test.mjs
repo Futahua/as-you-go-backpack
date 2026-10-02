@@ -1574,6 +1574,24 @@ test('C1: failed model installation reports bounded metadata and no hydration su
   assert.deepEqual(reports, [['install', 'model-install-failed', 'r0']]);
 });
 
+test('C1: coordinator startup can be retried after one transient versioned-load failure', async () => {
+  const disk = fakeDisk();
+  const loadVersioned = disk.loadVersioned.bind(disk);
+  let attempts = 0;
+  disk.loadVersioned = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error('transient versioned load');
+    return loadVersioned();
+  };
+  const candidate = surface(fakeLock(), disk, 'retry');
+
+  await assert.rejects(candidate.coordinator.start(), /transient versioned load/);
+  assert.equal(candidate.coordinator.baselineReady, false);
+  await candidate.coordinator.start();
+  assert.equal(candidate.coordinator.baselineReady, true);
+  assert.equal(candidate.coordinator.role, SURFACE_ROLE.WRITER);
+});
+
 test('C1: malformed broadcast reports decode failure without replacing the model', () => {
   const installed = [];
   const reports = [];

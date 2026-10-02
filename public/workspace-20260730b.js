@@ -2888,7 +2888,7 @@ elements.grid.addEventListener('auxclick', (event) => {
   if (restoreAll && !detachedWidgets.has(restoreAll.dataset.wlRestoreAll)) {
     event.preventDefault();
     event.stopPropagation();
-    void host.widgetOpen(restoreAll.dataset.wlRestoreAll).catch(() => undefined);
+    void openWindowLayoutWidgetWithRetry(restoreAll.dataset.wlRestoreAll);
     return;
   }
   const minimizeAll = event.target.closest('[data-wl-min-all]');
@@ -3918,6 +3918,28 @@ async function reconcileTrackingBaseline(providedSnapshot = null) {
   if (accepted.events.length) void drainTrackingLifecycleEvents();
 }
 
+function windowLayoutWidgetOpenSucceeded(result) {
+  return Boolean(result)
+    && result.ok !== false
+    && result.widget?.ok !== false
+    && result.outcome !== 'failed'
+    && result.outcome !== 'error';
+}
+
+async function openWindowLayoutWidgetWithRetry(layoutId, options = {}) {
+  let result = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      result = await host.widgetOpen(layoutId, options);
+    } catch {
+      result = null;
+    }
+    if (windowLayoutWidgetOpenSucceeded(result)) return result;
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 100 * (2 ** attempt)));
+  }
+  return result;
+}
+
 async function ensureStartupWindowLayoutWidget() {
   if (windowLayoutDetachment.getState().mode === 'detached'
     || windowLayoutDetachment.isReadOnly()
@@ -3933,7 +3955,7 @@ async function ensureStartupWindowLayoutWidget() {
   // Writer handoff can happen when a new AYG tab opens. Reconcile widgets
   // without activating every existing native window and disturbing taskbar
   // order/focus; direct user opens retain the normal activate behavior.
-  for (const layout of layouts) await host.widgetOpen(layout.id, { activate: false }).catch(() => undefined);
+  for (const layout of layouts) await openWindowLayoutWidgetWithRetry(layout.id, { activate: false });
 }
 
 async function populateTrackingLayout(layoutId) {
@@ -5700,7 +5722,7 @@ async function reopenWindowLayoutWidget(layoutId) {
     setStatus('Could not reopen this layout widget.');
     return;
   }
-  const result = await host.widgetOpen(layoutId).catch(() => null);
+  const result = await openWindowLayoutWidgetWithRetry(layoutId);
   if (!result || result.ok === false || result.widget?.ok === false
     || result.outcome === 'failed' || result.outcome === 'error') {
     setStatus('Could not open this layout widget.');
@@ -5885,7 +5907,8 @@ async function runMenuAction(action) {
           ? 'Reattach the window layout before creating another layout.'
           : 'Workspace is still synchronizing; try again in a moment.');
       } else if (createdLayout?.id) {
-        await host.widgetOpen(createdLayout.id);
+        const opened = await openWindowLayoutWidgetWithRetry(createdLayout.id);
+        if (!windowLayoutWidgetOpenSucceeded(opened)) setStatus('Could not open this layout widget.');
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -8477,25 +8500,42 @@ if (WIDGET_SURFACE) {
       }
     };
     setTimeout(refreshExternalDocument, 2000);
-    void surfaceCoordinator.start().then(async () => {
-      // Writer election is the durable-editing gate. Tracking/widget refresh
-      // is an optional window capability and must not be allowed to turn a
-      // successfully elected writer into a read-only workspace when its
-      // helper is unavailable or still restarting.
-      try {
-        await reconcileTrackingBaseline();
-        await ensureStartupWindowLayoutWidget();
-        scheduleClosedWindowReconcile();
-      } catch (error) {
-        console.warn('[AsYouGo] window tracking startup failed; editing remains enabled', error);
-      }
-    }).catch((error) => {
-      coordinationState = 'unavailable';
-      statusToast.show(error instanceof Error && error.message
-        ? `Shared document coordination failed; durable editing is disabled. ${error.message}`
-        : 'Shared document coordination failed to elect a writer; durable editing is disabled.', { tone: 'error' });
-      reportCoordinationUnavailableToWidgets('Workspace coordination unavailable');
-    });
+    let coordinationRetryTimer = null;
+    let coordinationFailureShown = false;
+    const startCoordinator = (attempt = 0) => {
+      if (!surfaceCoordinator || windowLayoutDetachment.isStopped()) return;
+      coordinationState = 'ready';
+      void surfaceCoordinator.start().then(async () => {
+        coordinationFailureShown = false;
+        // Writer election is the durable-editing gate. Tracking/widget refresh
+        // is an optional window capability and must not be allowed to turn a
+        // successfully elected writer into a read-only workspace when its
+        // helper is unavailable or still restarting.
+        try {
+          await reconcileTrackingBaseline();
+          await ensureStartupWindowLayoutWidget();
+          scheduleClosedWindowReconcile();
+        } catch (error) {
+          console.warn('[AsYouGo] window tracking startup failed; editing remains enabled', error);
+        }
+      }).catch((error) => {
+        coordinationState = 'unavailable';
+        if (!coordinationFailureShown) {
+          coordinationFailureShown = true;
+          statusToast.show(error instanceof Error && error.message
+            ? `Shared document coordination failed; retrying. ${error.message}`
+            : 'Shared document coordination failed; retrying.', { tone: 'error' });
+          reportCoordinationUnavailableToWidgets('Workspace coordination temporarily unavailable');
+        }
+        if (coordinationRetryTimer !== null || windowLayoutDetachment.isStopped()) return;
+        const delay = Math.min(5000, 250 * (2 ** Math.min(attempt, 5)));
+        coordinationRetryTimer = window.setTimeout(() => {
+          coordinationRetryTimer = null;
+          startCoordinator(attempt + 1);
+        }, delay);
+      });
+    };
+    startCoordinator();
   }
 
   void bootstrapWorkspace({
