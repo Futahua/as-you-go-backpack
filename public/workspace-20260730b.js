@@ -5689,6 +5689,14 @@ windowLayoutPillTray?.addEventListener('click', (event) => {
   if (pill) void reopenWindowLayoutWidget(pill.dataset.layoutWidgetPill);
 });
 
+function nativeDragPathsForItemIds(itemIds) {
+  return [...new Set(itemIds.flatMap((itemId) => {
+    const record = shortcutByRecordOrPlacementId(itemId);
+    if (!record || isWebLink(record) || !isAbsoluteWindowsPath(record.target)) return [];
+    return [record.target];
+  }))];
+}
+
 function selectedFileCapabilityContext() {
   const selectedIds = [...session.selected];
   if (selectedIds.length === 0) return { mode: 'empty', selectionCount: 0, items: [] };
@@ -6866,6 +6874,10 @@ const pointer = createPointerController({
   group,
   visiblePlacementIdFor,
   closeMenu,
+  nativeDragPaths: nativeDragPathsForItemIds,
+  startNativeDrag: (paths) => host.fileCapability('native-drag', { paths }).catch((error) => {
+    setStatus(error instanceof Error ? error.message : 'Native file drag failed.');
+  }),
   onDragTrail: (itemIds) => graph.recordDragTrail(itemIds),
   clearDragTrail: () => graph.clearDragTrail(),
   setSuppressGraphClick: (value) => { suppressGraphClick = value; },

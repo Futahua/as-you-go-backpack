@@ -16,6 +16,8 @@ export function createPointerController({
   group,
   visiblePlacementIdFor,
   closeMenu,
+  nativeDragPaths = () => [],
+  startNativeDrag = () => Promise.resolve(),
   onDragTrail = () => {},
   clearDragTrail = () => {},
   setSuppressGraphClick,
@@ -184,6 +186,19 @@ export function createPointerController({
     event.preventDefault();
   }
 
+  function restoreInitialDragPositions(activeDrag) {
+    for (const id of activeDrag.itemIds) {
+      const node = graph._getNode(id);
+      const initial = activeDrag.initialPositions.get(id);
+      if (!node || !initial) continue;
+      node.x = initial.x;
+      node.y = initial.y;
+      node.fx = initial.fx;
+      node.fy = initial.fy;
+      node.positioned = initial.fx !== null || initial.fy !== null;
+    }
+  }
+
   function onPointerMove(event) {
     if (drag && event.pointerId === drag.pointerId) {
       const session = store.getSession();
@@ -228,6 +243,26 @@ export function createPointerController({
         }
       }
       if (!drag.moved) return;
+      const outsideWindow = event.clientX <= 0
+        || event.clientY <= 0
+        || event.clientX >= Number(window.innerWidth || Infinity)
+        || event.clientY >= Number(window.innerHeight || Infinity);
+      if (outsideWindow && !drag.ancestorOnly) {
+        const paths = nativeDragPaths(drag.itemIds);
+        if (paths.length > 0) {
+          if (elements.grid.hasPointerCapture(event.pointerId)) elements.grid.releasePointerCapture(event.pointerId);
+          const outgoing = drag;
+          restoreInitialDragPositions(outgoing);
+          removeShiftListeners();
+          clearDragVisuals();
+          clearDragTrail();
+          setSuppressGraphClick(true);
+          drag = null;
+          graph.reheat(0.2);
+          void startNativeDrag(paths);
+          return;
+        }
+      }
       const world = clientToWorld(event.clientX, event.clientY);
       const deltaX = world.x - drag.startWorldX;
       const deltaY = world.y - drag.startWorldY;
@@ -384,16 +419,7 @@ export function createPointerController({
       }
       removeShiftListeners();
       if (drag.moved) {
-        for (const id of drag.itemIds) {
-          const node = graph._getNode(id);
-          const initial = drag.initialPositions.get(id);
-          if (node && initial) {
-            node.x = initial.x;
-            node.y = initial.y;
-            node.fx = initial.fx;
-            node.fy = initial.fy;
-          }
-        }
+        restoreInitialDragPositions(drag);
         graph.reheat(0.2);
       }
       clearDragVisuals();

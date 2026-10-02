@@ -300,11 +300,13 @@ export function createHostBridge(window) {
       request(
         'papers:project:file-capability',
         { operation, params },
-        operation === 'preview'
-          ? FILE_PREVIEW_REQUEST_TIMEOUT_MS
-          : ['copy', 'move', 'rename', 'delete'].includes(operation)
-            ? FILE_MUTATION_REQUEST_TIMEOUT_MS
-            : REQUEST_TIMEOUT_MS,
+        operation === 'native-drag'
+          ? null
+          : operation === 'preview'
+            ? FILE_PREVIEW_REQUEST_TIMEOUT_MS
+            : ['copy', 'move', 'rename', 'delete'].includes(operation)
+              ? FILE_MUTATION_REQUEST_TIMEOUT_MS
+              : REQUEST_TIMEOUT_MS,
       ),
     windowCandidates: ({ includeNativeIcons } = {}) => request('papers:project:window-candidates',
       typeof includeNativeIcons === 'boolean' ? { includeNativeIcons } : {}),

@@ -36,7 +36,7 @@ function fakeNode() {
   };
 }
 
-function createHarness({ binMode = false } = {}) {
+function createHarness({ binMode = false, nativeDragPaths = () => [] } = {}) {
   const store = createWorkspaceStore({
     getState: () => ({}),
     setState: () => {},
@@ -58,6 +58,8 @@ function createHarness({ binMode = false } = {}) {
   const elements = { grid, binButton };
   const windowListeners = [];
   const windowMock = {
+    innerWidth: 500,
+    innerHeight: 400,
     addEventListener(type, handler, options) {
       windowListeners.push({ type, handler, options });
     },
@@ -78,6 +80,7 @@ function createHarness({ binMode = false } = {}) {
     releaseDraggedNodes: (input) => { commandCalls.push(['release', input]); },
   };
   const graphNodes = new Map();
+  const nativeDragCalls = [];
   const effects = { reheat: [], decay: 0, close: 0, suppressGraph: [], suppressBlank: [], ejected: [], trails: [], trailClear: 0 };
   const graph = {
     _getNode: (id) => graphNodes.get(id) ?? null,
@@ -108,6 +111,8 @@ function createHarness({ binMode = false } = {}) {
     group: () => null,
     visiblePlacementIdFor: (id) => `p-${id}`,
     closeMenu: () => { effects.close += 1; },
+    nativeDragPaths,
+    startNativeDrag: (paths) => { nativeDragCalls.push([...paths]); return Promise.resolve(); },
     onDragTrail: (ids) => { effects.trails.push([...ids]); },
     clearDragTrail: () => { effects.trailClear += 1; },
     setSuppressGraphClick: (v) => { effects.suppressGraph.push(v); },
@@ -120,7 +125,7 @@ function createHarness({ binMode = false } = {}) {
   });
   controller.mount();
   return {
-    controller, grid, binButton, store, commands, commandCalls, graphNodes, effects, windowListeners, marquee,
+    controller, grid, binButton, store, commands, commandCalls, graphNodes, effects, windowListeners, marquee, windowMock, nativeDragCalls,
     getShells: () => shells,
     setShells: (value) => { shells = value; },
     setElementAtPoint: (value) => { elementAtPoint = value; },
@@ -179,6 +184,33 @@ test('pointermove beyond threshold moves the dragged nodes', () => {
   assert.equal(n.fy, 105);
   assert.ok(h.effects.reheat.length > 0);
   assert.deepEqual(h.effects.trails.at(-1), ['s1']);
+});
+
+test('dragging selected local shortcuts out of the AYG window hands off to native drag without moving the graph', () => {
+  const h = createHarness({
+    nativeDragPaths: (ids) => ids.map((id) => `D:\\drop\\${id}.txt`),
+  });
+  const n = node('s1', 100, 100);
+  h.graphNodes.set('s1', n);
+  h.store.setSelection(['s1']);
+  const tile = fakeNode();
+  tile.dataset = { id: 's1', kind: 'shortcut' };
+  tile.closest = (sel) => (sel === '.icon-item' ? tile : sel === '.graph-node-shell' ? tile : null);
+  h.grid._dispatch('pointerdown', pointerEvent(1, 10, 10, { target: tile }));
+  h.grid._dispatch('pointermove', pointerEvent(1, 20, 15));
+  assert.equal(n.fx, 110);
+  assert.equal(n.fy, 105);
+
+  h.grid._dispatch('pointermove', pointerEvent(1, 501, 15));
+
+  assert.deepEqual(h.nativeDragCalls, [['D:\\drop\\s1.txt']]);
+  assert.equal(n.x, 100);
+  assert.equal(n.y, 100);
+  assert.equal(n.fx, null);
+  assert.equal(n.fy, null);
+  assert.equal(h.getReleased(), 1);
+  assert.equal(h.commandCalls.find(([name]) => name === 'release'), undefined);
+  assert.equal(h.effects.suppressGraph.at(-1), true);
 });
 
 test('many-small-step drag keeps pointer tracking error exactly zero', () => {
