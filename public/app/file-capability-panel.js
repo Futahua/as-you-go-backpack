@@ -14,11 +14,13 @@ export function isAbsoluteWindowsPath(value) {
     && (/^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\]+\\[^\\]+/.test(value));
 }
 
-export async function requestBrowserLensCapture(host, tabId) {
-  if (!host?.fileCapability || typeof tabId !== 'string' || !tabId) {
+export async function requestBrowserLensCapture(host, sourceTabId, targetTabId) {
+  if (!host?.fileCapability
+    || typeof sourceTabId !== 'string' || !sourceTabId
+    || typeof targetTabId !== 'string' || !targetTabId) {
     return { ok: false, error: 'Browser tab is unavailable.' };
   }
-  return host.fileCapability('browser-lens-screen', { tabId });
+  return host.fileCapability('browser-lens-screen', { sourceTabId, targetTabId });
 }
 
 function basename(target) {
@@ -623,14 +625,35 @@ export function createFileCapabilityPanel(options) {
   }
 
   async function openLensScreen() {
-    const tab = activeBrowserTab();
-    if (!tab) return;
-    const result = await requestBrowserLensCapture(host, tab.id).catch((error) => ({
+    const sourceTab = activeBrowserTab();
+    const targetTabId = windowRef?.crypto?.randomUUID?.();
+    if (!sourceTab || !targetTabId) return;
+    const result = await requestBrowserLensCapture(host, sourceTab.id, targetTabId).catch((error) => ({
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     }));
     if (result?.ok && result.tab) {
-      applyBrowserHostState(result.tab);
+      const url = safeBrowserUrl(result.tab.url);
+      if (!url || result.tab.tabId !== targetTabId) {
+        setStatus('Lens returned an invalid result tab.');
+        return;
+      }
+      state.browserTabs.push({
+        id: targetTabId,
+        url,
+        title: typeof result.tab.title === 'string' && result.tab.title ? result.tab.title.slice(0, 500) : 'Google Lens',
+        sourceKey: null,
+        lastActiveAt: Date.now(),
+      });
+      if (state.browserTabs.length > MAX_STORED_BROWSER_TABS) {
+        const overflow = state.browserTabs.splice(0, state.browserTabs.length - MAX_STORED_BROWSER_TABS);
+        for (const stale of overflow) {
+          void host.fileCapability('browser-tab-close', { tabId: stale.id }).catch(() => {});
+        }
+      }
+      state.activeBrowserTabId = targetTabId;
+      persistBrowserTabs();
+      renderBrowserWorkspace();
       return;
     }
     if (!result?.cancelled) {

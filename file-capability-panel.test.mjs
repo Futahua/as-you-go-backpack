@@ -14,16 +14,19 @@ test('file capability accepts drive and UNC paths but rejects web and relative t
 
 test('Lens requests a real screen-region capture for the current browser tab', async () => {
   const calls = [];
-  const expected = { ok: true, tab: { tabId: 'tab-1', url: 'https://www.google.com/search?udm=26' } };
+  const expected = { ok: true, tab: { tabId: 'target-tab', url: 'https://www.google.com/search?udm=26' } };
   const host = {
     async fileCapability(operation, params) {
       calls.push({ operation, params });
       return expected;
     },
   };
-  assert.equal(await requestBrowserLensCapture(host, 'tab-1'), expected);
-  assert.deepEqual(calls, [{ operation: 'browser-lens-screen', params: { tabId: 'tab-1' } }]);
-  assert.deepEqual(await requestBrowserLensCapture(host, ''), { ok: false, error: 'Browser tab is unavailable.' });
+  assert.equal(await requestBrowserLensCapture(host, 'source-tab', 'target-tab'), expected);
+  assert.deepEqual(calls, [{
+    operation: 'browser-lens-screen',
+    params: { sourceTabId: 'source-tab', targetTabId: 'target-tab' },
+  }]);
+  assert.deepEqual(await requestBrowserLensCapture(host, '', 'target-tab'), { ok: false, error: 'Browser tab is unavailable.' });
 });
 
 test('file preview is a collapsed/expanded dock with a draggable width and no fake file-manager UI', async () => {
@@ -186,8 +189,9 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /const DEFAULT_BROWSER_HOME = 'https:\/\/www\.google\.com\/'/);
   assert.match(source, /const DEFAULT_SEARCH_URL = 'https:\/\/www\.google\.com\/search\?q='/);
   assert.doesNotMatch(source, /GOOGLE_LENS_HOME/);
-  assert.match(source, /requestBrowserLensCapture\(host, tab\.id\)/);
-  assert.match(source, /fileCapability\('browser-lens-screen', \{ tabId \}\)/);
+  assert.match(source, /requestBrowserLensCapture\(host, sourceTab\.id, targetTabId\)/);
+  assert.match(source, /fileCapability\('browser-lens-screen', \{ sourceTabId, targetTabId \}\)/);
+  assert.match(source, /state\.browserTabs\.push\(\{[\s\S]*id: targetTabId/);
   assert.match(source, /fileCapability\('browser-downloads'/);
   assert.match(source, /fileCapability\('browser-adblock-state'/);
   assert.match(source, /fileCapability\('browser-adblock-set'/);
