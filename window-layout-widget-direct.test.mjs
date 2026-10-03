@@ -40,10 +40,6 @@ test('widget picker writes its own authoritative layout without a workspace writ
   let acceptedWrites = 0;
   const host = {
     loadWorkspaceVersioned: async () => ({ state: durable, revision }),
-    observeWindowCapability: async () => ({
-      outcome: 'success',
-      observation: { state: 'normal', bounds: { x: 1, y: 2, width: 300, height: 200 } },
-    }),
     saveWorkspaceChecked: async (next, expected) => {
       assert.equal(expected, revision);
       acceptedWrites += 1;
@@ -68,6 +64,7 @@ test('widget picker writes its own authoritative layout without a workspace writ
   assert.equal(durable.activeWindowLayoutId, layoutId);
   assert.equal(durable.windowLayouts[0].arrangement.members.length, 1);
   assert.equal(durable.windowLayouts[0].arrangement.members[0].descriptor.windowInstanceId, INSTANCE);
+  assert.equal(durable.windowLayouts[0].arrangement.members[0].bounds, null);
 });
 
 test('widget picker rebases once after a refused stale CAS and still accepts only one durable write', async () => {
@@ -79,10 +76,6 @@ test('widget picker rebases once after a refused stale CAS and still accepts onl
   let acceptedWrites = 0;
   const host = {
     loadWorkspaceVersioned: async () => ({ state: durable, revision }),
-    observeWindowCapability: async () => ({
-      outcome: 'success',
-      observation: { state: 'normal', bounds: { x: 1, y: 2, width: 300, height: 200 } },
-    }),
     saveWorkspaceChecked: async (next, expected) => {
       saveAttempts += 1;
       if (saveAttempts === 1) {
@@ -112,6 +105,32 @@ test('widget picker rebases once after a refused stale CAS and still accepts onl
   assert.equal(saveAttempts, 2);
   assert.equal(acceptedWrites, 1);
   assert.equal(durable.view.iconSize, 120);
+  assert.equal(durable.windowLayouts[0].arrangement.members.length, 1);
+});
+
+test('widget add does not need a second native observe after the host-bound pick', async () => {
+  const initial = projectWithLayout();
+  const layoutId = initial.windowLayouts[0].id;
+  let durable = initial;
+  const host = {
+    loadWorkspaceVersioned: async () => ({ state: durable, revision: 'r0' }),
+    saveWorkspaceChecked: async (next) => {
+      durable = next;
+      return { ok: true, revision: 'r1' };
+    },
+  };
+
+  const result = await applyWindowLayoutWidgetPickDirect({
+    host,
+    layoutId,
+    pick: pick(),
+    capabilities: new Map(),
+    icons: new Map(),
+    iconCacheEntry: (_member, icon) => icon,
+  });
+
+  assert.equal(result.outcome, 'committed');
+  assert.equal(result.added, 1);
   assert.equal(durable.windowLayouts[0].arrangement.members.length, 1);
 });
 

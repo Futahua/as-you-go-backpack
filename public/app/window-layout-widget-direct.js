@@ -26,8 +26,7 @@ export async function applyWindowLayoutWidgetPickDirect({
   attempts = 2,
 }) {
   if (!host || typeof host.loadWorkspaceVersioned !== 'function'
-    || typeof host.saveWorkspaceChecked !== 'function'
-    || typeof host.observeWindowCapability !== 'function') {
+    || typeof host.saveWorkspaceChecked !== 'function') {
     return { outcome: 'failed', error: 'Widget persistence is unavailable' };
   }
 
@@ -60,7 +59,22 @@ export async function applyWindowLayoutWidgetPickDirect({
         working = normalizeState(durableNext);
         return true;
       },
-      observeCapability: (capability) => host.observeWindowCapability(capability),
+      // Both widget picker paths already cross a host-owned exact-window
+      // binding boundary before they can produce an add:
+      // - list pick -> bindWindowCandidate(), which re-observes the candidate;
+      // - direct pick -> WindowPickSession commit, which binds each staged
+      //   candidate before returning the committed result.
+      //
+      // Re-observing the just-issued capability here adds a second helper
+      // round-trip after the creator's click and can fail independently even
+      // though the pick itself was already proven. Membership persistence only
+      // needs the exact persisted descriptor; live bounds/state are hydrated by
+      // the normal runtime afterward. Keep this widget path one click -> one
+      // checked document write.
+      observeCapability: async () => ({
+        outcome: 'success',
+        observation: { state: 'normal', bounds: null },
+      }),
       model: { addWindowLayoutMember, removeWindowLayoutMember },
       capabilities,
       icons,
