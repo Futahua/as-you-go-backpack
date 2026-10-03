@@ -1,0 +1,6 @@
+Live post-deployment finding on 2026-10-03 for this exact commit:
+- Manual compact-widget membership editing is still broken: clicking list rows does not reliably add windows and cannot reliably remove them.
+- Auto mode is the only observed working membership population path: enabling the circle/Auto control adds the eligible apps, and those auto-added members then behave correctly.
+- Therefore this commit's one-pick/one-write change did not make manual membership editing functional.
+- Auto working narrows the defect to manual identity/commit semantics rather than general widget rendering, persisted member runtime control, or window tracking.
+Observed behavior only; root cause/fix belongs to a later commit.
