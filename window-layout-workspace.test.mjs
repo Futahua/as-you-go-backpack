@@ -830,7 +830,6 @@ test('019I both production writer adapters invoke store.commit without assigning
 
 test('direct picker self-recovers orphaned Papers sessions before attached and widget starts', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
-  const directSource = await readFile(new URL('./public/app/window-layout-widget-direct.js', import.meta.url), 'utf8');
   const attachedStart = source.indexOf('async function beginWindowLayoutDirectPick(layoutId)');
   const widgetStart = source.indexOf('async function beginWidgetDirectPick()');
   assert.ok(attachedStart >= 0 && widgetStart > attachedStart, 'both direct-pick entry points exist');
@@ -845,12 +844,10 @@ test('direct picker self-recovers orphaned Papers sessions before attached and w
   }
   assert.match(widget, /result\.outcome !== 'committed'/,
     'widget direct pick does not submit a cancelled native result');
-  assert.match(widget, /await applyWidgetPickDirect\(result\)/,
-    'widget direct pick commits from its own project surface instead of a workspace renderer');
-  assert.doesNotMatch(widget, /client\.sendCommandAndWait/,
-    'widget direct pick has no workspace-writer command relay');
-  assert.match(directSource, /lastSave\?\.code === 'STALE_REVISION'/,
-    'the direct host transaction retries once after a refused revision race');
+  assert.match(widget, /client\.sendCommandAndWait\([\s\S]*picker-commit/,
+    'widget direct pick waits for the authoritative picker commit');
+  assert.match(widget, /acknowledgement\?\.type === 'stale'/,
+    'widget direct pick retries once after a revision race');
   assert.match(attached, /windowLayoutRuntime\.pickUnsubscribe === pickUnsubscribe/,
     'an older attached attempt cannot unsubscribe a newer attempt');
   assert.match(widget, /widgetState\.pickUnsubscribe === pickUnsubscribe/,
@@ -1046,7 +1043,7 @@ test('bound list-pick identity treats same title on another executable as an add
   assert.equal(remove.adds.length, 0);
   assert.deepEqual(remove.removes, [{ descriptor: exact.descriptor }]);
 });
-test('attached and widget list picks use bound descriptor identity with their own durable paths', async () => {
+test('attached and detached list picks use bound descriptor identity and the shared durable writer', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const attachedPickerStart = source.indexOf('async function openWindowLayoutPicker(layoutId)');
   const attachedPickerEnd = source.indexOf('/** A tracking lifecycle refresh', attachedPickerStart);
@@ -1074,10 +1071,8 @@ test('attached and widget list picks use bound descriptor identity with their ow
   assert.match(widget, /windowLayoutPickForBoundCandidate\(/);
   assert.match(widget, /if \(!pick\) \{\s*setWindowLayoutStatus\(layoutId, windowLayoutHasValidInstanceId\(bound\.descriptor\)[\s\S]*?return false;/,
     'the detached picker reports identity failure without sending a mutation');
-  assert.ok(widget.indexOf('if (!pick)') < widget.indexOf('return applyWidgetPickDirect(pick)'),
-    'the widget picker exits before applying an unsafe toggle');
-  assert.doesNotMatch(widget, /sendCommandAndWait|kind: 'picker-commit'/,
-    'the widget picker does not relay its mouse mutation through a workspace writer');
+  assert.ok(widget.indexOf('if (!pick)') < widget.indexOf("const command = { kind: 'picker-commit', pick }"),
+    'the detached picker exits before sending an unsafe toggle');
   assert.doesNotMatch(widget, /selectedOverride|descriptor\.title\s*===\s*bound\.descriptor\.title/,
     'detached list picking decides add/remove only after binding the persisted descriptor pair');
 
@@ -1331,4 +1326,18 @@ test('widget member gestures map plain left click to activation and plain right 
     'right click preserves Ctrl/Shift behavior and toggles only an enabled member');
   assert.doesNotMatch(context, /windowControlActivate/,
     'right click no longer activates the member');
+});
+
+test('widget list pick preserves the exact chooser row across candidate binding', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const start = source.indexOf('  async function handleWidgetListCandidate');
+  const end = source.indexOf('  async function beginWidgetDirectPick', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const handler = source.slice(start, end);
+  assert.match(handler, /widgetState\.candidates[\s\S]*candidate\.id === candidateId/);
+  assert.match(handler, /if \(!row\) return false;/);
+  assert.match(handler, /bindWindowLayoutPickerCandidate\(candidateId, row\)/);
+  assert.doesNotMatch(handler, /bindWindowLayoutPickerCandidate\(candidateId, null\)/,
+    'the Oct 2 merge regression must not discard the chooser row again');
 });

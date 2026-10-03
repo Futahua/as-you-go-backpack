@@ -114,7 +114,6 @@ import {
   windowLayoutHasValidInstanceId,
   windowLayoutPickMemberDescriptors,
 } from './app/window-layout-workspace.js';
-import { applyWindowLayoutWidgetPickDirect } from './app/window-layout-widget-direct.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup, windowLayoutMemberState } from './app/window-layout-control-icons.js';
 import {
   WINDOW_LAYOUT_MEMBER_NOTE_UNCONFIRMED,
@@ -7213,11 +7212,10 @@ const promptLibrary = createPromptLibraryDialog({
 
 // ---- 019C compact-widget surface bootstrap --------------------------------
 // `?papers-surface=compact-widget&papers-layout-key=<id>` renders ONLY the named
-// layout's card. Passive live updates still arrive on the same-origin widget
-// channel, but mouse picker mutations write through the host's versioned CAS
-// directly from this widget surface: no dependency on whichever AYG tab happens
-// to own the long-lived renderer writer lock. No old 018 wait-for-ACTIVATE
+// layout's card and routes every card interaction through the same-origin
+// widget channel to the WORKSPACE writer. No old 018 wait-for-ACTIVATE/read-only
 // lifecycle; widget-ready is reported after the channel message listener exists.
+// The widget never writes the store/save/recording persistence.
 function bootstrapWindowLayoutWidget() {
   const { layoutId } = WIDGET_SURFACE;
   const widgetOpacityStorageKey = `papers-window-layout-widget-opacity:${layoutId}`;
@@ -7300,76 +7298,6 @@ function bootstrapWindowLayoutWidget() {
     snapshotRetryArmings = 0;
   }
 
-  function widgetSnapshotFromState(source) {
-    const layout = (source?.windowLayouts ?? []).find((candidate) => candidate.id === layoutId);
-    if (!layout) return null;
-    const members = new Map((layout.arrangement?.members ?? []).map((member) => [member.id, member]));
-    return {
-      ...windowLayoutWidgetSnapshot(
-        layout,
-        (candidateLayoutId, memberId) => {
-          const member = members.get(memberId);
-          if (!member) return null;
-          return windowLayoutIconFromCache(
-            member,
-            windowLayoutRuntime.icons.get(windowLayoutMemberKey(candidateLayoutId, memberId)),
-          );
-        },
-        () => null,
-      ),
-      appearance: {
-        theme: getTheme(source.view?.preferences),
-        transparentBackground: getTransparentBackground(source.view?.preferences),
-        backdropOpacity: getBackdropOpacity(source.view?.preferences),
-      },
-    };
-  }
-
-  function installWidgetState(source, reason = 'direct-authority') {
-    const snapshot = widgetSnapshotFromState(source);
-    if (!snapshot) return false;
-    handleWidgetMessage({
-      type: 'snapshot',
-      revision: Math.max(0, widgetState.lastRevision + 1),
-      reason,
-      snapshot,
-    });
-    return true;
-  }
-
-  async function refreshWidgetFromHost() {
-    const loaded = await host.loadWorkspaceVersioned();
-    const source = normalizeState(loaded.state);
-    if (!installWidgetState(source, 'direct-load')) {
-      if (widgetState.snapshotReceived) void host.widgetCloseSelf().catch(() => undefined);
-      return false;
-    }
-    return true;
-  }
-
-  async function applyWidgetPickDirect(pick) {
-    const applied = await applyWindowLayoutWidgetPickDirect({
-      host,
-      layoutId,
-      pick,
-      capabilities: windowLayoutRuntime.capabilities,
-      icons: windowLayoutRuntime.icons,
-      iconCacheEntry: windowLayoutIconCacheEntry,
-    });
-    if (applied.outcome === 'missing') {
-      void host.widgetCloseSelf().catch(() => undefined);
-      return false;
-    }
-    if (applied.outcome === 'failed') {
-      setWindowLayoutStatus(layoutId, applied.error || 'Pick failed');
-      return false;
-    }
-    if (applied.state) installWidgetState(applied.state, 'direct-pick');
-    const outcome = windowLayoutPickApplyOutcome(applied);
-    if (outcome.statusText) setWindowLayoutStatus(layoutId, outcome.statusText);
-    return true;
-  }
-
   /** A cold widget can miss the first BroadcastChannel request before its
    * workspace writer is ready. Unlike an explicit unknown-layout response,
    * that race is silent, so retry a small bounded number of times and leave a
@@ -7382,8 +7310,8 @@ function bootstrapWindowLayoutWidget() {
     snapshotRetry = createBoundedRetry({
       attempts: 3,
       delayMs: 250,
-      request: () => refreshWidgetFromHost(),
-      shouldRetry: (loaded) => loaded !== true && !widgetState.snapshotReceived,
+      request: () => { client.requestSnapshot(); return null; },
+      shouldRetry: () => !widgetState.snapshotReceived,
       onResult: () => {
         snapshotRetry = null;
         if (widgetState.snapshotReceived) return;
@@ -8045,26 +7973,15 @@ function bootstrapWindowLayoutWidget() {
   }
 
   async function handleWidgetListCandidate(candidateId, intent = 'toggle') {
-    const row = (widgetState.candidates ?? []).find((candidate) => candidate.id === candidateId) ?? null;
-    let picked = null;
-    // Auto already proves the stable W-identity route on this machine. Prefer
-    // that exact identity for a manual widget click. If exact W resolution
-    // cannot answer, retain the row when falling back so the established
-    // stale-candidate relist/rebind recovery remains available.
-    if (row && windowLayoutHasValidInstanceId(row)
-      && typeof host.resolveWindowInstance === 'function'
-      && typeof host.resolveWindowDescriptor === 'function') {
-      const probe = await host.resolveWindowInstance(row.windowInstanceId).catch(() => null);
-      if (probe?.outcome === 'success'
-        && probe.descriptor?.windowInstanceId === row.windowInstanceId) {
-        const resolved = await host.resolveWindowDescriptor(probe.descriptor).catch(() => null);
-        if (resolved?.outcome === 'success'
-          && resolved.descriptor?.windowInstanceId === row.windowInstanceId) {
-          picked = { bound: resolved, row };
-        }
-      }
-    }
-    if (!picked) picked = await bindWindowLayoutPickerCandidate(candidateId, row);
+    // Oct 2 regression guard: the a123d8f merge accidentally resolved this
+    // conflict to the old Sep 24 path and discarded the exact row that the
+    // working Oct 1 implementation carried across the native chooser await.
+    // Candidate ids are deliberately short-lived; retaining the row is what
+    // lets bindWindowLayoutPickerCandidate perform its bounded relist/rebind
+    // recovery if that id expired while the creator was clicking it.
+    const row = (widgetState.candidates ?? []).find((candidate) => candidate.id === candidateId);
+    if (!row) return false;
+    const picked = await bindWindowLayoutPickerCandidate(candidateId, row);
     const bound = picked.bound;
     if (bound.outcome !== 'success') {
       setWindowLayoutStatus(layoutId, bound.error || 'Pick failed');
@@ -8076,16 +7993,25 @@ function bootstrapWindowLayoutWidget() {
     const pick = windowLayoutPickForBoundCandidate(
       widgetState.snapshot.members ?? [],
       bound,
-      picked.row ?? row,
-    );
-    if (!pick) {
-      setWindowLayoutStatus(layoutId, windowLayoutHasValidInstanceId(bound.descriptor)
-        ? 'Window identity could not be confirmed; no layout change was made.'
-        : 'Window identity is unavailable; no layout change was made.');
+      picked.row,
+  );
+  if (!pick) {
+    setWindowLayoutStatus(layoutId, windowLayoutHasValidInstanceId(bound.descriptor)
+      ? 'Window identity could not be confirmed; no layout change was made.'
+      : 'Window identity is unavailable; no layout change was made.');
       return false;
     }
     if (intent === 'remove' && pick.removes.length === 0) return false;
-    return applyWidgetPickDirect(pick);
+    const command = { kind: 'picker-commit', pick };
+    let acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 30000 });
+    if (acknowledgement?.type === 'stale') {
+      acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 30000 });
+    }
+    if (acknowledgement?.type === 'error') {
+      setWindowLayoutStatus(layoutId, acknowledgement.message || acknowledgement.code || 'Pick failed');
+      return false;
+    }
+    return true;
   }
 
   async function beginWidgetDirectPick() {
@@ -8147,11 +8073,27 @@ function bootstrapWindowLayoutWidget() {
         return;
       }
       if (result.outcome !== 'committed') return;
-      // The widget is already a project surface with versioned state access.
-      // Apply this one human pick directly against host authority instead of
-      // depending on an arbitrary AYG renderer process to relay it.
-      await applyWidgetPickDirect(result);
+      // Winter's one typed committed set goes to the WORKSPACE writer; the
+      // widget never applies it locally. Wait for the authoritative result so
+      // a missing writer or a revision race cannot silently drop the pick.
+      let acknowledgement = await client.sendCommandAndWait(
+        { kind: 'picker-commit', pick: result },
+        { timeoutMs: 30000 },
+      );
       if (widgetState.pickAttempt !== pickAttempt) return;
+      if (acknowledgement?.type === 'stale') {
+        acknowledgement = await client.sendCommandAndWait(
+          { kind: 'picker-commit', pick: result },
+          { timeoutMs: 30000 },
+        );
+        if (widgetState.pickAttempt !== pickAttempt) return;
+      }
+      if (acknowledgement?.type === 'error') {
+        setWindowLayoutStatus(
+          layoutId,
+          acknowledgement.message || acknowledgement.code || 'Pick failed',
+        );
+      }
     } catch (error) {
       pickUnsubscribe?.();
       if (widgetState.pickUnsubscribe === pickUnsubscribe) {
@@ -8402,10 +8344,10 @@ function bootstrapWindowLayoutWidget() {
     if (members) members.classList.remove('wl-drag-out');
     members?.querySelector(`[data-wl-member="${CSS.escape(active.memberId)}"]`)?.classList.remove('wl-member-dragging');
   }, true);
-  return host.widgetReady().then(async () => {
+  return host.widgetReady().then(() => {
     client.ready();
-    const loaded = await refreshWidgetFromHost().catch(() => false);
-    if (!loaded) armSnapshotRetry();
+    client.requestSnapshot();
+    armSnapshotRetry();
   });
 }
 
