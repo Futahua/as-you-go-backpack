@@ -1,6 +1,7 @@
 import {
   normalizeState,
   setActiveWindowLayoutId,
+  setWindowLayoutInstanceSuppressed,
   addWindowLayoutMember,
   removeWindowLayoutMember,
 } from '../workspace-model-20260730b.js';
@@ -32,6 +33,7 @@ export async function applyWindowLayoutWidgetPickDirect({
 
   const boundedAttempts = Math.max(1, Math.min(2, Math.trunc(attempts) || 1));
   let lastSave = null;
+  const validInstanceId = (value) => typeof value === 'string' && /^W[0-9a-f]{16}$/i.test(value);
 
   for (let attempt = 0; attempt < boundedAttempts; attempt += 1) {
     let loaded;
@@ -61,7 +63,8 @@ export async function applyWindowLayoutWidgetPickDirect({
       },
       // Both widget picker paths already cross a host-owned exact-window
       // binding boundary before they can produce an add:
-      // - list pick -> bindWindowCandidate(), which re-observes the candidate;
+      // - list pick -> exact W resolution (or the candidate-bind fallback),
+      //   both of which return a fresh host-issued capability + descriptor;
       // - direct pick -> WindowPickSession commit, which binds each staged
       //   candidate before returning the committed result.
       //
@@ -75,7 +78,30 @@ export async function applyWindowLayoutWidgetPickDirect({
         outcome: 'success',
         observation: { state: 'normal', bounds: null },
       }),
-      model: { addWindowLayoutMember, removeWindowLayoutMember },
+      // A manual widget edit is authoritative even when Auto owns this layout.
+      // Removing one live W while Auto is enabled must suppress that exact W,
+      // otherwise the next Auto reconciliation simply puts it back. Explicitly
+      // adding that W again is the matching human override and clears it.
+      model: {
+        addWindowLayoutMember: (source, targetLayoutId, member) => {
+          let next = addWindowLayoutMember(source, targetLayoutId, member);
+          const instanceId = member?.descriptor?.windowInstanceId;
+          if (validInstanceId(instanceId)) {
+            next = setWindowLayoutInstanceSuppressed(next, targetLayoutId, instanceId, false);
+          }
+          return next;
+        },
+        removeWindowLayoutMember: (source, targetLayoutId, memberId, diagnostic) => {
+          const layout = (source.windowLayouts ?? []).find((entry) => entry.id === targetLayoutId);
+          const member = layout?.arrangement?.members?.find((entry) => entry.id === memberId);
+          const instanceId = member?.descriptor?.windowInstanceId;
+          let next = removeWindowLayoutMember(source, targetLayoutId, memberId, diagnostic);
+          if (layout?.tracking?.enabled === true && validInstanceId(instanceId)) {
+            next = setWindowLayoutInstanceSuppressed(next, targetLayoutId, instanceId, true);
+          }
+          return next;
+        },
+      },
       capabilities,
       icons,
       iconCacheEntry,

@@ -8045,7 +8045,26 @@ function bootstrapWindowLayoutWidget() {
   }
 
   async function handleWidgetListCandidate(candidateId, intent = 'toggle') {
-    const picked = await bindWindowLayoutPickerCandidate(candidateId, null);
+    const row = (widgetState.candidates ?? []).find((candidate) => candidate.id === candidateId) ?? null;
+    let picked = null;
+    // Auto already proves the stable W-identity route on this machine. Prefer
+    // that exact identity for a manual widget click. If exact W resolution
+    // cannot answer, retain the row when falling back so the established
+    // stale-candidate relist/rebind recovery remains available.
+    if (row && windowLayoutHasValidInstanceId(row)
+      && typeof host.resolveWindowInstance === 'function'
+      && typeof host.resolveWindowDescriptor === 'function') {
+      const probe = await host.resolveWindowInstance(row.windowInstanceId).catch(() => null);
+      if (probe?.outcome === 'success'
+        && probe.descriptor?.windowInstanceId === row.windowInstanceId) {
+        const resolved = await host.resolveWindowDescriptor(probe.descriptor).catch(() => null);
+        if (resolved?.outcome === 'success'
+          && resolved.descriptor?.windowInstanceId === row.windowInstanceId) {
+          picked = { bound: resolved, row };
+        }
+      }
+    }
+    if (!picked) picked = await bindWindowLayoutPickerCandidate(candidateId, row);
     const bound = picked.bound;
     if (bound.outcome !== 'success') {
       setWindowLayoutStatus(layoutId, bound.error || 'Pick failed');
@@ -8057,12 +8076,12 @@ function bootstrapWindowLayoutWidget() {
     const pick = windowLayoutPickForBoundCandidate(
       widgetState.snapshot.members ?? [],
       bound,
-      picked.row,
-  );
-  if (!pick) {
-    setWindowLayoutStatus(layoutId, windowLayoutHasValidInstanceId(bound.descriptor)
-      ? 'Window identity could not be confirmed; no layout change was made.'
-      : 'Window identity is unavailable; no layout change was made.');
+      picked.row ?? row,
+    );
+    if (!pick) {
+      setWindowLayoutStatus(layoutId, windowLayoutHasValidInstanceId(bound.descriptor)
+        ? 'Window identity could not be confirmed; no layout change was made.'
+        : 'Window identity is unavailable; no layout change was made.');
       return false;
     }
     if (intent === 'remove' && pick.removes.length === 0) return false;

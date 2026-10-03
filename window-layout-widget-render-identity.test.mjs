@@ -47,7 +47,7 @@ const BASE = layout([['m1', 'Alpha', 'normal'], ['m2', 'Beta', 'normal']]);
 test('compact widget shows a bootstrap card and retries a silent direct authority load', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const markup = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
-  assert.match(markup, /workspace-20260730b\.js\?build=widget-direct-cas-v1/);
+  assert.match(markup, /workspace-20260730b\.js\?build=widget-manual-membership-v1/);
   assert.match(markup, /workspace-20260730b\.css\?build=widget-picker-silent-v1/);
   assert.match(source, /renderWidgetBootstrapCard\('Loading window layout…'\)/);
   assert.match(source, /const loaded = await refreshWidgetFromHost\(\)\.catch\(\(\) => false\);\s*if \(!loaded\) armSnapshotRetry\(\);/);

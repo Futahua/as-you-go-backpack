@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
+  addWindowLayoutMember,
   createWindowLayout,
   emptyState,
+  setWindowLayoutInstanceSuppressed,
+  setWindowLayoutTracking,
 } from './public/workspace-model-20260730b.js';
 import { applyWindowLayoutWidgetPickDirect } from './public/app/window-layout-widget-direct.js';
 
@@ -134,6 +137,74 @@ test('widget add does not need a second native observe after the host-bound pick
   assert.equal(durable.windowLayouts[0].arrangement.members.length, 1);
 });
 
+test('manual widget remove suppresses the exact live instance while Auto is enabled', async () => {
+  let initial = projectWithLayout();
+  const layoutId = initial.windowLayouts[0].id;
+  initial = setWindowLayoutTracking(initial, layoutId, true);
+  initial = addWindowLayoutMember(initial, layoutId, {
+    id: 'member-1',
+    descriptor: {
+      version: 1,
+      title: 'Notepad',
+      executableFingerprint: FINGERPRINT,
+      windowInstanceId: INSTANCE,
+    },
+    bounds: null,
+    state: 'normal',
+  });
+  let durable = initial;
+  const host = {
+    loadWorkspaceVersioned: async () => ({ state: durable, revision: 'r0' }),
+    saveWorkspaceChecked: async (next) => {
+      durable = next;
+      return { ok: true, revision: 'r1' };
+    },
+  };
+
+  const result = await applyWindowLayoutWidgetPickDirect({
+    host,
+    layoutId,
+    pick: {
+      outcome: 'committed',
+      adds: [],
+      removes: [{ descriptor: initial.windowLayouts[0].arrangement.members[0].descriptor }],
+    },
+    capabilities: new Map(),
+    icons: new Map(),
+  });
+
+  assert.equal(result.outcome, 'committed');
+  assert.equal(durable.windowLayouts[0].arrangement.members.length, 0);
+  assert.deepEqual(durable.windowLayouts[0].tracking.suppressedInstanceIds, [INSTANCE]);
+});
+
+test('manual widget add clears an Auto suppression for that exact instance', async () => {
+  let initial = projectWithLayout();
+  const layoutId = initial.windowLayouts[0].id;
+  initial = setWindowLayoutTracking(initial, layoutId, true);
+  initial = setWindowLayoutInstanceSuppressed(initial, layoutId, INSTANCE, true);
+  let durable = initial;
+  const host = {
+    loadWorkspaceVersioned: async () => ({ state: durable, revision: 'r0' }),
+    saveWorkspaceChecked: async (next) => {
+      durable = next;
+      return { ok: true, revision: 'r1' };
+    },
+  };
+
+  const result = await applyWindowLayoutWidgetPickDirect({
+    host,
+    layoutId,
+    pick: pick(),
+    capabilities: new Map(),
+    icons: new Map(),
+  });
+
+  assert.equal(result.outcome, 'committed');
+  assert.equal(durable.windowLayouts[0].arrangement.members.length, 1);
+  assert.deepEqual(durable.windowLayouts[0].tracking.suppressedInstanceIds, []);
+});
+
 test('live compact-widget picker wiring bypasses the workspace-writer command relay', async () => {
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const listStart = source.indexOf('async function handleWidgetListCandidate');
@@ -145,6 +216,8 @@ test('live compact-widget picker wiring bypasses the workspace-writer command re
 
   const listPath = source.slice(listStart, directStart);
   const directPath = source.slice(directStart, directEnd);
+  assert.match(listPath, /widgetState\.candidates[\s\S]*?resolveWindowInstance\(row\.windowInstanceId\)/);
+  assert.match(listPath, /bindWindowLayoutPickerCandidate\(candidateId, row\)/);
   assert.match(listPath, /return applyWidgetPickDirect\(pick\)/);
   assert.doesNotMatch(listPath, /sendCommandAndWait/);
   assert.match(directPath, /await applyWidgetPickDirect\(result\)/);
