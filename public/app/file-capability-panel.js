@@ -3,6 +3,11 @@ const VERIFY_ATTEMPTS = 40;
 const VERIFY_DELAY_MS = 250;
 const FULL_PAGE_PREVIEW_PARAM = 'papers-file-preview';
 const FULL_PAGE_PREVIEW_STORAGE_PREFIX = 'papers:file-preview:';
+const BROWSER_TABS_STORAGE_PREFIX = 'papers:ayg:inline-browser-tabs:v1:';
+const BROWSER_TAB_POLL_MS = 750;
+const MAX_STORED_BROWSER_TABS = 100;
+const DEFAULT_BROWSER_HOME = 'https://www.google.com/';
+const DEFAULT_SEARCH_URL = 'https://www.google.com/search?q=';
 
 export function isAbsoluteWindowsPath(value) {
   return typeof value === 'string'
@@ -149,12 +154,123 @@ export function createFileCapabilityPanel(options) {
     htmlPreviewObserver: null,
     browserSessionId: null,
     browserObserver: null,
+    browserTabs: [],
+    activeBrowserTabId: null,
+    browserSurface: null,
+    browserPollTimer: null,
     imagePreviewObserver: null,
     markdownPreviewObserver: null,
     markdownAutoscrollCancel: null,
     fullPage: Boolean(launchedPreview || launchToken),
     lastPreviewResult: null,
   };
+
+  const browserStorageKey = BROWSER_TABS_STORAGE_PREFIX
+    + encodeURIComponent(windowRef?.location?.host || windowRef?.location?.pathname || 'ayg');
+
+  function safeBrowserUrl(value) {
+    try {
+      const parsed = new URL(String(value || '').trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function isBrowserTabId(value) {
+    return typeof value === 'string'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  function browserTabFallbackTitle(tab) {
+    if (tab?.title) return tab.title;
+    try { return new URL(tab?.url || '').hostname || 'New tab'; } catch { return 'New tab'; }
+  }
+
+  function persistBrowserTabs() {
+    try {
+      const tabs = state.browserTabs.slice(-MAX_STORED_BROWSER_TABS).map((tab) => ({
+        id: tab.id,
+        url: tab.url,
+        title: tab.title || '',
+        sourceKey: tab.sourceKey || null,
+        lastActiveAt: Number.isFinite(tab.lastActiveAt) ? tab.lastActiveAt : 0,
+      }));
+      windowRef?.localStorage?.setItem(browserStorageKey, JSON.stringify({
+        tabs,
+        activeTabId: state.activeBrowserTabId,
+      }));
+    } catch { /* browser metadata is optional local state */ }
+  }
+
+  function loadBrowserTabs() {
+    try {
+      const raw = windowRef?.localStorage?.getItem(browserStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const tabs = Array.isArray(parsed?.tabs) ? parsed.tabs : [];
+      state.browserTabs = tabs.slice(-MAX_STORED_BROWSER_TABS).flatMap((tab) => {
+        const url = safeBrowserUrl(tab?.url);
+        if (!isBrowserTabId(tab?.id) || !url) return [];
+        return [{
+          id: tab.id,
+          url,
+          title: typeof tab.title === 'string' ? tab.title.slice(0, 500) : '',
+          sourceKey: typeof tab.sourceKey === 'string' ? tab.sourceKey : null,
+          lastActiveAt: Number.isFinite(tab.lastActiveAt) ? tab.lastActiveAt : 0,
+        }];
+      });
+      state.activeBrowserTabId = state.browserTabs.some((tab) => tab.id === parsed?.activeTabId)
+        ? parsed.activeTabId
+        : (state.browserTabs.at(-1)?.id || null);
+    } catch {
+      state.browserTabs = [];
+      state.activeBrowserTabId = null;
+    }
+  }
+
+  function createBrowserTab(url, { title = '', sourceKey = null } = {}) {
+    const safe = safeBrowserUrl(url);
+    if (!safe || typeof windowRef?.crypto?.randomUUID !== 'function') return null;
+    const tab = {
+      id: windowRef.crypto.randomUUID(),
+      url: safe,
+      title: typeof title === 'string' ? title.slice(0, 500) : '',
+      sourceKey,
+      lastActiveAt: Date.now(),
+    };
+    state.browserTabs.push(tab);
+    if (state.browserTabs.length > MAX_STORED_BROWSER_TABS) {
+      const overflow = state.browserTabs.splice(0, state.browserTabs.length - MAX_STORED_BROWSER_TABS);
+      for (const stale of overflow) {
+        void host.fileCapability('browser-tab-close', { tabId: stale.id }).catch(() => {});
+      }
+    }
+    state.activeBrowserTabId = tab.id;
+    persistBrowserTabs();
+    return tab;
+  }
+
+  function browserTabForSource(source) {
+    const url = safeBrowserUrl(source?.url);
+    if (!url) return null;
+    const sourceKey = source?.shortcutId ? 'shortcut:' + source.shortcutId : 'url:' + url;
+    let tab = state.browserTabs.find((candidate) => candidate.sourceKey === sourceKey) || null;
+    if (!tab) tab = createBrowserTab(url, { title: source?.name || '', sourceKey });
+    if (!tab) return null;
+    if (tab.url !== url) tab.url = url;
+    if (!tab.title && source?.name) tab.title = String(source.name).slice(0, 500);
+    tab.lastActiveAt = Date.now();
+    state.activeBrowserTabId = tab.id;
+    persistBrowserTabs();
+    return tab;
+  }
+
+  function activeBrowserTab() {
+    return state.browserTabs.find((tab) => tab.id === state.activeBrowserTabId) || null;
+  }
+
+  loadBrowserTabs();
 
   const workspace = documentRef.querySelector('.workspace');
   const panel = documentRef.createElement('aside');
@@ -369,10 +485,24 @@ export function createFileCapabilityPanel(options) {
     if (sessionId) void host.fileCapability('browser-close', { sessionId }).catch(() => {});
   }
 
+  function stopBrowserTabPolling() {
+    if (state.browserPollTimer) clearTimeout(state.browserPollTimer);
+    state.browserPollTimer = null;
+  }
+
+  function hideBrowserTabs() {
+    stopBrowserTabPolling();
+    state.browserObserver?.disconnect();
+    state.browserObserver = null;
+    state.browserSurface = null;
+    void host.fileCapability('browser-tabs-visible', { visible: false }).catch(() => {});
+  }
+
   function clearPreview({ preserveBrowser = false } = {}) {
     closeNativePreview();
     closePdfPreview();
     closeHtmlPreview();
+    hideBrowserTabs();
     if (preserveBrowser) {
       state.browserObserver?.disconnect();
       state.browserObserver = null;
@@ -393,54 +523,226 @@ export function createFileCapabilityPanel(options) {
     preview.replaceChildren();
   }
 
-  async function startBrowserPreview(url) {
-    const generation = state.inspectGeneration;
-    const surface = documentRef.createElement('div');
-    surface.className = 'file-capability-native-preview file-capability-browser-preview';
-    preview.append(surface);
-    if (!state.expanded) {
-      surface.textContent = 'Expand the preview pane to use this link.';
-      return;
+  function applyBrowserHostState(hostTab) {
+    if (!hostTab || !isBrowserTabId(hostTab.tabId)) return;
+    const tab = state.browserTabs.find((candidate) => candidate.id === hostTab.tabId);
+    if (!tab) return;
+    const url = safeBrowserUrl(hostTab.url);
+    if (url) tab.url = url;
+    if (typeof hostTab.title === 'string' && hostTab.title) tab.title = hostTab.title.slice(0, 500);
+    persistBrowserTabs();
+    syncBrowserChrome(hostTab);
+  }
+
+  function syncBrowserChrome(hostTab = null) {
+    const active = activeBrowserTab();
+    const address = preview.querySelector('.file-capability-browser-address');
+    if (address && active && documentRef.activeElement !== address) address.value = active.url;
+    const back = preview.querySelector('[data-browser-command="back"]');
+    const forward = preview.querySelector('[data-browser-command="forward"]');
+    if (back) back.disabled = hostTab ? !hostTab.canGoBack : false;
+    if (forward) forward.disabled = hostTab ? !hostTab.canGoForward : false;
+    for (const node of preview.querySelectorAll('[data-browser-tab-id]')) {
+      const tab = state.browserTabs.find((candidate) => candidate.id === node.dataset.browserTabId);
+      if (!tab) continue;
+      node.classList.toggle('active', tab.id === state.activeBrowserTabId);
+      const label = node.querySelector('.file-capability-browser-tab-label');
+      if (label) label.textContent = browserTabFallbackTitle(tab);
+      node.title = tab.url;
     }
+  }
+
+  async function refreshBrowserTabState() {
+    const tab = activeBrowserTab();
+    if (!tab || !state.expanded || !state.browserSurface?.isConnected) return;
+    const result = await host.fileCapability('browser-tab-state', { tabId: tab.id }).catch(() => null);
+    if (result?.ok && result.tab) applyBrowserHostState(result.tab);
+  }
+
+  function scheduleBrowserTabPolling() {
+    stopBrowserTabPolling();
+    const poll = async () => {
+      await refreshBrowserTabState();
+      if (!state.expanded || !state.browserSurface?.isConnected) return;
+      state.browserPollTimer = setTimeout(poll, BROWSER_TAB_POLL_MS);
+    };
+    state.browserPollTimer = setTimeout(poll, BROWSER_TAB_POLL_MS);
+  }
+
+  function moveActiveBrowserTab() {
+    const tab = activeBrowserTab();
+    const surface = state.browserSurface;
+    if (!tab || !surface?.isConnected || !state.expanded) return;
+    void host.fileCapability('browser-tab-move', {
+      tabId: tab.id,
+      rect: nativePreviewRect(surface),
+    }).catch(() => {});
+  }
+
+  async function openActiveBrowserTab() {
+    const tab = activeBrowserTab();
+    const surface = state.browserSurface;
+    if (!tab || !surface?.isConnected || !state.expanded) return false;
     await nextLayoutTick();
-    if (generation !== state.inspectGeneration || state.inspectedUrl !== url) return;
-    const opened = await host.fileCapability('browser-open', {
-      url,
+    if (tab.id !== state.activeBrowserTabId || surface !== state.browserSurface) return false;
+    const result = await host.fileCapability('browser-tab-open', {
+      tabId: tab.id,
+      url: tab.url,
       rect: nativePreviewRect(surface),
     }).catch((error) => ({
       ok: false,
       message: error instanceof Error ? error.message : String(error),
     }));
-    if (generation !== state.inspectGeneration || state.inspectedUrl !== url) {
-      if (opened && opened.ok && typeof opened.sessionId === 'string') {
-        void host.fileCapability('browser-close', { sessionId: opened.sessionId }).catch(() => {});
-      }
+    if (!result?.ok) {
+      surface.textContent = result?.message || result?.error || 'This tab could not be opened.';
+      return false;
+    }
+    surface.textContent = '';
+    void host.fileCapability('browser-tabs-visible', { visible: true }).catch(() => {});
+    if (result.tab) applyBrowserHostState(result.tab);
+    scheduleBrowserTabPolling();
+    return true;
+  }
+
+  async function sendBrowserCommand(command) {
+    const tab = activeBrowserTab();
+    if (!tab) return;
+    const result = await host.fileCapability('browser-tab-command', {
+      tabId: tab.id,
+      command,
+    }).catch(() => null);
+    if (result?.ok && result.tab) applyBrowserHostState(result.tab);
+    windowRef?.setTimeout?.(() => { void refreshBrowserTabState(); }, 120);
+  }
+
+  function normalizeBrowserAddress(value) {
+    const input = String(value || '').trim();
+    const direct = safeBrowserUrl(input);
+    if (direct) return direct;
+    if (/^[^\s/]+\.[^\s]+(?:\/.*)?$/i.test(input)) {
+      const host = safeBrowserUrl('https://' + input);
+      if (host) return host;
+    }
+    return input ? DEFAULT_SEARCH_URL + encodeURIComponent(input) : DEFAULT_BROWSER_HOME;
+  }
+
+  function renderBrowserWorkspace() {
+    panel.classList.add('browser-mode');
+    inspector.classList.add('browser-mode');
+    clearPreview();
+    const shell = documentRef.createElement('div');
+    shell.className = 'file-capability-browser-shell';
+    const tabsBar = documentRef.createElement('div');
+    tabsBar.className = 'file-capability-browser-tabs';
+
+    for (const tab of state.browserTabs) {
+      const item = documentRef.createElement('div');
+      item.className = 'file-capability-browser-tab';
+      item.dataset.browserTabId = tab.id;
+      const select = createButton(documentRef, browserTabFallbackTitle(tab), 'file-capability-browser-tab-label');
+      select.addEventListener('click', () => {
+        state.activeBrowserTabId = tab.id;
+        tab.lastActiveAt = Date.now();
+        persistBrowserTabs();
+        renderBrowserWorkspace();
+      });
+      const close = createButton(documentRef, '×', 'file-capability-browser-tab-close');
+      close.title = 'Close tab';
+      close.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const index = state.browserTabs.findIndex((candidate) => candidate.id === tab.id);
+        if (index < 0) return;
+        state.browserTabs.splice(index, 1);
+        void host.fileCapability('browser-tab-close', { tabId: tab.id }).catch(() => {});
+        if (state.activeBrowserTabId === tab.id) {
+          state.activeBrowserTabId = state.browserTabs[Math.min(index, state.browserTabs.length - 1)]?.id || null;
+        }
+        persistBrowserTabs();
+        renderBrowserWorkspace();
+      });
+      item.append(select, close);
+      tabsBar.append(item);
+    }
+
+    const add = createButton(documentRef, '+', 'file-capability-browser-tab-add');
+    add.title = 'New tab';
+    add.addEventListener('click', () => {
+      const tab = createBrowserTab(DEFAULT_BROWSER_HOME, { title: 'Google' });
+      if (!tab) return;
+      renderBrowserWorkspace();
+      windowRef?.setTimeout?.(() => preview.querySelector('.file-capability-browser-address')?.select?.(), 0);
+    });
+    tabsBar.append(add);
+
+    const toolbar = documentRef.createElement('form');
+    toolbar.className = 'file-capability-browser-toolbar';
+    const back = createButton(documentRef, '←', 'file-capability-browser-nav');
+    back.dataset.browserCommand = 'back';
+    back.title = 'Back';
+    const forward = createButton(documentRef, '→', 'file-capability-browser-nav');
+    forward.dataset.browserCommand = 'forward';
+    forward.title = 'Forward';
+    const reload = createButton(documentRef, '↻', 'file-capability-browser-nav');
+    reload.dataset.browserCommand = 'reload';
+    reload.title = 'Reload';
+    for (const [button, command] of [[back, 'back'], [forward, 'forward'], [reload, 'reload']]) {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        void sendBrowserCommand(command);
+      });
+    }
+    const address = documentRef.createElement('input');
+    address.className = 'file-capability-browser-address';
+    address.type = 'text';
+    address.autocomplete = 'off';
+    address.spellcheck = false;
+    address.placeholder = 'Enter URL';
+    address.value = activeBrowserTab()?.url || '';
+    toolbar.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const tab = activeBrowserTab();
+      const url = normalizeBrowserAddress(address.value);
+      if (!tab || !url) return;
+      tab.url = url;
+      tab.title = '';
+      tab.lastActiveAt = Date.now();
+      persistBrowserTabs();
+      void host.fileCapability('browser-tab-navigate', { tabId: tab.id, url })
+        .then((result) => {
+          if (result?.ok && result.tab) applyBrowserHostState(result.tab);
+        })
+        .catch(() => {});
+    });
+    toolbar.append(back, forward, reload, address);
+
+    const surface = documentRef.createElement('div');
+    surface.className = 'file-capability-native-preview file-capability-browser-preview';
+    state.browserSurface = surface;
+    shell.append(tabsBar, toolbar, surface);
+    preview.append(shell);
+    syncBrowserChrome();
+
+    if (!state.expanded) {
+      surface.textContent = 'Expand the preview pane to use the browser.';
       return;
     }
-    if (!opened || !opened.ok || typeof opened.sessionId !== 'string') {
-      surface.textContent = opened && (opened.message || opened.error)
-        ? (opened.message || opened.error)
-        : 'This link could not be opened in the viewer.';
+    const tab = activeBrowserTab();
+    if (!tab) {
+      surface.textContent = 'Open a tab with + or select a web link in As you Go.';
       return;
     }
-    state.browserSessionId = opened.sessionId;
-    const move = () => {
-      if (!state.browserSessionId || !state.expanded) return;
-      void host.fileCapability('browser-move', {
-        sessionId: state.browserSessionId,
-        rect: nativePreviewRect(surface),
-      }).catch(() => {});
-    };
+    const move = () => moveActiveBrowserTab();
     if (typeof ResizeObserver === 'function') {
       state.browserObserver = new ResizeObserver(move);
       state.browserObserver.observe(surface);
     }
     documentRef.defaultView?.addEventListener('resize', move, { passive: true, once: true });
+    void openActiveBrowserTab();
   }
 
   function renderWebSelection(source) {
-    const url = typeof source?.url === 'string' ? source.url : '';
-    if (!/^https?:\/\//i.test(url)) {
+    const url = safeBrowserUrl(source?.url);
+    if (!url) {
       renderEmptySelection(0);
       return;
     }
@@ -452,14 +754,14 @@ export function createFileCapabilityPanel(options) {
     disarmDelete();
     renameRow.hidden = true;
     itemTitle.textContent = source.name || url;
-    itemMeta.textContent = 'Web link';
+    itemMeta.textContent = 'Web browser';
     pathText.textContent = url;
     copyPathButton.hidden = false;
     revealButton.hidden = true;
     openTabButton.hidden = true;
     actions.hidden = true;
-    clearPreview({ preserveBrowser: true });
-    void startBrowserPreview(url);
+    browserTabForSource(source);
+    renderBrowserWorkspace();
   }
 
   function renderImagePreview(source) {
@@ -1064,6 +1366,8 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderEmptySelection(selectionCount = 0) {
+    panel.classList.remove('browser-mode');
+    inspector.classList.remove('browser-mode');
     ++state.inspectGeneration;
     state.context = null;
     state.inspectedPath = null;
@@ -1088,6 +1392,8 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderMultipleSelection(selection) {
+    panel.classList.remove('browser-mode');
+    inspector.classList.remove('browser-mode');
     ++state.inspectGeneration;
     state.context = null;
     state.inspectedPath = null;
@@ -1108,6 +1414,8 @@ export function createFileCapabilityPanel(options) {
 
   async function inspectPath(target, context) {
     if (!isAbsoluteWindowsPath(target)) return false;
+    panel.classList.remove('browser-mode');
+    inspector.classList.remove('browser-mode');
     const generation = ++state.inspectGeneration;
     state.inspectedPath = target;
     state.inspectedUrl = null;
@@ -1237,11 +1545,13 @@ export function createFileCapabilityPanel(options) {
       closeNativePreview();
       closePdfPreview();
       closeHtmlPreview();
+      hideBrowserTabs();
     }
     else if (state.lastPreviewResult?.preview?.kind === 'windows-preview-handler') renderPreview(state.lastPreviewResult);
     else if (['hosted-pdf', 'hosted-html'].includes(state.lastPreviewResult?.preview?.kind) && state.inspectedPath) {
       void inspectPath(state.inspectedPath, state.context);
     }
+    else if (state.inspectedUrl) renderBrowserWorkspace();
   }
   expandButton.addEventListener('click', () => {
     setExpandedWithPreviewLifecycle(!state.expanded);
@@ -1489,6 +1799,13 @@ export function createFileCapabilityPanel(options) {
       void host.fileCapability('browser-move', {
         sessionId: state.browserSessionId,
         rect,
+      }).catch(() => {});
+    }
+    const browserTab = activeBrowserTab();
+    if (browserTab && state.browserSurface?.isConnected) {
+      void host.fileCapability('browser-tab-move', {
+        tabId: browserTab.id,
+        rect: nativePreviewRect(state.browserSurface),
       }).catch(() => {});
     }
   }
