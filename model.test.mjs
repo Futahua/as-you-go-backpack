@@ -1979,7 +1979,7 @@ test('Quick Run card geometry is bounded and survives state normalization', () =
   assert.equal(normalizeQuickRunCardSize({ width: 'wide', height: 300 }), null);
 });
 
-test('startup reconciliation preserves layouts and exact members when the first live baseline is empty', () => {
+test('startup reconciliation removes dead members and deletes only empty untracked layouts', () => {
   let state = emptyState();
   state = createWindowLayout(state, { name: 'Ordinary' });
   state = createWindowLayout(state, { name: 'Tracked' });
@@ -1996,16 +1996,12 @@ test('startup reconciliation preserves layouts and exact members when the first 
   state = { ...state, activeWindowLayoutId: ordinary.id };
 
   const next = reconcileWindowLayoutsAfterStartup(state, []);
-  assert.equal(next, state, 'one startup sample must not mutate durable layout state');
-  assert.deepEqual(next.windowLayouts.map((layout) => ({
-    id: layout.id,
-    members: layout.arrangement.members.map((member) => member.id),
-  })), [
-    { id: ordinary.id, members: ['ordinary-dead'] },
-    { id: tracked.id, members: ['tracked-dead'] },
-  ]);
-  assert.equal(next.activeWindowLayoutId, ordinary.id, 'active layout identity survives startup');
-  assert.equal(next.startupWindowLayoutId, tracked.id, 'startup layout identity survives startup');
+  assert.equal(next.windowLayouts.some((layout) => layout.id === ordinary.id), false,
+    'a populated non-tracking layout disappears once every exact member is gone');
+  assert.equal(next.windowLayouts.find((layout) => layout.id === tracked.id).arrangement.members.length, 0,
+    'the tracking owner persists as an empty durable layout');
+  assert.equal(next.activeWindowLayoutId, null, 'deleting the active layout clears its runtime id');
+  assert.equal(next.startupWindowLayoutId, tracked.id, 'the tracking owner remains the startup layout');
 });
 
 test('startup reconciliation preserves live and legacy members', () => {
