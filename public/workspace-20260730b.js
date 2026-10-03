@@ -5880,12 +5880,18 @@ async function runMenuAction(action) {
     try {
       const parentId = scopedMutationParent(elements.menu.dataset.parent);
       let createdLayout = null;
-      const nextLayoutState = () => {
+      const attemptCreateLayout = async () => {
         const next = createWindowLayout(state, { parentId });
         createdLayout = next.windowLayouts.at(-1) ?? null;
-        return next;
+        const committed = await commit(next, { requireDurable: true });
+        if (committed !== true && createdLayout?.id && windowLayoutFromState(createdLayout.id)) {
+          store.replace(deleteWindowLayout(state, createdLayout.id));
+          render();
+          createdLayout = null;
+        }
+        return committed;
       };
-      let committed = await commit(nextLayoutState());
+      let committed = await attemptCreateLayout();
       // A freshly restored tab can receive input before its shared-document
       // baseline is ready. The first commit is deliberately refused in that
       // short interval; retry once after coordination settles instead of
@@ -5898,7 +5904,7 @@ async function runMenuAction(action) {
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
         if (hasDocumentWriteAuthority()) {
-          committed = await commit(nextLayoutState());
+          committed = await attemptCreateLayout();
         }
       }
       if (committed === false) {
@@ -7309,9 +7315,14 @@ function bootstrapWindowLayoutWidget() {
       onResult: () => {
         snapshotRetry = null;
         if (widgetState.snapshotReceived) return;
-        renderWidgetBootstrapCard(snapshotRetryArmings >= MAX_SNAPSHOT_RETRY_ARMINGS
-          ? 'Could not load this window layout. Reopen the widget from As You Go.'
+        const exhausted = snapshotRetryArmings >= MAX_SNAPSHOT_RETRY_ARMINGS;
+        renderWidgetBootstrapCard(exhausted
+          ? 'This window layout no longer exists.'
           : 'Waiting for the window layout…');
+        if (exhausted) {
+          void host.widgetCloseSelf().catch(() => undefined);
+          return;
+        }
         if (snapshotRetryArmings < MAX_SNAPSHOT_RETRY_ARMINGS) {
           snapshotRetryCooldownTimer = setTimeout(() => {
             snapshotRetryCooldownTimer = null;

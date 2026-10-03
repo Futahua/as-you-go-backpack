@@ -111,6 +111,37 @@ test('durable automatic commits propagate rebase metadata and reject dropped sav
   assert.notEqual(statuses.at(-1), '', 'a dropped automatic save is not announced as persisted');
 });
 
+test('a durable commit rejects an unacknowledged forwarded save', async () => {
+  let state = { items: ['root'] };
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => ({ ok: true, forwarded: true, revision: 'r0' }),
+    normalizeState: (s) => s,
+  });
+
+  const ok = await store.commit({ items: ['layout'] }, { requireDurable: true });
+  assert.equal(ok, false, 'an optimistic forwarded envelope is not durable success');
+});
+
+test('a durable commit accepts a forwarded save only after the writer acknowledgement', async () => {
+  let state = { items: ['root'] };
+  const store = createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => ({
+      ok: true,
+      forwarded: true,
+      revision: 'r0',
+      acknowledgement: Promise.resolve({ ok: true, revision: 'r1' }),
+    }),
+    normalizeState: (s) => s,
+  });
+
+  const ok = await store.commit({ items: ['layout'] }, { requireDurable: true });
+  assert.equal(ok, true);
+});
+
 test('a failed follower acknowledgement invalidates dependent queued edits', async () => {
   let state = { items: ['root'] };
   let rejectAck;

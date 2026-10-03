@@ -5,6 +5,7 @@
 // BroadcastChannel-like bus (no self-delivery) drives both sides.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 
 import {
   WINDOW_LAYOUT_WIDGET_CHANNEL,
@@ -14,6 +15,13 @@ import {
   windowLayoutWidgetParseCommand,
   createBoundedRetry,
 } from './public/app/window-layout-widget-channel.js';
+
+test('entry wiring opens widgets only after durable layout persistence and self-closes exhausted orphans', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  assert.match(source, /commit\(next, \{ requireDurable: true \}\)/);
+  assert.match(source, /store\.replace\(deleteWindowLayout\(state, createdLayout\.id\)\)/);
+  assert.match(source, /host\.widgetCloseSelf\(\)/);
+});
 
 function fakeBus() {
   const listeners = new Map();

@@ -145,6 +145,7 @@ export function createWorkspaceStore({
             ? { generation, sequence, baseSerialized, pendingSnapshots: queuedPending }
             : metadata;
         let result = await persist(snapshot, persistMetadata);
+        let forwardedAcknowledged = false;
         // A coordinated follower returns an optimistic envelope plus a
         // correlated writer acknowledgement. Do not report the commit as
         // durable until that ACK arrives; writer death becomes an explicit
@@ -161,6 +162,7 @@ export function createWorkspaceStore({
             throw new Error(humanSaveRefusal(acknowledgement));
           }
           result = { ...result, ...acknowledgement };
+          forwardedAcknowledged = true;
         }
         if (result?.ok === false) {
           if (result?.forwarded && generation === saveGeneration) {
@@ -173,6 +175,12 @@ export function createWorkspaceStore({
         // authoritative and advances the store's queue base here.
         if (!result?.forwarded && result?.ok !== false) {
           lastPersistedSnapshot = typeof result?.serialized === 'string' ? result.serialized : snapshot;
+        }
+        if (result?.forwarded && forwardedAcknowledged && result && typeof result === 'object') {
+          Object.defineProperty(result, 'durablyAcknowledged', {
+            value: true,
+            enumerable: false,
+          });
         }
         return result;
       });
@@ -231,7 +239,11 @@ export function createWorkspaceStore({
         // Some automatic/cosmetic writes deliberately resolve as dropped after
         // bounded CAS retries. Callers that add durable document members need
         // to distinguish that result from an acknowledged save.
-        if (requireDurable && (result?.ok !== true || result?.dropped === true)) return false;
+        if (requireDurable && (
+          result?.ok !== true
+          || result?.dropped === true
+          || (result?.forwarded === true && result?.durablyAcknowledged !== true)
+        )) return false;
         setStatus?.('');
         return true;
       })
