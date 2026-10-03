@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isAbsoluteWindowsPath } from './public/app/file-capability-panel.js';
+import { isAbsoluteWindowsPath, requestBrowserLensCapture } from './public/app/file-capability-panel.js';
 
 test('file capability accepts drive and UNC paths but rejects web and relative targets', () => {
   assert.equal(isAbsoluteWindowsPath('C:\\Users\\me\\file.txt'), true);
@@ -10,6 +10,20 @@ test('file capability accepts drive and UNC paths but rejects web and relative t
   assert.equal(isAbsoluteWindowsPath('https://example.com/file.pdf'), false);
   assert.equal(isAbsoluteWindowsPath('relative\\file.txt'), false);
   assert.equal(isAbsoluteWindowsPath(''), false);
+});
+
+test('Lens requests a real screen-region capture for the current browser tab', async () => {
+  const calls = [];
+  const expected = { ok: true, tab: { tabId: 'tab-1', url: 'https://www.google.com/search?udm=26' } };
+  const host = {
+    async fileCapability(operation, params) {
+      calls.push({ operation, params });
+      return expected;
+    },
+  };
+  assert.equal(await requestBrowserLensCapture(host, 'tab-1'), expected);
+  assert.deepEqual(calls, [{ operation: 'browser-lens-screen', params: { tabId: 'tab-1' } }]);
+  assert.deepEqual(await requestBrowserLensCapture(host, ''), { ok: false, error: 'Browser tab is unavailable.' });
 });
 
 test('file preview is a collapsed/expanded dock with a draggable width and no fake file-manager UI', async () => {
@@ -171,8 +185,9 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /BROWSER_TABS_STORAGE_PREFIX/);
   assert.match(source, /const DEFAULT_BROWSER_HOME = 'https:\/\/www\.google\.com\/'/);
   assert.match(source, /const DEFAULT_SEARCH_URL = 'https:\/\/www\.google\.com\/search\?q='/);
-  assert.match(source, /const GOOGLE_LENS_HOME = 'https:\/\/lens\.google\.com\/'/);
-  assert.match(source, /createBrowserTab\(GOOGLE_LENS_HOME, \{ title: 'Google Lens' \}\)/);
+  assert.doesNotMatch(source, /GOOGLE_LENS_HOME/);
+  assert.match(source, /requestBrowserLensCapture\(host, tab\.id\)/);
+  assert.match(source, /fileCapability\('browser-lens-screen', \{ tabId \}\)/);
   assert.match(source, /fileCapability\('browser-downloads'/);
   assert.match(source, /fileCapability\('browser-adblock-state'/);
   assert.match(source, /fileCapability\('browser-adblock-set'/);

@@ -8,11 +8,17 @@ const BROWSER_TAB_POLL_MS = 750;
 const MAX_STORED_BROWSER_TABS = 100;
 const DEFAULT_BROWSER_HOME = 'https://www.google.com/';
 const DEFAULT_SEARCH_URL = 'https://www.google.com/search?q=';
-const GOOGLE_LENS_HOME = 'https://lens.google.com/';
 
 export function isAbsoluteWindowsPath(value) {
   return typeof value === 'string'
     && (/^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\]+\\[^\\]+/.test(value));
+}
+
+export async function requestBrowserLensCapture(host, tabId) {
+  if (!host?.fileCapability || typeof tabId !== 'string' || !tabId) {
+    return { ok: false, error: 'Browser tab is unavailable.' };
+  }
+  return host.fileCapability('browser-lens-screen', { tabId });
 }
 
 function basename(target) {
@@ -616,10 +622,20 @@ export function createFileCapabilityPanel(options) {
     windowRef?.setTimeout?.(() => { void refreshBrowserTabState(); }, 120);
   }
 
-  function openLensTab() {
-    const tab = createBrowserTab(GOOGLE_LENS_HOME, { title: 'Google Lens' });
+  async function openLensScreen() {
+    const tab = activeBrowserTab();
     if (!tab) return;
-    renderBrowserWorkspace();
+    const result = await requestBrowserLensCapture(host, tab.id).catch((error) => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    if (result?.ok && result.tab) {
+      applyBrowserHostState(result.tab);
+      return;
+    }
+    if (!result?.cancelled) {
+      setStatus(result?.message || result?.error || 'Lens screen capture could not start.');
+    }
   }
 
   async function populateDownloadsMenu(menu) {
@@ -762,7 +778,7 @@ export function createFileCapabilityPanel(options) {
     lens.title = 'Google Lens';
     lens.addEventListener('click', (event) => {
       event.preventDefault();
-      openLensTab();
+      void openLensScreen();
     });
     const downloads = createButton(documentRef, '↓', 'file-capability-browser-nav file-capability-browser-tool');
     downloads.title = 'Downloads';
