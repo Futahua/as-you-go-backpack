@@ -8,6 +8,7 @@ const BROWSER_TAB_POLL_MS = 750;
 const MAX_STORED_BROWSER_TABS = 100;
 const DEFAULT_BROWSER_HOME = 'https://www.google.com/';
 const DEFAULT_SEARCH_URL = 'https://www.google.com/search?q=';
+const GOOGLE_LENS_HOME = 'https://lens.google.com/';
 
 export function isAbsoluteWindowsPath(value) {
   return typeof value === 'string'
@@ -615,6 +616,72 @@ export function createFileCapabilityPanel(options) {
     windowRef?.setTimeout?.(() => { void refreshBrowserTabState(); }, 120);
   }
 
+  function openLensTab() {
+    const tab = createBrowserTab(GOOGLE_LENS_HOME, { title: 'Google Lens' });
+    if (!tab) return;
+    renderBrowserWorkspace();
+  }
+
+  async function populateDownloadsMenu(menu) {
+    if (!menu) return;
+    menu.replaceChildren();
+    const result = await host.fileCapability('browser-downloads', {}).catch(() => null);
+    const downloads = Array.isArray(result?.downloads) ? result.downloads : [];
+    if (!downloads.length) {
+      const empty = documentRef.createElement('div');
+      empty.className = 'file-capability-browser-download-empty';
+      empty.textContent = 'No recent downloads';
+      menu.append(empty);
+      return;
+    }
+    for (const download of downloads.slice(0, 12)) {
+      const row = documentRef.createElement('div');
+      row.className = 'file-capability-browser-download';
+      const label = documentRef.createElement('button');
+      label.type = 'button';
+      label.className = 'file-capability-browser-download-name';
+      label.textContent = download.filename || 'Download';
+      label.title = download.path || download.url || '';
+      label.disabled = download.state !== 'completed' || !download.path;
+      label.addEventListener('click', () => {
+        if (!download.path) return;
+        void host.fileCapability('open', { path: download.path }).catch(() => {});
+      });
+      const stateLabel = documentRef.createElement('span');
+      stateLabel.className = 'file-capability-browser-download-state';
+      if (download.state === 'progressing' && Number(download.totalBytes) > 0) {
+        const percent = Math.min(100, Math.round((Number(download.receivedBytes) / Number(download.totalBytes)) * 100));
+        stateLabel.textContent = percent + '%';
+      } else {
+        stateLabel.textContent = download.state || '';
+      }
+      const reveal = createButton(documentRef, '⌕', 'file-capability-browser-download-reveal');
+      reveal.title = 'Show in folder';
+      reveal.disabled = !download.path;
+      reveal.addEventListener('click', () => {
+        if (!download.path) return;
+        void host.fileCapability('reveal', { path: download.path }).catch(() => {});
+      });
+      row.append(label, stateLabel, reveal);
+      menu.append(row);
+    }
+  }
+
+  function syncAdblockButton(button, adblock) {
+    if (!button || !adblock) return;
+    const enabled = adblock.enabled !== false;
+    button.classList.toggle('active', enabled && adblock.status !== 'failed');
+    button.dataset.adblockStatus = adblock.status || '';
+    if (adblock.status === 'loading') button.title = 'Ad blocker: loading';
+    else if (adblock.status === 'failed') button.title = 'Ad blocker unavailable' + (adblock.error ? ': ' + adblock.error : '');
+    else button.title = enabled ? 'Ad blocker: on' : 'Ad blocker: off';
+  }
+
+  async function refreshAdblockButton(button) {
+    const result = await host.fileCapability('browser-adblock-state', {}).catch(() => null);
+    if (result?.ok && result.adblock) syncAdblockButton(button, result.adblock);
+  }
+
   function normalizeBrowserAddress(value) {
     const input = String(value || '').trim();
     const direct = safeBrowserUrl(input);
@@ -691,6 +758,35 @@ export function createFileCapabilityPanel(options) {
         void sendBrowserCommand(command);
       });
     }
+    const lens = createButton(documentRef, '⌾', 'file-capability-browser-nav file-capability-browser-tool');
+    lens.title = 'Google Lens';
+    lens.addEventListener('click', (event) => {
+      event.preventDefault();
+      openLensTab();
+    });
+    const downloads = createButton(documentRef, '↓', 'file-capability-browser-nav file-capability-browser-tool');
+    downloads.title = 'Downloads';
+    const downloadsMenu = documentRef.createElement('div');
+    downloadsMenu.className = 'file-capability-browser-downloads';
+    downloadsMenu.hidden = true;
+    downloads.addEventListener('click', (event) => {
+      event.preventDefault();
+      downloadsMenu.hidden = !downloadsMenu.hidden;
+      if (!downloadsMenu.hidden) void populateDownloadsMenu(downloadsMenu);
+    });
+    const adblock = createButton(documentRef, '◇', 'file-capability-browser-nav file-capability-browser-tool file-capability-browser-adblock');
+    adblock.title = 'Ad blocker';
+    adblock.addEventListener('click', async (event) => {
+      event.preventDefault();
+      const stateResult = await host.fileCapability('browser-adblock-state', {}).catch(() => null);
+      const enabled = stateResult?.ok && stateResult.adblock
+        ? stateResult.adblock.enabled !== false
+        : true;
+      const result = await host.fileCapability('browser-adblock-set', { enabled: !enabled }).catch(() => null);
+      if (result?.ok && result.adblock) syncAdblockButton(adblock, result.adblock);
+      const tab = activeBrowserTab();
+      if (tab) void sendBrowserCommand('reload');
+    });
     const address = documentRef.createElement('input');
     address.className = 'file-capability-browser-address';
     address.type = 'text';
@@ -713,14 +809,15 @@ export function createFileCapabilityPanel(options) {
         })
         .catch(() => {});
     });
-    toolbar.append(back, forward, reload, address);
+    toolbar.append(back, forward, reload, lens, downloads, adblock, address);
 
     const surface = documentRef.createElement('div');
     surface.className = 'file-capability-native-preview file-capability-browser-preview';
     state.browserSurface = surface;
-    shell.append(tabsBar, toolbar, surface);
+    shell.append(tabsBar, toolbar, downloadsMenu, surface);
     preview.append(shell);
     syncBrowserChrome();
+    void refreshAdblockButton(adblock);
 
     if (!state.expanded) {
       surface.textContent = 'Expand the preview pane to use the browser.';

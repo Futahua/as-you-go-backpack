@@ -171,6 +171,16 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /BROWSER_TABS_STORAGE_PREFIX/);
   assert.match(source, /const DEFAULT_BROWSER_HOME = 'https:\/\/www\.google\.com\/'/);
   assert.match(source, /const DEFAULT_SEARCH_URL = 'https:\/\/www\.google\.com\/search\?q='/);
+  assert.match(source, /const GOOGLE_LENS_HOME = 'https:\/\/lens\.google\.com\/'/);
+  assert.match(source, /createBrowserTab\(GOOGLE_LENS_HOME, \{ title: 'Google Lens' \}\)/);
+  assert.match(source, /fileCapability\('browser-downloads'/);
+  assert.match(source, /fileCapability\('browser-adblock-state'/);
+  assert.match(source, /fileCapability\('browser-adblock-set'/);
+  assert.match(source, /function syncAdblockButton\(/);
+  assert.match(source, /fileCapability\('open', \{ path: download\.path \}\)/);
+  assert.match(source, /fileCapability\('reveal', \{ path: download\.path \}\)/);
+  assert.match(css, /\.file-capability-browser-downloads/);
+  assert.match(css, /\.file-capability-browser-adblock\.active/);
   assert.match(source, /createBrowserTab\(DEFAULT_BROWSER_HOME, \{ title: 'Google' \}\)/);
   assert.match(source, /DEFAULT_SEARCH_URL \+ encodeURIComponent\(input\)/);
   assert.match(source, /fileCapability\('browser-tab-open'/);
