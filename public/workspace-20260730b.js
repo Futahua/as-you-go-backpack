@@ -7335,6 +7335,17 @@ function bootstrapWindowLayoutWidget() {
   }
 
   function handleWidgetMessage(message) {
+    // Deletion is document-global but native widget ownership is Papers-window
+    // scoped. The elected writer may live in a different Papers window, so its
+    // best-effort widgetClose(layoutId) can target the wrong owner even after
+    // the durable delete succeeded. A committed deletion therefore closes from
+    // the widget's own authenticated surface, which always names the exact
+    // native window that must disappear.
+    if (message.type === 'committed' && message.deleted === true) {
+      cancelSnapshotRetry();
+      void host.widgetCloseSelf().catch(() => undefined);
+      return;
+    }
     if (message.type === 'hover-policy') {
       if (typeof message.enabled !== 'boolean'
         || !Array.isArray(message.blockedBindings) || message.blockedBindings.length > 256
@@ -7391,6 +7402,15 @@ function bootstrapWindowLayoutWidget() {
     }
     if (message.type === 'error') {
       if (message.code === 'unknown-layout') {
+        if (widgetState.snapshotReceived) {
+          // A widget that previously held an authoritative snapshot cannot
+          // legitimately outlive that layout. This is the orphan case left by
+          // cross-window deletion or an external durable removal: close the
+          // exact widget instead of leaving an interactive-looking dead shell.
+          cancelSnapshotRetry();
+          void host.widgetCloseSelf().catch(() => undefined);
+          return;
+        }
         armSnapshotRetry();
         return;
       }

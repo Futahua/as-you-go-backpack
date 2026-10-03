@@ -21,6 +21,8 @@ test('entry wiring opens widgets only after durable layout persistence and self-
   assert.match(source, /commit\(next, \{ requireDurable: true \}\)/);
   assert.match(source, /store\.replace\(deleteWindowLayout\(state, createdLayout\.id\)\)/);
   assert.match(source, /host\.widgetCloseSelf\(\)/);
+  assert.match(source, /message\.type === 'committed' && message\.deleted === true/);
+  assert.match(source, /message\.code === 'unknown-layout'[\s\S]*widgetState\.snapshotReceived[\s\S]*host\.widgetCloseSelf\(\)/);
 });
 
 function fakeBus() {
