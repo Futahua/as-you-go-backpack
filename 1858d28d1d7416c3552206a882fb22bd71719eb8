@@ -1,0 +1,34 @@
+Historical root-cause record for commit 1858d28d1d7416c3552206a882fb22bd71719eb8
+
+Observed regression:
+- Compact-widget manual list add/remove became inert: the native picker opened and rows reacted/greyed, but selecting a row did not mutate layout membership.
+- Auto mode still populated windows correctly, and middle-click removal on an existing widget member still persisted, proving that general window identity, widget runtime behavior, and durable membership writes were not broadly broken.
+
+Exact introducing regression:
+- Known-good Oct 1 commit 027fbe4 kept the clicked chooser row:
+    const row = (widgetState.candidates ?? []).find(candidate => candidate.id === candidateId)
+    ...
+    bindWindowLayoutPickerCandidate(candidateId, row)
+- Oct 2 merge commit a123d8f ("Merge current AYG state into main") resolved a conflict at this exact manual-picker seam to an older Sep 24 implementation from the e6bd098 lineage:
+    bindWindowLayoutPickerCandidate(candidateId, null)
+- Candidate IDs are intentionally short-lived. Discarding the row removed the fallback identity needed by bindWindowLayoutPickerCandidate to relist candidates and safely rebind the exact clicked window when the original candidate ID expired between enumeration and the user's click.
+- This was a merge regression, not a new failure in Auto tracking, widget rendering, or Papers' picker presentation.
+
+Historical cross-check:
+- Papers checkpoint 7 (6d91f08) and Oct 1 c1fea29 already contained the same candidate-picker Peek/finishAction behavior as current Papers. Therefore the earlier theory that Peek teardown introduced this regression was falsified by history and was not changed here.
+
+Work performed in this commit:
+- Restored the Oct 1 row-preserving manual picker path and added a regression test forbidding a return to bindWindowLayoutPickerCandidate(candidateId, null).
+- Restored list/direct picker mutations to the established shared workspace writer acknowledgement flow instead of the speculative widget-local CAS path.
+- Reverted the speculative Oct 3 AYG picker fixes introduced by f1ff363, fd44f39, and 24865c9, including removal of window-layout-widget-direct.js and its tests.
+- Retained the later, independently useful widget lifecycle fixes such as durable widget creation/orphan cleanup and deletion ownership behavior.
+- Bumped the workspace renderer cache identity so restarted widgets cannot keep executing the stale picker code.
+
+Validation:
+- Focused window-layout/widget/store suite: 143/143 passed.
+- Full AYG suite: 1675/1675 passed.
+- git diff --check passed.
+- Commit was pushed to main and Papers was restarted through the normal Delegate Wave launcher, with AYG HEAD/origin both at this commit.
+
+Why this fix is intentionally historical rather than novel:
+- It restores the exact known-good manual picker contract that existed before the Oct 2 merge regression instead of adding another new authority, identity, or persistence mechanism.
