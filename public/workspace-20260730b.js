@@ -114,6 +114,7 @@ import {
   windowLayoutHasValidInstanceId,
   windowLayoutPickMemberDescriptors,
 } from './app/window-layout-workspace.js';
+import { applyWindowLayoutWidgetPickDirect } from './app/window-layout-widget-direct.js';
 import { windowLayoutControlButton, windowLayoutMemberMarkup, windowLayoutMemberState } from './app/window-layout-control-icons.js';
 import {
   WINDOW_LAYOUT_MEMBER_NOTE_UNCONFIRMED,
@@ -7212,10 +7213,11 @@ const promptLibrary = createPromptLibraryDialog({
 
 // ---- 019C compact-widget surface bootstrap --------------------------------
 // `?papers-surface=compact-widget&papers-layout-key=<id>` renders ONLY the named
-// layout's card and routes every card interaction through the same-origin
-// widget channel to the WORKSPACE writer. No old 018 wait-for-ACTIVATE/read-only
+// layout's card. Passive live updates still arrive on the same-origin widget
+// channel, but mouse picker mutations write through the host's versioned CAS
+// directly from this widget surface: no dependency on whichever AYG tab happens
+// to own the long-lived renderer writer lock. No old 018 wait-for-ACTIVATE
 // lifecycle; widget-ready is reported after the channel message listener exists.
-// The widget never writes the store/save/recording persistence.
 function bootstrapWindowLayoutWidget() {
   const { layoutId } = WIDGET_SURFACE;
   const widgetOpacityStorageKey = `papers-window-layout-widget-opacity:${layoutId}`;
@@ -7298,6 +7300,76 @@ function bootstrapWindowLayoutWidget() {
     snapshotRetryArmings = 0;
   }
 
+  function widgetSnapshotFromState(source) {
+    const layout = (source?.windowLayouts ?? []).find((candidate) => candidate.id === layoutId);
+    if (!layout) return null;
+    const members = new Map((layout.arrangement?.members ?? []).map((member) => [member.id, member]));
+    return {
+      ...windowLayoutWidgetSnapshot(
+        layout,
+        (candidateLayoutId, memberId) => {
+          const member = members.get(memberId);
+          if (!member) return null;
+          return windowLayoutIconFromCache(
+            member,
+            windowLayoutRuntime.icons.get(windowLayoutMemberKey(candidateLayoutId, memberId)),
+          );
+        },
+        () => null,
+      ),
+      appearance: {
+        theme: getTheme(source.view?.preferences),
+        transparentBackground: getTransparentBackground(source.view?.preferences),
+        backdropOpacity: getBackdropOpacity(source.view?.preferences),
+      },
+    };
+  }
+
+  function installWidgetState(source, reason = 'direct-authority') {
+    const snapshot = widgetSnapshotFromState(source);
+    if (!snapshot) return false;
+    handleWidgetMessage({
+      type: 'snapshot',
+      revision: Math.max(0, widgetState.lastRevision + 1),
+      reason,
+      snapshot,
+    });
+    return true;
+  }
+
+  async function refreshWidgetFromHost() {
+    const loaded = await host.loadWorkspaceVersioned();
+    const source = normalizeState(loaded.state);
+    if (!installWidgetState(source, 'direct-load')) {
+      if (widgetState.snapshotReceived) void host.widgetCloseSelf().catch(() => undefined);
+      return false;
+    }
+    return true;
+  }
+
+  async function applyWidgetPickDirect(pick) {
+    const applied = await applyWindowLayoutWidgetPickDirect({
+      host,
+      layoutId,
+      pick,
+      capabilities: windowLayoutRuntime.capabilities,
+      icons: windowLayoutRuntime.icons,
+      iconCacheEntry: windowLayoutIconCacheEntry,
+    });
+    if (applied.outcome === 'missing') {
+      void host.widgetCloseSelf().catch(() => undefined);
+      return false;
+    }
+    if (applied.outcome === 'failed') {
+      setWindowLayoutStatus(layoutId, applied.error || 'Pick failed');
+      return false;
+    }
+    if (applied.state) installWidgetState(applied.state, 'direct-pick');
+    const outcome = windowLayoutPickApplyOutcome(applied);
+    if (outcome.statusText) setWindowLayoutStatus(layoutId, outcome.statusText);
+    return true;
+  }
+
   /** A cold widget can miss the first BroadcastChannel request before its
    * workspace writer is ready. Unlike an explicit unknown-layout response,
    * that race is silent, so retry a small bounded number of times and leave a
@@ -7310,8 +7382,8 @@ function bootstrapWindowLayoutWidget() {
     snapshotRetry = createBoundedRetry({
       attempts: 3,
       delayMs: 250,
-      request: () => { client.requestSnapshot(); return null; },
-      shouldRetry: () => !widgetState.snapshotReceived,
+      request: () => refreshWidgetFromHost(),
+      shouldRetry: (loaded) => loaded !== true && !widgetState.snapshotReceived,
       onResult: () => {
         snapshotRetry = null;
         if (widgetState.snapshotReceived) return;
@@ -7994,16 +8066,7 @@ function bootstrapWindowLayoutWidget() {
       return false;
     }
     if (intent === 'remove' && pick.removes.length === 0) return false;
-    const command = { kind: 'picker-commit', pick };
-    let acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 30000 });
-    if (acknowledgement?.type === 'stale') {
-      acknowledgement = await client.sendCommandAndWait(command, { timeoutMs: 30000 });
-    }
-    if (acknowledgement?.type === 'error') {
-      setWindowLayoutStatus(layoutId, acknowledgement.message || acknowledgement.code || 'Pick failed');
-      return false;
-    }
-    return true;
+    return applyWidgetPickDirect(pick);
   }
 
   async function beginWidgetDirectPick() {
@@ -8065,27 +8128,11 @@ function bootstrapWindowLayoutWidget() {
         return;
       }
       if (result.outcome !== 'committed') return;
-      // Winter's one typed committed set goes to the WORKSPACE writer; the
-      // widget never applies it locally. Wait for the authoritative result so
-      // a missing writer or a revision race cannot silently drop the pick.
-      let acknowledgement = await client.sendCommandAndWait(
-        { kind: 'picker-commit', pick: result },
-        { timeoutMs: 30000 },
-      );
+      // The widget is already a project surface with versioned state access.
+      // Apply this one human pick directly against host authority instead of
+      // depending on an arbitrary AYG renderer process to relay it.
+      await applyWidgetPickDirect(result);
       if (widgetState.pickAttempt !== pickAttempt) return;
-      if (acknowledgement?.type === 'stale') {
-        acknowledgement = await client.sendCommandAndWait(
-          { kind: 'picker-commit', pick: result },
-          { timeoutMs: 30000 },
-        );
-        if (widgetState.pickAttempt !== pickAttempt) return;
-      }
-      if (acknowledgement?.type === 'error') {
-        setWindowLayoutStatus(
-          layoutId,
-          acknowledgement.message || acknowledgement.code || 'Pick failed',
-        );
-      }
     } catch (error) {
       pickUnsubscribe?.();
       if (widgetState.pickUnsubscribe === pickUnsubscribe) {
@@ -8336,10 +8383,10 @@ function bootstrapWindowLayoutWidget() {
     if (members) members.classList.remove('wl-drag-out');
     members?.querySelector(`[data-wl-member="${CSS.escape(active.memberId)}"]`)?.classList.remove('wl-member-dragging');
   }, true);
-  return host.widgetReady().then(() => {
+  return host.widgetReady().then(async () => {
     client.ready();
-    client.requestSnapshot();
-    armSnapshotRetry();
+    const loaded = await refreshWidgetFromHost().catch(() => false);
+    if (!loaded) armSnapshotRetry();
   });
 }
 
