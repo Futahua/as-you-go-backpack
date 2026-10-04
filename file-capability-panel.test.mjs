@@ -267,6 +267,9 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /ResizeObserver/);
   assert.match(css, /\.file-capability-image-toolbar/);
   assert.match(css, /\.file-capability-panel\.full-page/);
+  assert.match(css, /\.file-capability-panel\.full-page \{[\s\S]*grid-template-rows: minmax\(0, 1fr\)/);
+  assert.match(css, /\.file-capability-panel\.full-page \.file-capability-header \{[\s\S]*position: absolute[\s\S]*border-bottom: 0/);
+  assert.match(css, /\.file-capability-panel\.full-page \.file-capability-body \{[\s\S]*grid-row: 1/);
   assert.match(css, /\.file-capability-panel\.embedded-surface-proxima/);
   assert.match(css, /\.file-capability-image-viewport\.panning/);
   const sidecarHtml = await readFile(new URL('./public/proxima-preview.html', import.meta.url), 'utf8');
