@@ -229,6 +229,12 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /createBrowserTab\(DEFAULT_BROWSER_HOME, \{ title: 'Google' \}\)/);
   assert.match(source, /DEFAULT_SEARCH_URL \+ encodeURIComponent\(input\)/);
   assert.match(source, /fileCapability\('browser-tab-open'/);
+  assert.match(source, /fileCapability\('browser-tab-open-requests'/);
+  assert.match(source, /function createBrowserTab\(url, \{ title = '', sourceKey = null, activate = true \} = \{\}\)/);
+  assert.match(source, /if \(activate\) state\.activeBrowserTabId = tab\.id/);
+  assert.match(source, /async function adoptBrowserOpenRequests\(requests\)/);
+  assert.match(source, /activate: request\?\.activate !== false|const activate = request\?\.activate !== false/);
+  assert.match(source, /browser-tab-open', \{[\s\S]*activate,/);
   assert.match(source, /fileCapability\('browser-tab-navigate'/);
   assert.match(source, /fileCapability\('browser-tab-command'/);
   assert.match(source, /fileCapability\('browser-tab-state'/);

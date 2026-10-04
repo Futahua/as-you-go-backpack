@@ -242,7 +242,7 @@ export function createFileCapabilityPanel(options) {
     }
   }
 
-  function createBrowserTab(url, { title = '', sourceKey = null } = {}) {
+  function createBrowserTab(url, { title = '', sourceKey = null, activate = true } = {}) {
     const safe = safeBrowserUrl(url);
     if (!safe || typeof windowRef?.crypto?.randomUUID !== 'function') return null;
     const tab = {
@@ -259,7 +259,7 @@ export function createFileCapabilityPanel(options) {
         void host.fileCapability('browser-tab-close', { tabId: stale.id }).catch(() => {});
       }
     }
-    state.activeBrowserTabId = tab.id;
+    if (activate) state.activeBrowserTabId = tab.id;
     persistBrowserTabs();
     return tab;
   }
@@ -628,17 +628,54 @@ export function createFileCapabilityPanel(options) {
     }
   }
 
+  async function adoptBrowserOpenRequests(requests) {
+    const surface = state.browserSurface;
+    if (!surface?.isConnected || !Array.isArray(requests) || requests.length === 0) return false;
+    let changed = false;
+    for (const request of requests) {
+      const url = safeBrowserUrl(request?.url);
+      if (!url) continue;
+      const activate = request?.activate !== false;
+      const previousActiveId = state.activeBrowserTabId;
+      const tab = createBrowserTab(url, { activate });
+      if (!tab) continue;
+      const result = await host.fileCapability('browser-tab-open', {
+        tabId: tab.id,
+        url,
+        rect: nativePreviewRect(surface),
+        activate,
+      }).catch(() => null);
+      if (!result?.ok || !result.tab) {
+        state.browserTabs = state.browserTabs.filter((candidate) => candidate.id !== tab.id);
+        if (state.activeBrowserTabId === tab.id) state.activeBrowserTabId = previousActiveId;
+        persistBrowserTabs();
+        continue;
+      }
+      const resultUrl = safeBrowserUrl(result.tab.url);
+      if (resultUrl) tab.url = resultUrl;
+      if (typeof result.tab.title === 'string' && result.tab.title) tab.title = result.tab.title.slice(0, 500);
+      changed = true;
+    }
+    if (changed) {
+      persistBrowserTabs();
+      renderBrowserWorkspace();
+    }
+    return changed;
+  }
+
   async function refreshBrowserTabState() {
     const tab = activeBrowserTab();
     if (!tab || !state.expanded || !state.browserSurface?.isConnected) return;
-    const [result, downloadsResult] = await Promise.all([
+    const [result, downloadsResult, openRequestsResult] = await Promise.all([
       host.fileCapability('browser-tab-state', { tabId: tab.id }).catch(() => null),
       host.fileCapability('browser-downloads', {}).catch(() => null),
+      host.fileCapability('browser-tab-open-requests', {}).catch(() => null),
     ]);
     if (result?.ok && result.tab) applyBrowserHostState(result.tab);
     if (downloadsResult?.ok && Array.isArray(downloadsResult.downloads)) {
       applyBrowserDownloads(downloadsResult.downloads);
     }
+    if (openRequestsResult?.ok && await adoptBrowserOpenRequests(openRequestsResult.requests)) return;
   }
 
   function scheduleBrowserTabPolling() {
