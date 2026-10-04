@@ -679,6 +679,39 @@ export function createFileCapabilityPanel(options) {
     for (const download of downloads.slice(0, 50)) {
       const row = documentRef.createElement('div');
       row.className = 'file-capability-browser-download';
+      const draggable = download.state === 'completed' && isAbsoluteWindowsPath(download.path);
+      row.draggable = draggable;
+      if (draggable) {
+        let nativeDragStarted = false;
+        row.addEventListener('dragstart', (event) => {
+          nativeDragStarted = false;
+          row.classList.add('dragging');
+          const payload = JSON.stringify([{
+            target: download.path,
+            name: download.filename || basename(download.path),
+          }]);
+          event.dataTransfer?.setData('application/x-papers-native-items', payload);
+          event.dataTransfer?.setData('text/plain', download.path);
+          if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copyLink';
+        });
+        row.addEventListener('drag', (event) => {
+          if (nativeDragStarted || !windowRef) return;
+          const outsideWindow = event.screenX < windowRef.screenX
+            || event.screenY < windowRef.screenY
+            || event.screenX >= windowRef.screenX + windowRef.outerWidth
+            || event.screenY >= windowRef.screenY + windowRef.outerHeight;
+          if (!outsideWindow) return;
+          nativeDragStarted = true;
+          void host.fileCapability('native-drag', { paths: [download.path] }).catch((error) => {
+            nativeDragStarted = false;
+            setStatus(error instanceof Error ? error.message : 'Native file drag failed.');
+          });
+        });
+        row.addEventListener('dragend', () => {
+          nativeDragStarted = false;
+          row.classList.remove('dragging');
+        });
+      }
       const label = documentRef.createElement('button');
       label.type = 'button';
       label.className = 'file-capability-browser-download-name';

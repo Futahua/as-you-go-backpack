@@ -552,6 +552,19 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.file-capability-browser-download[draggable="true"] {
+  cursor: grab;
+}
+
+.file-capability-browser-download[draggable="true"]:active,
+.file-capability-browser-download.dragging {
+  cursor: grabbing;
+}
+
+.file-capability-browser-download.dragging {
+  opacity: .72;
+}
+
 .file-capability-browser-download-name {
   min-width: 0;
   overflow: hidden;

@@ -203,7 +203,12 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /function syncAdblockButton\(/);
   assert.match(source, /fileCapability\('open', \{ path: download\.path \}\)/);
   assert.match(source, /fileCapability\('reveal', \{ path: download\.path \}\)/);
+  assert.match(source, /row\.draggable = draggable/);
+  assert.match(source, /application\/x-papers-native-items/);
+  assert.match(source, /fileCapability\('native-drag', \{ paths: \[download\.path\] \}\)/);
+  assert.match(source, /download\.state === 'completed' && isAbsoluteWindowsPath\(download\.path\)/);
   assert.match(css, /\.file-capability-browser-downloads-page/);
+  assert.match(css, /\.file-capability-browser-download\[draggable="true"\]/);
   assert.doesNotMatch(css, /\.file-capability-browser-downloads-heading/);
   assert.doesNotMatch(css, /\.file-capability-browser-downloads \{/);
   assert.match(css, /\.file-capability-browser-adblock\.active/);
