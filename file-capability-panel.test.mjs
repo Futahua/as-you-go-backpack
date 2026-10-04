@@ -199,6 +199,7 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /hostTab\.faviconUrl/);
   assert.match(source, /safeBrowserFavicon/);
   assert.match(source, /faviconUrl:\s*safeBrowserFavicon\(tab\.faviconUrl\)/);
+  assert.match(source, /const hostFavicon = safeBrowserFavicon\(hostTab\.faviconUrl\);\s*if \(hostFavicon\) tab\.faviconUrl = hostFavicon;/);
   assert.match(source, /browser-favicon-resolve/);
   assert.match(source, /Math\.min\(4, pending\.length\)/);
   assert.match(source, /file-capability-browser-tab-favicon/);

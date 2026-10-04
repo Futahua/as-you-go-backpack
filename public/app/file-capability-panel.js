@@ -558,15 +558,15 @@ export function createFileCapabilityPanel(options) {
     const url = safeBrowserUrl(hostTab.url);
     if (url) tab.url = url;
     if (typeof hostTab.title === 'string' && hostTab.title) tab.title = hostTab.title.slice(0, 500);
-    tab.faviconUrl = safeBrowserFavicon(hostTab.faviconUrl);
+    const hostFavicon = safeBrowserFavicon(hostTab.faviconUrl);
+    if (hostFavicon) tab.faviconUrl = hostFavicon;
     persistBrowserTabs();
     syncBrowserChrome(hostTab);
   }
 
   function hydrateBrowserFavicons() {
     if (state.browserFaviconHydration) return state.browserFaviconHydration;
-    const pending = state.browserTabs.filter((tab) =>
-      tab.id !== state.activeBrowserTabId && !safeBrowserFavicon(tab.faviconUrl));
+    const pending = state.browserTabs.filter((tab) => !safeBrowserFavicon(tab.faviconUrl));
     if (pending.length === 0) return Promise.resolve();
     let cursor = 0;
     state.browserFaviconHydration = (async () => {
@@ -1075,8 +1075,11 @@ export function createFileCapabilityPanel(options) {
       const tab = activeBrowserTab();
       const url = normalizeBrowserAddress(address.value);
       if (!tab || !url) return;
+      const previousOrigin = safeBrowserUrl(tab.url) ? new URL(tab.url).origin : null;
+      const nextOrigin = new URL(url).origin;
       tab.url = url;
       tab.title = '';
+      if (previousOrigin && previousOrigin !== nextOrigin) tab.faviconUrl = '';
       tab.lastActiveAt = Date.now();
       persistBrowserTabs();
       void host.fileCapability('browser-tab-navigate', { tabId: tab.id, url })
