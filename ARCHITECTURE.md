@@ -419,3 +419,10 @@ Card row balancing, ResizeObserver registration/removal and the 180ms trailing
 size update now live in `public/app/window-layout-card-presentation.js`. The
 owner consumes the existing store/model callbacks and adds no persistence queue.
 Widget, placeholder, disconnected and no-explicit-width gates remain unchanged.
+
+Shift Peek timers, generation fencing, retries and serialized native begin/end
+operations live in `public/app/window-layout-shift-peek-lifecycle.js`. The entry
+retains event translation through the existing pure Shift planner and supplies
+only Peek host methods, capability resolution, preview cancellation and existing
+diagnostic presentation dependencies. Read-only held/key getters expose ephemeral
+lifecycle state; no durable state or second native authority is introduced.

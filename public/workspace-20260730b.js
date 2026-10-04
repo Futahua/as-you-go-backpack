@@ -1,3 +1,4 @@
+import { createWindowLayoutShiftPeekLifecycle } from './app/window-layout-shift-peek-lifecycle.js';
 import { createWindowLayoutCardPresentation } from './app/window-layout-card-presentation.js';
 import { createWindowLayoutView } from './app/window-layout-view.js';
 import { createWindowLayoutSelection } from './app/window-layout-selection.js';
@@ -2311,157 +2312,42 @@ const windowLayoutMemberPreview = createWindowLayoutMemberPreview({
 // Shift-hover mirrors taskbar Peek semantics using a reversible host session:
 // every other currently visible eligible window is temporarily minimized, and
 // only windows changed by this session are restored on release/leave.
-let windowLayoutShiftPeekHeld = false;
-let windowLayoutShiftPeekGeneration = 0;
-let windowLayoutShiftPeekKey = null;
-let windowLayoutShiftPeekEndTimer = null;
-let windowLayoutShiftPeekStartTimer = null;
-let windowLayoutShiftPeekRetryTimer = null;
 let windowLayoutLastHoveredMember = null;
-let windowLayoutShiftPeekHostQueue = Promise.resolve();
-
-function enqueueWindowLayoutShiftPeekHostOperation(operation) {
-  const pending = windowLayoutShiftPeekHostQueue.then(operation, operation);
-  windowLayoutShiftPeekHostQueue = pending.catch(() => undefined);
-  return pending;
-}
-
-function endWindowLayoutShiftPeek() {
-  // Planner keyup/blur and pointer-leave can converge on this function. Once
-  // this target's lifecycle has been cleared, later notifications must not
-  // issue another host end (or let an old completion end a newer target).
-  if (windowLayoutShiftPeekKey === null
-    && windowLayoutShiftPeekStartTimer === null
-    && windowLayoutShiftPeekEndTimer === null
-    && windowLayoutShiftPeekRetryTimer === null) return;
-  if (windowLayoutShiftPeekStartTimer !== null) {
-    clearTimeout(windowLayoutShiftPeekStartTimer);
-    windowLayoutShiftPeekStartTimer = null;
-  }
-  if (windowLayoutShiftPeekEndTimer !== null) {
-    clearTimeout(windowLayoutShiftPeekEndTimer);
-    windowLayoutShiftPeekEndTimer = null;
-  }
-  if (windowLayoutShiftPeekRetryTimer !== null) {
-    clearTimeout(windowLayoutShiftPeekRetryTimer);
-    windowLayoutShiftPeekRetryTimer = null;
-  }
-  windowLayoutShiftPeekGeneration += 1;
-  windowLayoutShiftPeekKey = null;
-  void enqueueWindowLayoutShiftPeekHostOperation(() => host.windowPeekEnd()).catch(() => undefined);
-}
-
-function deferWindowLayoutShiftPeekEnd() {
-  if (windowLayoutShiftPeekEndTimer !== null) clearTimeout(windowLayoutShiftPeekEndTimer);
-  windowLayoutShiftPeekEndTimer = setTimeout(() => {
-    windowLayoutShiftPeekEndTimer = null;
-    windowLayoutShiftPeekHeld = false;
-    endWindowLayoutShiftPeek();
-  }, 120);
-}
-
-function keepWindowLayoutShiftPeekAlive() {
-  if (windowLayoutShiftPeekEndTimer === null) return;
-  clearTimeout(windowLayoutShiftPeekEndTimer);
-  windowLayoutShiftPeekEndTimer = null;
-}
-
-function beginWindowLayoutShiftPeek(member) {
-  const layoutId = member?.dataset?.wlLayout;
-  const memberId = member?.dataset?.wlMember;
-  if (!layoutId || !memberId) return;
-  const key = `${layoutId}\u0000${memberId}`;
-  if (windowLayoutShiftPeekKey === key) return;
-  const generation = ++windowLayoutShiftPeekGeneration;
-  windowLayoutShiftPeekKey = key;
-  if (windowLayoutShiftPeekStartTimer !== null) clearTimeout(windowLayoutShiftPeekStartTimer);
-  if (windowLayoutShiftPeekRetryTimer !== null) clearTimeout(windowLayoutShiftPeekRetryTimer);
-  cancelWindowLayoutPreviewDwell();
-  windowLayoutMemberPopover.hide();
-  windowLayoutMemberPreview.cancel();
-  // Explorer's compositor path is private; our bounded foreign-window
-  // fallback must never queue one native transition for every icon crossed.
-  // Coalesce traversal within two display frames: an A->B->C sweep performs C
-  // only, while an intentional hover remains effectively immediate.
-  windowLayoutShiftPeekStartTimer = setTimeout(() => {
-    windowLayoutShiftPeekStartTimer = null;
-    void performWindowLayoutShiftPeek(layoutId, memberId, generation);
-  }, 32);
-}
-
-async function performWindowLayoutShiftPeek(layoutId, memberId, generation, attempt = 0) {
-  let capability = null;
-  try {
-    capability = await resolveWindowLayoutPreviewCapability(layoutId, memberId);
-  } catch {
-    // Capability lookup may briefly fail while the host is catching up. Keep
-    // retrying this same hovered target while Shift remains held.
-  }
-  if (!capability && WIDGET_SURFACE) document.title = 'peek: no capability';
-  if (generation !== windowLayoutShiftPeekGeneration || !windowLayoutShiftPeekHeld
-    || windowLayoutShiftPeekKey !== `${layoutId}\u0000${memberId}`) return;
-  if (!capability) {
-    windowLayoutShiftPeekRetryTimer = setTimeout(() => {
-      windowLayoutShiftPeekRetryTimer = null;
-      void performWindowLayoutShiftPeek(layoutId, memberId, generation, attempt + 1);
-    }, Math.min(1000, 180 + attempt * 120));
-    return;
-  }
-  const result = await enqueueWindowLayoutShiftPeekHostOperation(() => {
-    // A newer target or release may have arrived while this operation waited
-    // behind an in-flight host call. Never let the stale target start late.
-    if (generation !== windowLayoutShiftPeekGeneration || !windowLayoutShiftPeekHeld
-      || windowLayoutShiftPeekKey !== `${layoutId}\u0000${memberId}`) return { outcome: 'cancelled' };
-    return host.windowPeekBeginCapability(capability);
-  }).catch((error) => ({ outcome: 'error', error: String(error) }));
-  // ONE LINE THAT PROVES THE WHOLE REMAINING CHAIN: the broker noticed physical
-  // Shift, Node parsed it, IPC forwarded it, the preload posted it, the host bridge
-  // relayed it, the widget received it, resolved a capability and Peek began. The
-  // native watcher is already proven separately, so nothing else needs proving.
-  if (WIDGET_SURFACE) document.title = 'shift-peek | held=1 | begin=' + String(result?.outcome ?? 'empty')
-    + ' ' + String(result?.error ?? '').slice(0, 60);
-  if (generation !== windowLayoutShiftPeekGeneration) {
-    // The lifecycle owner already ended or superseded this attempt. An extra
-    // global end here could cancel a newer member's Peek.
-    return;
-  }
-  if (result?.outcome !== 'success' && windowLayoutShiftPeekHeld) {
-    windowLayoutShiftPeekRetryTimer = setTimeout(() => {
-      windowLayoutShiftPeekRetryTimer = null;
-      void performWindowLayoutShiftPeek(layoutId, memberId, generation, attempt + 1);
-    }, Math.min(1000, 180 + attempt * 120));
-  }
-}
-
-function applyWindowLayoutShiftPeekTransition(transition) {
-  if (!transition.handled) return false;
-  windowLayoutShiftPeekHeld = transition.held;
-  if (transition.begin) void beginWindowLayoutShiftPeek(transition.begin);
-  if (transition.end) endWindowLayoutShiftPeek();
-  return true;
-}
-
+const windowLayoutShiftPeek = createWindowLayoutShiftPeekLifecycle({
+  host: { windowPeekEnd: host.windowPeekEnd, windowPeekBeginCapability: host.windowPeekBeginCapability },
+  resolveWindowLayoutPreviewCapability,
+  cancelWindowLayoutPreviewDwell,
+  windowLayoutMemberPopover,
+  windowLayoutMemberPreview,
+  WIDGET_SURFACE,
+  document,
+});
+const beginWindowLayoutShiftPeek = windowLayoutShiftPeek.begin;
+const endWindowLayoutShiftPeek = windowLayoutShiftPeek.end;
+const deferWindowLayoutShiftPeekEnd = windowLayoutShiftPeek.deferEnd;
+const keepWindowLayoutShiftPeekAlive = windowLayoutShiftPeek.keepAlive;
+const applyWindowLayoutShiftPeekTransition = windowLayoutShiftPeek.apply;
 window.addEventListener('keydown', (event) => {
   const transition = planWindowLayoutShiftPeekTransition('keydown', event, {
-    held: windowLayoutShiftPeekHeld,
+    held: windowLayoutShiftPeek.held,
     member: document.querySelector('[data-wl-member]:hover'),
   });
   applyWindowLayoutShiftPeekTransition(transition);
 });
 window.addEventListener('keyup', (event) => {
-  const transition = planWindowLayoutShiftPeekTransition('keyup', event, { held: windowLayoutShiftPeekHeld });
+  const transition = planWindowLayoutShiftPeekTransition('keyup', event, { held: windowLayoutShiftPeek.held });
   applyWindowLayoutShiftPeekTransition(transition);
 });
 window.addEventListener('blur', () => {
   if (WIDGET_SURFACE) return; // Physical Shift release comes from the native broker.
-  const transition = planWindowLayoutShiftPeekTransition('blur', {}, { held: windowLayoutShiftPeekHeld });
+  const transition = planWindowLayoutShiftPeekTransition('blur', {}, { held: windowLayoutShiftPeek.held });
   applyWindowLayoutShiftPeekTransition(transition);
 });
 // A detached widget is non-focusable. The resident native broker reports the
 // physical Shift key, including when the pointer stays still over an icon.
 if (typeof host.onWindowControlShift === 'function') host.onWindowControlShift((held) => {
   const transition = planWindowLayoutShiftPeekTransition(held ? 'keydown' : 'keyup', { key: 'Shift' }, {
-    held: windowLayoutShiftPeekHeld,
+    held: windowLayoutShiftPeek.held,
     member: document.querySelector('[data-wl-member]:hover')
       ?? (elements.grid.matches(':hover') && windowLayoutLastHoveredMember?.isConnected
         ? windowLayoutLastHoveredMember : null),
@@ -2492,7 +2378,7 @@ elements.grid.addEventListener('mouseover', (event) => {
   const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
   if (member) windowLayoutLastHoveredMember = member;
   const peekTransition = planWindowLayoutShiftPeekTransition('hover', event, {
-    held: windowLayoutShiftPeekHeld,
+    held: windowLayoutShiftPeek.held,
     member,
     relatedMember,
   });
@@ -2521,11 +2407,11 @@ elements.grid.addEventListener('pointermove', (event) => {
   // Small pointer drift over gaps/descendants is still inside the compact
   // widget. Cancel the delayed leave end even when the move is not over a
   // member and therefore produces no planner transition.
-  if (windowLayoutShiftPeekHeld && elements.grid.matches(':hover')) keepWindowLayoutShiftPeekAlive();
+  if (windowLayoutShiftPeek.held && elements.grid.matches(':hover')) keepWindowLayoutShiftPeekAlive();
   const member = event.target.closest('[data-wl-member]');
   if (member) windowLayoutLastHoveredMember = member;
   const transition = planWindowLayoutShiftPeekTransition('pointermove', event, {
-    held: windowLayoutShiftPeekHeld,
+    held: windowLayoutShiftPeek.held,
     member,
   });
   if (transition.handled && transition.begin) {
@@ -2549,9 +2435,9 @@ elements.grid.addEventListener('mouseout', (event) => {
   // release. Keep the session alive so the host can reveal only the new target
   // and hide only the old one. Blank space between icons keeps the last Peek
   // while Shift is held; leaving the widget or releasing Shift ends it.
-  if (member && !relatedMember && windowLayoutShiftPeekKey) {
+  if (member && !relatedMember && windowLayoutShiftPeek.key) {
     const leftWidget = !event.relatedTarget || !elements.grid.contains(event.relatedTarget);
-    const leave = planWindowLayoutShiftPeekTransition('memberleave', { leftWidget }, { held: windowLayoutShiftPeekHeld });
+    const leave = planWindowLayoutShiftPeekTransition('memberleave', { leftWidget }, { held: windowLayoutShiftPeek.held });
     if (leave.end) deferWindowLayoutShiftPeekEnd();
   }
   const state = windowLayoutPreviewHoverState(member, relatedMember);

@@ -150,3 +150,19 @@ without cancelling an existing timer; changing that would be a behavior change.
 No environmental failure. Browser/filesystem, host/native, recording, unrelated
 Backpacks and creator data untouched. This commit is the lifecycle checkpoint.
 DOM state/status patching and surface separation remain pending.
+
+## Shift Peek lifecycle receipt
+
+Production: `public/workspace-20260730b.js`, new
+`public/app/window-layout-shift-peek-lifecycle.js`. Supporting:
+`window-layout-shift-peek-lifecycle.test.mjs`, `window-layout-shift-peek.test.mjs`,
+`package.json`, `ARCHITECTURE.md`, this checklist. Original 6 behavioral cases
+passed before movement. After extraction: focused 35 pass / 0 fail / 0 skip;
+full 1744 pass / 0 fail / 0 skip plus 8 pretests. Preserved 32ms traversal coalescing,
+120ms leave grace, generation/key fencing, bounded 180+120*attempt retry up to
+1000ms, release deduplication, late capability refusal and native begin/end queue
+ordering. Existing diagnostic titles and event planner semantics unchanged.
+No environmental failure. Browser/filesystem, native host, recording, durable
+store/state and unrelated Backpacks untouched. Commit containing this receipt
+is the code-only checkpoint. Ordinary preview lifecycle/cache and surface wiring
+remain pending; overall completion remains unproven.

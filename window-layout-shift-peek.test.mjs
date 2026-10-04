@@ -54,7 +54,7 @@ test('blank space between icons keeps the last Peek while Shift is held', () => 
 });
 
 test('the workspace routes every Shift Peek event source through the tested planner', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-shift-peek-lifecycle.js', import.meta.url), 'utf8');
   assert.match(source, /planWindowLayoutShiftPeekTransition\('keydown'/);
   assert.match(source, /planWindowLayoutShiftPeekTransition\('keyup'/);
   assert.match(source, /planWindowLayoutShiftPeekTransition\('blur'/);
@@ -65,7 +65,7 @@ test('the workspace routes every Shift Peek event source through the tested plan
     'host begin/end transitions are serialized so an old target cannot finish after a newer one');
   assert.match(source, /catch \{\s*\/\/ Capability lookup may briefly fail/s,
     'transient capability helper failures stay inside the held retry loop');
-  assert.match(source, /windowLayoutShiftPeekHeld && elements\.grid\.matches\(':hover'\)\) keepWindowLayoutShiftPeekAlive\(\)/,
+  assert.match(source, /windowLayoutShiftPeek\.held && elements\.grid\.matches\(':hover'\)\) keepWindowLayoutShiftPeekAlive\(\)/,
     'pointer movement over widget gaps cancels a pending leave end');
   assert.match(source, /if \(windowLayoutShiftPeekKey === null[\s\S]*?return;/,
     'converging release and leave notifications issue at most one host end');
