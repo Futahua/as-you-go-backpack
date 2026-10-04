@@ -12,8 +12,8 @@ import {
 const INSTANCE = 'W0123456789abcdef';
 
 test('workspace imports only the current automatic tracking API', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
-  assert.match(source, /import \{ createWindowLayoutAutoTracking \} from '\.\/app\/window-layout-auto-tracking\.js';/);
+  const source = await readFile(new URL('./public/app/window-layout-tracking-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  assert.match(source, /import \{ createWindowLayoutAutoTracking as defaultAutoTracking \} from '\.\/window-layout-auto-tracking\.js';/);
   assert.doesNotMatch(source, /createWindowLayoutAutoTracker|windowLayoutTrackingTransitions|syncTrackingAfterDocumentInstall/);
 });
 const descriptor = {
@@ -280,7 +280,7 @@ test('a failed durable baseline reconciliation leaves its open delta available f
 });
 
 test('workspace rebinds lifecycle probes and keeps one lifecycle queue drain active', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-tracking-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   assert.match(source, /resolveWindowDescriptor:\s*\(descriptor\)\s*=>\s*host\.resolveWindowDescriptor\(descriptor\)/);
   assert.match(source, /while \(trackingEventQueue\.length > 0\)\s*\{\s*try\s*\{\s*await processTrackingLifecycleEvent/);
   const processor = source.match(/async function processTrackingLifecycleEvent\(event\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';

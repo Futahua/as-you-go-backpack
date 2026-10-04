@@ -458,3 +458,13 @@ fields and listener cleanup. The widget sends typed picker-commit commands throu
 the existing channel and waits for the workspace writer, retrying one stale
 acknowledgement. Host methods are restricted to picker operations. There is no
 local durable writer, save queue or second identity authority in this owner.
+
+`public/app/window-layout-tracking-lifecycle.js` owns the lifecycle event drain,
+pending-open retries, tracker-session/sequence recovery, complete startup baseline,
+periodic close confirmation, initial Auto population and tracking toggles. All state
+and surface-role reads use getters across awaits; detachment checks are lazy because
+the coordinator is constructed later. Native descriptors and the existing Auto
+writer remain authoritative. One owner retains the bounded queues, missing counts,
+population lock and sweep timer. Durable changes still call the existing store.
+Recording demand, retirement callbacks and surface activation/teardown remain the
+next extraction boundary; no new persistence or identity authority was added.

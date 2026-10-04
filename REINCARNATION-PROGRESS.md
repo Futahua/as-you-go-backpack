@@ -245,3 +245,23 @@ the right-click source delimiter now uses its composition declaration.
 No environmental failure. Protected browser/filesystem, native host/preload,
 recording, persistence, other Backpacks and creator data unchanged. This is the
 code checkpoint; surface separation and recording/tracking orchestration remain.
+
+## Tracking lifecycle orchestration receipt
+
+Production: `public/workspace-20260730b.js`, new
+`public/app/window-layout-tracking-lifecycle.js`. Supporting:
+`window-layout-tracking-lifecycle.test.mjs`, `window-layout-auto-tracking.test.mjs`,
+`window-layout-workspace.test.mjs`, `package.json`, `ARCHITECTURE.md`, this checklist.
+All 16 characterization cases pass against the original code and new owner.
+Focused 156 pass / 0 fail / 0 skip; full 1802 pass / 0 fail / 0 skip plus 8 pretests.
+Preserves serialized failure-tolerant events, 64 pending opens, 2s retries/sweeps,
+60s expiry and four retries per sweep; complete startup reconciliation only once;
+refused startup commits stay retryable; live snapshots/outages clear missing
+counts; lifecycle gone needs an independent exact resolution; periodic retirement
+requires two positives. Population rechecks current suppression after observation,
+commits before capability publication and refreshes recording once after additions.
+The moved owner uses state/role getters so awaited host work sees current authority.
+Source assertions now read the owner and composition and retain semantic guards.
+No environmental failure. Protected browser/filesystem, host/preload, other
+Backpacks and creator data untouched. Recording demand/retirement orchestration,
+surface separation and final acceptance remain pending; completion is unproven.
