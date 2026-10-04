@@ -28,6 +28,24 @@
 .file-capability-panel.expanded {
   bottom: 8px;
   width: min(var(--file-capability-width), calc(100vw - 24px));
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.file-capability-panel.expanded .file-capability-header {
+  position: absolute;
+  z-index: 8;
+  top: 4px;
+  right: 5px;
+  width: auto;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.file-capability-panel.expanded .file-capability-body {
+  grid-row: 1;
 }
 
 .file-capability-panel.expanded.browser-mode {
@@ -58,10 +76,6 @@
   padding: 0;
   border-color: transparent;
   background: transparent;
-}
-
-.file-capability-panel.expanded.browser-mode .file-capability-body {
-  grid-row: 1;
 }
 
 .file-capability-panel.embedded-surface-proxima {
