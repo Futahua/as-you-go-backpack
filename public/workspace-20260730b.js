@@ -111,6 +111,7 @@ import {
   createWindowLayoutRetirementWriter,
   windowLayoutPickApplyOutcome,
   windowLayoutPickForBoundCandidate,
+  windowLayoutRemoveForBoundCandidate,
   windowLayoutCandidateIsMember,
   windowLayoutHasValidInstanceId,
   windowLayoutPickMemberDescriptors,

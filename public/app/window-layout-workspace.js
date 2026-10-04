@@ -140,17 +140,10 @@ export function windowLayoutPickForBoundCandidate(members, bound, candidate = nu
 /** A native-list remove intent can only remove this exact bound identity.
  * Unlike a toggle pick, absence is a no-op and can never turn into an add. */
 export function windowLayoutRemoveForBoundCandidate(members, bound) {
-  if (!isPlainObject(bound) || !isPlainObject(bound.descriptor)) return null;
-  const descriptor = bound.descriptor;
-  const current = Array.isArray(members) ? members : [];
-  const isMember = current.some((member) => sameWindowDescriptorIdentity(member?.descriptor, descriptor));
-  return {
-    outcome: 'committed',
-    adds: [],
-    removes: isMember ? [{ descriptor }] : [],
-  };
+  const pick = windowLayoutPickForBoundCandidate(members, bound);
+  if (!pick) return null;
+  return { outcome: 'committed', adds: [], removes: pick.removes };
 }
-
 export function createWindowLayoutPickApplier({
   getState,
   commitState,

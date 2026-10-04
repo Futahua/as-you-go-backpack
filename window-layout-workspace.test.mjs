@@ -1341,3 +1341,21 @@ test('widget list pick preserves the exact chooser row across candidate binding'
   assert.doesNotMatch(handler, /bindWindowLayoutPickerCandidate\(candidateId, null\)/,
     'the Oct 2 merge regression must not discard the chooser row again');
 });
+
+// Reincarnation: explicit list removal must share the validated bound identity decision.
+for (const [label, members, bound, expected] of [
+  ['present exact window', [{ descriptor: { windowInstanceId: 'W0123456789abcdef' } }], { descriptor: { windowInstanceId: 'W0123456789abcdef' } }, 1],
+  ['absent exact window', [], { descriptor: { windowInstanceId: 'W0123456789abcdef' } }, 0],
+  ['malformed identity', [], { descriptor: { windowInstanceId: 'bad' } }, null],
+  ['legacy ambiguity', [{ descriptor: { title: 'Doc', executableFingerprint: 'a'.repeat(64) } }], { descriptor: { title: 'Doc', executableFingerprint: 'a'.repeat(64), windowInstanceId: 'W0123456789abcdef' } }, null],
+]) {
+  test(`explicit remove: ${label}`, async () => {
+    const { windowLayoutRemoveForBoundCandidate } = await import('./public/app/window-layout-workspace.js');
+    const pick = windowLayoutRemoveForBoundCandidate(members, bound);
+    if (expected === null) assert.equal(pick, null);
+    else {
+      assert.deepEqual(pick.adds, []);
+      assert.equal(pick.removes.length, expected);
+    }
+  });
+}
