@@ -128,6 +128,7 @@ import { createWindowLayoutIsolateMode } from './app/window-layout-isolate-mode.
 import { createWindowLayoutMemberPreview } from './app/window-layout-preview.js';
 import { installWindowLayoutPreviewInput } from './app/window-layout-preview-input.js';
 import { installWindowLayoutWorkspaceMemberDrag } from './app/window-layout-workspace-member-drag.js';
+import { createWindowLayoutWorkspaceCardInput } from './app/window-layout-workspace-card-input.js';
 import {
   createWindowLayoutIconHydration,
   windowLayoutIconCacheEntry,
@@ -1839,38 +1840,7 @@ elements.grid.addEventListener('auxclick', (event) => {
     }
     return;
   }
-  const restoreAll = event.target.closest('[data-wl-restore-all]');
-  if (restoreAll && !detachedWidgets.has(restoreAll.dataset.wlRestoreAll)) {
-    event.preventDefault();
-    event.stopPropagation();
-    void openWindowLayoutWidgetWithRetry(restoreAll.dataset.wlRestoreAll);
-    return;
-  }
-  const minimizeAll = event.target.closest('[data-wl-min-all]');
-  if (minimizeAll && detachedWidgets.has(minimizeAll.dataset.wlMinAll)) {
-    event.preventDefault();
-    event.stopPropagation();
-    const layoutId = minimizeAll.dataset.wlMinAll;
-    if (detachedWidgets.delete(layoutId)) render();
-    void host.widgetClose(layoutId).catch(() => undefined);
-    return;
-  }
-  const member = event.target.closest('[data-wl-member]');
-  if (!member || member.disabled) return;
-  event.preventDefault();
-  event.stopPropagation();
-  cancelWindowLayoutPreviewDwell();
-  windowLayoutMemberPopover.hide();
-  windowLayoutMemberPreview.cancel();
-  if (event.ctrlKey) {
-    // Ctrl+MMB is the explicit close-process gesture. The close path retires
-    // the member only after Papers confirms that the native window closed.
-    void closeWindowLayoutMember(member.dataset.wlLayout, member.dataset.wlMember);
-  } else {
-    // Plain MMB is data-only: remove this icon from this layout, leaving the
-    // external application running and available to pick again.
-    handleWindowLayoutUnlink(member.dataset.wlLayout, member.dataset.wlMember);
-  }
+  if (windowLayoutWorkspaceCardInput.handleAuxClick(event)) return;
 });
 /** 017I2: exactly ONE controller owns recording (switch, timer, observation,
  * echo suppression). This wiring glues the pure controller to the real model
@@ -4384,6 +4354,34 @@ const windowLayoutWorkspaceMemberDrag = installWindowLayoutWorkspaceMemberDrag({
 });
 function cancelWindowLayoutDrag() { windowLayoutWorkspaceMemberDrag.cancel(); }
 
+const windowLayoutWorkspaceCardInput = createWindowLayoutWorkspaceCardInput({
+  detachedWidgets,
+  consumeDragClick: () => windowLayoutWorkspaceMemberDrag.consumeJustMoved(),
+  isolateMode: windowLayoutRuntime.isolateMode,
+  handleMemberClick: handleWindowLayoutMemberClick,
+  handlePickCandidate: handleWindowLayoutPickCandidate,
+  unlinkMember: handleWindowLayoutUnlink,
+  closePicker: closeWindowLayoutPicker,
+  cancelListDwell: cancelWindowLayoutListDwell,
+  beginDirectPick: beginWindowLayoutDirectPick,
+  toggleTracking: handleWindowLayoutTrackingToggle,
+  groupAction: windowLayoutGroupAction,
+  closeWidget: (layoutId) => host.widgetClose(layoutId),
+  openWidget: (layoutId) => openWindowLayoutWidgetWithRetry(layoutId),
+  render,
+  cancelPreview: () => {
+    cancelWindowLayoutPreviewDwell();
+    windowLayoutMemberPopover.hide();
+    windowLayoutMemberPreview.cancel();
+  },
+  closeMember: closeWindowLayoutMember,
+  toggleIsolateMode: toggleWindowLayoutIsolateMode,
+  toggleRange: windowLayoutToggleRange,
+  isControlReady: (layoutId, memberId) => windowControlReady.has(windowControlKey(layoutId, memberId)),
+  controlUnavailable: () => windowControlUnavailable,
+  setStatus: setWindowLayoutStatus,
+});
+
 elements.grid.addEventListener('click', (event) => {
   if (WIDGET_SURFACE) return;
   event.stopPropagation();
@@ -4406,84 +4404,7 @@ elements.grid.addEventListener('click', (event) => {
     saveWorkspaceView();
     return;
   }
-  // Assignment 015/016: window-layout member/control clicks are handled here
-  // and never fall through to selection, navigation or graph drag.
-  const windowLayoutBody = event.target.closest('.window-layout-body');
-  if (windowLayoutBody) {
-    // 035: while a layout's widget is open its attached card is a greyed
-    // placeholder — every ordinary interaction is inert except its explicit
-    // plain-click reattach lock.
-    const bodyLayoutId = windowLayoutBody.dataset?.wlLayout;
-    const detachedLayout = typeof bodyLayoutId === 'string' && bodyLayoutId && detachedWidgets.has(bodyLayoutId);
-    if (detachedLayout && !event.target.closest('[data-wl-reattach]')) return;
-    const memberButton = event.target.closest('[data-wl-member]');
-    if (memberButton) {
-      if (windowLayoutWorkspaceMemberDrag.consumeJustMoved()) return;
-      if (!event.ctrlKey && !event.shiftKey
-        && !windowLayoutRuntime.isolateMode.isActive(memberButton.dataset.wlLayout)) {
-        // A PLAIN CLICK TOGGLES. This branch used to check readiness and RETURN -
-        // nothing was ever sent, which is why an icon click did nothing at all while
-        // minimize-all and restore-all worked. The widget is not the writer, so it
-        // sends the intent over the seam that already exists; the writer applies it
-        // and routes it to the resident broker.
-        const plainLayoutId = memberButton.dataset.wlLayout;
-        const plainMemberId = memberButton.dataset.wlMember;
-        if (WIDGET_SURFACE && windowLayoutWidgetClient) {
-          const sentOk = windowLayoutWidgetClient.sendCommand({ kind: 'member-toggle', memberId: plainMemberId });
-          try { document.title = 'click->toggle sent=' + String(sentOk); } catch { /* diagnostic */ }
-          return;
-        }
-        void handleWindowLayoutMemberClick(plainLayoutId, plainMemberId);
-        return;
-      }
-      void handleWindowLayoutMemberClick(memberButton.dataset.wlLayout, memberButton.dataset.wlMember, event.ctrlKey, event.shiftKey);
-      return;
-    }
-    const pickCandidate = event.target.closest('[data-wl-pick-candidate]');
-    if (pickCandidate) {
-      void handleWindowLayoutPickCandidate(pickCandidate.dataset.wlPick, pickCandidate.dataset.wlPickCandidate);
-      return;
-    }
-    const unlink = event.target.closest('[data-wl-unlink]');
-    if (unlink) {
-      void handleWindowLayoutUnlink(unlink.dataset.wlPick, unlink.dataset.wlUnlink);
-      return;
-    }
-    const pickerClose = event.target.closest('[data-wl-picker-close]');
-    if (pickerClose) {
-      closeWindowLayoutPicker();
-      return;
-    }
-    const listButton = event.target.closest('[data-wl-list]');
-    if (listButton) {
-      cancelWindowLayoutListDwell();
-      void beginWindowLayoutDirectPick(listButton.dataset.wlList);
-      return;
-    }
-    const trackingButton = event.target.closest('[data-wl-track]');
-    if (trackingButton) {
-      void handleWindowLayoutTrackingToggle(trackingButton.dataset.wlTrack);
-      return;
-    }
-    const minAll = event.target.closest('[data-wl-min-all]');
-    if (minAll) {
-      void windowLayoutGroupAction(minAll.dataset.wlMinAll, 'minimize');
-      return;
-    }
-    const restoreAll = event.target.closest('[data-wl-restore-all]');
-    if (restoreAll) {
-      void windowLayoutGroupAction(restoreAll.dataset.wlRestoreAll, 'restore');
-      return;
-    }
-    const reattach = event.target.closest('[data-wl-reattach]');
-    if (reattach) {
-      const layoutId = reattach.dataset.wlReattach;
-      if (detachedWidgets.delete(layoutId)) render();
-      void host.widgetClose(layoutId).catch(() => undefined);
-      return;
-    }
-    return;
-  }
+  if (windowLayoutWorkspaceCardInput.handleClick(event)) return;
   const tile = event.target.closest('.icon-item');
   if (tile) {
     if (suppressGraphClick) {
@@ -4585,44 +4506,7 @@ elements.grid.addEventListener('contextmenu', (event) => {
   // will-pin/graph-drop-target visuals stuck on whatever tile the pointer
   // last touched. Cancel the drag defensively any time the menu opens.
   pointer.cancelDrag();
-  const isolateToggle = event.target.closest('[data-wl-min-all]');
-  if (isolateToggle) {
-    toggleWindowLayoutIsolateMode(isolateToggle.dataset.wlMinAll);
-    return;
-  }
-  // 019B: Shift+right-click on a member minimizes/restores the selected range
-  // (direction from the clicked member's live state). 040: a PLAIN right-click
-  // on a member opens the member context menu (`Remove from this layout`); it
-  // must never trigger preview, reorder, selection, or removal from another
-  // layout, and the inert grey placeholder card refuses removal.
-  const wlMember = event.target.closest('[data-wl-member]');
-  if (wlMember) {
-    if (event.ctrlKey && !event.shiftKey && windowLayoutRuntime.isolateMode.isActive(wlMember.dataset.wlLayout)) {
-      const targets = windowLayoutRuntime.isolateMode.click(wlMember.dataset.wlLayout, wlMember.dataset.wlMember, true);
-      if (targets !== null) void windowLayoutGroupAction(wlMember.dataset.wlLayout, 'isolate', targets);
-      return;
-    }
-    if (event.shiftKey) {
-      void windowLayoutToggleRange(wlMember.dataset.wlLayout, wlMember.dataset.wlMember);
-      return;
-    }
-    const layoutId = wlMember.dataset.wlLayout;
-    const memberId = wlMember.dataset.wlMember;
-    if (!layoutId || !memberId) return;
-    // 040: grey placeholder refusal — the placeholder card's members are
-    // disabled and never offer removal.
-    if (wlMember.disabled) return;
-    if (!windowControlReady.has(windowControlKey(layoutId, memberId))) {
-      setWindowLayoutStatus(layoutId, windowControlUnavailable || 'Native window control is preparing.');
-    }
-    return;
-    // A plain right-click brings that member's window to the front. It used to
-    // open a menu whose only entry was "remove from this layout" - a dead end
-    // for the far more common "show me that window". Removing an icon is Direct
-    // Pick's job now, and it names the windows on screen instead of a menu item.
-    // The refusal is SHOWN: an ignored promise is how this quietly did nothing.
-    // The resident hook already attempted the native action at mouse-down.
-  }
+  if (windowLayoutWorkspaceCardInput.handleContextMenu(event)) return;
   const tile = event.target.closest('.icon-item');
   if (tile && tile.classList.contains('bin-origin-ghost')) return;
   // An ancestor tile has no context menu (nothing on it can be renamed,

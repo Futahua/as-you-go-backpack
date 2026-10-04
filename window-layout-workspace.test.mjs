@@ -1129,10 +1129,11 @@ test('a delayed add rebases on the latest state instead of dropping concurrent w
 test('middle-click splits data unlink from Ctrl+middle-click process close', async () => {
   const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-widget-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-tracking-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-recording-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const widgetSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
-  const attachedStart = source.indexOf("elements.grid.addEventListener('auxclick', (event) => {");
-  const attachedEnd = source.indexOf('// A press on a member is a CONTROL intent', attachedStart);
-  const attached = source.slice(attachedStart, attachedEnd);
-  assert.match(attached, /if \(event\.ctrlKey\) \{[\s\S]*closeWindowLayoutMember\([\s\S]*\)[\s\S]*\} else \{[\s\S]*handleWindowLayoutUnlink\(/,
+  const attachedSource = await readFile(new URL('./public/app/window-layout-workspace-card-input.js', import.meta.url), 'utf8');
+  const attachedStart = attachedSource.indexOf('function handleAuxClick(event)');
+  const attachedEnd = attachedSource.indexOf('function handleContextMenu(event)', attachedStart);
+  const attached = attachedSource.slice(attachedStart, attachedEnd);
+  assert.match(attached, /if \(event\.ctrlKey\) void closeMember\([\s\S]*else unlinkMember\(/,
     'the attached card closes only for Ctrl+MMB and unlinks for plain MMB');
 
   const memberCloseStart = source.indexOf('async function closeWindowLayoutMember(layoutId, memberId)');

@@ -355,3 +355,25 @@ Focused gate: 61 pass / 0 fail / 0 skip. Full `npm test`: 1830 pass / 0 fail /
 host/preload/runtime, Proxima, Delegate Wave and creator data were untouched. The
 dated entry is down to 5793 lines. Attached card click/context-menu/control routing
 and the final authority/completion audit remain open.
+
+## Attached card/control input routing receipt
+
+Production: `public/workspace-20260730b.js` and new
+`public/app/window-layout-workspace-card-input.js`. Supporting changes:
+`window-layout-workspace-card-input.test.mjs`, `card-implementation.test.mjs`,
+`picker-keyboard-routing.test.mjs`, `window-layout-workspace.test.mjs`,
+`package.json`, this architecture guide and this checklist.
+
+The owner contains only attached window-layout event decisions: placeholder refusal,
+member click routing, list/direct picker controls, tracking/group controls, widget
+open/close gestures, middle-click close-vs-unlink, isolate/range context gestures and
+bounded readiness status. The mixed graph listeners keep folder/tile/set/blank
+behavior and receive only a handled/not-handled result. All real actions remain
+injected existing owners; the router has no store/save/commit/recording or native
+identity authority.
+
+Focused characterization: 76 pass / 0 fail / 0 skip. Full `npm test`: 1835 pass /
+0 fail / 0 skip. `git diff --check` passed. Protected browser/filesystem, Papers
+host/preload/runtime, Proxima, Delegate Wave and creator data were untouched. The
+dated entry is down to 5677 lines. Global picker dismissal/keyboard wiring and the
+final architecture/authority/completion audit remain open.

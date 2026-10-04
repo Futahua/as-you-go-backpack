@@ -462,6 +462,13 @@ live DOM reordering, drag-out unlink intent, pointer-cancel/Escape rollback and 
 one-shot post-drag click suppression. Durable unlink/reorder decisions remain
 injected callbacks; the owner has no store/save/commit or recording authority.
 
+Attached card/control input routing now belongs to
+`public/app/window-layout-workspace-card-input.js`. It owns the window-layout
+branches of click, middle-click and context-menu handling and returns a bounded
+handled/not-handled decision to the generic graph listeners. Picker, group, tracking,
+widget, preview and member actions remain injected owners; graph/folder input and
+durable persistence stay outside this router.
+
 `public/app/window-layout-preview-presentation.js` owns the one popover's DOM,
 anchor/name/icon state, animation-frame cleanup, native preview presentation
 routing and 100ms hover dwell. The existing thumbnail scheduler is supplied lazily;

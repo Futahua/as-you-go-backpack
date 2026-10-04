@@ -6,6 +6,7 @@ import { WINDOW_LAYOUT_CARD_MAX_WIDTH } from './public/app/window-layout-widget-
 
 const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
 const widgetSurfaceSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
+const workspaceCardInputSource = await readFile(new URL('./public/app/window-layout-workspace-card-input.js', import.meta.url), 'utf8');
 const itemsCss = await readFile(new URL('./public/styles/items.css', import.meta.url), 'utf8');
 
 test('021: attached layout markup removes decorative art and blocks layout editor customization', () => {
@@ -139,7 +140,7 @@ test('035: the attached card becomes a greyed placeholder while its widget is op
   assert.match(workspaceSource, /windowLayoutControlButton\('reattach', 'Reattach this window-layout widget', 'data-wl-reattach', candidate\.id\)/);
   assert.doesNotMatch(workspaceSource, /data-wl-detach/);
   // Ordinary workspace clicks stay inert while detached except the lock.
-  assert.match(workspaceSource, /detachedLayout && !event\.target\.closest\('\[data-wl-reattach\]'\)\) return;/);
+  assert.match(workspaceCardInputSource, /detached && !event\.target\.closest\('\[data-wl-reattach\]'\)\) return true;/);
 });
 
 test('043: the initial graph fit uses the direct zoomBehavior.transform, never viewportSelection.transition', () => {

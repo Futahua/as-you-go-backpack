@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8')
   + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8')
+  + '\n' + await readFile(new URL('./public/app/window-layout-workspace-card-input.js', import.meta.url), 'utf8')
   + '\n' + await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
 
 test('active direct picker routes every non-Escape key to confirmation and Escape to cancellation', () => {
@@ -15,16 +16,16 @@ test('active direct picker routes every non-Escape key to confirmation and Escap
 });
 
 test('icon middle-click semantics stay separate: plain unlinks, Ctrl closes the process', () => {
-  const attached = source.slice(source.indexOf("elements.grid.addEventListener('auxclick'"), source.indexOf('// A press on a member is a CONTROL intent'));
+  const attached = source.slice(source.indexOf('function handleAuxClick(event)'), source.indexOf('function handleContextMenu(event)'));
   const widget = source.slice(source.indexOf('function handleWidgetCardAuxClick(event)'), source.indexOf('async function handleWidgetCardContextMenu(event)'));
   for (const handler of [attached, widget]) {
-    assert.match(handler, /if \(event\.ctrlKey\)[\s\S]*?closeWindowLayoutMember/);
-    assert.match(handler, /remove-member|handleWindowLayoutUnlink/);
+    assert.match(handler, /if \(event\.ctrlKey\)[\s\S]*?(closeMember|closeWindowLayoutMember)/);
+    assert.match(handler, /remove-member|unlinkMember/);
   }
 });
 
 test('the picker button click enters live pick mode before the hover list', () => {
-  assert.match(source, /cancelWindowLayoutListDwell\(\);\s*void beginWindowLayoutDirectPick\(listButton\.dataset\.wlList\)/);
+  assert.match(source, /cancelListDwell\(\);\s*void beginDirectPick\(list\.dataset\.wlList\)/);
   assert.match(source, /cancelWindowLayoutListDwell\(\);\s*void beginWidgetDirectPick\(\)/);
   assert.match(source, /Live-pick an onscreen window \(hover for the list\)/);
 });
