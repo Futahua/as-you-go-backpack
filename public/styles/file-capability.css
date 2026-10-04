@@ -485,18 +485,11 @@
   font-size: 10px;
 }
 
-.file-capability-browser-tab-favicon,
-.file-capability-browser-tab-favicon-fallback {
+.file-capability-browser-tab-favicon {
   flex: 0 0 12px;
   width: 12px;
   height: 12px;
   border-radius: 2px;
-}
-
-.file-capability-browser-tab-favicon-fallback {
-  box-sizing: border-box;
-  border: 1px solid var(--border-hover);
-  background: var(--surface-raised);
 }
 
 .file-capability-browser-tab-text {

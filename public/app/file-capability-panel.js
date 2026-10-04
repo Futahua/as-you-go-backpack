@@ -190,6 +190,13 @@ export function createFileCapabilityPanel(options) {
     }
   }
 
+  function safeBrowserFavicon(value) {
+    if (typeof value !== 'string' || value.length > 256_000) return '';
+    return /^data:image\/(?:png|jpeg|webp|gif|svg\+xml|x-icon|vnd\.microsoft\.icon);base64,/i.test(value)
+      ? value
+      : '';
+  }
+
   function isBrowserTabId(value) {
     return typeof value === 'string'
       && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -206,6 +213,7 @@ export function createFileCapabilityPanel(options) {
         id: tab.id,
         url: tab.url,
         title: tab.title || '',
+        faviconUrl: safeBrowserFavicon(tab.faviconUrl),
         sourceKey: tab.sourceKey || null,
         lastActiveAt: Number.isFinite(tab.lastActiveAt) ? tab.lastActiveAt : 0,
       }));
@@ -229,6 +237,7 @@ export function createFileCapabilityPanel(options) {
           id: tab.id,
           url,
           title: typeof tab.title === 'string' ? tab.title.slice(0, 500) : '',
+          faviconUrl: safeBrowserFavicon(tab.faviconUrl),
           sourceKey: typeof tab.sourceKey === 'string' ? tab.sourceKey : null,
           lastActiveAt: Number.isFinite(tab.lastActiveAt) ? tab.lastActiveAt : 0,
         }];
@@ -251,6 +260,7 @@ export function createFileCapabilityPanel(options) {
       id,
       url: safe,
       title: typeof title === 'string' ? title.slice(0, 500) : '',
+      faviconUrl: '',
       sourceKey,
       lastActiveAt: Date.now(),
     };
@@ -547,7 +557,7 @@ export function createFileCapabilityPanel(options) {
     const url = safeBrowserUrl(hostTab.url);
     if (url) tab.url = url;
     if (typeof hostTab.title === 'string' && hostTab.title) tab.title = hostTab.title.slice(0, 500);
-    tab.faviconUrl = typeof hostTab.faviconUrl === 'string' ? hostTab.faviconUrl.slice(0, 4000) : '';
+    tab.faviconUrl = safeBrowserFavicon(hostTab.faviconUrl);
     persistBrowserTabs();
     syncBrowserChrome(hostTab);
   }
@@ -628,12 +638,10 @@ export function createFileCapabilityPanel(options) {
       const text = node.querySelector('.file-capability-browser-tab-text');
       if (text) text.textContent = browserTabFallbackTitle(tab);
       const favicon = node.querySelector('.file-capability-browser-tab-favicon');
-      const fallback = node.querySelector('.file-capability-browser-tab-favicon-fallback');
       if (favicon) {
         if (tab.faviconUrl) favicon.src = tab.faviconUrl;
         favicon.hidden = !tab.faviconUrl;
       }
-      if (fallback) fallback.hidden = Boolean(tab.faviconUrl);
       node.title = tab.url;
     }
   }
@@ -916,13 +924,10 @@ export function createFileCapabilityPanel(options) {
       favicon.draggable = false;
       favicon.src = tab.faviconUrl || '';
       favicon.hidden = !tab.faviconUrl;
-      const fallback = documentRef.createElement('span');
-      fallback.className = 'file-capability-browser-tab-favicon-fallback';
-      fallback.hidden = Boolean(tab.faviconUrl);
       const tabText = documentRef.createElement('span');
       tabText.className = 'file-capability-browser-tab-text';
       tabText.textContent = browserTabFallbackTitle(tab);
-      select.append(favicon, fallback, tabText);
+      select.append(favicon, tabText);
       select.addEventListener('click', () => {
         state.browserDownloadsOpen = false;
         state.activeBrowserTabId = tab.id;

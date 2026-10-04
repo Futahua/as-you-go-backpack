@@ -197,8 +197,11 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /fileCapability\('browser-download-bubble-hide'/);
   assert.match(source, /file-capability-browser-download-pie/);
   assert.match(source, /hostTab\.faviconUrl/);
+  assert.match(source, /safeBrowserFavicon/);
+  assert.match(source, /faviconUrl:\s*safeBrowserFavicon\(tab\.faviconUrl\)/);
   assert.match(source, /file-capability-browser-tab-favicon/);
   assert.match(source, /file-capability-browser-tab-text/);
+  assert.doesNotMatch(source, /file-capability-browser-tab-favicon-fallback/);
   assert.match(source, /address\.addEventListener\('pointerdown',[\s\S]*address\.focus\(\)[\s\S]*address\.select\(\)/);
   assert.match(source, /browserDownloadCompletionPending/);
   assert.doesNotMatch(source, /browserDownloadCompletionUntil/);
