@@ -407,3 +407,10 @@ Shift ranges, clearing and membership repair. It uses explicit read/write/erase,
 anchor and order adapters over the existing attached-map and widget-set storage.
 Attached Ctrl toggles clone; widget toggles mutate; ranges replace. The module
 has no DOM, native, host, store or save access; callers synchronize presentation.
+
+Shared card/body/picker HTML lives in `public/app/window-layout-view.js`.
+The entry wires read-only presentation readers, icon/note/status readers and
+layout selection into that owner; attached and widget surfaces call the same
+builders. It has no host, store, native-operation or save access. Committed
+baseline HTML fixtures verify exact strings; DOM patching and presentation
+lifecycle remain pending extractions.

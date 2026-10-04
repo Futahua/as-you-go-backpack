@@ -25,7 +25,7 @@ No release, installation, restart, process termination, or creator-data mutation
 - [x] Isolate window-layout identity/membership policy from durable mutation,
       retaining public compatibility exports and all established validation.
 - [x] Isolate member selection/range state and repair from DOM/persistence.
-- [ ] Extract card/member/picker view and DOM patching behind presentation inputs.
+- [ ] Finish view lifecycle and DOM patching (shared card/body/picker HTML extracted).
 - [ ] Extract picker coordination and cleanup for attached/widget callers; preserve
       supersession, subscribe-before-begin, cancellation and byte-zero no-op rules.
 - [x] Extract group-action orchestration and target selection; preserve current
@@ -115,3 +115,24 @@ No environmental failure. Rendering remains caller-owned; no host/native control
 store/persistence, browser/filesystem, Papers host/preload or other Backpack edits.
 Existing creator data/untracked artifacts preserved. Commit containing this
 receipt is the selection checkpoint. Overall refactor still incomplete.
+## Shared card/picker HTML extraction receipt
+
+Production changes: `public/workspace-20260730b.js` and new
+`public/app/window-layout-view.js`. Supporting changes: `window-layout-view.test.mjs`,
+`test-fixtures/window-layout-view.json`, `compact-card-parity.test.mjs`,
+`card-implementation.test.mjs`, `picker-keyboard-routing.test.mjs`,
+`window-layout-clear.test.mjs`, `package.json`, `ARCHITECTURE.md`, and this checklist.
+Existing source checks read both the wiring and extracted presentation owner.
+
+Baseline: 7 cases captured original production HTML before movement. Golden
+fixtures cover attached, widget, detached placeholder, read-only, widget during
+handoff, empty card, picker row and empty picker. Test fixture authoring code was
+removed after capture; ordinary tests cannot bless new output. After movement:
+focused 69 pass / 0 fail / 0 skip; full 1728 pass / 0 fail / 0 skip plus 8 pretests.
+Markup strings match baseline byte-for-byte, including whitespace, selector,
+attribute, label and escaping contracts. An extraction indentation mistake was
+caught by these checks and corrected without modifying the fixtures.
+No environmental failure. No CSS/DOM event, picker policy, native control,
+recording, store/persistence, browser/filesystem, host/preload or other Backpack
+changes. Existing untracked work and creator state preserved. View lifecycle,
+DOM patching and surface separation are still pending; this is not full completion.

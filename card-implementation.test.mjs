@@ -4,7 +4,7 @@ import test from 'node:test';
 import { reorderWindowLayoutMember } from './model.mjs';
 import { WINDOW_LAYOUT_CARD_MAX_WIDTH } from './public/app/window-layout-widget-channel.js';
 
-const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
 const itemsCss = await readFile(new URL('./public/styles/items.css', import.meta.url), 'utf8');
 
 test('021: attached layout markup removes decorative art and blocks layout editor customization', () => {

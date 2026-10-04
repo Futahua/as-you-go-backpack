@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
 const itemsCss = await readFile(new URL('./public/styles/items.css', import.meta.url), 'utf8');
 
 test('024: the decorative folder-art rule is removed (no folder illustration)', () => {
