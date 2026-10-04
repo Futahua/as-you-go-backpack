@@ -379,3 +379,11 @@ acceptance of a nonvisual extraction, not a claim of creator visual acceptance.
 No packaging, installation, release, restart, or creator-data mutation was performed.
 Existing untracked work artifacts were preserved. The commit containing this section
 is the code-only rollback point; no state migration is needed.
+
+Widget opening and startup presentation policy now belong to
+`public/app/window-layout-widget-lifecycle.js`. It receives host widget opening,
+state reading, detachment/read-only checks, placement selection, and waiting as
+explicit dependencies. It has no store, save, revision, membership, or recording
+interface. Direct opens retain activation; startup uses activate:false and bounded
+retries. Remaining completion work and validation receipts are tracked in
+`REINCARNATION-PROGRESS.md`; the overall refactor remains in progress.

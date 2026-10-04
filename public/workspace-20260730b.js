@@ -1,3 +1,4 @@
+import { createWindowLayoutWidgetLifecycle } from './app/window-layout-widget-lifecycle.js';
 import { createWindowLayoutCandidateBinder } from './app/window-layout-candidate-binding.js';
 // Build marker. Papers runs from a packaged copy, so the first question when a
 // change appears to have no effect is whether this file is the one running at
@@ -3907,45 +3908,16 @@ async function reconcileTrackingBaseline(providedSnapshot = null) {
   if (accepted.events.length) void drainTrackingLifecycleEvents();
 }
 
-function windowLayoutWidgetOpenSucceeded(result) {
-  return Boolean(result)
-    && result.ok !== false
-    && result.widget?.ok !== false
-    && result.outcome !== 'failed'
-    && result.outcome !== 'error';
-}
-
-async function openWindowLayoutWidgetWithRetry(layoutId, options = {}) {
-  let result = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      result = await host.widgetOpen(layoutId, options);
-    } catch {
-      result = null;
-    }
-    if (windowLayoutWidgetOpenSucceeded(result)) return result;
-    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 100 * (2 ** attempt)));
-  }
-  return result;
-}
-
-async function ensureStartupWindowLayoutWidget() {
-  if (windowLayoutDetachment.getState().mode === 'detached'
-    || windowLayoutDetachment.isReadOnly()) return;
-  // Every layout is a native widget by default. Only layouts explicitly
-  // middle-clicked into the AYG pill tray stay docked across startup.
-  const docked = new Set(state.windowLayoutPillIds ?? []);
-  const layouts = (state.windowLayouts ?? []).filter((layout) =>
-    layout.binned !== true
-      && !layout.bin
-      && !docked.has(layout.id)
-      && itemsIn(state, layout.parentId).some((candidate) => candidate.id === layout.id));
-  // Writer handoff can happen when a new AYG tab opens. Reconcile widgets
-  // without activating every existing native window and disturbing taskbar
-  // order/focus; direct user opens retain the normal activate behavior.
-  for (const layout of layouts) await openWindowLayoutWidgetWithRetry(layout.id, { activate: false });
-}
-
+const windowLayoutWidgetLifecycle = createWindowLayoutWidgetLifecycle({
+  widgetOpen: host.widgetOpen,
+  getState: () => state,
+  detachmentMode: () => windowLayoutDetachment.getState().mode,
+  isReadOnly: () => windowLayoutDetachment.isReadOnly(),
+  itemsIn,
+});
+const openWindowLayoutWidgetWithRetry = windowLayoutWidgetLifecycle.open;
+const ensureStartupWindowLayoutWidget = windowLayoutWidgetLifecycle.ensureStartup;
+const windowLayoutWidgetOpenSucceeded = windowLayoutWidgetLifecycle.succeeded;
 async function populateTrackingLayout(layoutId) {
   if (trackingPopulateInFlight) return;
   trackingPopulateInFlight = true;
