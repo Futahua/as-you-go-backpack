@@ -547,6 +547,7 @@ export function createFileCapabilityPanel(options) {
     const url = safeBrowserUrl(hostTab.url);
     if (url) tab.url = url;
     if (typeof hostTab.title === 'string' && hostTab.title) tab.title = hostTab.title.slice(0, 500);
+    tab.faviconUrl = typeof hostTab.faviconUrl === 'string' ? hostTab.faviconUrl.slice(0, 4000) : '';
     persistBrowserTabs();
     syncBrowserChrome(hostTab);
   }
@@ -624,8 +625,15 @@ export function createFileCapabilityPanel(options) {
       const tab = state.browserTabs.find((candidate) => candidate.id === node.dataset.browserTabId);
       if (!tab) continue;
       node.classList.toggle('active', tab.id === state.activeBrowserTabId);
-      const label = node.querySelector('.file-capability-browser-tab-label');
-      if (label) label.textContent = browserTabFallbackTitle(tab);
+      const text = node.querySelector('.file-capability-browser-tab-text');
+      if (text) text.textContent = browserTabFallbackTitle(tab);
+      const favicon = node.querySelector('.file-capability-browser-tab-favicon');
+      const fallback = node.querySelector('.file-capability-browser-tab-favicon-fallback');
+      if (favicon) {
+        if (tab.faviconUrl) favicon.src = tab.faviconUrl;
+        favicon.hidden = !tab.faviconUrl;
+      }
+      if (fallback) fallback.hidden = Boolean(tab.faviconUrl);
       node.title = tab.url;
     }
   }
@@ -901,7 +909,20 @@ export function createFileCapabilityPanel(options) {
       const item = documentRef.createElement('div');
       item.className = 'file-capability-browser-tab';
       item.dataset.browserTabId = tab.id;
-      const select = createButton(documentRef, browserTabFallbackTitle(tab), 'file-capability-browser-tab-label');
+      const select = createButton(documentRef, '', 'file-capability-browser-tab-label');
+      const favicon = documentRef.createElement('img');
+      favicon.className = 'file-capability-browser-tab-favicon';
+      favicon.alt = '';
+      favicon.draggable = false;
+      favicon.src = tab.faviconUrl || '';
+      favicon.hidden = !tab.faviconUrl;
+      const fallback = documentRef.createElement('span');
+      fallback.className = 'file-capability-browser-tab-favicon-fallback';
+      fallback.hidden = Boolean(tab.faviconUrl);
+      const tabText = documentRef.createElement('span');
+      tabText.className = 'file-capability-browser-tab-text';
+      tabText.textContent = browserTabFallbackTitle(tab);
+      select.append(favicon, fallback, tabText);
       select.addEventListener('click', () => {
         state.browserDownloadsOpen = false;
         state.activeBrowserTabId = tab.id;
@@ -1009,6 +1030,13 @@ export function createFileCapabilityPanel(options) {
     address.placeholder = 'Enter URL';
     address.value = state.browserDownloadsOpen ? 'Downloads' : (activeBrowserTab()?.url || '');
     address.disabled = state.browserDownloadsOpen;
+    address.addEventListener('pointerdown', (event) => {
+      if (documentRef.activeElement === address) return;
+      event.preventDefault();
+      address.focus();
+      address.select();
+    });
+    address.addEventListener('focus', () => address.select());
     toolbar.addEventListener('submit', (event) => {
       event.preventDefault();
       const tab = activeBrowserTab();

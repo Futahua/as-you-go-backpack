@@ -475,11 +475,35 @@
   min-width: 0;
   height: 28px;
   padding: 0 7px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
   font-size: 10px;
+}
+
+.file-capability-browser-tab-favicon,
+.file-capability-browser-tab-favicon-fallback {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.file-capability-browser-tab-favicon-fallback {
+  box-sizing: border-box;
+  border: 1px solid var(--border-hover);
+  background: var(--surface-raised);
+}
+
+.file-capability-browser-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-capability-browser-tab-close,

@@ -196,6 +196,10 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /fileCapability\('browser-download-bubble-show'/);
   assert.match(source, /fileCapability\('browser-download-bubble-hide'/);
   assert.match(source, /file-capability-browser-download-pie/);
+  assert.match(source, /hostTab\.faviconUrl/);
+  assert.match(source, /file-capability-browser-tab-favicon/);
+  assert.match(source, /file-capability-browser-tab-text/);
+  assert.match(source, /address\.addEventListener\('pointerdown',[\s\S]*address\.focus\(\)[\s\S]*address\.select\(\)/);
   assert.match(source, /browserDownloadCompletionPending/);
   assert.doesNotMatch(source, /browserDownloadCompletionUntil/);
   assert.match(source, /if \(started\) state\.browserDownloadCompletionPending = false/);
@@ -220,6 +224,8 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(css, /\.file-capability-browser-downloads-page/);
   assert.match(css, /\.file-capability-browser-download-button\.downloading/);
   assert.match(css, /\.file-capability-browser-download-pie/);
+  assert.match(css, /\.file-capability-browser-tab-favicon/);
+  assert.match(css, /\.file-capability-browser-tab-text/);
   assert.match(css, /conic-gradient/);
   assert.match(css, /file-capability-download-complete/);
   assert.match(css, /\.file-capability-browser-download\[draggable="true"\]/);
