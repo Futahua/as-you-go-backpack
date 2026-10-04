@@ -49,7 +49,7 @@ test('workspace entry is parseable before the browser can run its first render',
 });
 
 test('picker enumeration skips serial native icon extraction while Auto hydration keeps exact icons', async () => {
-  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-widget-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const picker = source.match(/async function openWindowLayoutPicker\(layoutId\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
   const widgetPicker = source.match(/async function openWidgetPicker\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] ?? '';
   const iconRefresh = source.match(/async function runWindowLayoutIconRefresh\(\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';

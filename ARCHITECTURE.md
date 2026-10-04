@@ -450,3 +450,11 @@ native picker-session helper and pure membership seed/row decisions. Pick
 application, exact process closing and preview restoration remain explicit injected
 callbacks; no store, save or native identity authority is introduced. Widget
 picker coordination remains surface-local until its own extraction.
+
+Widget list/direct/close and acknowledgement orchestration now live in
+`public/app/window-layout-widget-picker.js`. Its one ephemeral list generation
+fences native chooser replies; direct attempts retain the existing widget state
+fields and listener cleanup. The widget sends typed picker-commit commands through
+the existing channel and waits for the workspace writer, retrying one stale
+acknowledgement. Host methods are restricted to picker operations. There is no
+local durable writer, save queue or second identity authority in this owner.

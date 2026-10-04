@@ -228,3 +228,20 @@ No environmental failure. Protected browser/filesystem, native host/preload,
 recording, persistence and other Backpacks unchanged; creator data untouched.
 This commit is the checkpoint. Widget picker coordination, recording/tracking
 orchestration and surface separation remain open; overall completion unproven.
+
+## Widget picker orchestration receipt
+
+Production: `public/workspace-20260730b.js`, new
+`public/app/window-layout-widget-picker.js`. Supporting:
+`window-layout-widget-picker.test.mjs`, `window-layout-workspace.test.mjs`,
+`window-layout-member-icon.test.mjs`, `package.json`, `ARCHITECTURE.md`, this checklist.
+Before movement 10 behavioral cases pass against original functions. After movement:
+focused 87 pass / 0 fail / 0 skip; full 1786 pass / 0 fail / 0 skip plus 8 pretests.
+Idle dismiss avoids native close; required close failure blocks direct begin;
+list/direct generations fence retired responses; early result buffering, cancellation
+zero-command behavior, listener cleanup, exact retained rows and one stale workspace
+acknowledgement retry are preserved. Source assertions read the actual moved owner;
+the right-click source delimiter now uses its composition declaration.
+No environmental failure. Protected browser/filesystem, native host/preload,
+recording, persistence, other Backpacks and creator data unchanged. This is the
+code checkpoint; surface separation and recording/tracking orchestration remain.
