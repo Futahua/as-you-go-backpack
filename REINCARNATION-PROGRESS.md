@@ -25,19 +25,19 @@ No release, installation, restart, process termination, or creator-data mutation
 - [x] Isolate window-layout identity/membership policy from durable mutation,
       retaining public compatibility exports and all established validation.
 - [x] Isolate member selection/range state and repair from DOM/persistence.
-- [ ] Finish view lifecycle and DOM patching (shared card/body/picker HTML extracted).
-- [ ] Extract picker coordination and cleanup for attached/widget callers; preserve
+- [x] Finish view lifecycle and DOM patching (shared card/body/picker HTML extracted).
+- [x] Extract picker coordination and cleanup for attached/widget callers; preserve
       supersession, subscribe-before-begin, cancellation and byte-zero no-op rules.
 - [x] Extract group-action orchestration and target selection; preserve current
       broker batching and existing state/save/recording sequence. Unused worker orchestration removed.
 - [x] Extract recording/tracking orchestration, demand, retirement and draining;
       retain native identity authority and two genuine missing observations.
 - [x] Isolate preview coordination/cache lifecycle and Shift peek ownership.
-- [ ] Finish live surface separation. Compact-widget wiring is now extracted;
-      the dated entry still carries attached/workspace window-layout event wiring.
+- [x] Finish live window-layout surface separation. Compact-widget wiring and the
+      retained attached workspace input paths now have explicit surface owners.
       The historical full-surface detach path is retired/unreachable and is not a
       required extraction target merely because the old roadmap named it.
-- [ ] Refresh architecture/dependency map, remove superseded implementations and
+- [x] Refresh architecture/dependency map, remove superseded implementations and
       audit for duplicate persistence, identity or lifecycle authorities.
 - [ ] Run complete automated gates and applicable isolated runtime/visual proofs.
       Current evidence is source/unit evidence, not installed/creator acceptance.
@@ -398,3 +398,29 @@ Papers host/preload/runtime, Proxima, Delegate Wave and creator data were untouc
 The dated entry is down to 5652 lines. Surface input extraction is now complete for
 the live compact-widget/preview/member-drag/card-control/picker paths; final
 architecture/authority/completion audit and applicable runtime proof remain open.
+
+## Final source-side authority audit
+
+Source/unit refactor acceptance is complete for the retained live window-layout
+paths. Shared card/body/picker HTML, DOM patching, measured card presentation,
+workspace/widget picker coordination, compact-widget surface wiring, preview/Shift
+Peek input, attached member drag, attached card/control routing and workspace picker
+global input all terminate in named owners. Superseded inline implementations for
+those seams are removed from `public/workspace-20260730b.js`.
+
+The remaining direct persistence calls in window-layout modules are intentional
+existing owners/adapters (recording/tracking/group/card presentation and the dated
+workspace writer boundary), not duplicate widget writers. Candidate binding and
+native descriptor resolution remain at explicit native/identity seams. Picker
+lifecycle state is owned by the workspace/widget picker owners plus recording cleanup
+that drains an active pick during lifecycle retirement. No second persistence,
+identity or native lifecycle authority was found in the extracted input/surface
+owners.
+
+Latest complete automated gate: `npm test` = 1838 pass / 0 fail / 0 skip at
+`ec6f6366ce4cbdb33c54ee428215d1ed84f830ba`. Protected browser/filesystem,
+Papers host/preload/runtime, Proxima and Delegate Wave were outside these slices.
+
+The intentionally open acceptance item is live runtime/visual creator proof. No
+install, restart or release was authorized during this refactor, so source/unit
+evidence must not be presented as installed-runtime acceptance.
