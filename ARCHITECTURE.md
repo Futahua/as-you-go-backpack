@@ -387,3 +387,10 @@ explicit dependencies. It has no store, save, revision, membership, or recording
 interface. Direct opens retain activation; startup uses activate:false and bounded
 retries. Remaining completion work and validation receipts are tracked in
 `REINCARNATION-PROGRESS.md`; the overall refactor remains in progress.
+
+Pure window-layout membership policy lives in `public/app/window-layout-membership.js`:
+instance/fingerprint validation, descriptor relation, direct-picker seed shaping,
+candidate membership and bound toggle/remove decisions. `window-layout-workspace.js`
+retains compatibility exports and durable mutation orchestration; it consumes the
+same policy for post-await rebase decisions. Native identity continues to come
+from Papers descriptors, with no host calls or persistence in the policy module.

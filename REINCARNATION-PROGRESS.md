@@ -22,7 +22,7 @@ No release, installation, restart, process termination, or creator-data mutation
 
 ## Remaining acceptance work
 
-- [ ] Isolate window-layout identity/membership policy from durable mutation,
+- [x] Isolate window-layout identity/membership policy from durable mutation,
       retaining public compatibility exports and all established validation.
 - [ ] Isolate member selection/range state and repair from DOM/persistence.
 - [ ] Extract card/member/picker view and DOM patching behind presentation inputs.
@@ -57,3 +57,21 @@ assertions were repointed to the new owner; behavior tests cover the contract.
 Protected file-capability-panel, browser, filesystem, Papers host/preload/runtime,
 store, recording and unrelated Backpack code are unchanged. No environmental
 failure occurred. Existing untracked work artifacts are preserved.
+
+## Identity/membership extraction receipt
+
+Production changes: `public/app/window-layout-workspace.js` and new
+`public/app/window-layout-membership.js`. Supporting changes:
+`window-layout-workspace.test.mjs`, `ARCHITECTURE.md`, and this checklist.
+All existing exports remain available through the workspace module. The writer
+imports validators and identity relation from the pure owner; direct policy tests
+import that owner. No second identity authority is introduced: host descriptors
+still supply native truth, and this module only classifies membership.
+
+Before movement: workspace characterization 51 pass / 0 fail / 0 skip.
+After movement: focused 97 pass / 0 fail / 0 skip; full 1703 pass / 0 fail / 0 skip
+plus 8 pretests. Exact/legacy/mixed identity, malformed rejection, ambiguity,
+seed deduplication, remove-only no-op, commit rebasing and refusal remain covered.
+No environmental failure. Entry, native host, browser/filesystem, store, recording,
+other Backpacks and creator data unchanged. Commit containing this receipt is
+the extraction checkpoint. Overall refactor is still incomplete.

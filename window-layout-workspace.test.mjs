@@ -1,3 +1,4 @@
+import { windowLayoutCandidateIsMember, windowLayoutPickForBoundCandidate, windowLayoutPickMemberDescriptors } from './public/app/window-layout-membership.js';
 // 019C (RoketPuncha sole-editor lane): the workspace-side durable writers.
 // Winter's ONE typed committed pick set (single commit, cancel byte-zero,
 // mixed add/remove, partial add failures) and Ning's retirement intent (one
@@ -10,9 +11,6 @@ import {
   createWindowLayoutPickApplier,
   createWindowLayoutRetirementWriter,
   windowLayoutPickApplyOutcome,
-  windowLayoutCandidateIsMember,
-  windowLayoutPickForBoundCandidate,
-  windowLayoutPickMemberDescriptors,
 } from './public/app/window-layout-workspace.js';
 import { windowLayoutMemberKey } from './public/app/window-layout-runtime.js';
 import { endExactWindowCandidateProcess } from './public/app/window-layout-process-end.js';
