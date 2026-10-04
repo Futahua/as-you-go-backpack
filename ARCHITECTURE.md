@@ -449,6 +449,13 @@ compact widgets provide the live detached-card experience. Therefore the histori
 roadmap item to extract a separate full-surface detached bootstrap is not a current
 completion requirement unless that product behavior is deliberately revived later.
 
+Shared preview and Shift-Peek input routing now belongs to
+`public/app/window-layout-preview-input.js`. It translates keyboard, native Shift,
+hover, pointer, scroll, resize and pagehide events into the existing preview
+presentation and Shift-Peek lifecycle owners. Workspace list-hover still opens the
+attached picker, while compact-widget list-hover remains widget-local. The input
+router owns no persistence, recording, native identity or capability authority.
+
 `public/app/window-layout-preview-presentation.js` owns the one popover's DOM,
 anchor/name/icon state, animation-frame cleanup, native preview presentation
 routing and 100ms hover dwell. The existing thumbnail scheduler is supplied lazily;

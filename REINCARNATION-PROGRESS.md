@@ -313,3 +313,25 @@ Papers host/preload/runtime, Proxima, Delegate Wave and creator data were untouc
 Existing untracked `work/` evidence was preserved. No package/install/restart/release
 or installed-runtime claim was made. Live attached/workspace surface wiring and the
 final authority/completion audit remain open.
+
+## Preview / Shift-Peek input routing receipt
+
+Production: `public/workspace-20260730b.js` and new
+`public/app/window-layout-preview-input.js`. Supporting changes:
+`window-layout-preview-input.test.mjs`, `window-layout-shift-peek.test.mjs`,
+`compact-card-parity.test.mjs`, `package.json`, this architecture guide and this
+checklist.
+
+The moved owner contains only surface input translation: keyboard/native Shift,
+member/list hover, pointer movement/leave, member press, scroll, resize and pagehide.
+It calls the already-extracted preview presentation and Shift-Peek lifecycle owners;
+it has no store/save/commit/recording/document-writer surface. Workspace list hover
+still opens the attached native chooser, while compact-widget list hover remains
+owned by the widget surface. Folder middle-click and member close/unlink gestures
+stay in the entry and were not widened into this slice.
+
+Focused surface gate: 73 pass / 0 fail / 0 skip. Full `npm test`: 1826 pass /
+0 fail / 0 skip. `git diff --check` passed. Protected browser/filesystem,
+Papers host/preload/runtime, Proxima, Delegate Wave and creator data were untouched.
+The dated entry is down to 5901 lines; remaining live attached/member-control wiring
+and the final authority/completion audit remain open.

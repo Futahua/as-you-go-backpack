@@ -107,7 +107,6 @@ import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-cap
 import { createWorkspaceNavigator } from './app/workspace-navigator.js';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { endExactWindowCandidateProcess } from './app/window-layout-process-end.js';
-import { planWindowLayoutShiftPeekTransition } from './app/window-layout-shift-peek.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, toggleWindowLayoutMemberVisibility, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { createWindowLayoutWidgetChannelWorkspace, windowLayoutWidgetSnapshot, windowLayoutWidgetCommittedStatus, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
 import {
@@ -126,7 +125,8 @@ import {
   snapshotMemberNote,
 } from './app/window-layout-member-note.js';
 import { createWindowLayoutIsolateMode } from './app/window-layout-isolate-mode.js';
-import { createWindowLayoutMemberPreview, windowLayoutPreviewHoverState } from './app/window-layout-preview.js';
+import { createWindowLayoutMemberPreview } from './app/window-layout-preview.js';
+import { installWindowLayoutPreviewInput } from './app/window-layout-preview-input.js';
 import {
   createWindowLayoutIconHydration,
   windowLayoutIconCacheEntry,
@@ -1798,7 +1798,6 @@ const windowLayoutMemberPreview = createWindowLayoutMemberPreview({
 // Shift-hover mirrors taskbar Peek semantics using a reversible host session:
 // every other currently visible eligible window is temporarily minimized, and
 // only windows changed by this session are restored on release/leave.
-let windowLayoutLastHoveredMember = null;
 const windowLayoutShiftPeek = createWindowLayoutShiftPeekLifecycle({
   host: { windowPeekEnd: host.windowPeekEnd, windowPeekBeginCapability: host.windowPeekBeginCapability },
   resolveWindowLayoutPreviewCapability,
@@ -1808,130 +1807,20 @@ const windowLayoutShiftPeek = createWindowLayoutShiftPeekLifecycle({
   WIDGET_SURFACE,
   document,
 });
-const beginWindowLayoutShiftPeek = windowLayoutShiftPeek.begin;
-const endWindowLayoutShiftPeek = windowLayoutShiftPeek.end;
-const deferWindowLayoutShiftPeekEnd = windowLayoutShiftPeek.deferEnd;
-const keepWindowLayoutShiftPeekAlive = windowLayoutShiftPeek.keepAlive;
-const applyWindowLayoutShiftPeekTransition = windowLayoutShiftPeek.apply;
-window.addEventListener('keydown', (event) => {
-  const transition = planWindowLayoutShiftPeekTransition('keydown', event, {
-    held: windowLayoutShiftPeek.held,
-    member: document.querySelector('[data-wl-member]:hover'),
-  });
-  applyWindowLayoutShiftPeekTransition(transition);
-});
-window.addEventListener('keyup', (event) => {
-  const transition = planWindowLayoutShiftPeekTransition('keyup', event, { held: windowLayoutShiftPeek.held });
-  applyWindowLayoutShiftPeekTransition(transition);
-});
-window.addEventListener('blur', () => {
-  if (WIDGET_SURFACE) return; // Physical Shift release comes from the native broker.
-  const transition = planWindowLayoutShiftPeekTransition('blur', {}, { held: windowLayoutShiftPeek.held });
-  applyWindowLayoutShiftPeekTransition(transition);
-});
-// A detached widget is non-focusable. The resident native broker reports the
-// physical Shift key, including when the pointer stays still over an icon.
-if (typeof host.onWindowControlShift === 'function') host.onWindowControlShift((held) => {
-  const transition = planWindowLayoutShiftPeekTransition(held ? 'keydown' : 'keyup', { key: 'Shift' }, {
-    held: windowLayoutShiftPeek.held,
-    member: document.querySelector('[data-wl-member]:hover')
-      ?? (elements.grid.matches(':hover') && windowLayoutLastHoveredMember?.isConnected
-        ? windowLayoutLastHoveredMember : null),
-  });
-  applyWindowLayoutShiftPeekTransition(transition);
-});
-
-// 019B/019GR hover wiring via the pure exact-member transition predicate: a move
-// between descendants of the SAME member (icon/indicator) is ignored (no
-// reschedule/clear); entering a member shows icon+title and schedules; leaving
-// this EXACT member (to another member or the outside) hides + cancels before
-// the next member schedules. Scrolling (a card may have scrolled the strip) or
-// resizing hides the popover and cancels the pending preview. Read-only safe.
-elements.grid.addEventListener('mouseover', (event) => {
-  const listButton = event.target.closest('[data-wl-list]');
-  const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
-  // The compact widget installs its own membership-aware opener on the card.
-  // Do not let this workspace delegate replace that dwell after the event
-  // bubbles to the grid; widget-local state is authoritative there.
-  if (!WIDGET_SURFACE && listButton && listButton !== relatedListButton) {
-    scheduleWindowLayoutListDwell(
-      listButton,
-      () => openWindowLayoutPicker(listButton.dataset.wlList),
-    );
-    return;
-  }
-  const member = event.target.closest('[data-wl-member]');
-  const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
-  if (member) windowLayoutLastHoveredMember = member;
-  const peekTransition = planWindowLayoutShiftPeekTransition('hover', event, {
-    held: windowLayoutShiftPeek.held,
-    member,
-    relatedMember,
-  });
-  if (peekTransition.handled) {
-    keepWindowLayoutShiftPeekAlive();
-    applyWindowLayoutShiftPeekTransition(peekTransition);
-    return;
-  }
-  const state = windowLayoutPreviewHoverState(member, relatedMember);
-  if (state === 'outside') {
-    if (!event.target.closest('[data-wl-popover]')) {
-      cancelWindowLayoutPreviewDwell();
-      windowLayoutMemberPopover.hide();
-      windowLayoutMemberPreview.cancel();
-    }
-    return;
-  }
-  if (state === 'inside') return;
-  scheduleWindowLayoutPreviewDwell(member);
-});
-// The detached widget is deliberately non-focusable, so it cannot reliably
-// receive Shift keydown/keyup. Mouse/pointer events still carry the physical
-// modifier state. Track that state while the pointer moves so Shift Peek works
-// even when Shift was pressed before entering the widget.
-elements.grid.addEventListener('pointermove', (event) => {
-  // Small pointer drift over gaps/descendants is still inside the compact
-  // widget. Cancel the delayed leave end even when the move is not over a
-  // member and therefore produces no planner transition.
-  if (windowLayoutShiftPeek.held && elements.grid.matches(':hover')) keepWindowLayoutShiftPeekAlive();
-  const member = event.target.closest('[data-wl-member]');
-  if (member) windowLayoutLastHoveredMember = member;
-  const transition = planWindowLayoutShiftPeekTransition('pointermove', event, {
-    held: windowLayoutShiftPeek.held,
-    member,
-  });
-  if (transition.handled && transition.begin) {
-    keepWindowLayoutShiftPeekAlive();
-    applyWindowLayoutShiftPeekTransition(transition);
-    return;
-  }
-  if (transition.handled && transition.end) {
-    applyWindowLayoutShiftPeekTransition(transition);
-  }
-});
-elements.grid.addEventListener('mouseout', (event) => {
-  const listButton = event.target.closest('[data-wl-list]');
-  const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
-  if (listButton && listButton !== relatedListButton) cancelWindowLayoutListDwell();
-  const member = event.target.closest('[data-wl-member]');
-  const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
-  if (relatedMember) windowLayoutLastHoveredMember = relatedMember;
-  else if (!event.relatedTarget || !elements.grid.contains(event.relatedTarget)) windowLayoutLastHoveredMember = null;
-  // Crossing directly from one member to another is a Peek transition, not a
-  // release. Keep the session alive so the host can reveal only the new target
-  // and hide only the old one. Blank space between icons keeps the last Peek
-  // while Shift is held; leaving the widget or releasing Shift ends it.
-  if (member && !relatedMember && windowLayoutShiftPeek.key) {
-    const leftWidget = !event.relatedTarget || !elements.grid.contains(event.relatedTarget);
-    const leave = planWindowLayoutShiftPeekTransition('memberleave', { leftWidget }, { held: windowLayoutShiftPeek.held });
-    if (leave.end) deferWindowLayoutShiftPeekEnd();
-  }
-  const state = windowLayoutPreviewHoverState(member, relatedMember);
-  if (state === 'enter') {
-    cancelWindowLayoutPreviewDwell();
-    windowLayoutMemberPopover.hide();
-    windowLayoutMemberPreview.cancel();
-  }
+installWindowLayoutPreviewInput({
+  windowRef: window,
+  documentRef: document,
+  grid: elements.grid,
+  host,
+  widgetSurface: WIDGET_SURFACE,
+  shiftPeek: windowLayoutShiftPeek,
+  memberPreview: windowLayoutMemberPreview,
+  memberPopover: windowLayoutMemberPopover,
+  schedulePreviewDwell: scheduleWindowLayoutPreviewDwell,
+  cancelPreviewDwell: cancelWindowLayoutPreviewDwell,
+  scheduleListDwell: scheduleWindowLayoutListDwell,
+  cancelListDwell: cancelWindowLayoutListDwell,
+  openWorkspacePicker: openWindowLayoutPicker,
 });
 elements.grid.addEventListener('auxclick', (event) => {
   if (event.button !== 1) return;
@@ -1982,47 +1871,6 @@ elements.grid.addEventListener('auxclick', (event) => {
     handleWindowLayoutUnlink(member.dataset.wlLayout, member.dataset.wlMember);
   }
 });
-// A press on a member is a CONTROL intent, and control must not queue behind
-// cosmetic work. The Papers window helper executes exactly one request at a
-// time - read a line, run it to completion, write the reply - so a hover that
-// is still cold (desktop list, then bind/observe, then a full PrintWindow
-// capture) occupies it, and this click's own observe and minimize/restore wait
-// behind all of that. The creator sees the real application window react late,
-// and only on the first click after moving to another icon: staying on one icon
-// starts no new hover pipeline.
-//
-// Every other member interaction already cancels the preview - Ctrl-drag,
-// context menu, picker start, scroll, resize. The ordinary click was the single
-// path that did not, so pressing an icon let a capture launch AFTER the creator
-// had already asked for the window to move. Capture phase, so it runs ahead of
-// any handler that stops propagation, and covers the attached card and the
-// detached widget through one seam.
-//
-// This cannot cancel a capture already executing inside the helper - nothing
-// can, PowerShell is synchronous inside PrintWindow - but it stops one being
-// started or queued once the creator has committed to a click.
-document.addEventListener('pointerdown', (event) => {
-  if (!event.target?.closest?.('[data-wl-member]')) return;
-  cancelWindowLayoutPreviewDwell();
-  windowLayoutMemberPopover.hide();
-  windowLayoutMemberPreview.cancel();
-}, true);
-document.addEventListener('scroll', () => {
-  cancelWindowLayoutPreviewDwell();
-  windowLayoutMemberPopover.hide();
-  windowLayoutMemberPreview.cancel();
-}, true);
-window.addEventListener('resize', () => {
-  cancelWindowLayoutPreviewDwell();
-  windowLayoutMemberPopover.hide();
-  windowLayoutMemberPreview.cancel();
-});
-window.addEventListener('pagehide', () => {
-  endWindowLayoutShiftPeek();
-  cancelWindowLayoutPreviewDwell();
-  windowLayoutMemberPreview.cancel();
-});
-
 /** 017I2: exactly ONE controller owns recording (switch, timer, observation,
  * echo suppression). This wiring glues the pure controller to the real model
  * and store: persisted active id, byte-stable inactive arrangements,
