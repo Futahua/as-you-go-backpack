@@ -1,3 +1,4 @@
+import { createWindowLayoutDomPresentation } from './app/window-layout-dom-presentation.js';
 import { createWindowLayoutPreviewPresentation } from './app/window-layout-preview-presentation.js';
 import { createWindowLayoutPreviewCapabilities } from './app/window-layout-preview-capabilities.js';
 import { createWindowLayoutShiftPeekLifecycle } from './app/window-layout-shift-peek-lifecycle.js';
@@ -834,28 +835,18 @@ function windowLayoutStatusText(layoutId) {
   return '';
 }
 
-const windowLayoutTransientStatusTimers = new Map();
+const windowLayoutDomPresentation = createWindowLayoutDomPresentation({
+  document,
+  CSS,
+  WIDGET_SURFACE,
+  windowLayoutRuntime: { liveMemberState: windowLayoutRuntime.liveMemberState },
+});
+const setWindowLayoutStatus = windowLayoutDomPresentation.status;
+const setWindowLayoutTransientStatus = windowLayoutDomPresentation.transient;
+const patchWindowLayoutMember = windowLayoutDomPresentation.patch;
 /** Consecutive independent positives that a member's window is gone. One is not
  * enough: a resolve can miss a window that is merely hidden or not enumerated. */
 const windowLayoutGoneConfirmations = new Map();
-function setWindowLayoutStatus(layoutId, text) {
-  const previous = windowLayoutTransientStatusTimers.get(layoutId);
-  if (previous) {
-    clearTimeout(previous);
-    windowLayoutTransientStatusTimers.delete(layoutId);
-  }
-  const status = document.querySelector(`[data-wl-status="${CSS.escape(layoutId)}"]`);
-  if (status) status.textContent = text;
-  if (WIDGET_SURFACE && text) {
-    const timer = setTimeout(() => {
-      windowLayoutTransientStatusTimers.delete(layoutId);
-      const current = document.querySelector(`[data-wl-status="${CSS.escape(layoutId)}"]`);
-      if (current?.textContent === text) current.textContent = '';
-    }, 2400);
-    windowLayoutTransientStatusTimers.set(layoutId, timer);
-  }
-}
-
 // Geometry and capability publication is background work. The resident native
 // broker sees the physical press; these requests never run inside a click.
 const windowControlReady = new Set();
@@ -1156,21 +1147,6 @@ function windowLayoutMemberIcon(layoutId, member) {
   if (windowLayoutRuntime.icons.has(key)) windowLayoutRuntime.icons.delete(key);
   queueWindowLayoutIconRefresh(layoutId, memberId);
   return null;
-}
-
-function setWindowLayoutTransientStatus(layoutId, text, durationMs = 2400) {
-  if (WIDGET_SURFACE) {
-    setWindowLayoutStatus(layoutId, text);
-    return;
-  }
-  const previous = windowLayoutTransientStatusTimers.get(layoutId);
-  if (previous) clearTimeout(previous);
-  setWindowLayoutStatus(layoutId, text);
-  const timer = setTimeout(() => {
-    windowLayoutTransientStatusTimers.delete(layoutId);
-    setWindowLayoutStatus(layoutId, '');
-  }, durationMs);
-  windowLayoutTransientStatusTimers.set(layoutId, timer);
 }
 
 /** One capability warm-up at a time, in the background.
@@ -1560,40 +1536,6 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
   patchWindowLayoutMember(layoutId, memberId, 'unknown');
   noteWindowLayoutCommit(layoutId);
   queueWindowLayoutSave();
-}
-
-function patchWindowLayoutMember(layoutId, memberId, liveState) {
-  // 040: scope the DOM selector by layout+member so a state patch for one
-  // layout can never touch the same-window member of another layout. There
-  // can be two legitimate matches while a compact widget is detached: update
-  // both copies instead of leaving one surface with stale underlines.
-  //
-  // LIVE state, not persisted state. The underline is presentation truth, and
-  // only a live observation is allowed to paint it. An action's own result says
-  // what was ASKED for, and the atomic toggle's observation describes the window
-  // BEFORE the mutation - neither proves what is on screen now, so both paint
-  // `unknown` until an observation confirms.
-  const state = liveState === 'minimized' ? 'minimized' : (liveState === 'normal' ? 'normal' : 'unknown');
-  windowLayoutRuntime.liveMemberState.set(windowLayoutMemberKey(layoutId, memberId), state);
-  const buttons = document.querySelectorAll(
-    `[data-wl-layout="${CSS.escape(layoutId)}"] [data-wl-member="${CSS.escape(memberId)}"]`);
-  for (const button of buttons) {
-    button.classList.remove('normal', 'minimized', 'unknown');
-    button.classList.add(state);
-    button.setAttribute('aria-pressed', state === 'minimized' ? 'true' : 'false');
-    button.removeAttribute('title');
-    // ONE stable element, always present: its state is inspectable at any moment
-    // and there is no create/remove churn. Removing it for minimized made sense
-    // while the model had only two states; "unknown" is a real state now.
-    let marker = button.querySelector('.window-layout-member-state');
-    if (!marker) {
-      marker = document.createElement('span');
-      marker.setAttribute('aria-hidden', 'true');
-      button.append(marker);
-    }
-    marker.className = `window-layout-member-state ${state}`;
-    marker.setAttribute('data-wl-live-state', state);
-  }
 }
 
 async function openWindowLayoutPicker(layoutId) {

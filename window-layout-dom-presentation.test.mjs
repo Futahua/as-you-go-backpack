@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { windowLayoutMemberKey } from './public/app/window-layout-runtime.js';
+import { createWindowLayoutDomPresentation as createPresentation } from './public/app/window-layout-dom-presentation.js';
+function harness(widget=false){
+ const status={textContent:''};const timers=new Map();const liveMemberState=new Map();let id=0;let queried='';
+ function button(){let marker=null;const classes=new Set();const attrs=new Map();return {classes,attrs,classList:{remove:(...values)=>values.forEach(v=>classes.delete(v)),add:v=>classes.add(v)},setAttribute:(key,value)=>attrs.set(key,value),removeAttribute:key=>attrs.delete(key),querySelector:()=>marker,append:value=>{marker=value;},get marker(){return marker;}};}
+ const buttons=[button(),button()];const document={querySelector:()=>status,querySelectorAll:selector=>{queried=selector;return buttons;},createElement:()=>({attrs:new Map(),setAttribute(key,value){this.attrs.set(key,value);}})};
+ const owner=createPresentation({document,CSS:{escape:value=>value},WIDGET_SURFACE:widget,windowLayoutRuntime:{liveMemberState},windowLayoutMemberKey,setTimeout:(fn,ms)=>{timers.set(++id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id)});
+ return {owner,status,timers,buttons,liveMemberState,get queried(){return queried;},flush:()=>{const pending=[...timers.values()];timers.clear();for(const timer of pending)timer.fn();}};
+}
+test('widget status auto-clears after 2400ms and cannot erase newer text',()=>{const h=harness(true);h.owner.status('L','first');assert.equal([...h.timers.values()][0].ms,2400);h.status.textContent='newer';h.flush();assert.equal(h.status.textContent,'newer');h.owner.status('L','second');h.flush();assert.equal(h.status.textContent,'');});
+test('replacing status cancels its prior timer; empty status schedules no timer',()=>{const h=harness(true);h.owner.status('L','first');h.owner.status('L','second');assert.equal(h.timers.size,1);h.owner.status('L','');assert.equal(h.timers.size,0);});
+test('attached status persists unless explicitly transient',()=>{const h=harness();h.owner.status('L','error');assert.equal(h.timers.size,0);h.owner.transient('L','temporary',77);assert.equal([...h.timers.values()][0].ms,77);h.flush();assert.equal(h.status.textContent,'');});
+test('widget explicit transient duration still uses its established 2400ms rule',()=>{const h=harness(true);h.owner.transient('L','temporary',77);assert.equal([...h.timers.values()][0].ms,2400);});
+for(const [input,expected]of [['normal','normal'],['minimized','minimized'],['missing','unknown'],[undefined,'unknown']])test(`live DOM patch ${input} becomes ${expected} in both scoped copies`,()=>{const h=harness();h.owner.patch('L','m',input);assert.equal(h.queried,'[data-wl-layout="L"] [data-wl-member="m"]');assert.equal(h.liveMemberState.get(windowLayoutMemberKey('L','m')),expected);for(const button of h.buttons){assert.equal(button.classes.has(expected),true);assert.equal(button.attrs.get('aria-pressed'),expected==='minimized'?'true':'false');assert.equal(button.marker.attrs.get('data-wl-live-state'),expected);}});
+test('live marker remains the same element across updates and title is removed',()=>{const h=harness();h.buttons[0].attrs.set('title','stale');h.owner.patch('L','m','normal');const marker=h.buttons[0].marker;h.owner.patch('L','m','minimized');assert.equal(h.buttons[0].marker,marker);assert.equal(h.buttons[0].attrs.has('title'),false);assert.deepEqual([...h.buttons[0].classes],['minimized']);});

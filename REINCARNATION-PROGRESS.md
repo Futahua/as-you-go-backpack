@@ -198,3 +198,15 @@ No environmental failure. Thumbnail generation scheduler and Shift planner/owner
 native host, persistence, browser/filesystem, other Backpacks and creator data
 untouched. This commit is the presentation checkpoint. Event routing remains in
 the entry until surface extraction; no installed/native visual acceptance claimed.
+## DOM presentation receipt
+
+Production: `public/workspace-20260730b.js`, new
+`public/app/window-layout-dom-presentation.js`. Supporting:
+`window-layout-dom-presentation.test.mjs`, `package.json`, `ARCHITECTURE.md`, this
+checklist. Original 9 behavior cases pass before movement; focused 83 pass / 0 fail /
+0 skip; full 1768 pass / 0 fail / 0 skip plus 8 pretests. Preserves scoped duplicate
+DOM patches, live normal/minimized/unknown state, marker identity, title removal,
+status replacement/cancellation, widget 2400ms auto-clear and attached explicit
+duration. No environmental failure. No persistence, picker policy, native control,
+recording, browser/filesystem, host/preload, other Backpack or creator-data changes.
+This commit is the checkpoint. Surface-local event wiring is still pending.

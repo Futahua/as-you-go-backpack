@@ -438,3 +438,8 @@ anchor/name/icon state, animation-frame cleanup, native preview presentation
 routing and 100ms hover dwell. The existing thumbnail scheduler is supplied lazily;
 only authorized preview-show/hide host methods are injected. Superseded unreachable
 in-page thumbnail rendering was removed. Surface event translation stays separate.
+
+Live member DOM patches and transient-status timers live in
+`public/app/window-layout-dom-presentation.js`. It consumes the existing live-state
+map and no store/host operations. Scoped selectors update every matching copy,
+retain stable marker nodes, and normalize unconfirmed live results to unknown.
