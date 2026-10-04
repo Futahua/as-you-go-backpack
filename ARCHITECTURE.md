@@ -456,6 +456,12 @@ presentation and Shift-Peek lifecycle owners. Workspace list-hover still opens t
 attached picker, while compact-widget list-hover remains widget-local. The input
 router owns no persistence, recording, native identity or capability authority.
 
+Attached member-drag lifecycle now belongs to
+`public/app/window-layout-workspace-member-drag.js`. It owns Ctrl-drag state,
+live DOM reordering, drag-out unlink intent, pointer-cancel/Escape rollback and the
+one-shot post-drag click suppression. Durable unlink/reorder decisions remain
+injected callbacks; the owner has no store/save/commit or recording authority.
+
 `public/app/window-layout-preview-presentation.js` owns the one popover's DOM,
 anchor/name/icon state, animation-frame cleanup, native preview presentation
 routing and 100ms hover dwell. The existing thumbnail scheduler is supplied lazily;

@@ -5,6 +5,7 @@ import test from 'node:test';
 const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
 const widgetSurfaceSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
 const previewInputSource = await readFile(new URL('./public/app/window-layout-preview-input.js', import.meta.url), 'utf8');
+const workspaceDragSource = await readFile(new URL('./public/app/window-layout-workspace-member-drag.js', import.meta.url), 'utf8');
 const itemsCss = await readFile(new URL('./public/styles/items.css', import.meta.url), 'utf8');
 
 test('024: the decorative folder-art rule is removed (no folder illustration)', () => {
@@ -72,7 +73,7 @@ test('024/035: the detached/widget card supports member-icon reorder via the cha
   assert.match(widgetSurfaceSource, /client\.dispose\(\);/);
   // The workspace-only member handlers never run on the widget surface (null
   // durable state would otherwise crash the detached card).
-  assert.match(workspaceSource, /elements\.grid\.addEventListener\('pointerdown', \(event\) => \{\s*if \(WIDGET_SURFACE\) return;/);
+  assert.match(workspaceDragSource, /const onPointerDown = \(event\) => \{\s*if \(widgetSurface\) return;/);
   assert.match(workspaceSource, /elements\.grid\.addEventListener\('click', \(event\) => \{\s*if \(WIDGET_SURFACE\) return;/);
   assert.match(previewInputSource, /if \(!widgetSurface && listButton && listButton !== relatedListButton\)/);
   assert.match(widgetSurfaceSource, /scheduleWindowLayoutListDwell\(listButton, openWidgetPicker\)/);

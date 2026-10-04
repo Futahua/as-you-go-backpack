@@ -107,7 +107,7 @@ import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-cap
 import { createWorkspaceNavigator } from './app/workspace-navigator.js';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { endExactWindowCandidateProcess } from './app/window-layout-process-end.js';
-import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, toggleWindowLayoutMemberVisibility, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
+import { createDetachSaveGate, createDetachReadOnlyInputGuards, toggleWindowLayoutMemberVisibility, createReadOnlyStatusSink, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { createWindowLayoutWidgetChannelWorkspace, windowLayoutWidgetSnapshot, windowLayoutWidgetCommittedStatus, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
 import {
   createWindowLayoutPickApplier,
@@ -127,6 +127,7 @@ import {
 import { createWindowLayoutIsolateMode } from './app/window-layout-isolate-mode.js';
 import { createWindowLayoutMemberPreview } from './app/window-layout-preview.js';
 import { installWindowLayoutPreviewInput } from './app/window-layout-preview-input.js';
+import { installWindowLayoutWorkspaceMemberDrag } from './app/window-layout-workspace-member-drag.js';
 import {
   createWindowLayoutIconHydration,
   windowLayoutIconCacheEntry,
@@ -4357,137 +4358,31 @@ async function runMenuAction(action) {
   }
 }
 
-// 016 inner member drag: reorder within the layout, or unlink (data-only)
-// beyond a clear outside threshold. Never starts outer graph drag and never
-// moves/resizes/minimizes/closes the external window. 018X4: the drag state
-// machine lives in the shared createWindowLayoutMemberDrag guard so the
-// read-only handoff can cancel it and a later pointerup / reused pointer ID
-// cannot finalize an unlink/reorder after reattach.
-const windowLayoutMemberDrag = createWindowLayoutMemberDrag();
-let windowLayoutDragJustMoved = false;
+// 016 attached member drag is surface-local; durable reorder/unlink remain injected.
 const WINDOW_LAYOUT_DROP_OUT_PX = 40;
-
-/** 018X6: restores the member row's live DOM order back to the canonical
- * persisted arrangement order (a pointermove may already have reordered the
- * buttons before a read-only cancellation). Same DOM nodes/listeners are
- * preserved; nothing is committed/saved/finalized. */
-function restoreWindowLayoutMemberDomOrder(layoutId) {
-  const members = document.querySelector(`[data-wl-members="${CSS.escape(layoutId)}"]`);
-  const layout = windowLayoutFromState(layoutId);
-  if (!members || !layout) return;
-  const memberIds = (layout.arrangement?.members ?? []).map((member) => member.id);
-  const ordered = orderWindowLayoutMemberButtons(
-    [...members.querySelectorAll('[data-wl-member]')],
-    memberIds,
-  );
-  for (const button of ordered) {
-    if (button.parentNode === members) members.appendChild(button);
-  }
-}
-
-/** 018X4/018X6: cancels an in-progress 016 member drag WITHOUT finalizing a
- * move: rolls back any visual DOM reorder to the canonical order, clears the
- * drag state and the drag-out visual, so a later pointerup (e.g. after the
- * read-only handoff disarms) or a reused pointer ID cannot trigger an unlink
- * or reorder. Used by read-only entry and Escape (force-cancel). */
-function cancelWindowLayoutDrag() {
-  const layoutId = windowLayoutMemberDrag.get()?.layoutId;
-  windowLayoutMemberDrag.cancel();
-  if (layoutId) restoreWindowLayoutMemberDomOrder(layoutId);
-  const members = document.querySelector('[data-wl-members].wl-drag-out');
-  if (members) members.classList.remove('wl-drag-out');
-}
-
-elements.grid.addEventListener('pointerdown', (event) => {
-  if (WIDGET_SURFACE) return;
-  const body = event.target.closest('.window-layout-body');
-  if (body && event.button === 0 && !event.ctrlKey && !event.shiftKey
-    && !event.target.closest('button, input, [data-wl-member]')) {
-    // Attached cards need their own inner-selection clear. The outer graph
-    // blank handler never sees this press because card events intentionally
-    // stop before workspace selection/navigation. Clear on pointerdown so a
-    // graph drag or pointer capture cannot swallow the later click.
-    clearWindowLayoutMemberSelection(body.dataset.wlLayout);
-  }
-  const member = event.target.closest('[data-wl-member]');
-  if (!member || !event.ctrlKey || event.button !== 0) return;
-  cancelWindowLayoutPreviewDwell();
-  windowLayoutMemberPopover.hide();
-  windowLayoutMemberPreview.cancel();
-  windowLayoutMemberDrag.start({
-    layoutId: member.dataset.wlLayout,
-    memberId: member.dataset.wlMember,
-    clientX: event.clientX,
-    clientY: event.clientY,
-    pointerId: event.pointerId,
-  });
-});
-
-elements.grid.addEventListener('pointermove', (event) => {
-  if (WIDGET_SURFACE) return;
-  const drag = windowLayoutMemberDrag.move(event.pointerId, event.clientX, event.clientY);
-  if (!drag) return;
-    const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
-    const button = document.querySelector(`[data-wl-layout="${CSS.escape(drag.layoutId)}"] [data-wl-member="${CSS.escape(drag.memberId)}"]`);
-  if (!members || !button) return;
-  const row = members.getBoundingClientRect();
-  const outside = event.clientY < row.top - WINDOW_LAYOUT_DROP_OUT_PX
-    || event.clientY > row.bottom + WINDOW_LAYOUT_DROP_OUT_PX
-    || event.clientX < row.left - WINDOW_LAYOUT_DROP_OUT_PX
-    || event.clientX > row.right + WINDOW_LAYOUT_DROP_OUT_PX;
-  members.classList.toggle('wl-drag-out', outside);
-  if (outside) return;
-  moveWindowLayoutMemberButton(members, button, event.clientX, event.clientY);
-});
-
-elements.grid.addEventListener('pointerup', (event) => {
-  if (WIDGET_SURFACE) return;
-  windowLayoutMemberDrag.finalize(event.pointerId, (drag) => {
-    const members = document.querySelector(`[data-wl-members="${CSS.escape(drag.layoutId)}"]`);
-    if (!members) return;
-    const row = members.getBoundingClientRect();
-    const outside = event.clientY < row.top - WINDOW_LAYOUT_DROP_OUT_PX
-      || event.clientY > row.bottom + WINDOW_LAYOUT_DROP_OUT_PX
-      || event.clientX < row.left - WINDOW_LAYOUT_DROP_OUT_PX
-      || event.clientX > row.right + WINDOW_LAYOUT_DROP_OUT_PX;
-    members.classList.remove('wl-drag-out');
-    const layout = windowLayoutFromState(drag.layoutId);
-    if (!layout) return;
-    if (!drag.moved) return; // plain click: handled by the click delegation
-    windowLayoutDragJustMoved = true;
-    if (outside) {
-      // Escape-like cancel path: data-only unlink, never closes or moves it.
-      handleWindowLayoutUnlink(drag.layoutId, drag.memberId);
-      return;
-    }
-    const buttons = [...members.querySelectorAll('[data-wl-member]')];
-    const toIndex = buttons.findIndex((button) => button.dataset.wlMember === drag.memberId);
-    if (toIndex === -1) return;
-    const next = reorderWindowLayoutMember(state, drag.layoutId, drag.memberId, toIndex);
-    // One commit = one persistence request; only broadcast after it settles.
+const windowLayoutWorkspaceMemberDrag = installWindowLayoutWorkspaceMemberDrag({
+  documentRef: document,
+  grid: elements.grid,
+  CSS,
+  widgetSurface: WIDGET_SURFACE,
+  getLayout: windowLayoutFromState,
+  clearSelection: clearWindowLayoutMemberSelection,
+  cancelPreview: () => {
+    cancelWindowLayoutPreviewDwell();
+    windowLayoutMemberPopover.hide();
+    windowLayoutMemberPreview.cancel();
+  },
+  moveMemberButton: moveWindowLayoutMemberButton,
+  unlinkMember: handleWindowLayoutUnlink,
+  commitReorder: (layoutId, memberId, toIndex) => {
+    const next = reorderWindowLayoutMember(state, layoutId, memberId, toIndex);
     void store.commit(next).then((persisted) => {
-      if (persisted) noteWindowLayoutCommit(drag.layoutId);
+      if (persisted) noteWindowLayoutCommit(layoutId);
     });
-  });
+  },
+  dropOutPx: WINDOW_LAYOUT_DROP_OUT_PX,
 });
-
-elements.grid.addEventListener('pointercancel', (event) => {
-  if (WIDGET_SURFACE) return;
-  // 018X6: ordinary pointercancel cancels ONLY when its pointerId matches the
-  // active drag (preserving prior multi-pointer behavior); read-only/Escape
-  // force-cancel via cancelWindowLayoutDrag().
-  const active = windowLayoutMemberDrag.get();
-  if (!active || !windowLayoutMemberDrag.cancelMatching(event.pointerId)) return;
-  restoreWindowLayoutMemberDomOrder(active.layoutId);
-  const members = document.querySelector('[data-wl-members].wl-drag-out');
-  if (members) members.classList.remove('wl-drag-out');
-});
-
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && windowLayoutMemberDrag.isActive()) {
-    cancelWindowLayoutDrag();
-  }
-});
+function cancelWindowLayoutDrag() { windowLayoutWorkspaceMemberDrag.cancel(); }
 
 elements.grid.addEventListener('click', (event) => {
   if (WIDGET_SURFACE) return;
@@ -4523,10 +4418,7 @@ elements.grid.addEventListener('click', (event) => {
     if (detachedLayout && !event.target.closest('[data-wl-reattach]')) return;
     const memberButton = event.target.closest('[data-wl-member]');
     if (memberButton) {
-      if (windowLayoutDragJustMoved) {
-        windowLayoutDragJustMoved = false;
-        return;
-      }
+      if (windowLayoutWorkspaceMemberDrag.consumeJustMoved()) return;
       if (!event.ctrlKey && !event.shiftKey
         && !windowLayoutRuntime.isolateMode.isActive(memberButton.dataset.wlLayout)) {
         // A PLAIN CLICK TOGGLES. This branch used to check readiness and RETURN -

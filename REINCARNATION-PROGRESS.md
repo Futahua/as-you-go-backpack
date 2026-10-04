@@ -335,3 +335,23 @@ Focused surface gate: 73 pass / 0 fail / 0 skip. Full `npm test`: 1826 pass /
 Papers host/preload/runtime, Proxima, Delegate Wave and creator data were untouched.
 The dated entry is down to 5901 lines; remaining live attached/member-control wiring
 and the final authority/completion audit remain open.
+
+## Attached member-drag lifecycle receipt
+
+Production: `public/workspace-20260730b.js` and new
+`public/app/window-layout-workspace-member-drag.js`. Supporting changes:
+`window-layout-workspace-member-drag.test.mjs`, `compact-card-parity.test.mjs`,
+`package.json`, this architecture guide and this checklist.
+
+The owner contains only attached-card ephemeral drag state: Ctrl-drag start, live DOM
+reorder, drag-out detection, data-only unlink intent, pointer-cancel/Escape rollback,
+inner-selection clearing and one-shot suppression of the click emitted after a real
+drag. The dated entry injects the existing unlink writer and one durable reorder
+adapter; the owner never calls the store, save queue, recording controller or native
+identity authority directly.
+
+Focused gate: 61 pass / 0 fail / 0 skip. Full `npm test`: 1830 pass / 0 fail /
+0 skip. `git diff --check` passed. Protected browser/filesystem, Papers
+host/preload/runtime, Proxima, Delegate Wave and creator data were untouched. The
+dated entry is down to 5793 lines. Attached card click/context-menu/control routing
+and the final authority/completion audit remain open.
