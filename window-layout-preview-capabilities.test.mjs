@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './public/app/window-layout-runtime.js';
+import { createWindowLayoutPreviewCapabilities as createCapabilities } from './public/app/window-layout-preview-capabilities.js';
+const member=(id,title='Doc',state='normal')=>({id,state,descriptor:{version:1,title,executableFingerprint:'a'.repeat(64)},windowInstanceId:'W0123456789abcdef'});
+function harness(overrides={}){
+ let snapshot=null;const cache=new Map();const calls=[];
+ const deps={WIDGET_SURFACE:true,document:{title:''},host:{resolveWindowDescriptor:async descriptor=>{calls.push(descriptor);return {outcome:'success',capability:{bindingId:`cap-${calls.length}`}};}},capabilityForMember:async()=>({bindingId:'attached'}),windowLayoutMemberKey,resolveWindowLayoutDescriptorWithFallback,resolveWindowLayoutMemberDescriptor:async descriptor=>({outcome:'success',capability:{bindingId:descriptor.title}}),windowLayoutWidgetPreviewCapabilities:cache,getSnapshot:()=>snapshot,...overrides};
+ const owner=createCapabilities(deps);return {owner,cache,calls,install:next=>{owner.evict(next);snapshot=next;}};
+}
+test('state-only snapshots retain warm capability; exact instance descriptor is bound',async()=>{const h=harness();h.install({id:'L',members:[member('a')]});const cap=await h.owner.resolve('L','a');h.install({id:'L',members:[member('a','Doc','minimized')]});assert.equal(await h.owner.resolve('L','a'),cap);assert.equal(h.calls.length,1);assert.equal(h.calls[0].windowInstanceId,'W0123456789abcdef');});
+test('re-identification evicts only changed member and removal evicts the absent one',async()=>{const h=harness();h.install({id:'L',members:[member('a'),member('b')]});await h.owner.resolve('L','a');await h.owner.resolve('L','b');h.install({id:'L',members:[member('a','Changed'),member('b')]});assert.equal(h.cache.size,1);await h.owner.resolve('L','a');assert.equal(h.calls.length,3);h.install({id:'L',members:[member('b')]});assert.equal(h.cache.size,1);});
+test('forget after host missing forces fresh resolution',async()=>{const h=harness();h.install({id:'L',members:[member('a')]});await h.owner.resolve('L','a');h.owner.forget('L','a');await h.owner.resolve('L','a');assert.equal(h.calls.length,2);});
+test('same member ids in different layouts never share capabilities',async()=>{const h=harness();h.install({id:'L',members:[member('a')]});const first=await h.owner.resolve('L','a');h.install({id:'other',members:[member('a')]});assert.notEqual(await h.owner.resolve('other','a'),first);assert.equal(h.calls.length,2);});
+test('absent or malformed member descriptors return null without native resolution',async()=>{const h=harness();h.install({id:'L',members:[{id:'bad',descriptor:[]}]});assert.equal(await h.owner.resolve('L','absent'),null);assert.equal(await h.owner.resolve('L','bad'),null);assert.equal(h.calls.length,0);});
+test('successful existence without capability and host errors cannot populate cache',async()=>{for(const resolve of [async()=>({outcome:'success'}),async()=>{throw Error('outage');}]){const h=harness({host:{resolveWindowDescriptor:resolve}});h.install({id:'L',members:[member('a')]});assert.equal(await h.owner.resolve('L','a'),null);assert.equal(h.cache.size,0);}});
+test('attached surface delegates to its existing member capability resolver',async()=>{const h=harness({WIDGET_SURFACE:false});assert.deepEqual(await h.owner.resolve('L','a'),{bindingId:'attached'});assert.equal(h.cache.size,0);});

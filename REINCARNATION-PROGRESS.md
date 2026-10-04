@@ -166,3 +166,18 @@ No environmental failure. Browser/filesystem, native host, recording, durable
 store/state and unrelated Backpacks untouched. Commit containing this receipt
 is the code-only checkpoint. Ordinary preview lifecycle/cache and surface wiring
 remain pending; overall completion remains unproven.
+
+## Preview capability ownership receipt
+
+Production: `public/workspace-20260730b.js`, new
+`public/app/window-layout-preview-capabilities.js`. Supporting:
+`window-layout-preview-capabilities.test.mjs`, `package.json`, `ARCHITECTURE.md`, this
+checklist. Baseline 7 behavioral cases pass before movement; focused 60 pass /
+0 fail / 0 skip; full 1751 pass / 0 fail / 0 skip plus 8 pretests. Retains state-only
+warm capabilities, isolates composite keys, evicts changed/removed identity,
+recovers after explicit missing invalidation, binds exact instance descriptors,
+refuses capability-free success/error and delegates attached resolution unchanged.
+No environmental failure. Thumbnail/ordinary preview lifecycle, native identity,
+store/persistence, browser/filesystem, host/preload and other Backpacks unchanged.
+Existing snapshot and cache storage remain caller-owned, with no second authority.
+This commit is the checkpoint; popover/dwell and surface extraction still pending.

@@ -426,3 +426,9 @@ retains event translation through the existing pure Shift planner and supplies
 only Peek host methods, capability resolution, preview cancellation and existing
 diagnostic presentation dependencies. Read-only held/key getters expose ephemeral
 lifecycle state; no durable state or second native authority is introduced.
+
+Preview capability resolution and identity-based retention live in
+`public/app/window-layout-preview-capabilities.js`. It consumes the existing
+capability map and a widget snapshot getter; native descriptor fallback remains
+in the runtime module. State-only rerenders retain warm tokens, changed identities
+and missing outcomes evict, and attached surfaces delegate to their existing resolver.
