@@ -167,6 +167,7 @@ export function createFileCapabilityPanel(options) {
     activeBrowserTabId: null,
     browserSurface: null,
     browserPollTimer: null,
+    browserDownloadsOpen: false,
     imagePreviewObserver: null,
     markdownPreviewObserver: null,
     markdownAutoscrollCancel: null,
@@ -661,19 +662,29 @@ export function createFileCapabilityPanel(options) {
     }
   }
 
-  async function populateDownloadsMenu(menu) {
-    if (!menu) return;
-    menu.replaceChildren();
+  async function populateDownloadsPage(container) {
+    if (!container) return;
+    container.replaceChildren();
+    const heading = documentRef.createElement('div');
+    heading.className = 'file-capability-browser-downloads-heading';
+    const title = documentRef.createElement('strong');
+    title.textContent = 'Downloads';
+    const hint = documentRef.createElement('span');
+    hint.textContent = 'Downloaded files';
+    heading.append(title, hint);
+    container.append(heading);
     const result = await host.fileCapability('browser-downloads', {}).catch(() => null);
     const downloads = Array.isArray(result?.downloads) ? result.downloads : [];
     if (!downloads.length) {
       const empty = documentRef.createElement('div');
       empty.className = 'file-capability-browser-download-empty';
       empty.textContent = 'No recent downloads';
-      menu.append(empty);
+      container.append(empty);
       return;
     }
-    for (const download of downloads.slice(0, 12)) {
+    const list = documentRef.createElement('div');
+    list.className = 'file-capability-browser-download-list';
+    for (const download of downloads.slice(0, 50)) {
       const row = documentRef.createElement('div');
       row.className = 'file-capability-browser-download';
       const label = documentRef.createElement('button');
@@ -702,8 +713,9 @@ export function createFileCapabilityPanel(options) {
         void host.fileCapability('reveal', { path: download.path }).catch(() => {});
       });
       row.append(label, stateLabel, reveal);
-      menu.append(row);
+      list.append(row);
     }
+    container.append(list);
   }
 
   function syncAdblockButton(button, adblock) {
@@ -747,6 +759,7 @@ export function createFileCapabilityPanel(options) {
       item.dataset.browserTabId = tab.id;
       const select = createButton(documentRef, browserTabFallbackTitle(tab), 'file-capability-browser-tab-label');
       select.addEventListener('click', () => {
+        state.browserDownloadsOpen = false;
         state.activeBrowserTabId = tab.id;
         tab.lastActiveAt = Date.now();
         persistBrowserTabs();
@@ -773,6 +786,7 @@ export function createFileCapabilityPanel(options) {
     const add = createButton(documentRef, '+', 'file-capability-browser-tab-add');
     add.title = 'New tab';
     add.addEventListener('click', () => {
+      state.browserDownloadsOpen = false;
       const tab = createBrowserTab(DEFAULT_BROWSER_HOME, { title: 'Google' });
       if (!tab) return;
       renderBrowserWorkspace();
@@ -805,13 +819,11 @@ export function createFileCapabilityPanel(options) {
     });
     const downloads = createButton(documentRef, '↓', 'file-capability-browser-nav file-capability-browser-tool');
     downloads.title = 'Downloads';
-    const downloadsMenu = documentRef.createElement('div');
-    downloadsMenu.className = 'file-capability-browser-downloads';
-    downloadsMenu.hidden = true;
+    downloads.classList.toggle('active', state.browserDownloadsOpen);
     downloads.addEventListener('click', (event) => {
       event.preventDefault();
-      downloadsMenu.hidden = !downloadsMenu.hidden;
-      if (!downloadsMenu.hidden) void populateDownloadsMenu(downloadsMenu);
+      state.browserDownloadsOpen = !state.browserDownloadsOpen;
+      renderBrowserWorkspace();
     });
     const adblock = createButton(documentRef, '◇', 'file-capability-browser-nav file-capability-browser-tool file-capability-browser-adblock');
     adblock.title = 'Ad blocker';
@@ -832,7 +844,8 @@ export function createFileCapabilityPanel(options) {
     address.autocomplete = 'off';
     address.spellcheck = false;
     address.placeholder = 'Enter URL';
-    address.value = activeBrowserTab()?.url || '';
+    address.value = state.browserDownloadsOpen ? 'Downloads' : (activeBrowserTab()?.url || '');
+    address.disabled = state.browserDownloadsOpen;
     toolbar.addEventListener('submit', (event) => {
       event.preventDefault();
       const tab = activeBrowserTab();
@@ -853,10 +866,21 @@ export function createFileCapabilityPanel(options) {
     const surface = documentRef.createElement('div');
     surface.className = 'file-capability-native-preview file-capability-browser-preview';
     state.browserSurface = surface;
-    shell.append(tabsBar, toolbar, downloadsMenu, surface);
+    shell.append(tabsBar, toolbar, surface);
     preview.append(shell);
     syncBrowserChrome();
     void refreshAdblockButton(adblock);
+
+    if (state.browserDownloadsOpen) {
+      back.disabled = true;
+      forward.disabled = true;
+      reload.disabled = true;
+      lens.disabled = true;
+      adblock.disabled = true;
+      surface.classList.add('file-capability-browser-downloads-page');
+      void populateDownloadsPage(surface);
+      return;
+    }
 
     if (!state.expanded) {
       surface.textContent = 'Expand the preview pane to use the browser.';
@@ -896,6 +920,7 @@ export function createFileCapabilityPanel(options) {
     revealButton.hidden = true;
     openTabButton.hidden = true;
     actions.hidden = true;
+    state.browserDownloadsOpen = false;
     browserTabForSource(source);
     renderBrowserWorkspace();
   }
