@@ -167,6 +167,7 @@ export function createFileCapabilityPanel(options) {
     activeBrowserTabId: null,
     browserSurface: null,
     browserPollTimer: null,
+    browserFaviconHydration: null,
     browserDownloadsOpen: false,
     browserDownloads: [],
     browserDownloadCompletionPending: false,
@@ -560,6 +561,33 @@ export function createFileCapabilityPanel(options) {
     tab.faviconUrl = safeBrowserFavicon(hostTab.faviconUrl);
     persistBrowserTabs();
     syncBrowserChrome(hostTab);
+  }
+
+  function hydrateBrowserFavicons() {
+    if (state.browserFaviconHydration) return state.browserFaviconHydration;
+    const pending = state.browserTabs.filter((tab) =>
+      tab.id !== state.activeBrowserTabId && !safeBrowserFavicon(tab.faviconUrl));
+    if (pending.length === 0) return Promise.resolve();
+    let cursor = 0;
+    state.browserFaviconHydration = (async () => {
+      const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {
+        while (cursor < pending.length) {
+          const tab = pending[cursor++];
+          if (!tab) continue;
+          const expectedUrl = tab.url;
+          const result = await host.fileCapability('browser-favicon-resolve', { url: expectedUrl }).catch(() => null);
+          const faviconUrl = safeBrowserFavicon(result?.faviconUrl);
+          if (!faviconUrl || !state.browserTabs.includes(tab) || tab.url !== expectedUrl) continue;
+          tab.faviconUrl = faviconUrl;
+          persistBrowserTabs();
+          syncBrowserChrome();
+        }
+      });
+      await Promise.all(workers);
+    })().finally(() => {
+      state.browserFaviconHydration = null;
+    });
+    return state.browserFaviconHydration;
   }
 
   function downloadProgress(download) {
@@ -1065,6 +1093,7 @@ export function createFileCapabilityPanel(options) {
     shell.append(tabsBar, toolbar, surface);
     preview.append(shell);
     syncBrowserChrome();
+    void hydrateBrowserFavicons();
     void refreshAdblockButton(adblock);
 
     if (state.browserDownloadsOpen) {
