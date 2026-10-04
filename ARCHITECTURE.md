@@ -433,6 +433,22 @@ capability map and a widget snapshot getter; native descriptor fallback remains
 in the runtime module. State-only rerenders retain warm tokens, changed identities
 and missing outcomes evict, and attached surfaces delegate to their existing resolver.
 
+Compact-widget surface wiring now belongs to
+`public/app/window-layout-widget-surface.js`. It owns the live compact surface's
+snapshot/render loop, local selection/drag gestures, resize fitting, hover policy,
+Quick Run key handoff, picker/event wiring and teardown. It receives shared card,
+picker, preview and native-operation owners through explicit dependencies and reports
+only command intents through the existing widget channel. It has no direct durable
+store/save/commit or recording-writer interface; the workspace remains the sole
+durable writer. `public/workspace-20260730b.js` retains only construction and narrow
+callbacks for the few shared ephemeral references needed by other composition code.
+
+The old full-workspace `?detach=1` architecture is already retired from reachability;
+the production detachment shim always remains in workspace/non-read-only mode while
+compact widgets provide the live detached-card experience. Therefore the historical
+roadmap item to extract a separate full-surface detached bootstrap is not a current
+completion requirement unless that product behavior is deliberately revived later.
+
 `public/app/window-layout-preview-presentation.js` owns the one popover's DOM,
 anchor/name/icon state, animation-frame cleanup, native preview presentation
 routing and 100ms hover dwell. The existing thumbnail scheduler is supplied lazily;

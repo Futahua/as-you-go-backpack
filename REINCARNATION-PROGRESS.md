@@ -33,8 +33,10 @@ No release, installation, restart, process termination, or creator-data mutation
 - [x] Extract recording/tracking orchestration, demand, retirement and draining;
       retain native identity authority and two genuine missing observations.
 - [x] Isolate preview coordination/cache lifecycle and Shift peek ownership.
-- [ ] Separate workspace/widget/detached surface wiring. The dated entry must
-      compose named owners rather than carry feature business logic or markup.
+- [ ] Finish live surface separation. Compact-widget wiring is now extracted;
+      the dated entry still carries attached/workspace window-layout event wiring.
+      The historical full-surface detach path is retired/unreachable and is not a
+      required extraction target merely because the old roadmap named it.
 - [ ] Refresh architecture/dependency map, remove superseded implementations and
       audit for duplicate persistence, identity or lifecycle authorities.
 - [ ] Run complete automated gates and applicable isolated runtime/visual proofs.
@@ -283,3 +285,31 @@ Existing retirement writer and recording runtime remain the sole authorities.
 No environmental failure. Protected browser/filesystem, host/preload, unrelated
 Backpacks and creator data untouched. Surface split, final architecture/authority
 audit and runtime/visual acceptance still remain; overall completion is unproven.
+
+## Compact widget surface receipt
+
+Checkpoint: `d3455899068201852adc1dd1af34d328aba61744`.
+
+Production: `public/workspace-20260730b.js` and new
+`public/app/window-layout-widget-surface.js`. Supporting changes retarget the existing
+compact-card, picker, hover-policy, clear, channel, render-identity and workspace
+characterization tests to the owner that now contains the behavior; new
+`window-layout-widget-surface.test.mjs` covers listener-before-ready ordering,
+duplicate snapshot stability, one-time geometry restoration, widget-local opacity,
+orphan/deletion close behavior, pagehide teardown and resize debounce.
+
+The extraction moves compact-surface snapshot handling, resize, selection, drag,
+hover input, picker intents, Quick Run handoff and teardown together. The dated entry
+keeps only dependency construction plus explicit callbacks for shared ephemeral
+references. The widget owner contains no direct store/save/commit/document-writer
+surface; durable commands still cross the existing widget channel to the workspace
+writer. An unused legacy in-card picker-markup function disappeared with the moved
+block; both live native chooser branches remain characterized as using the same exact
+membership identity rule.
+
+Focused affected gate: 163 pass / 0 fail / 0 skip. Full `npm test`: 1821 pass /
+0 fail / 0 skip. `git diff --check` passed. Browser, filesystem/file capability,
+Papers host/preload/runtime, Proxima, Delegate Wave and creator data were untouched.
+Existing untracked `work/` evidence was preserved. No package/install/restart/release
+or installed-runtime claim was made. Live attached/workspace surface wiring and the
+final authority/completion audit remain open.
