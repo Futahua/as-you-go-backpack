@@ -1,3 +1,4 @@
+import { createWindowLayoutCandidateBinder } from './public/app/window-layout-candidate-binding.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
@@ -51,11 +52,16 @@ test('picker enumeration skips serial native icon extraction while Auto hydratio
   const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const picker = source.match(/async function openWindowLayoutPicker\(layoutId\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
   const widgetPicker = source.match(/async function openWidgetPicker\(\)\s*\{([\s\S]*?)\n  \}/)?.[1] ?? '';
-  const fallbackBind = source.match(/async function bindWindowLayoutPickerCandidate\(candidateId, row\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
   const iconRefresh = source.match(/async function runWindowLayoutIconRefresh\(\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
   assert.match(picker, /host\.windowCandidates\(\{\s*includeNativeIcons:\s*false\s*\}\)/);
   assert.match(widgetPicker, /host\.windowCandidates\(\{\s*includeNativeIcons:\s*false\s*\}\)/);
-  assert.match(fallbackBind, /host\.windowCandidates\(\{\s*includeNativeIcons:\s*false\s*\}\)/);
+  const enumerationOptions = [];
+  const bind = createWindowLayoutCandidateBinder({
+    bindWindowCandidate: async () => ({ outcome: 'missing' }),
+    windowCandidates: async (options) => { enumerationOptions.push(options); return { outcome: 'success', candidates: [] }; },
+  });
+  await bind('expired', { title: 'Notepad' });
+  assert.deepEqual(enumerationOptions, [{ includeNativeIcons: false }]);
   assert.match(source, /requestCandidates:\s*\(\)\s*=>\s*host\.windowCandidates\(\{\s*includeNativeIcons:\s*true\s*\}\)/);
   assert.match(source, /createWindowLayoutIconHydration/);
 });

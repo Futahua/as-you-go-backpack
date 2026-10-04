@@ -348,3 +348,34 @@ These are stable and must not change casually:
   double-click navigation, file/app double-click launch, web-link open, directory
   double-click reveal, keyboard Enter, drag, marquee, external drop, Bin restore/delete,
   and the failed-load fallback staying interactive.
+
+## Reincarnation checkpoint — 2026-10-04
+
+Window-layout chooser binding/recovery now belongs to
+`public/app/window-layout-candidate-binding.js`, constructed with only
+`bindWindowCandidate` and `windowCandidates`. Attached toggle/removal and widget
+list picks retain their exact chooser row and call the same binder in the entry.
+The binder owns no membership, recording, document, identity, or persistence state.
+
+Invariant: bind first; relist only on typed missing with a retained row; rebind
+only one title/application match; retain the original baseline fallback when
+application labels are absent; refuse ambiguous matches. Outcomes and transport
+errors propagate unchanged. Durable writers and native identity authority stay
+in their existing owners.
+
+Changed files: `public/workspace-20260730b.js`,
+`public/app/window-layout-candidate-binding.js`,
+`window-layout-candidate-binding.test.mjs`, `window-layout-member-icon.test.mjs`,
+`package.json`, and this architecture guide. The icon test's inline-source
+assumption was replaced by a production-binder behavior check.
+
+Validation: 15 characterization tests passed against the original inline binder
+before movement; focused suite 113 pass / 0 fail / 0 skip; full main suite
+1691 pass / 0 fail / 0 skip, plus npm pretest 8 pass / 0 fail / 0 skip.
+No environmental failure occurred on this machine. Browser/filesystem panels,
+Papers host/preload/runtime, recording, store, and unrelated Backpacks are unchanged.
+No installed-runtime/native eye test was run: this is source and automated-test
+acceptance of a nonvisual extraction, not a claim of creator visual acceptance.
+No packaging, installation, release, restart, or creator-data mutation was performed.
+Existing untracked work artifacts were preserved. The commit containing this section
+is the code-only rollback point; no state migration is needed.

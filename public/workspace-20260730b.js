@@ -1,3 +1,4 @@
+import { createWindowLayoutCandidateBinder } from './app/window-layout-candidate-binding.js';
 // Build marker. Papers runs from a packaged copy, so the first question when a
 // change appears to have no effect is whether this file is the one running at
 // all. Logged once at module load: if this line is absent from the console, the
@@ -1826,23 +1827,10 @@ async function openWindowLayoutPicker(layoutId) {
  * row the user clicked. Retry only that typed `missing` case, and only when a
  * fresh enumeration has one unambiguous title/application match. Duplicate
  * Chrome windows remain fail-closed. */
-async function bindWindowLayoutPickerCandidate(candidateId, row) {
-  let bound = await host.bindWindowCandidate(candidateId);
-  if (bound?.outcome !== 'missing' || !row) return { bound, row };
-  const refreshed = await host.windowCandidates({ includeNativeIcons: false });
-  if (refreshed?.outcome !== 'success') return { bound, row };
-  const matches = (refreshed.candidates ?? []).filter((candidate) => {
-    if (candidate.title !== row.title) return false;
-    if (typeof row.applicationLabel === 'string' && typeof candidate.applicationLabel === 'string') {
-      return candidate.applicationLabel === row.applicationLabel;
-    }
-    return true;
-  });
-  if (matches.length !== 1) return { bound, row };
-  const rebound = await host.bindWindowCandidate(matches[0].id);
-  if (rebound?.outcome === 'success') return { bound: rebound, row: matches[0] };
-  return { bound: rebound, row: matches[0] };
-}
+const bindWindowLayoutPickerCandidate = createWindowLayoutCandidateBinder({
+  bindWindowCandidate: host.bindWindowCandidate,
+  windowCandidates: host.windowCandidates,
+});
 
 async function closeWindowLayoutCandidate(layoutId, candidateId, candidates) {
   const result = await endExactWindowCandidateProcess({
