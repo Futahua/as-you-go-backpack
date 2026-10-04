@@ -125,7 +125,7 @@ test('a rejected policy renewal reports one fixed diagnostic and success clears 
 });
 
 test('workspace hover-policy failure uses fixed diagnostics and cannot create an AYG warning banner', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
   const policySource = await readFile(new URL('./public/app/widget-hover-policy.js', import.meta.url), 'utf8');
   const wiring = source.match(/const widgetHoverPolicy = createWidgetHoverPolicy\(\{([\s\S]*?)\n  \}\);/)?.[1] ?? '';
   assert.match(wiring, /publish:\s*\(enabled, blockedBindings\)\s*=>\s*host\.setWidgetHoverPolicy\(enabled, blockedBindings\)/);
@@ -169,7 +169,7 @@ test('Quick Run handles letters, editing keys and repeats only during physical h
 });
 
 test('Quick Run key capture is locally gated by hover and pagehide revokes the host policy', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
   assert.match(source, /!widgetHoverPolicy\.isHovered\(\)[\s\S]*?widgetState\.pickUnsubscribe/);
   assert.match(source, /widgetRoot\.addEventListener\('pointerenter', onWidgetPointerEnter\)/);
   assert.match(source, /widgetRoot\.addEventListener\('pointermove', onWidgetPointerEnter\)/);

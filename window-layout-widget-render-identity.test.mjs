@@ -45,7 +45,7 @@ function layout(members, cardSize = null) {
 const BASE = layout([['m1', 'Alpha', 'normal'], ['m2', 'Beta', 'normal']]);
 
 test('compact widget shows a bootstrap card and retries a silent initial snapshot request', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
   const markup = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
   assert.match(markup, /workspace-20260730b\.js\?build=browser-capabilities-v2/);
   assert.match(markup, /workspace-20260730b\.css\?build=browser-capabilities-v2/);
@@ -57,7 +57,7 @@ test('compact widget shows a bootstrap card and retries a silent initial snapsho
 
 test('direct Quick Pick confirms on any key except Escape on both surfaces', () => {
   assert.match(workspaceSource, /if \(windowLayoutRuntime\.pickUnsubscribe\) \{[\s\S]*?host\.pickWindowCommit\(\)/);
-  assert.match(workspaceSource, /if \(!widgetState\.pickUnsubscribe\) return;[\s\S]*?event\.key === 'Escape'[\s\S]*?host\.pickWindowCancel\(\)[\s\S]*?host\.pickWindowCommit\(\)/);
+  assert.match(widgetSurfaceSource, /if \(!widgetState\.pickUnsubscribe\) return;[\s\S]*?event\.key === 'Escape'[\s\S]*?host\.pickWindowCancel\(\)[\s\S]*?host\.pickWindowCommit\(\)/);
 });
 
 test('compact widget never renders warning/status text', async () => {
@@ -160,16 +160,17 @@ test('render identity is stable under repeated evaluation of one snapshot', () =
 // harness in this suite; the escape it pins is the one that makes the sentence reachable, and the wire that
 // carries it is proven behaviourally in window-layout-widget-channel.test.mjs.
 const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+const widgetSurfaceSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
 
 test('widget render forwards tracking state into the shared card candidate', () => {
-  assert.match(workspaceSource, /tracking: snapshot\.tracking/);
+  assert.match(widgetSurfaceSource, /tracking: snapshot\.tracking/);
 });
 
 test('widget opacity comes from its local preference, with an opaque default', () => {
-  assert.match(workspaceSource, /function applyWidgetOpacity\(\)/);
-  assert.match(workspaceSource, /applyWidgetOpacity\(\);/);
+  assert.match(widgetSurfaceSource, /function applyWidgetOpacity\(\)/);
+  assert.match(widgetSurfaceSource, /applyWidgetOpacity\(\);/);
   assert.match(
-    workspaceSource,
+    widgetSurfaceSource,
     /let widgetOpacity = Number\.isFinite\(parsedWidgetOpacity\)[\s\S]{0,120}: 1/,
   );
 });
@@ -196,7 +197,7 @@ function region(source, start, end) {
 }
 
 test('the committed status is displayed before the guard that a no-op cannot pass', () => {
-  const handler = region(workspaceSource, 'function handleWidgetMessage(message) {', 'if (message.type === \'error\')');
+  const handler = region(widgetSurfaceSource, 'function handleWidgetMessage(message) {', 'if (message.type === \'error\')');
   const displayed = handler.indexOf('setWindowLayoutStatus(layoutId, committedStatus)');
   const guard = handler.indexOf('if (renderIdentity === widgetState.lastRenderIdentity) return;');
   assert.notEqual(displayed, -1, 'the committed branch must be able to say something');

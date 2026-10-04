@@ -5,6 +5,7 @@ import { reorderWindowLayoutMember } from './model.mjs';
 import { WINDOW_LAYOUT_CARD_MAX_WIDTH } from './public/app/window-layout-widget-channel.js';
 
 const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
+const widgetSurfaceSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
 const itemsCss = await readFile(new URL('./public/styles/items.css', import.meta.url), 'utf8');
 
 test('021: attached layout markup removes decorative art and blocks layout editor customization', () => {
@@ -46,11 +47,11 @@ test('037: one shared compact presentation maximum, content-fit native host, no 
   assert.match(itemsCss, /max-width:\s*min\(100%, var\(--wl-card-max-width,\s*280px\)/);
   // 037: the detached widget SNAPS its client width at the compact maximum and
   // reports the actual capped card/client width (not an empty host footprint).
-  assert.match(workspaceSource, /const cardWidth = Math\.min\(width, WINDOW_LAYOUT_CARD_MAX_WIDTH\)/);
-  assert.match(workspaceSource, /void host\.widgetReportSize\(cardWidth, height\)/);
-  assert.match(workspaceSource, /client\.sendCardSize\(cardWidth, height\)/);
+  assert.match(widgetSurfaceSource, /const cardWidth = Math\.min\(width, WINDOW_LAYOUT_CARD_MAX_WIDTH\)/);
+  assert.match(widgetSurfaceSource, /void host\.widgetReportSize\(cardWidth, height\)/);
+  assert.match(widgetSurfaceSource, /client\.sendCardSize\(cardWidth, height\)/);
   // 037: the restore caps an over-max legacy persisted width on open.
-  assert.match(workspaceSource, /Math\.round\(Math\.min\(cardSize\.width, WINDOW_LAYOUT_CARD_MAX_WIDTH\)\)/);
+  assert.match(widgetSurfaceSource, /Math\.round\(Math\.min\(cardSize\.width, WINDOW_LAYOUT_CARD_MAX_WIDTH\)\)/);
   // 037: the attached shell footprint is capped at the compact maximum too.
   assert.match(workspaceSource, /const width = Math\.min\(raw, WINDOW_LAYOUT_CARD_MAX_WIDTH\);/);
 });
@@ -78,18 +79,18 @@ test('038: the compact-widget surface hides ALL workspace host furniture; the sh
 test('039/041: the detached native client auto-fits the card in BOTH axes (width = card border box, height = rendered card content)', () => {
   // The report measures the CARD content and reports its WIDTH and HEIGHT (not
   // the client size), so no empty surrounding or vertical canvas can persist.
-  assert.match(workspaceSource, /const cardWidth = Math\.min\(width, WINDOW_LAYOUT_CARD_MAX_WIDTH\)/);
-  assert.match(workspaceSource, /const height = content && content\.height > 0 \? content\.height : window\.innerHeight;/);
+  assert.match(widgetSurfaceSource, /const cardWidth = Math\.min\(width, WINDOW_LAYOUT_CARD_MAX_WIDTH\)/);
+  assert.match(widgetSurfaceSource, /const height = content && content\.height > 0 \? content\.height : window\.innerHeight;/);
   // 041: the client width snaps to the content-fit card border box; 039: the
   // client height auto-corrects; 037: the over-max width snaps. One report.
-  assert.match(workspaceSource, /if \(width > WINDOW_LAYOUT_CARD_MAX_WIDTH\s*\|\|\s*Math\.abs\(height - window\.innerHeight\) > 1\)/);
-  assert.match(workspaceSource, /void host\.widgetReportSize\(cardWidth, height\)/);
+  assert.match(widgetSurfaceSource, /if \(width > WINDOW_LAYOUT_CARD_MAX_WIDTH\s*\|\|\s*Math\.abs\(height - window\.innerHeight\) > 1\)/);
+  assert.match(widgetSurfaceSource, /void host\.widgetReportSize\(cardWidth, height\)/);
   // Every re-render after the first restore auto-corrects (member-count change);
   // the first restore never measures the transient default width.
-  assert.match(workspaceSource, /const wasRestored = windowRestoredOnce;/);
-  assert.match(workspaceSource, /if \(wasRestored && !skipHostResize\) reportWidgetSize\(\);/);
+  assert.match(widgetSurfaceSource, /const wasRestored = windowRestoredOnce;/);
+  assert.match(widgetSurfaceSource, /if \(wasRestored && !skipHostResize\) reportWidgetSize\(\);/);
   // The shared geometry (content-fit card width + card content height) persists.
-  assert.match(workspaceSource, /client\.sendCardSize\(cardWidth, height\);/);
+  assert.match(widgetSurfaceSource, /client\.sendCardSize\(cardWidth, height\);/);
 });
 
 test('041: shared cards fill a resizable compact host and fresh shells remain intrinsic-sized', () => {

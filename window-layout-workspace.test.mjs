@@ -871,6 +871,7 @@ test('direct picker self-recovers orphaned Papers sessions before attached and w
 
 test('pagehide explicitly releases active native direct-pick ownership on both surfaces', async () => {
   const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-widget-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-tracking-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-recording-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const widgetSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
 
   const teardownStart = source.indexOf('function teardownWindowLayoutRecording()');
   const teardownEnd = source.indexOf('// 018X1: pagehide', teardownStart);
@@ -879,10 +880,9 @@ test('pagehide explicitly releases active native direct-pick ownership on both s
   assert.match(teardown, /host\.pickWindowCancel\(\)\.catch\(\(\) => undefined\)/,
     'workspace pagehide releases a still-owned Papers picker instead of only dropping its listener');
 
-  const widgetStart = source.indexOf('function bootstrapWindowLayoutWidget()');
-  const pagehideStart = source.indexOf("  window.addEventListener('pagehide', () => {", widgetStart);
-  const pagehideEnd = source.indexOf('// 035/037/039:', pagehideStart);
-  const widgetPagehide = source.slice(pagehideStart, pagehideEnd);
+  const pagehideStart = widgetSource.indexOf("  window.addEventListener('pagehide', () => {");
+  const pagehideEnd = widgetSource.indexOf('// 035/037/039:', pagehideStart);
+  const widgetPagehide = widgetSource.slice(pagehideStart, pagehideEnd);
   assert.match(widgetPagehide, /const hadActivePick = Boolean\(widgetState\.pickAttempt \|\| widgetState\.pickUnsubscribe\)/);
   assert.match(widgetPagehide, /widgetState\.pickAttempt = null/);
   assert.match(widgetPagehide, /host\.pickWindowCancel\(\)\.catch\(\(\) => undefined\)/,
@@ -1043,6 +1043,7 @@ test('bound list-pick identity treats same title on another executable as an add
 });
 test('attached and detached list picks use bound descriptor identity and the shared durable writer', async () => {
   const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-widget-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-tracking-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-recording-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const widgetPickerSource = await readFile(new URL('./public/app/window-layout-widget-picker.js', import.meta.url), 'utf8');
   const attachedPickerStart = source.indexOf('async function openWindowLayoutPicker(layoutId)');
   const attachedPickerEnd = source.indexOf('/** A tracking lifecycle refresh', attachedPickerStart);
   const attachedPicker = source.slice(attachedPickerStart, attachedPickerEnd);
@@ -1063,9 +1064,9 @@ test('attached and detached list picks use bound descriptor identity and the sha
   assert.doesNotMatch(attached, /store\.commit\(|saveWorkspaceView\(|descriptor\.title\s*===\s*row\.title/,
     'attached list picking has no title-only or side-channel persistence path');
 
-  const widgetStart = source.indexOf('  async function handleWidgetListCandidate(candidateId, intent = \'toggle\')');
-  const widgetEnd = source.indexOf('  async function beginWidgetDirectPick()', widgetStart);
-  const widget = source.slice(widgetStart, widgetEnd);
+  const widgetStart = widgetPickerSource.indexOf('  async function handleWidgetListCandidate(candidateId, intent = \'toggle\')');
+  const widgetEnd = widgetPickerSource.indexOf('  async function beginWidgetDirectPick()', widgetStart);
+  const widget = widgetPickerSource.slice(widgetStart, widgetEnd);
   assert.match(widget, /windowLayoutPickForBoundCandidate\(/);
   assert.match(widget, /if \(!pick\) \{\s*setWindowLayoutStatus\(layoutId, windowLayoutHasValidInstanceId\(bound\.descriptor\)[\s\S]*?return false;/,
     'the detached picker reports identity failure without sending a mutation');
@@ -1074,17 +1075,15 @@ test('attached and detached list picks use bound descriptor identity and the sha
   assert.doesNotMatch(widget, /selectedOverride|descriptor\.title\s*===\s*bound\.descriptor\.title/,
     'detached list picking decides add/remove only after binding the persisted descriptor pair');
 
-  const widgetPickerStart = source.indexOf('  async function openWidgetPicker()');
-  const widgetPickerEnd = source.indexOf('  function windowLayoutWidgetPickerMarkup(candidates)', widgetPickerStart);
-  const widgetPicker = source.slice(widgetPickerStart, widgetPickerEnd);
+  const widgetPickerStart = widgetPickerSource.indexOf('  async function openWidgetPicker()');
+  const widgetPickerEnd = widgetPickerSource.indexOf('  function closeWidgetPicker', widgetPickerStart);
+  const widgetPicker = widgetPickerSource.slice(widgetPickerStart, widgetPickerEnd);
   assert.match(widgetPicker, /toWindowLayoutPickerRows\([\s\S]*?widgetState\.snapshot\.members \?\? \[\],[\s\S]*?windowLayoutCandidateIsMember/,
     'detached native rows mark membership from the widget snapshot and exact identity rule');
   assert.doesNotMatch(widgetPicker, /currentTitles|currentTitles\.has\(candidate\.title\)/,
     'detached row status does not use mutable display titles');
-  const widgetMarkupStart = widgetPickerEnd;
-  const widgetMarkupEnd = source.indexOf('  function closeWidgetPicker()', widgetMarkupStart);
-  assert.match(source.slice(widgetMarkupStart, widgetMarkupEnd), /windowLayoutCandidateIsMember\(/,
-    'fallback in-card picker uses the same identity rule');
+  assert.match(widgetPicker, /host\.windowCandidatePicker\(\s*toWindowLayoutPickerRows\(result\.candidates, widgetState\.snapshot\.members \?\? \[\], windowLayoutCandidateIsMember\)/,
+    'fallback native chooser uses the same exact membership identity rule');
 
   const commandStart = source.indexOf("    if (command.kind === 'picker-commit')");
   const commandEnd = source.indexOf("    return { ok: false, error: 'unknown command' };", commandStart);
@@ -1129,6 +1128,7 @@ test('a delayed add rebases on the latest state instead of dropping concurrent w
 
 test('middle-click splits data unlink from Ctrl+middle-click process close', async () => {
   const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-widget-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-tracking-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-recording-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const widgetSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
   const attachedStart = source.indexOf("elements.grid.addEventListener('auxclick', (event) => {");
   const attachedEnd = source.indexOf('// A press on a member is a CONTROL intent', attachedStart);
   const attached = source.slice(attachedStart, attachedEnd);
@@ -1143,9 +1143,9 @@ test('middle-click splits data unlink from Ctrl+middle-click process close', asy
   assert.doesNotMatch(memberClose, /host\.endProcessWindowCapability\(/,
     'member Ctrl+MMB never ends the owning process');
 
-  const widgetStart = source.indexOf('  function handleWidgetCardAuxClick(event)');
-  const widgetEnd = source.indexOf('  async function handleWidgetCardContextMenu(event)', widgetStart);
-  const widget = source.slice(widgetStart, widgetEnd);
+  const widgetStart = widgetSource.indexOf('  function handleWidgetCardAuxClick(event)');
+  const widgetEnd = widgetSource.indexOf('  async function handleWidgetCardContextMenu(event)', widgetStart);
+  const widget = widgetSource.slice(widgetStart, widgetEnd);
   assert.match(widget, /const member = event\.target\.closest\('\[data-wl-member\]'\);/);
   assert.match(widget, /if \(event\.ctrlKey\) \{[\s\S]*closeWindowLayoutMember\(layoutId, member\.dataset\.wlMember\)[\s\S]*\} else \{[\s\S]*kind: 'remove-member'/,
     'the widget closes only for Ctrl+MMB and sends a scoped unlink for plain MMB');
@@ -1226,10 +1226,7 @@ test('startup opens non-docked layouts by default without creating implicit trac
 });
 
 test('a fresh compact widget defaults to fully opaque independent of workspace appearance', async () => {
-  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-widget-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-tracking-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-recording-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
-  const start = source.indexOf('function bootstrapWindowLayoutWidget()');
-  const end = source.indexOf('// 019C: the compact-widget surface never runs', start);
-  const widget = source.slice(start, end);
+  const widget = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
   assert.match(widget, /storedWidgetOpacity === null \? Number\.NaN : Number\(storedWidgetOpacity\)/,
     'an absent localStorage entry is not interpreted as numeric zero');
   assert.match(widget, /: 1;\s*\n\s*function applyWidgetOpacity\(\) \{\s*const opacity = widgetOpacity;/,
@@ -1295,7 +1292,7 @@ test('detached picker re-entry invalidates stale chooser ownership before starti
 });
 
 test('widget member gestures map plain left click to activation and plain right click to toggle', async () => {
-  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-widget-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-tracking-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-recording-lifecycle.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
   const clickStart = source.indexOf('  function handleWidgetCardClick(event)');
   const clickEnd = source.indexOf('  function resetWidgetClearArm()', clickStart);
   const click = source.slice(clickStart, clickEnd);

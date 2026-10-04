@@ -17,7 +17,8 @@ import {
 } from './public/app/window-layout-widget-channel.js';
 
 test('entry wiring opens widgets only after durable layout persistence and self-closes exhausted orphans', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8')
+    + '\n' + await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
   assert.match(source, /commit\(next, \{ requireDurable: true \}\)/);
   assert.match(source, /store\.replace\(deleteWindowLayout\(state, createdLayout\.id\)\)/);
   assert.match(source, /host\.widgetCloseSelf\(\)/);

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
+const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8')
+  + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8')
+  + '\n' + await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
 
 test('active direct picker routes every non-Escape key to confirmation and Escape to cancellation', () => {
   assert.match(source, /if \(event\.key === 'Escape' && windowLayoutRuntime\.pickUnsubscribe\)[\s\S]*?host\.pickWindowCancel\(\)/);

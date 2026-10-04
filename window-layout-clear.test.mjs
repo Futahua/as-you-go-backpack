@@ -27,7 +27,7 @@ test('clear affordance is a hovered backspace and first activation receives the 
   assert.match(rule, /color:\s*#ff5555/);
   assert.match(rule, /filter:\s*drop-shadow\(0 0 5px #ff5555\)/);
   assert.match(css, /\.window-layout-control\.wl-clear:hover[\s\S]*?opacity:\s*1/);
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
   assert.match(source, /handleWidgetClearActivation\(event, clearButton, widgetClearGuard,[\s\S]*?sendCommand\(\{ kind: 'clear-layout' \}\)/);
   assert.match(source, /pointerout[\s\S]*?resetWidgetClearArm\(\)/);
   assert.match(source, /window\.addEventListener\('blur', resetWidgetClearArm\)/);
@@ -103,7 +103,7 @@ test('layout delete turns red on the first pointer click, deletes only on the se
   assert.match(deleteRule, /color:\s*#ff5555/);
   assert.match(deleteRule, /background:\s*rgba\(255, 85, 85, 0\.14\)/);
 
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
   assert.match(source, /Click twice to delete this layout/);
   assert.match(source, /handleWidgetDeleteActivation\(event, deleteButton, widgetDeleteGuard,[\s\S]*?sendCommand\(\{ kind: 'delete-layout' \}\)/);
   assert.match(source, /pointerout[\s\S]*?resetWidgetDeleteArm\(\)/);

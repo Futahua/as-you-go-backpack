@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
+const widgetSurfaceSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
 const itemsCss = await readFile(new URL('./public/styles/items.css', import.meta.url), 'utf8');
 
 test('024: the decorative folder-art rule is removed (no folder illustration)', () => {
@@ -35,7 +36,7 @@ test('033/034/035/036 C5: the ONE shared card component (`.window-layout-card`) 
   assert.doesNotMatch(workspaceSource, /window-layout-card-title/);
   // Both the attached grid node and the detached widget render the SAME card.
   assert.match(workspaceSource, /windowLayoutCardMarkup\(candidate, \{ detached: detachedWidgets\.has\(candidate\.id\) \}\)/);
-  assert.match(workspaceSource, /windowLayoutCardMarkup\([\s\S]*?widgetSurface:\s*true/);
+  assert.match(widgetSurfaceSource, /windowLayoutCardMarkup\([\s\S]*?widgetSurface:\s*true/);
   assert.match(workspaceSource, /function windowLayoutCardMarkup/);
 });
 
@@ -60,21 +61,21 @@ test('024/035: the detached/widget card supports member-icon reorder via the cha
   // The widget drag sends a bounded `reorder` intent; the workspace writer
   // applies it through the model reorder; the widget restores its window ONCE
   // (persisted shared geometry or content-fit) and reports user resizes.
-  assert.match(workspaceSource, /const widgetMemberDrag = createWindowLayoutMemberDrag\(\);/);
-  assert.match(workspaceSource, /client\.sendCommand\(\{ kind: 'reorder', memberId: drag\.memberId, toIndex \}\)/);
+  assert.match(widgetSurfaceSource, /const widgetMemberDrag = createWindowLayoutMemberDrag\(\);/);
+  assert.match(widgetSurfaceSource, /client\.sendCommand\(\{ kind: 'reorder', memberId: drag\.memberId, toIndex \}\)/);
   assert.match(workspaceSource, /if \(command\.kind === 'reorder'\) \{/);
   assert.match(workspaceSource, /reorderWindowLayoutMember\(state, layoutId, command\.memberId, command\.toIndex\)/);
-  assert.match(workspaceSource, /restoreWidgetWindowSize\(\);/);
-  assert.match(workspaceSource, /void host\.widgetReportSize\(\s*Math\.round\(Math\.min\(cardSize\.width, WINDOW_LAYOUT_CARD_MAX_WIDTH\)\),\s*Math\.round\(cardSize\.height\),?\s*\)/);
-  assert.match(workspaceSource, /client\.sendCardSize\(cardWidth, height\)/);
-  assert.match(workspaceSource, /client\.dispose\(\);/);
+  assert.match(widgetSurfaceSource, /restoreWidgetWindowSize\(\);/);
+  assert.match(widgetSurfaceSource, /void host\.widgetReportSize\(\s*Math\.round\(Math\.min\(cardSize\.width, WINDOW_LAYOUT_CARD_MAX_WIDTH\)\),\s*Math\.round\(cardSize\.height\),?\s*\)/);
+  assert.match(widgetSurfaceSource, /client\.sendCardSize\(cardWidth, height\)/);
+  assert.match(widgetSurfaceSource, /client\.dispose\(\);/);
   // The workspace-only member handlers never run on the widget surface (null
   // durable state would otherwise crash the detached card).
   assert.match(workspaceSource, /elements\.grid\.addEventListener\('pointerdown', \(event\) => \{\s*if \(WIDGET_SURFACE\) return;/);
   assert.match(workspaceSource, /elements\.grid\.addEventListener\('click', \(event\) => \{\s*if \(WIDGET_SURFACE\) return;/);
   assert.match(workspaceSource, /if \(!WIDGET_SURFACE && listButton && listButton !== relatedListButton\)/);
-  assert.match(workspaceSource, /scheduleWindowLayoutListDwell\(listButton, openWidgetPicker\)/);
-  assert.match(workspaceSource,
+  assert.match(widgetSurfaceSource, /scheduleWindowLayoutListDwell\(listButton, openWidgetPicker\)/);
+  assert.match(widgetSurfaceSource,
     /!event\.target\.closest\('button, input, \[data-wl-member\]'\)\) clearWidgetSelection\(\)/);
 });
 

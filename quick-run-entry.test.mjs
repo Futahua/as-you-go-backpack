@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+const widgetSurfaceSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
 const binding = await readFile(new URL('./public/app/quick-run/quick-run-workspace.js', import.meta.url), 'utf8');
 
 const regionStart = source.indexOf('// Quick Run (STAGE 5)');
@@ -209,8 +210,8 @@ test('Quick Run activation adds no second launcher and no reveal path (sections 
 });
 
 test('focused compact-widget typing routes to the owning project command surface, not widget-local empty state', () => {
-  assert.match(source, /host\.widgetQuickRunInput\('open', plan\.seed\)/);
-  assert.match(source, /host\.widgetQuickRunInput\('append', plan\.text\)/);
-  assert.match(source, /opening: widgetQuickRunOpening/);
-  assert.doesNotMatch(source, /quickRun\.open\(plan\.seed\)/);
+  assert.match(widgetSurfaceSource, /host\.widgetQuickRunInput\('open', plan\.seed\)/);
+  assert.match(widgetSurfaceSource, /host\.widgetQuickRunInput\('append', plan\.text\)/);
+  assert.match(widgetSurfaceSource, /opening: widgetQuickRunOpening/);
+  assert.doesNotMatch(widgetSurfaceSource, /quickRun\.open\(plan\.seed\)/);
 });
