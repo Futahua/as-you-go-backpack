@@ -1052,7 +1052,7 @@ test('attached and detached list picks use bound descriptor identity and the sha
     'attached row status does not use mutable display titles');
 
   const attachedStart = source.indexOf('async function handleWindowLayoutPickCandidate(layoutId, candidateId)');
-  const attachedEnd = source.indexOf('/** 019B: bounded concurrent group scheduling.', attachedStart);
+  const attachedEnd = source.indexOf('const windowLayoutGroupActions =', attachedStart);
   const attached = source.slice(attachedStart, attachedEnd);
   assert.match(attached, /windowLayoutPickForBoundCandidate\(/);
   assert.match(attached, /await applyWindowLayoutPickSet\(/);

@@ -28,8 +28,8 @@ No release, installation, restart, process termination, or creator-data mutation
 - [ ] Extract card/member/picker view and DOM patching behind presentation inputs.
 - [ ] Extract picker coordination and cleanup for attached/widget callers; preserve
       supersession, subscribe-before-begin, cancellation and byte-zero no-op rules.
-- [ ] Extract group-action orchestration, target selection, prewarm/retry and
-      bounded concurrency; keep existing one commit and partial failure behavior.
+- [x] Extract group-action orchestration and target selection; preserve current
+      broker batching and existing state/save/recording sequence. Unused worker orchestration removed.
 - [ ] Extract recording/tracking orchestration, demand, retirement and draining;
       retain native identity authority and two genuine missing observations.
 - [ ] Isolate preview coordination/cache lifecycle and Shift peek ownership.
@@ -75,3 +75,25 @@ seed deduplication, remove-only no-op, commit rebasing and refusal remain covere
 No environmental failure. Entry, native host, browser/filesystem, store, recording,
 other Backpacks and creator data unchanged. Commit containing this receipt is
 the extraction checkpoint. Overall refactor is still incomplete.
+## Group/range orchestration receipt
+
+Changed production files: `public/workspace-20260730b.js` and new
+`public/app/window-layout-group-actions.js`. Supporting changes:
+`window-layout-group-actions.test.mjs`, `window-layout-workspace.test.mjs`,
+`package.json`, `ARCHITECTURE.md`, and this checklist.
+
+Evidence corrected an obsolete architectural assumption: current group controls
+use the resident broker's one native batch, not the bounded worker helpers still
+sitting unused in the entry. Extracted the active group/range paths unchanged and
+removed only the unreachable worker wrappers, constants, import and construction.
+The existing worker primitives/tests in their owning modules remain intact.
+No legacy worker implementation was reintroduced into the live control path.
+
+Before movement: 8 behavioral tests passed against the original production
+functions. After movement: focused 127 pass / 0 fail / 0 skip; full 1711 pass /
+0 fail / 0 skip plus 8 pretests. Target/all/range/isolate action order, host refusal,
+post-await handoff, latest-state patches, one queued save and recording sequence,
+live range direction and missing-capability invalidation are characterized.
+No environmental failure. Native broker, recording implementation, store,
+browser/filesystem, host/preload, other Backpacks and creator data untouched.
+This commit is the code-only rollback checkpoint; overall refactor remains active.

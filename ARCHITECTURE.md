@@ -394,3 +394,10 @@ candidate membership and bound toggle/remove decisions. `window-layout-workspace
 retains compatibility exports and durable mutation orchestration; it consumes the
 same policy for post-await rebase decisions. Native identity continues to come
 from Papers descriptors, with no host calls or persistence in the policy module.
+
+Active group and range orchestration now lives in
+`public/app/window-layout-group-actions.js`. It consumes explicit injected
+selectors, native broker/observation operations, capability access, read-only
+gates and existing state/save/recording callbacks. Group controls use one
+resident-broker batch; the former uncalled worker wrappers were removed from
+the entry. The separate bounded scheduling/runner modules retain their contracts.

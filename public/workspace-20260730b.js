@@ -1,3 +1,4 @@
+import { createWindowLayoutGroupActions } from './app/window-layout-group-actions.js';
 import { createWindowLayoutWidgetLifecycle } from './app/window-layout-widget-lifecycle.js';
 import { createWindowLayoutCandidateBinder } from './app/window-layout-candidate-binding.js';
 // Build marker. Papers runs from a packaged copy, so the first question when a
@@ -104,8 +105,7 @@ import { createClickTwiceGuard } from './app/click-twice-guard.js';
 import { createWidgetHoverPolicy, createWidgetHoverPolicyDiagnostics } from './app/widget-hover-policy.js';
 import { handleWidgetClearActivation, handleWidgetDeleteActivation } from './app/widget-clear-activation.js';
 import { planWindowLayoutShiftPeekTransition } from './app/window-layout-shift-peek.js';
-import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, createWindowLayoutGroupActionRunner, toggleWindowLayoutMemberVisibility, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
-import { runBoundedConcurrent } from './app/window-layout-actions.js';
+import { createDetachSaveGate, createDetachReadOnlyInputGuards, createWindowLayoutMemberDrag, toggleWindowLayoutMemberVisibility, createReadOnlyStatusSink, orderWindowLayoutMemberButtons, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
 import { createWindowLayoutWidgetChannelWorkspace, createWindowLayoutWidgetChannelClient, windowLayoutWidgetSnapshot, windowLayoutWidgetRenderIdentity, windowLayoutWidgetCommittedStatus, createBoundedRetry, WINDOW_LAYOUT_WIDGET_CHANNEL, WINDOW_LAYOUT_CARD_MAX_WIDTH } from './app/window-layout-widget-channel.js';
 import {
   createWindowLayoutPickApplier,
@@ -1960,172 +1960,26 @@ async function handleWindowLayoutRemoveCandidate(layoutId, candidateId) {
   return applied.outcome === 'committed' && windowLayoutPickApplyOutcome(applied).mutated;
 }
 
-/** 019B: bounded concurrent group scheduling. At most
- * WINDOW_LAYOUT_GROUP_CONCURRENCY members observe/mutate in flight, so a group
- * action's latency scales with the slowest helper call instead of a fully
- * serialized tail; results stay typed per member and a superseded result
- * (read-only handoff begun mid-batch) aborts the whole batch. */
-const WINDOW_LAYOUT_GROUP_CONCURRENCY = 4;
-const WINDOW_LAYOUT_GROUP_ABORT = (result) => result === 'superseded';
-
-/** 016 group actions (selected members when any are selected, otherwise all):
- * minimize, restore/open (applies saved bounds), or isolate (restore the
- * targets, minimize only the unselected members OF THIS LAYOUT). One bounded
- * per-member loop with typed results; partial failures are visible. */
-async function runGroupMemberAction(layoutId, member, action, results, patches) {
-  const capability = await capabilityForMember(layoutId, member.id);
-  // 018X7: capabilityForMember yields even on the cached fast path; a handoff
-  // entered during that microtask must abort before any host call.
-  if (windowLayoutDetachment.isReadOnly()) return 'superseded';
-  if (!capability) return 'missing';
-  // 018X5: the runner owns the systematic barriers (observe/apply/restore/
-  // minimize each abort on read-only at the next executable boundary).
-  const outcome = await windowLayoutGroupActionRunner.runMember(capability, member, action);
-  if (outcome === 'superseded') return outcome;
-  if (outcome !== 'success') return outcome;
-  const nextState = action === 'minimize' ? 'minimized' : 'normal';
-  if (windowLayoutDetachment.isReadOnly()) return 'superseded';
-  results.push({ memberId: member.id, outcome });
-  patches.push({ memberId: member.id, state: nextState });
-  // Persisted intent, not presentation truth: the underline waits for the
-  // observation that follows the mutation.
-  patchWindowLayoutMember(layoutId, member.id, 'unknown');
-  return outcome;
-}
-
-/** 019B: the stale-binding retry moves INSIDE the concurrent worker so a
- * helper restart fails one member's first observe with missing, drops and
- * re-resolves that member ONCE, and retries without deserializing the batch. */
-async function runGroupMemberActionWithRetry(layoutId, member, action, results, patches) {
-  let outcome = await runGroupMemberAction(layoutId, member, action, results, patches);
-  if (outcome === 'missing') {
-    windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, member.id));
-    const freshCapability = await capabilityForMember(layoutId, member.id);
-    // 018X5: abort immediately after the retry resolution await.
-    if (windowLayoutDetachment.isReadOnly()) return 'superseded';
-    if (freshCapability) {
-      outcome = await runGroupMemberAction(layoutId, member, action, results, patches);
-      if (outcome !== 'missing') return outcome;
-    }
-    results.push({ memberId: member.id, outcome: 'missing' });
-  }
-  return outcome;
-}
-
-/** 019B: isolate minimizes ONE unselected member (a bounded concurrent
- * worker); the handoff barriers are identical to the per-member runner. */
-async function isolateMinimizeMember(layoutId, member, results, patches) {
-  const capability = await capabilityForMember(layoutId, member.id);
-  // 018X5: abort immediately after the isolate resolution await.
-  if (windowLayoutDetachment.isReadOnly()) return 'superseded';
-  if (!capability) {
-    results.push({ memberId: member.id, outcome: 'missing' });
-    return 'missing';
-  }
-  const result = await host.minimizeWindowCapability(capability);
-  // 018X5: abort immediately after the minimize await before the UI patch.
-  if (windowLayoutDetachment.isReadOnly()) return 'superseded';
-  results.push({ memberId: member.id, outcome: result.outcome });
-  if (result.outcome === 'success') {
-    patches.push({ memberId: member.id, state: 'minimized' });
-    patchWindowLayoutMember(layoutId, member.id, 'unknown');
-  }
-  return result.outcome;
-}
-
-/** 019B: prewarms every target's capability concurrently (the host descriptor
- * resolves fan out in one round trip instead of a serialized tail), then runs
- * the per-member actions through a BOUNDED concurrent scheduler with typed
- * results, a superseded abort and a final abort barrier before the single
- * committed state. `explicitTargetIds` lets Shift+right-click toggle ONLY the
- * clicked member when no inner range is selected (019B) without disturbing the
- * selection UI. */
-async function windowLayoutGroupAction(layoutId, action, explicitTargetIds = null) {
-  if (windowLayoutDetachment.isReadOnly()) return;
-  const layout = windowLayoutFromState(layoutId);
-  if (!layout) return;
-  const members = layout.arrangement?.members ?? [];
-  if (members.length === 0) return;
-  const selected = explicitTargetIds
-    ? new Set(explicitTargetIds)
-    : windowLayoutRuntime.selectedMembers.get(layoutId);
-  const targets = selected && selected.size > 0
-    ? members.filter((member) => selected.has(member.id)) : members;
-  const actions = targets.map((member) => ({
-    memberId: member.id,
-    operation: action === 'isolate' ? 'restore' : action,
-  }));
-  if (action === 'isolate') {
-    for (const member of members) {
-      if (!targets.some((target) => target.id === member.id)) {
-        actions.push({ memberId: member.id, operation: 'minimize' });
-      }
-    }
-  }
-  if (typeof host.windowControlGroup !== 'function') {
-    setWindowLayoutStatus(layoutId, 'Native window control is unavailable.');
-    return;
-  }
-  const result = await host.windowControlGroup(layoutId, actions).catch(() => ({ outcome: 'helper-unavailable' }));
-  if (windowLayoutDetachment.isReadOnly()) return;
-  if (result?.outcome !== 'success') {
-    setWindowLayoutStatus(layoutId, 'Native window control is unavailable.');
-    return;
-  }
-  let nextState = state;
-  for (const entry of actions) {
-    nextState = updateWindowLayoutMember(nextState, layoutId, entry.memberId,
-      { state: entry.operation === 'minimize' ? 'minimized' : 'normal' });
-  }
-  store.replace(nextState);
-  noteWindowLayoutCommit(layoutId);
-  queueWindowLayoutSave();
-  setWindowLayoutStatus(layoutId, '');
-  await windowLayoutRecording.ensureRecording(layoutId);
-}
-
-/** 019B/019C Shift+right-click: minimizes/restores the SELECTED RANGE (or just
- * the clicked member when no inner range is selected) toward the OPPOSITE of
- * the clicked member's live state — clicking a minimized member restores the
- * range, otherwise it minimizes it. `explicitMemberIds` (the widget-sourced
- * range, 019C) overrides the workspace-local inner selection without touching
- * it. The direction is probed once (one observe) and the batch keeps per-member
- * typed results through the bounded scheduler. Plain right-click on a member
- * still falls through to the workspace menu. */
-async function windowLayoutToggleRange(layoutId, clickedMemberId, explicitMemberIds = null) {
-  if (windowLayoutDetachment.isReadOnly()) return;
-  const member = windowLayoutMemberFromState(layoutId, clickedMemberId);
-  if (!member) return;
-  const selected = explicitMemberIds !== null
-    ? new Set(explicitMemberIds)
-    : windowLayoutRuntime.selectedMembers.get(layoutId);
-  const hasRange = Boolean(selected && selected.size > 0);
-  const capability = await capabilityForMember(layoutId, clickedMemberId);
-  // 018X5: abort immediately after the probe resolution await.
-  if (windowLayoutDetachment.isReadOnly()) return;
-  if (!capability) {
-    setWindowLayoutStatus(layoutId, 'Window not visible');
-    return;
-  }
-  const observed = await host.observeWindowCapability(capability);
-  // 018X4: abort immediately after the observe await, before success/failure.
-  if (windowLayoutDetachment.isReadOnly()) return;
-  if (observed.outcome !== 'success' || !observed.observation) {
-    if (observed.outcome === 'missing') {
-      windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, clickedMemberId));
-      windowLayoutRuntimeController.invalidateCapabilities(layoutId);
-    }
-    setWindowLayoutStatus(layoutId, windowLayoutStatusForOutcome(observed.outcome));
-    return;
-  }
-  const liveState = observed.observation.state === 'minimized' ? 'minimized' : 'normal';
-  const action = liveState === 'minimized' ? 'restore' : 'minimize';
-  const range = explicitMemberIds !== null
-    ? explicitMemberIds
-    : (hasRange ? null : [clickedMemberId]);
-  await windowLayoutGroupAction(layoutId, action, range);
-}
-
+const windowLayoutGroupActions = createWindowLayoutGroupActions({
+  getState: () => state,
+  windowLayoutDetachment: { isReadOnly: () => windowLayoutDetachment.isReadOnly() },
+  windowLayoutFromState,
+  windowLayoutMemberFromState,
+  windowLayoutRuntime,
+  windowLayoutMemberKey,
+  host: { windowControlGroup: host.windowControlGroup, observeWindowCapability: host.observeWindowCapability },
+  updateWindowLayoutMember,
+  store,
+  noteWindowLayoutCommit,
+  queueWindowLayoutSave,
+  setWindowLayoutStatus,
+  windowLayoutRecording: { ensureRecording: (id) => windowLayoutRecording.ensureRecording(id) },
+  capabilityForMember,
+  windowLayoutRuntimeController: { invalidateCapabilities: (id) => windowLayoutRuntimeController.invalidateCapabilities(id) },
+  windowLayoutStatusForOutcome,
+});
+const windowLayoutGroupAction = windowLayoutGroupActions.groupAction;
+const windowLayoutToggleRange = windowLayoutGroupActions.toggleRange;
 /** 016 direct onscreen pick: begin the Papers-owned pick session for THIS
  * layout and wait for its single typed result (Escape/right-click cancels). */
 async function beginWindowLayoutDirectPick(layoutId) {
@@ -3345,12 +3199,6 @@ const windowLayoutDetachment = {
   reportReady: () => Promise.resolve(),
   waitForActivate: () => Promise.resolve(null),
 };
-
-// 018X5: systematic await/read-only barrier for the group member actions.
-const windowLayoutGroupActionRunner = createWindowLayoutGroupActionRunner({
-  isReadOnly: () => windowLayoutDetachment.isReadOnly(),
-  host,
-});
 
 // ---- 019C compact widget surface (As You Go half) -------------------------
 // One native widget per layout, opened/focused by the workspace and closed by
