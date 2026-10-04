@@ -225,6 +225,44 @@ function cancelWindowLayoutPick() {
   return host.pickWindowCancel().catch(() => undefined);
 }
 
+function handleKeydown(event) {
+  if (event.key === 'Escape' && windowLayoutRuntime.pickUnsubscribe) {
+    event.preventDefault();
+    event.stopPropagation();
+    void cancelWindowLayoutPick();
+    return true;
+  }
+  if (windowLayoutRuntime.pickUnsubscribe) {
+    event.preventDefault();
+    event.stopPropagation();
+    const layoutId = windowLayoutRuntime.pickLayoutId;
+    const request = host.pickWindowCommit();
+    void request.catch((error) => setWindowLayoutStatus(
+      layoutId ?? 'active',
+      error instanceof Error ? error.message : String(error),
+    ));
+    return true;
+  }
+  if (event.key === 'Escape' && windowLayoutRuntime.pickerOpenFor) {
+    closeWindowLayoutPicker();
+    return true;
+  }
+  return false;
+}
 
-return { open: openWindowLayoutPicker, close: closeWindowLayoutPicker, direct: beginWindowLayoutDirectPick, cancel: cancelWindowLayoutPick };
+function handleDocumentClick(event) {
+  if (!windowLayoutRuntime.pickerOpenFor || event.target.closest('[data-wl-picker]')) return false;
+  closeWindowLayoutPicker();
+  return true;
+}
+
+
+return {
+  open: openWindowLayoutPicker,
+  close: closeWindowLayoutPicker,
+  direct: beginWindowLayoutDirectPick,
+  cancel: cancelWindowLayoutPick,
+  keydown: handleKeydown,
+  documentClick: handleDocumentClick,
+};
 }

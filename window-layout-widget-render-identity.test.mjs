@@ -43,6 +43,9 @@ function layout(members, cardSize = null) {
 }
 
 const BASE = layout([['m1', 'Alpha', 'normal'], ['m2', 'Beta', 'normal']]);
+const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+const workspacePickerSource = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8');
+const widgetSurfaceSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
 
 test('compact widget shows a bootstrap card and retries a silent initial snapshot request', async () => {
   const source = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
@@ -56,7 +59,7 @@ test('compact widget shows a bootstrap card and retries a silent initial snapsho
 });
 
 test('direct Quick Pick confirms on any key except Escape on both surfaces', () => {
-  assert.match(workspaceSource, /if \(windowLayoutRuntime\.pickUnsubscribe\) \{[\s\S]*?host\.pickWindowCommit\(\)/);
+  assert.match(workspacePickerSource, /if \(windowLayoutRuntime\.pickUnsubscribe\) \{[\s\S]*?host\.pickWindowCommit\(\)/);
   assert.match(widgetSurfaceSource, /if \(!widgetState\.pickUnsubscribe\) return;[\s\S]*?event\.key === 'Escape'[\s\S]*?host\.pickWindowCancel\(\)[\s\S]*?host\.pickWindowCommit\(\)/);
 });
 
@@ -159,9 +162,6 @@ test('render identity is stable under repeated evaluation of one snapshot', () =
 // source-shape assertion because the entry (public/workspace-20260730b.js) is a browser module with no DOM
 // harness in this suite; the escape it pins is the one that makes the sentence reachable, and the wire that
 // carries it is proven behaviourally in window-layout-widget-channel.test.mjs.
-const workspaceSource = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
-const widgetSurfaceSource = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
-
 test('widget render forwards tracking state into the shared card candidate', () => {
   assert.match(widgetSurfaceSource, /tracking: snapshot\.tracking/);
 });

@@ -1537,6 +1537,7 @@ const windowLayoutWorkspacePicker = createWindowLayoutWorkspacePicker({
     windowCandidatePickerClose: host.windowCandidatePickerClose,
     pickWindowCancel: host.pickWindowCancel,
     pickWindowBegin: host.pickWindowBegin,
+    pickWindowCommit: host.pickWindowCommit,
     onPickResult: host.onPickResult,
   },
   windowLayoutRuntime,
@@ -4614,35 +4615,9 @@ document.addEventListener('click', (event) => {
   }
 });
 
-// Escape (or a click anywhere else) closes an open window-layout picker
-// without changing anything (Assignment 015).
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && windowLayoutRuntime.pickUnsubscribe) {
-    event.preventDefault();
-    event.stopPropagation();
-    void cancelWindowLayoutPick();
-    return;
-  }
-  if (windowLayoutRuntime.pickUnsubscribe) {
-    event.preventDefault();
-    event.stopPropagation();
-    const activePickLayout = windowLayoutRuntime.pickLayoutId;
-    const request = host.pickWindowCommit();
-    void request.catch((error) => setWindowLayoutStatus(
-      activePickLayout ?? 'active',
-      error instanceof Error ? error.message : String(error),
-    ));
-    return;
-  }
-  if (event.key === 'Escape' && windowLayoutRuntime.pickerOpenFor) {
-    closeWindowLayoutPicker();
-  }
-});
-document.addEventListener('click', (event) => {
-  if (windowLayoutRuntime.pickerOpenFor && !event.target.closest('[data-wl-picker]')) {
-    closeWindowLayoutPicker();
-  }
-});
+// Global dismissal/confirmation belongs to the same picker lifecycle owner.
+document.addEventListener('keydown', (event) => windowLayoutWorkspacePicker.keydown(event));
+document.addEventListener('click', (event) => windowLayoutWorkspacePicker.documentClick(event));
 
 elements.explorer.addEventListener('wheel', (event) => {
   if (WIDGET_SURFACE) return;

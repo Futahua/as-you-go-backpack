@@ -377,3 +377,24 @@ Focused characterization: 76 pass / 0 fail / 0 skip. Full `npm test`: 1835 pass 
 host/preload/runtime, Proxima, Delegate Wave and creator data were untouched. The
 dated entry is down to 5677 lines. Global picker dismissal/keyboard wiring and the
 final architecture/authority/completion audit remain open.
+
+## Workspace picker global input completion receipt
+
+Production: `public/app/window-layout-workspace-picker.js` and
+`public/workspace-20260730b.js`. Supporting changes:
+`window-layout-workspace-picker.test.mjs`, `picker-keyboard-routing.test.mjs`,
+`window-layout-widget-render-identity.test.mjs`, this architecture guide and this
+checklist.
+
+The existing workspace picker owner now also owns document-level direct-pick key
+confirmation/cancellation, list-picker Escape dismissal and outside-click dismissal.
+The entry installs only two forwarding listeners. Host commit/cancel calls stay inside
+the same picker lifecycle; durable pick application remains the already-existing
+injected writer. No store/save/recording/native-identity authority moved.
+
+Focused picker/workspace gate: 65 pass / 0 fail / 0 skip. Full `npm test`: 1838
+pass / 0 fail / 0 skip. `git diff --check` passed. Protected browser/filesystem,
+Papers host/preload/runtime, Proxima, Delegate Wave and creator data were untouched.
+The dated entry is down to 5652 lines. Surface input extraction is now complete for
+the live compact-widget/preview/member-drag/card-control/picker paths; final
+architecture/authority/completion audit and applicable runtime proof remain open.

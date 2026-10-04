@@ -485,7 +485,9 @@ cancel orchestration over existing runtime session fields. It uses the shared
 native picker-session helper and pure membership seed/row decisions. Pick
 application, exact process closing and preview restoration remain explicit injected
 callbacks; no store, save or native identity authority is introduced. Widget
-picker coordination remains surface-local until its own extraction.
+picker coordination remains surface-local until its own extraction. Global document
+keyboard confirmation/cancellation and outside-click dismissal now terminate in this
+same picker owner instead of being duplicated in the dated entry.
 
 Widget list/direct/close and acknowledgement orchestration now live in
 `public/app/window-layout-widget-picker.js`. Its one ephemeral list generation
