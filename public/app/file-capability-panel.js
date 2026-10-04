@@ -242,11 +242,13 @@ export function createFileCapabilityPanel(options) {
     }
   }
 
-  function createBrowserTab(url, { title = '', sourceKey = null, activate = true } = {}) {
+  function createBrowserTab(url, { title = '', sourceKey = null, activate = true, tabId = null } = {}) {
     const safe = safeBrowserUrl(url);
     if (!safe || typeof windowRef?.crypto?.randomUUID !== 'function') return null;
+    const id = isBrowserTabId(tabId) ? tabId : windowRef.crypto.randomUUID();
+    if (state.browserTabs.some((candidate) => candidate.id === id)) return null;
     const tab = {
-      id: windowRef.crypto.randomUUID(),
+      id,
       url: safe,
       title: typeof title === 'string' ? title.slice(0, 500) : '',
       sourceKey,
@@ -636,15 +638,23 @@ export function createFileCapabilityPanel(options) {
       const url = safeBrowserUrl(request?.url);
       if (!url) continue;
       const activate = request?.activate !== false;
+      const requestedTabId = isBrowserTabId(request?.tabId) ? request.tabId : null;
       const previousActiveId = state.activeBrowserTabId;
-      const tab = createBrowserTab(url, { activate });
+      const tab = createBrowserTab(url, { activate, tabId: requestedTabId });
       if (!tab) continue;
-      const result = await host.fileCapability('browser-tab-open', {
-        tabId: tab.id,
-        url,
-        rect: nativePreviewRect(surface),
-        activate,
-      }).catch(() => null);
+      const result = requestedTabId
+        ? await host.fileCapability(
+          activate ? 'browser-tab-activate' : 'browser-tab-state',
+          activate
+            ? { tabId: tab.id, rect: nativePreviewRect(surface) }
+            : { tabId: tab.id },
+        ).catch(() => null)
+        : await host.fileCapability('browser-tab-open', {
+          tabId: tab.id,
+          url,
+          rect: nativePreviewRect(surface),
+          activate,
+        }).catch(() => null);
       if (!result?.ok || !result.tab) {
         state.browserTabs = state.browserTabs.filter((candidate) => candidate.id !== tab.id);
         if (state.activeBrowserTabId === tab.id) state.activeBrowserTabId = previousActiveId;
