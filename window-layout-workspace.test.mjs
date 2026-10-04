@@ -518,7 +518,7 @@ test('the workspace wrapper obeys that decision: a pure refusal notifies nothing
   // The wrapper lives in the workspace entry and cannot be constructed in this suite, so what is proven here is
   // (a) the decision, behaviourally, above, and (b) that the entry gates BOTH calls on it and has no ungated
   // path left anywhere. The alternative - a harness that copies the wrapper - would test the copy.
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   // Scoped to the wrapper, because the entry legitimately notifies the channel from other paths - the
   // retirement writer's own removal does, after it has proved a member was removed.
   const start = source.indexOf('async function applyWindowLayoutPickSet(');
@@ -810,7 +810,7 @@ test('019I picker commit and retirement leave state a valid object while persist
 });
 
 test('019I both production writer adapters invoke store.commit without assigning its Promise to state', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const pickStart = source.indexOf('const windowLayoutPickApplier = createWindowLayoutPickApplier({');
   const retirementStart = source.indexOf('const windowLayoutRetirementWriter = createWindowLayoutRetirementWriter({');
   const retirementEnd = source.indexOf('\n});', retirementStart);
@@ -827,7 +827,7 @@ test('019I both production writer adapters invoke store.commit without assigning
 });
 
 test('direct picker self-recovers orphaned Papers sessions before attached and widget starts', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const attachedStart = source.indexOf('async function beginWindowLayoutDirectPick(layoutId)');
   const widgetStart = source.indexOf('async function beginWidgetDirectPick()');
   assert.ok(attachedStart >= 0 && widgetStart > attachedStart, 'both direct-pick entry points exist');
@@ -870,7 +870,7 @@ test('direct picker self-recovers orphaned Papers sessions before attached and w
 });
 
 test('pagehide explicitly releases active native direct-pick ownership on both surfaces', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
 
   const teardownStart = source.indexOf('function teardownWindowLayoutRecording()');
   const teardownEnd = source.indexOf('// 018X1: pagehide', teardownStart);
@@ -1042,7 +1042,7 @@ test('bound list-pick identity treats same title on another executable as an add
   assert.deepEqual(remove.removes, [{ descriptor: exact.descriptor }]);
 });
 test('attached and detached list picks use bound descriptor identity and the shared durable writer', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const attachedPickerStart = source.indexOf('async function openWindowLayoutPicker(layoutId)');
   const attachedPickerEnd = source.indexOf('/** A tracking lifecycle refresh', attachedPickerStart);
   const attachedPicker = source.slice(attachedPickerStart, attachedPickerEnd);
@@ -1128,7 +1128,7 @@ test('a delayed add rebases on the latest state instead of dropping concurrent w
 });
 
 test('middle-click splits data unlink from Ctrl+middle-click process close', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const attachedStart = source.indexOf("elements.grid.addEventListener('auxclick', (event) => {");
   const attachedEnd = source.indexOf('// A press on a member is a CONTROL intent', attachedStart);
   const attached = source.slice(attachedStart, attachedEnd);
@@ -1152,7 +1152,7 @@ test('middle-click splits data unlink from Ctrl+middle-click process close', asy
 });
 
 test('the all-windows picker ends only the process behind the clicked row', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const start = source.indexOf('async function closeWindowLayoutCandidate(layoutId, candidateId, candidates)');
   const end = source.indexOf('async function closeWindowLayoutMember', start);
   const action = source.slice(start, end);
@@ -1196,7 +1196,7 @@ test('a stale process-end row id never falls back to a unique same-title applica
 });
 
 test('startup opens non-docked layouts by default without creating implicit tracking', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const baselineStart = source.indexOf('async function reconcileTrackingBaseline(providedSnapshot = null)');
   const baselineEnd = source.indexOf('const windowLayoutWidgetLifecycle =', baselineStart);
   const baseline = source.slice(baselineStart, baselineEnd);
@@ -1226,7 +1226,7 @@ test('startup opens non-docked layouts by default without creating implicit trac
 });
 
 test('a fresh compact widget defaults to fully opaque independent of workspace appearance', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const start = source.indexOf('function bootstrapWindowLayoutWidget()');
   const end = source.indexOf('// 019C: the compact-widget surface never runs', start);
   const widget = source.slice(start, end);
@@ -1239,7 +1239,7 @@ test('a fresh compact widget defaults to fully opaque independent of workspace a
 });
 
 test('closed-window safety reconciliation removes only positively missing exact instances', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const eventStart = source.indexOf('async function processTrackingLifecycleEvent(event)');
   const eventEnd = source.indexOf('async function drainTrackingLifecycleEvents()', eventStart);
   const lifecycle = source.slice(eventStart, eventEnd);
@@ -1272,7 +1272,7 @@ test('closed-window safety reconciliation removes only positively missing exact 
 });
 
 test('detached picker re-entry invalidates stale chooser ownership before starting again', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const start = source.indexOf('  let widgetPickerOpen = false;');
   const end = source.indexOf('  async function handleWidgetListCandidate', start);
   const widgetPicker = source.slice(start, end);
@@ -1295,7 +1295,7 @@ test('detached picker re-entry invalidates stale chooser ownership before starti
 });
 
 test('widget member gestures map plain left click to activation and plain right click to toggle', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const clickStart = source.indexOf('  function handleWidgetCardClick(event)');
   const clickEnd = source.indexOf('  function resetWidgetClearArm()', clickStart);
   const click = source.slice(clickStart, clickEnd);
@@ -1325,7 +1325,7 @@ test('widget member gestures map plain left click to activation and plain right 
 });
 
 test('widget list pick preserves the exact chooser row across candidate binding', async () => {
-  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./public/app/window-layout-workspace-picker.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const start = source.indexOf('  async function handleWidgetListCandidate');
   const end = source.indexOf('  async function beginWidgetDirectPick', start);
   assert.notEqual(start, -1);

@@ -443,3 +443,10 @@ Live member DOM patches and transient-status timers live in
 `public/app/window-layout-dom-presentation.js`. It consumes the existing live-state
 map and no store/host operations. Scoped selectors update every matching copy,
 retain stable marker nodes, and normalize unconfirmed live results to unknown.
+
+`public/app/window-layout-workspace-picker.js` owns workspace list/direct/close/
+cancel orchestration over existing runtime session fields. It uses the shared
+native picker-session helper and pure membership seed/row decisions. Pick
+application, exact process closing and preview restoration remain explicit injected
+callbacks; no store, save or native identity authority is introduced. Widget
+picker coordination remains surface-local until its own extraction.

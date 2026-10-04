@@ -210,3 +210,21 @@ status replacement/cancellation, widget 2400ms auto-clear and attached explicit
 duration. No environmental failure. No persistence, picker policy, native control,
 recording, browser/filesystem, host/preload, other Backpack or creator-data changes.
 This commit is the checkpoint. Surface-local event wiring is still pending.
+
+## Workspace picker orchestration receipt
+
+Production: `public/workspace-20260730b.js`, new
+`public/app/window-layout-workspace-picker.js`. Supporting:
+`window-layout-workspace-picker.test.mjs`, `window-layout-workspace.test.mjs`,
+`window-layout-member-icon.test.mjs`, `package.json`, `ARCHITECTURE.md`, this checklist.
+Before movement 8 behavioral cases pass; focused 72 pass / 0 fail / 0 skip;
+full 1776 pass / 0 fail / 0 skip plus 8 pretests. Preserves required-close rejection,
+ordinary-close fail-local cleanup, cancelled pick zero application, result buffering
+before begin settles, begin-failure unsubscribe, post-await read-only gates, stale
+list generation refusal and cancellation draining promise. Existing shared picker
+session/identity/writer modules remain unchanged. Source tests now read the moved
+owner plus composition; their semantic assertions remain intact.
+No environmental failure. Protected browser/filesystem, native host/preload,
+recording, persistence and other Backpacks unchanged; creator data untouched.
+This commit is the checkpoint. Widget picker coordination, recording/tracking
+orchestration and surface separation remain open; overall completion unproven.
