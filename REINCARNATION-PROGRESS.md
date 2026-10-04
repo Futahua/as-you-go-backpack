@@ -32,7 +32,7 @@ No release, installation, restart, process termination, or creator-data mutation
       broker batching and existing state/save/recording sequence. Unused worker orchestration removed.
 - [ ] Extract recording/tracking orchestration, demand, retirement and draining;
       retain native identity authority and two genuine missing observations.
-- [ ] Isolate preview coordination/cache lifecycle and Shift peek ownership.
+- [x] Isolate preview coordination/cache lifecycle and Shift peek ownership.
 - [ ] Separate workspace/widget/detached surface wiring. The dated entry must
       compose named owners rather than carry feature business logic or markup.
 - [ ] Refresh architecture/dependency map, remove superseded implementations and
@@ -181,3 +181,20 @@ No environmental failure. Thumbnail/ordinary preview lifecycle, native identity,
 store/persistence, browser/filesystem, host/preload and other Backpacks unchanged.
 Existing snapshot and cache storage remain caller-owned, with no second authority.
 This commit is the checkpoint; popover/dwell and surface extraction still pending.
+
+## Preview presentation/dwell receipt
+
+Production: `public/workspace-20260730b.js`, new
+`public/app/window-layout-preview-presentation.js`. Supporting:
+`window-layout-preview-presentation.test.mjs`, `package.json`, `ARCHITECTURE.md`, this
+checklist. Baseline 8 behavioral cases pass against original production functions;
+focused 42 pass / 0 fail / 0 skip; full 1759 pass / 0 fail / 0 skip plus 8 pretests.
+Preserved one shared popover, text/icon updates, viewport clamping, animation-frame
+cancellation, widget local-name suppression, native show/hide authorization and
+screen-anchor payloads, 100ms coalesced dwell and disconnected/non-hover gates.
+Deleted the superseded in-page thumbnail branch already unreachable after the
+native-preview path's unconditional return; focused/full gates rerun afterward.
+No environmental failure. Thumbnail generation scheduler and Shift planner/owner,
+native host, persistence, browser/filesystem, other Backpacks and creator data
+untouched. This commit is the presentation checkpoint. Event routing remains in
+the entry until surface extraction; no installed/native visual acceptance claimed.

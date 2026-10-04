@@ -432,3 +432,9 @@ Preview capability resolution and identity-based retention live in
 capability map and a widget snapshot getter; native descriptor fallback remains
 in the runtime module. State-only rerenders retain warm tokens, changed identities
 and missing outcomes evict, and attached surfaces delegate to their existing resolver.
+
+`public/app/window-layout-preview-presentation.js` owns the one popover's DOM,
+anchor/name/icon state, animation-frame cleanup, native preview presentation
+routing and 100ms hover dwell. The existing thumbnail scheduler is supplied lazily;
+only authorized preview-show/hide host methods are injected. Superseded unreachable
+in-page thumbnail rendering was removed. Surface event translation stays separate.
