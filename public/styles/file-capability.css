@@ -530,6 +530,63 @@
   background: var(--surface-raised);
 }
 
+.file-capability-browser-download-button {
+  position: relative;
+}
+
+.file-capability-browser-download-glyph,
+.file-capability-browser-download-pie {
+  grid-area: 1 / 1;
+  transition: opacity .12s ease, transform .16s ease;
+}
+
+.file-capability-browser-download-pie {
+  width: 14px;
+  height: 14px;
+  display: block;
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(.72);
+  background: conic-gradient(
+    from -90deg,
+    transparent 0 calc(1turn - var(--download-progress, 0turn)),
+    currentColor calc(1turn - var(--download-progress, 0turn)) 1turn
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 34%, transparent);
+}
+
+.file-capability-browser-download-button.downloading .file-capability-browser-download-glyph,
+.file-capability-browser-download-button.download-complete-flash .file-capability-browser-download-glyph {
+  opacity: 0;
+  transform: scale(.55);
+}
+
+.file-capability-browser-download-button.downloading .file-capability-browser-download-pie,
+.file-capability-browser-download-button.download-complete-flash .file-capability-browser-download-pie {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.file-capability-browser-download-button.download-indeterminate .file-capability-browser-download-pie {
+  animation: file-capability-download-pie-spin .75s linear infinite;
+}
+
+.file-capability-browser-download-button.download-complete-flash .file-capability-browser-download-pie {
+  --download-progress: 1turn;
+  background: currentColor;
+  animation: file-capability-download-complete .9s ease-out;
+}
+
+@keyframes file-capability-download-pie-spin {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes file-capability-download-complete {
+  0% { transform: scale(.78); opacity: .72; }
+  35% { transform: scale(1.16); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 .file-capability-browser-downloads-page {
   overflow: auto;
   padding: 6px 8px;

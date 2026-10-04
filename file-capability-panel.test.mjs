@@ -193,6 +193,11 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /fileCapability\('browser-lens-screen', \{ sourceTabId, targetTabId \}\)/);
   assert.match(source, /state\.browserTabs\.push\(\{[\s\S]*id: targetTabId/);
   assert.match(source, /fileCapability\('browser-downloads'/);
+  assert.match(source, /fileCapability\('browser-download-bubble-show'/);
+  assert.match(source, /fileCapability\('browser-download-bubble-hide'/);
+  assert.match(source, /file-capability-browser-download-pie/);
+  assert.match(source, /browserDownloadCompletionUntil/);
+  assert.match(source, /downloadProgress\(/);
   assert.match(source, /browserDownloadsOpen/);
   assert.match(source, /populateDownloadsPage\(/);
   assert.match(source, /surface\.classList\.add\('file-capability-browser-downloads-page'\)/);
@@ -208,6 +213,10 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /fileCapability\('native-drag', \{ paths: \[download\.path\] \}\)/);
   assert.match(source, /download\.state === 'completed' && isAbsoluteWindowsPath\(download\.path\)/);
   assert.match(css, /\.file-capability-browser-downloads-page/);
+  assert.match(css, /\.file-capability-browser-download-button\.downloading/);
+  assert.match(css, /\.file-capability-browser-download-pie/);
+  assert.match(css, /conic-gradient/);
+  assert.match(css, /file-capability-download-complete/);
   assert.match(css, /\.file-capability-browser-download\[draggable="true"\]/);
   assert.doesNotMatch(css, /\.file-capability-browser-downloads-heading/);
   assert.doesNotMatch(css, /\.file-capability-browser-downloads \{/);

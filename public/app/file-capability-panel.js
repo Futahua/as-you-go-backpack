@@ -168,6 +168,9 @@ export function createFileCapabilityPanel(options) {
     browserSurface: null,
     browserPollTimer: null,
     browserDownloadsOpen: false,
+    browserDownloads: [],
+    browserDownloadCompletionUntil: 0,
+    browserDownloadHover: false,
     imagePreviewObserver: null,
     markdownPreviewObserver: null,
     markdownAutoscrollCancel: null,
@@ -502,6 +505,8 @@ export function createFileCapabilityPanel(options) {
 
   function hideBrowserTabs() {
     stopBrowserTabPolling();
+    state.browserDownloadHover = false;
+    void host.fileCapability('browser-download-bubble-hide', { immediate: true }).catch(() => {});
     state.browserObserver?.disconnect();
     state.browserObserver = null;
     state.browserSurface = null;
@@ -544,6 +549,67 @@ export function createFileCapabilityPanel(options) {
     syncBrowserChrome(hostTab);
   }
 
+  function downloadProgress(download) {
+    const total = Number(download?.totalBytes);
+    const received = Number(download?.receivedBytes);
+    if (!(total > 0) || !Number.isFinite(received)) return null;
+    return Math.max(0, Math.min(1, received / total));
+  }
+
+  function syncDownloadIndicator(button) {
+    if (!button) return;
+    const active = state.browserDownloads.find((download) => download.state === 'progressing') || null;
+    const completionActive = Date.now() < state.browserDownloadCompletionUntil;
+    const progress = active ? downloadProgress(active) : null;
+    button.classList.toggle('downloading', Boolean(active));
+    button.classList.toggle('download-complete-flash', !active && completionActive);
+    if (active) {
+      button.style.setProperty('--download-progress', progress == null ? '.34turn' : String(progress) + 'turn');
+      button.classList.toggle('download-indeterminate', progress == null);
+      button.title = active.filename ? 'Downloading ' + active.filename : 'Downloading';
+    } else {
+      button.style.removeProperty('--download-progress');
+      button.classList.remove('download-indeterminate');
+      button.title = 'Downloads';
+    }
+  }
+
+  async function showDownloadsBubble(button, auto = false) {
+    if (!button?.isConnected || state.browserDownloadsOpen) return;
+    const result = await host.fileCapability('browser-downloads', {}).catch(() => null);
+    if (Array.isArray(result?.downloads)) state.browserDownloads = result.downloads;
+    syncDownloadIndicator(button);
+    const rect = button.getBoundingClientRect();
+    const count = Math.max(1, Math.min(8, state.browserDownloads.length));
+    const width = Math.min(320, Math.max(240, Math.round((windowRef?.innerWidth || 600) * 0.42)));
+    const bubbleRect = {
+      x: Math.max(4, Math.round(rect.right - width)),
+      y: Math.round(rect.bottom + 2),
+      width,
+      height: state.browserDownloads.length ? Math.min(316, 12 + count * 39) : 58,
+    };
+    await host.fileCapability('browser-download-bubble-show', { rect: bubbleRect }).catch(() => null);
+    if (auto) {
+      windowRef?.setTimeout?.(() => {
+        if (!state.browserDownloadHover) {
+          void host.fileCapability('browser-download-bubble-hide', {}).catch(() => {});
+        }
+      }, 1500);
+    }
+  }
+
+  function applyBrowserDownloads(downloads) {
+    const previous = new Map(state.browserDownloads.map((download) => [download.id, download.state]));
+    const next = Array.isArray(downloads) ? downloads : [];
+    const started = next.some((download) => download.state === 'progressing' && !previous.has(download.id));
+    const completed = next.some((download) => previous.get(download.id) === 'progressing' && download.state === 'completed');
+    state.browserDownloads = next;
+    if (completed) state.browserDownloadCompletionUntil = Date.now() + 1250;
+    const button = preview.querySelector('.file-capability-browser-download-button');
+    syncDownloadIndicator(button);
+    if ((started || completed) && button) void showDownloadsBubble(button, true);
+  }
+
   function syncBrowserChrome(hostTab = null) {
     const active = activeBrowserTab();
     const address = preview.querySelector('.file-capability-browser-address');
@@ -565,8 +631,14 @@ export function createFileCapabilityPanel(options) {
   async function refreshBrowserTabState() {
     const tab = activeBrowserTab();
     if (!tab || !state.expanded || !state.browserSurface?.isConnected) return;
-    const result = await host.fileCapability('browser-tab-state', { tabId: tab.id }).catch(() => null);
+    const [result, downloadsResult] = await Promise.all([
+      host.fileCapability('browser-tab-state', { tabId: tab.id }).catch(() => null),
+      host.fileCapability('browser-downloads', {}).catch(() => null),
+    ]);
     if (result?.ok && result.tab) applyBrowserHostState(result.tab);
+    if (downloadsResult?.ok && Array.isArray(downloadsResult.downloads)) {
+      applyBrowserDownloads(downloadsResult.downloads);
+    }
   }
 
   function scheduleBrowserTabPolling() {
@@ -842,11 +914,27 @@ export function createFileCapabilityPanel(options) {
       event.preventDefault();
       void openLensScreen();
     });
-    const downloads = createButton(documentRef, '↓', 'file-capability-browser-nav file-capability-browser-tool');
+    const downloads = createButton(documentRef, '', 'file-capability-browser-nav file-capability-browser-tool file-capability-browser-download-button');
     downloads.title = 'Downloads';
     downloads.classList.toggle('active', state.browserDownloadsOpen);
+    const downloadGlyph = documentRef.createElement('span');
+    downloadGlyph.className = 'file-capability-browser-download-glyph';
+    downloadGlyph.textContent = '↓';
+    const downloadPie = documentRef.createElement('span');
+    downloadPie.className = 'file-capability-browser-download-pie';
+    downloads.append(downloadGlyph, downloadPie);
+    syncDownloadIndicator(downloads);
+    downloads.addEventListener('mouseenter', () => {
+      state.browserDownloadHover = true;
+      void showDownloadsBubble(downloads);
+    });
+    downloads.addEventListener('mouseleave', () => {
+      state.browserDownloadHover = false;
+      void host.fileCapability('browser-download-bubble-hide', {}).catch(() => {});
+    });
     downloads.addEventListener('click', (event) => {
       event.preventDefault();
+      void host.fileCapability('browser-download-bubble-hide', { immediate: true }).catch(() => {});
       state.browserDownloadsOpen = !state.browserDownloadsOpen;
       renderBrowserWorkspace();
     });
