@@ -414,3 +414,8 @@ layout selection into that owner; attached and widget surfaces call the same
 builders. It has no host, store, native-operation or save access. Committed
 baseline HTML fixtures verify exact strings; DOM patching and presentation
 lifecycle remain pending extractions.
+
+Card row balancing, ResizeObserver registration/removal and the 180ms trailing
+size update now live in `public/app/window-layout-card-presentation.js`. The
+owner consumes the existing store/model callbacks and adds no persistence queue.
+Widget, placeholder, disconnected and no-explicit-width gates remain unchanged.

@@ -136,3 +136,17 @@ No environmental failure. No CSS/DOM event, picker policy, native control,
 recording, store/persistence, browser/filesystem, host/preload or other Backpack
 changes. Existing untracked work and creator state preserved. View lifecycle,
 DOM patching and surface separation are still pending; this is not full completion.
+## Card presentation lifecycle receipt
+
+Production: `public/workspace-20260730b.js`, new
+`public/app/window-layout-card-presentation.js`. Supporting:
+`window-layout-card-presentation.test.mjs`, `package.json`, `ARCHITECTURE.md`, this
+checklist. Before movement 10 tests pass against the original functions; focused
+34 pass / 0 fail / 0 skip; full 1738 pass / 0 fail / 0 skip plus 8 pretests.
+Measured balancing, empty rows, capped width/rounded height, 180ms debounce,
+existing rebaseAutomaticSave metadata, observation/removal and disconnected,
+placeholder, widget, missing-layout gates are preserved. Remove still unobserves
+without cancelling an existing timer; changing that would be a behavior change.
+No environmental failure. Browser/filesystem, host/native, recording, unrelated
+Backpacks and creator data untouched. This commit is the lifecycle checkpoint.
+DOM state/status patching and surface separation remain pending.
