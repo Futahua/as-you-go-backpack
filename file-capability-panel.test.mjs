@@ -197,13 +197,14 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /populateDownloadsPage\(/);
   assert.match(source, /surface\.classList\.add\('file-capability-browser-downloads-page'\)/);
   assert.doesNotMatch(source, /downloadsMenu/);
+  assert.doesNotMatch(source, /file-capability-browser-downloads-heading/);
   assert.match(source, /fileCapability\('browser-adblock-state'/);
   assert.match(source, /fileCapability\('browser-adblock-set'/);
   assert.match(source, /function syncAdblockButton\(/);
   assert.match(source, /fileCapability\('open', \{ path: download\.path \}\)/);
   assert.match(source, /fileCapability\('reveal', \{ path: download\.path \}\)/);
   assert.match(css, /\.file-capability-browser-downloads-page/);
-  assert.match(css, /\.file-capability-browser-downloads-heading/);
+  assert.doesNotMatch(css, /\.file-capability-browser-downloads-heading/);
   assert.doesNotMatch(css, /\.file-capability-browser-downloads \{/);
   assert.match(css, /\.file-capability-browser-adblock\.active/);
   assert.match(source, /createBrowserTab\(DEFAULT_BROWSER_HOME, \{ title: 'Google' \}\)/);

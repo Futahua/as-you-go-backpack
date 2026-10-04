@@ -665,14 +665,6 @@ export function createFileCapabilityPanel(options) {
   async function populateDownloadsPage(container) {
     if (!container) return;
     container.replaceChildren();
-    const heading = documentRef.createElement('div');
-    heading.className = 'file-capability-browser-downloads-heading';
-    const title = documentRef.createElement('strong');
-    title.textContent = 'Downloads';
-    const hint = documentRef.createElement('span');
-    hint.textContent = 'Downloaded files';
-    heading.append(title, hint);
-    container.append(heading);
     const result = await host.fileCapability('browser-downloads', {}).catch(() => null);
     const downloads = Array.isArray(result?.downloads) ? result.downloads : [];
     if (!downloads.length) {
