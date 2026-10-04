@@ -169,7 +169,7 @@ export function createFileCapabilityPanel(options) {
     browserPollTimer: null,
     browserDownloadsOpen: false,
     browserDownloads: [],
-    browserDownloadCompletionUntil: 0,
+    browserDownloadCompletionPending: false,
     browserDownloadHover: false,
     imagePreviewObserver: null,
     markdownPreviewObserver: null,
@@ -559,10 +559,9 @@ export function createFileCapabilityPanel(options) {
   function syncDownloadIndicator(button) {
     if (!button) return;
     const active = state.browserDownloads.find((download) => download.state === 'progressing') || null;
-    const completionActive = Date.now() < state.browserDownloadCompletionUntil;
     const progress = active ? downloadProgress(active) : null;
     button.classList.toggle('downloading', Boolean(active));
-    button.classList.toggle('download-complete-flash', !active && completionActive);
+    button.classList.toggle('download-complete-flash', !active && state.browserDownloadCompletionPending);
     if (active) {
       button.style.setProperty('--download-progress', progress == null ? '.34turn' : String(progress) + 'turn');
       button.classList.toggle('download-indeterminate', progress == null);
@@ -604,7 +603,8 @@ export function createFileCapabilityPanel(options) {
     const started = next.some((download) => download.state === 'progressing' && !previous.has(download.id));
     const completed = next.some((download) => previous.get(download.id) === 'progressing' && download.state === 'completed');
     state.browserDownloads = next;
-    if (completed) state.browserDownloadCompletionUntil = Date.now() + 1250;
+    if (started) state.browserDownloadCompletionPending = false;
+    if (completed) state.browserDownloadCompletionPending = true;
     const button = preview.querySelector('.file-capability-browser-download-button');
     syncDownloadIndicator(button);
     if ((started || completed) && button) void showDownloadsBubble(button, true);
@@ -926,6 +926,8 @@ export function createFileCapabilityPanel(options) {
     syncDownloadIndicator(downloads);
     downloads.addEventListener('mouseenter', () => {
       state.browserDownloadHover = true;
+      state.browserDownloadCompletionPending = false;
+      syncDownloadIndicator(downloads);
       void showDownloadsBubble(downloads);
     });
     downloads.addEventListener('mouseleave', () => {
@@ -934,6 +936,7 @@ export function createFileCapabilityPanel(options) {
     });
     downloads.addEventListener('click', (event) => {
       event.preventDefault();
+      state.browserDownloadCompletionPending = false;
       void host.fileCapability('browser-download-bubble-hide', { immediate: true }).catch(() => {});
       state.browserDownloadsOpen = !state.browserDownloadsOpen;
       renderBrowserWorkspace();

@@ -196,7 +196,12 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /fileCapability\('browser-download-bubble-show'/);
   assert.match(source, /fileCapability\('browser-download-bubble-hide'/);
   assert.match(source, /file-capability-browser-download-pie/);
-  assert.match(source, /browserDownloadCompletionUntil/);
+  assert.match(source, /browserDownloadCompletionPending/);
+  assert.doesNotMatch(source, /browserDownloadCompletionUntil/);
+  assert.match(source, /if \(started\) state\.browserDownloadCompletionPending = false/);
+  assert.match(source, /if \(completed\) state\.browserDownloadCompletionPending = true/);
+  assert.match(source, /downloads\.addEventListener\('mouseenter',[\s\S]*browserDownloadCompletionPending = false/);
+  assert.match(source, /downloads\.addEventListener\('click',[\s\S]*browserDownloadCompletionPending = false/);
   assert.match(source, /downloadProgress\(/);
   assert.match(source, /browserDownloadsOpen/);
   assert.match(source, /populateDownloadsPage\(/);
