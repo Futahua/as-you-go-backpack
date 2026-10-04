@@ -1,3 +1,4 @@
+import { createWindowLayoutRecordingLifecycle } from './app/window-layout-recording-lifecycle.js';
 import { createWindowLayoutTrackingLifecycle } from './app/window-layout-tracking-lifecycle.js';
 import { createWindowLayoutWidgetPicker } from './app/window-layout-widget-picker.js';
 import { createWindowLayoutWorkspacePicker } from './app/window-layout-workspace-picker.js';
@@ -60,7 +61,6 @@ import {
   addWindowLayoutMember,
   removeWindowLayoutMember,
   noteWindowLayoutDiagnostic,
-  removeClosedWindowFromAllLayouts,
   updateWindowLayoutMember,
   reorderWindowLayoutMember,
   setWindowLayoutCardSize,
@@ -1376,9 +1376,7 @@ function windowLayoutStatusForOutcome(outcome) {
  * actions never consult this at all, which is why they kept working while every
  * individual icon looked dead.
  */
-function isActiveRecordingContext(layoutId) {
-  return windowLayoutRuntimeController.getSnapshot().activeLayoutId === layoutId;
-}
+function isActiveRecordingContext(layoutId) { return windowLayoutRecordingLifecycle.active(layoutId); }
 
 async function toggleWindowLayoutMember(layoutId, memberId, capability, member, { resolveCapability, isMemberCurrent } = {}) {
   const key = windowLayoutMemberKey(layoutId, memberId);
@@ -2229,51 +2227,7 @@ const detachedWidgets = new Set();
 // when the widget bootstraps, cleared on pagehide.
 let windowLayoutWidgetClient = null;
 
-async function retireClosedWindowEverywhere(descriptor, diagnostics = {}) {
-  if (WIDGET_SURFACE) {
-    return Boolean(windowLayoutWidgetClient?.sendCommand({
-      kind: 'retire-closed-window',
-      descriptor,
-      diagnostics,
-    }));
-  }
-  if (windowLayoutDetachment.isReadOnly()) return false;
-  const removedByLayout = new Map();
-  for (const layout of state.windowLayouts ?? []) {
-    const removed = (layout.arrangement?.members ?? []).filter((member) => {
-      if (typeof descriptor?.windowInstanceId === 'string') {
-        return member.descriptor?.windowInstanceId === descriptor.windowInstanceId;
-      }
-      return member.descriptor?.title === descriptor?.title
-        && member.descriptor?.executableFingerprint?.toLowerCase()
-          === descriptor?.executableFingerprint?.toLowerCase();
-    });
-    if (removed.length > 0) removedByLayout.set(layout.id, removed);
-  }
-  if (removedByLayout.size === 0) return false;
-  const next = removeClosedWindowFromAllLayouts(state, descriptor, diagnostics);
-  const persisted = await store.commit(next);
-  if (!persisted) return false;
-  for (const [changedLayoutId, removed] of removedByLayout) {
-    const removedIds = new Set(removed.map((member) => member.id));
-    for (const memberId of removedIds) {
-      const key = windowLayoutMemberKey(changedLayoutId, memberId);
-      windowLayoutRuntime.capabilities.delete(key);
-      windowLayoutRuntime.icons.delete(key);
-      windowLayoutWidgetPreviewCapabilities.delete(key);
-    }
-    if (windowLayoutSelection.repair(changedLayoutId, removedIds, { eraseEmpty: true, repairAnchor: true })) {
-      syncWindowLayoutMemberSelection(changedLayoutId);
-    }
-    setWindowLayoutStatus(changedLayoutId, '');
-    noteWindowLayoutCommit(changedLayoutId, { reason: 'closed-window-retired' });
-  }
-  windowLayoutMemberPreview.cancel();
-  if ([...removedByLayout.keys()].some((candidate) => isActiveRecordingContext(candidate))) {
-    await windowLayoutRuntimeController.reconcileActive();
-  }
-  return persisted;
-}
+function retireClosedWindowEverywhere(...args) { return windowLayoutRecordingLifecycle.retireEverywhere(...args); }
 
 // The compact widget loads this same bundle, so this workspace-side responder
 // is constructed on the widget surface too - but the widget deliberately skips
@@ -2524,6 +2478,22 @@ const windowLayoutRetirementWriter = createWindowLayoutRetirementWriter({
   icons: windowLayoutRuntime.icons,
 });
 
+const windowLayoutRecordingLifecycle = createWindowLayoutRecordingLifecycle({
+  getState: () => state,
+  getController: () => windowLayoutRuntimeController,
+  getRecording: () => windowLayoutRecording,
+  isWidgetSurface: () => WIDGET_SURFACE,
+  sendWidgetCommand: (...args) => windowLayoutWidgetClient?.sendCommand(...args),
+  windowLayoutDetachment, windowLayoutRuntime, windowLayoutRetirementWriter,
+  windowLayoutWidgetPreviewCapabilities,
+  store: { commit: (...args) => store.commit(...args) },
+  windowLayoutSelection, syncWindowLayoutMemberSelection, setWindowLayoutStatus,
+  noteWindowLayoutCommit, windowLayoutMemberPreview, windowLayoutFromState,
+  saveWorkspaceView, closeWindowLayoutPicker,
+  host: { pickWindowCancel: () => host.pickWindowCancel() },
+  WINDOW_LAYOUT_SAVE_DEBOUNCE_MS,
+});
+
 /** 019C/019DR: applies Winter's ONE typed committed pick set (every remove
  * data-only, every successful add) with a single durable commit; cancel is
  * byte-zero and a read-only handoff begun mid-apply surfaces as typed
@@ -2554,22 +2524,7 @@ async function applyWindowLayoutPickSet(layoutId, result, { activateOnMutation =
 /** 019C: Ning's onRetireMember intent -> ONE data-only removal/save and a
  * status/selection refresh. An intent for a member/layout that no longer
  * exists is ignored; counters are never persisted. */
-function handleWindowLayoutRetireMember(intent) {
-  const { layoutId, memberId } = intent ?? {};
-  if (!layoutId || !memberId) return;
-  if (windowLayoutDetachment.isReadOnly()) return;
-  const result = windowLayoutRetirementWriter.retire(layoutId, memberId);
-  if (result.outcome !== 'removed') return;
-  if (intent.reason === 'watcher-destroy' && typeof intent.descriptor?.windowInstanceId === 'string') {
-    const cleared = setWindowLayoutInstanceSuppressed(state, layoutId, intent.descriptor.windowInstanceId, false);
-    void store.commit(cleared);
-  }
-  // 019G: a removed card must clear/discard any pending hover preview.
-  windowLayoutMemberPreview.cancel();
-  windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
-  setWindowLayoutStatus(layoutId, '');
-  if (windowLayoutSelection.remove(layoutId, memberId)) syncWindowLayoutMemberSelection(layoutId);
-}
+function handleWindowLayoutRetireMember(intent) { return windowLayoutRecordingLifecycle.retireMember(intent); }
 
 /** 019C: after any OTHER durable window-layout commit the workspace broadcasts
  * the fresh snapshot/revision so open widgets re-sync (the channel workspace
@@ -2598,59 +2553,9 @@ function noteWindowLayoutCommit(layoutId, options) {
   windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId, options);
 }
 
-function queueWindowLayoutSave() {
-  clearTimeout(windowLayoutRuntime.saveTimer);
-  windowLayoutRuntime.saveTimer = setTimeout(() => {
-    saveWorkspaceView();
-  }, WINDOW_LAYOUT_SAVE_DEBOUNCE_MS);
-}
-
-/** Bootstrap: reconcile the persisted active id WITHOUT inventing one. Returns
- * the real controller switch promise so the detached/workspace RESUMED ACK
- * follows actual owner start (018X1). A null id means no recording context
- * until the creator touches a layout. */
-function bootstrapWindowLayoutRecording() {
-  // Deliberately the DURABLE id, not isActiveRecordingContext(): this is the
-  // resume seam, and at boot the runtime has no active layout yet. This is the
-  // one question the persisted field is the right answer to.
-  if (state.activeWindowLayoutId) {
-    // RESUME, do not activate. Launching Papers attaches observation to the
-    // layout that was already active; ensureRecording() here replayed the whole
-    // layout - applying every saved rectangle and restoring each window in turn
-    // for about eight seconds after launch, raising the creator's windows over
-    // whatever they were doing. A deliberate switch still applies the layout.
-    return windowLayoutRecording.resumeRecording(state.activeWindowLayoutId);
-  }
-  return Promise.resolve();
-}
-
-/** Teardown: stop the recording timer and drop ephemeral capabilities without
- * a late save (the persisted active id stays for the next open to reconcile).
- * A pending debounced save is cancelled so no write races the unload. This is
- * the CONTROLLER stop used by the detach handoff too, so it must NOT stop the
- * detach lifecycle: the workspace still has to receive CLOSED/crash and
- * resume. 018X2 item 8: the runtime stop Promise is RETURNED so the factory's
- * `await stopController()` is a real await. The pagehide handler performs the
- * full lifecycle stop. */
-function teardownWindowLayoutRecording() {
-  clearTimeout(windowLayoutRuntime.saveTimer);
-  windowLayoutRuntime.saveTimer = null;
-  const hadActivePick = Boolean(windowLayoutRuntime.pickAttempt || windowLayoutRuntime.pickUnsubscribe);
-  windowLayoutRuntime.pickAttempt = null;
-  windowLayoutRuntime.pickLayoutId = null;
-  windowLayoutRuntime.pickUnsubscribe?.();
-  windowLayoutRuntime.pickUnsubscribe = null;
-  // pagehide can occur without immediately destroying the sender WebContents.
-  // Do not abandon the result listener while leaving that sender owning the
-  // native one-shot session; explicitly release it before teardown completes.
-  const cancelPick = hadActivePick
-    ? host.pickWindowCancel().catch(() => undefined)
-    : Promise.resolve();
-  return Promise.all([
-    cancelPick,
-    windowLayoutRuntimeController.stop({ clearActive: false }),
-  ]).then(() => undefined);
-}
+function queueWindowLayoutSave() { return windowLayoutRecordingLifecycle.queueSave(); }
+function bootstrapWindowLayoutRecording() { return windowLayoutRecordingLifecycle.resume(); }
+function teardownWindowLayoutRecording() { return windowLayoutRecordingLifecycle.stop(); }
 
 // 018X1: pagehide performs only the detach LIFECYCLE stop (the controller stop
 // is owned by the handoff and by the controller's own seams; a second stop here
@@ -2662,30 +2567,7 @@ window.addEventListener('pagehide', () => {
   void teardownWindowLayoutRecording();
 });
 
-function handleWindowLayoutUnlink(layoutId, memberId) {
-  if (windowLayoutDetachment.isReadOnly()) return;
-  const layout = windowLayoutFromState(layoutId);
-  if (!layout || !memberId) return;
-  // 019G: a removed card must clear/discard any pending hover preview.
-  windowLayoutMemberPreview.cancel();
-  let next = removeWindowLayoutMember(state, layoutId, memberId, { source: 'user-unlink', reason: 'the creator removed this icon' });
-  if (layout.tracking?.enabled === true && typeof layout.arrangement?.members?.find((member) => member.id === memberId)?.descriptor?.windowInstanceId === 'string') {
-    const instanceId = layout.arrangement.members.find((member) => member.id === memberId).descriptor.windowInstanceId;
-    next = setWindowLayoutInstanceSuppressed(next, layoutId, instanceId, true);
-  }
-  windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
-  windowLayoutRuntime.icons.delete(windowLayoutMemberKey(layoutId, memberId));
-  store.commit(next);
-  closeWindowLayoutPicker();
-  saveWorkspaceView();
-  noteWindowLayoutCommit(layoutId);
-  // Unlinking a member of the active layout re-syncs the observer; unlinking
-  // from an inactive layout never starts recording there. Unlinking the last
-  // member leaves the id retained with no timer (retry on the next add).
-  if (isActiveRecordingContext(layoutId)) {
-    void windowLayoutRuntimeController.reconcileActive();
-  }
-}
+function handleWindowLayoutUnlink(...args) { return windowLayoutRecordingLifecycle.unlink(...args); }
 
 const windowLayoutWidgetLifecycle = createWindowLayoutWidgetLifecycle({
   widgetOpen: host.widgetOpen,

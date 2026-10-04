@@ -468,3 +468,12 @@ writer remain authoritative. One owner retains the bounded queues, missing count
 population lock and sweep timer. Durable changes still call the existing store.
 Recording demand, retirement callbacks and surface activation/teardown remain the
 next extraction boundary; no new persistence or identity authority was added.
+
+`public/app/window-layout-recording-lifecycle.js` owns recording-context queries,
+trailing save demand, durable-id resume, controller/native-pick draining, retirement
+intents, confirmed cross-layout retirement and explicit unlink policy. It receives
+controller/recording getters, the existing retirement writer, one narrow store
+commit adapter and presentation/selection callbacks. Widget removal routes through
+the channel command; it never acquires a local writer. The entry keeps hoisted
+compatibility delegates for callbacks wired before construction. Observation cadence
+still belongs to `window-layout-runtime.js`; native identity remains host-owned.

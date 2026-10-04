@@ -30,7 +30,7 @@ No release, installation, restart, process termination, or creator-data mutation
       supersession, subscribe-before-begin, cancellation and byte-zero no-op rules.
 - [x] Extract group-action orchestration and target selection; preserve current
       broker batching and existing state/save/recording sequence. Unused worker orchestration removed.
-- [ ] Extract recording/tracking orchestration, demand, retirement and draining;
+- [x] Extract recording/tracking orchestration, demand, retirement and draining;
       retain native identity authority and two genuine missing observations.
 - [x] Isolate preview coordination/cache lifecycle and Shift peek ownership.
 - [ ] Separate workspace/widget/detached surface wiring. The dated entry must
@@ -265,3 +265,21 @@ Source assertions now read the owner and composition and retain semantic guards.
 No environmental failure. Protected browser/filesystem, host/preload, other
 Backpacks and creator data untouched. Recording demand/retirement orchestration,
 surface separation and final acceptance remain pending; completion is unproven.
+
+## Recording demand and retirement lifecycle receipt
+
+Production: `public/workspace-20260730b.js`, new
+`public/app/window-layout-recording-lifecycle.js`. Supporting:
+`window-layout-recording-lifecycle.test.mjs`, `window-layout-workspace.test.mjs`,
+`package.json`, `ARCHITECTURE.md`, this checklist. Baseline 11 cases pass before
+movement; focused 161 pass / 0 fail / 0 skip; full 1813 pass / 0 fail / 0 skip,
+plus 8 pretests. Resume observes the durable id without applying saved rectangles;
+active queries use runtime ownership; stop clears pending save/listener/attempt
+synchronously and awaits both native cancellation and controller stop with
+clearActive:false. Confirmed retirement commits once across layouts before cache,
+selection and preview cleanup; refused persistence does no cleanup; widget routes
+one command; unlink retains exact Auto suppression and inactive-context behavior.
+Existing retirement writer and recording runtime remain the sole authorities.
+No environmental failure. Protected browser/filesystem, host/preload, unrelated
+Backpacks and creator data untouched. Surface split, final architecture/authority
+audit and runtime/visual acceptance still remain; overall completion is unproven.
