@@ -24,7 +24,7 @@ No release, installation, restart, process termination, or creator-data mutation
 
 - [x] Isolate window-layout identity/membership policy from durable mutation,
       retaining public compatibility exports and all established validation.
-- [ ] Isolate member selection/range state and repair from DOM/persistence.
+- [x] Isolate member selection/range state and repair from DOM/persistence.
 - [ ] Extract card/member/picker view and DOM patching behind presentation inputs.
 - [ ] Extract picker coordination and cleanup for attached/widget callers; preserve
       supersession, subscribe-before-begin, cancellation and byte-zero no-op rules.
@@ -97,3 +97,21 @@ live range direction and missing-capability invalidation are characterized.
 No environmental failure. Native broker, recording implementation, store,
 browser/filesystem, host/preload, other Backpacks and creator data untouched.
 This commit is the code-only rollback checkpoint; overall refactor remains active.
+## Selection ownership receipt
+
+Changed production files: `public/workspace-20260730b.js` and new
+`public/app/window-layout-selection.js`. Supporting changes:
+`window-layout-selection.test.mjs`, `package.json`, `ARCHITECTURE.md`, and this
+checklist. Storage stays in existing surface-local maps/sets; all selection
+writes now flow through the owner or its explicit storage adapters.
+
+Before movement: 7 tests characterized the original attached Ctrl/range/clear
+path. After movement: focused 152 pass / 0 fail / 0 skip; full 1721 pass / 0 fail /
+0 skip plus 8 pretests. Additional tests cover widget in-place toggle versus range
+set replacement, empty clear leaving anchors untouched, single retirement,
+startup/closed-window repair, snapshot pruning, and layout isolation. Existing
+retirement anchor differences are deliberately preserved, not silently corrected.
+No environmental failure. Rendering remains caller-owned; no host/native control,
+store/persistence, browser/filesystem, Papers host/preload or other Backpack edits.
+Existing creator data/untracked artifacts preserved. Commit containing this
+receipt is the selection checkpoint. Overall refactor still incomplete.

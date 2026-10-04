@@ -401,3 +401,9 @@ selectors, native broker/observation operations, capability access, read-only
 gates and existing state/save/recording callbacks. Group controls use one
 resident-broker batch; the former uncalled worker wrappers were removed from
 the entry. The separate bounded scheduling/runner modules retain their contracts.
+
+`public/app/window-layout-selection.js` owns ephemeral Ctrl toggling, ordered
+Shift ranges, clearing and membership repair. It uses explicit read/write/erase,
+anchor and order adapters over the existing attached-map and widget-set storage.
+Attached Ctrl toggles clone; widget toggles mutate; ranges replace. The module
+has no DOM, native, host, store or save access; callers synchronize presentation.

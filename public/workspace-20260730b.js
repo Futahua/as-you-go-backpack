@@ -1,3 +1,4 @@
+import { createWindowLayoutSelection } from './app/window-layout-selection.js';
 import { createWindowLayoutGroupActions } from './app/window-layout-group-actions.js';
 import { createWindowLayoutWidgetLifecycle } from './app/window-layout-widget-lifecycle.js';
 import { createWindowLayoutCandidateBinder } from './app/window-layout-candidate-binding.js';
@@ -837,6 +838,13 @@ const windowLayoutRuntime = {
   isolateMode: createWindowLayoutIsolateMode(), // ephemeral; right-click minimize toggles it
   pickUnsubscribe: null,
 };
+const windowLayoutSelection = createWindowLayoutSelection({
+  read: (id) => windowLayoutRuntime.selectedMembers.get(id),
+  write: (id, selected) => windowLayoutRuntime.selectedMembers.set(id, selected),
+  erase: (id) => windowLayoutRuntime.selectedMembers.delete(id),
+  anchors: windowLayoutRuntime.selectionAnchor,
+  orderedIds: (id) => (windowLayoutFromState(id)?.arrangement?.members ?? []).map((member) => member.id),
+});
 const windowLayoutMemberToggleTails = new Map();
 
 const WINDOW_LAYOUT_SAVE_DEBOUNCE_MS = 300;
@@ -1563,40 +1571,16 @@ async function handleWindowLayoutMemberClick(layoutId, memberId, ctrlKey = false
     return;
   }
   if (ctrlKey) {
-    // 016 inner multiselection: separate from workspace selection.
-    const selected = new Set(windowLayoutRuntime.selectedMembers.get(layoutId) ?? []);
-    if (selected.has(memberId)) selected.delete(memberId);
-    else selected.add(memberId);
-    windowLayoutRuntime.selectedMembers.set(layoutId, selected);
-    windowLayoutRuntime.selectionAnchor.set(layoutId, memberId);
+    windowLayoutSelection.toggle(layoutId, memberId);
     syncWindowLayoutMemberSelection(layoutId);
     return;
   }
   if (shiftKey) {
-    // 019B: Shift+click selects the first-to-last range between the anchor and
-    // the clicked member in persisted member order. With no anchor (or an
-    // anchor that left the layout), the clicked member alone becomes the range
-    // AND the new anchor.
-    const ordered = (windowLayoutFromState(layoutId)?.arrangement?.members ?? [])
-      .map((existing) => existing.id);
-    const anchorId = windowLayoutRuntime.selectionAnchor.get(layoutId);
-    const anchorIndex = ordered.indexOf(anchorId);
-    const clickedIndex = ordered.indexOf(memberId);
-    const selected = new Set();
-    if (anchorIndex === -1 || clickedIndex === -1) {
-      selected.add(memberId);
-    } else {
-      const [start, end] = anchorIndex <= clickedIndex
-        ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
-      for (let index = start; index <= end; index += 1) selected.add(ordered[index]);
-    }
-    windowLayoutRuntime.selectedMembers.set(layoutId, selected);
-    windowLayoutRuntime.selectionAnchor.set(layoutId, memberId);
+    windowLayoutSelection.range(layoutId, memberId);
     syncWindowLayoutMemberSelection(layoutId);
     return;
   }
-  windowLayoutRuntime.selectedMembers.delete(layoutId);
-  windowLayoutRuntime.selectionAnchor.delete(layoutId);
+  windowLayoutSelection.clear(layoutId, true);
   syncWindowLayoutMemberSelection(layoutId);
   // 016 contextual occurrences: an icon click from a DIFFERENT layout (or
   // with no active context) applies THIS layout's saved arrangement for every
@@ -2102,9 +2086,7 @@ function syncWindowLayoutMemberSelection(layoutId) {
 }
 
 function clearWindowLayoutMemberSelection(layoutId) {
-  if (!layoutId || !(windowLayoutRuntime.selectedMembers.get(layoutId)?.size > 0)) return;
-  windowLayoutRuntime.selectedMembers.delete(layoutId);
-  windowLayoutRuntime.selectionAnchor.delete(layoutId);
+  if (!windowLayoutSelection.clear(layoutId)) return;
   syncWindowLayoutMemberSelection(layoutId);
 }
 
@@ -3249,14 +3231,8 @@ async function retireClosedWindowEverywhere(descriptor, diagnostics = {}) {
       windowLayoutRuntime.icons.delete(key);
       windowLayoutWidgetPreviewCapabilities.delete(key);
     }
-    const selected = windowLayoutRuntime.selectedMembers.get(changedLayoutId);
-    if (selected) {
-      for (const memberId of removedIds) selected.delete(memberId);
-      if (selected.size === 0) windowLayoutRuntime.selectedMembers.delete(changedLayoutId);
+    if (windowLayoutSelection.repair(changedLayoutId, removedIds, { eraseEmpty: true, repairAnchor: true })) {
       syncWindowLayoutMemberSelection(changedLayoutId);
-    }
-    if (removedIds.has(windowLayoutRuntime.selectionAnchor.get(changedLayoutId))) {
-      windowLayoutRuntime.selectionAnchor.delete(changedLayoutId);
     }
     setWindowLayoutStatus(changedLayoutId, '');
     noteWindowLayoutCommit(changedLayoutId, { reason: 'closed-window-retired' });
@@ -3384,8 +3360,7 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
       for (const cache of [windowLayoutRuntime.icons, windowLayoutWidgetPreviewCapabilities]) {
         for (const key of [...cache.keys()]) if (key.startsWith(prefix)) cache.delete(key);
       }
-      windowLayoutRuntime.selectedMembers.delete(layoutId);
-      windowLayoutRuntime.selectionAnchor.delete(layoutId);
+      windowLayoutSelection.clear(layoutId, true);
       detachedWidgets.delete(layoutId);
       if (wasActive) await windowLayoutRuntimeController.reconcileActive();
       await host.widgetClose(layoutId).catch(() => undefined);
@@ -3411,8 +3386,7 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
         windowLayoutRuntime.icons.delete(key);
         windowLayoutWidgetPreviewCapabilities.delete(key);
       }
-      windowLayoutRuntime.selectedMembers.delete(layoutId);
-      windowLayoutRuntime.selectionAnchor.delete(layoutId);
+      windowLayoutSelection.clear(layoutId, true);
       await windowLayoutRuntimeController.reconcileActive();
       noteWindowLayoutCommit(layoutId);
       return { ok: true };
@@ -3563,8 +3537,7 @@ function handleWindowLayoutRetireMember(intent) {
   windowLayoutMemberPreview.cancel();
   windowLayoutWidgetChannelWorkspace.noteCommitted(layoutId);
   setWindowLayoutStatus(layoutId, '');
-  const selected = windowLayoutRuntime.selectedMembers.get(layoutId);
-  if (selected?.delete(memberId)) syncWindowLayoutMemberSelection(layoutId);
+  if (windowLayoutSelection.remove(layoutId, memberId)) syncWindowLayoutMemberSelection(layoutId);
 }
 
 /** 019C: after any OTHER durable window-layout commit the workspace broadcasts
@@ -3731,10 +3704,7 @@ async function reconcileTrackingBaseline(providedSnapshot = null) {
           windowLayoutWidgetPreviewCapabilities.delete(key);
         }
         if (removedIds.size > 0 || !nextLayout) {
-          const selected = windowLayoutRuntime.selectedMembers.get(layout.id);
-          if (selected) {
-            for (const memberId of removedIds) selected.delete(memberId);
-            if (selected.size === 0) windowLayoutRuntime.selectedMembers.delete(layout.id);
+          if (windowLayoutSelection.repair(layout.id, removedIds, { eraseEmpty: true })) {
             syncWindowLayoutMemberSelection(layout.id);
           }
           setWindowLayoutStatus(layout.id, '');
@@ -7188,9 +7158,7 @@ function bootstrapWindowLayoutWidget() {
         }
         widgetState.snapshotReceived = true;
         const memberIds = new Set((message.snapshot.members ?? []).map((member) => member.id));
-        for (const memberId of [...widgetState.selection]) {
-          if (!memberIds.has(memberId)) widgetState.selection.delete(memberId);
-        }
+        widgetSelection.retain(layoutId, memberIds);
         // renderWidgetCard replaces elements.grid.innerHTML wholesale, which
         // destroys every member button and the pointer's hover target with it.
         // A duplicate message must therefore leave the live DOM alone: the
@@ -7393,17 +7361,21 @@ function bootstrapWindowLayoutWidget() {
     }
   }
 
+  const widgetSelection = createWindowLayoutSelection({
+    read: () => widgetState.selection,
+    write: (_id, selected) => { widgetState.selection = selected; },
+    erase: () => widgetState.selection.clear(),
+    anchors: widgetState.anchor,
+    orderedIds: () => (widgetState.snapshot.members ?? []).map((member) => member.id),
+    copyOnToggle: false,
+  });
   function toggleWidgetMemberSelection(memberId) {
-    if (widgetState.selection.has(memberId)) widgetState.selection.delete(memberId);
-    else widgetState.selection.add(memberId);
-    widgetState.anchor.set(layoutId, memberId);
+    widgetSelection.toggle(layoutId, memberId);
     syncWidgetSelection();
   }
 
   function clearWidgetSelection() {
-    if (widgetState.selection.size === 0) return;
-    widgetState.selection.clear();
-    widgetState.anchor.delete(layoutId);
+    if (!widgetSelection.clear(layoutId)) return;
     syncWidgetSelection();
   }
 
@@ -7531,19 +7503,7 @@ function bootstrapWindowLayoutWidget() {
         return;
       }
       if (event.shiftKey) {
-        const ordered = (widgetState.snapshot.members ?? []).map((candidate) => candidate.id);
-        const anchorId = widgetState.anchor.get(layoutId);
-        const anchorIndex = ordered.indexOf(anchorId);
-        const clickedIndex = ordered.indexOf(memberId);
-        widgetState.selection = new Set();
-        if (anchorIndex === -1 || clickedIndex === -1) {
-          widgetState.selection.add(memberId);
-        } else {
-          const [start, end] = anchorIndex <= clickedIndex
-            ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
-          for (let index = start; index <= end; index += 1) widgetState.selection.add(ordered[index]);
-        }
-        widgetState.anchor.set(layoutId, memberId);
+        widgetSelection.range(layoutId, memberId);
         syncWidgetSelection();
         return;
       }
