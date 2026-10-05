@@ -1,7 +1,7 @@
 /**
  * Quick Run — the launcher overlay's marker and its one event.
  *
- * The creator's correction, and it is the whole reason this module exists rather than the old one: Alt+A is a
+ * The creator's correction, and it is the whole reason this module exists rather than the old one: Alt+Shift+A is a
  * LAUNCHER, not a window switcher. "they all work, but my idea of alt a is not to bring papers forward" -
  * the command surface appears on top of whatever application they are using, they type, they press Enter, it
  * vanishes, and the application they came from never loses its place. Papers does not come forward at all.

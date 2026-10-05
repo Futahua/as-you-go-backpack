@@ -30,7 +30,7 @@ export function createHostBridge(window) {
   const FILE_MUTATION_REQUEST_TIMEOUT_MS = 30 * 1000;
   const pickListeners = new Set();
   const detachListeners = new Set();
-  // The launcher overlay's invocation (the creator's "Alt+A anywhere", host side). A push, like the detach
+  // The launcher overlay's invocation (the creator's "Alt+Shift+A anywhere", host side). A push, like the detach
   // lifecycle, so it is fanned out here rather than listened for by the page: every host-to-project message
   // arrives as a `message` event from `window.parent`, and this is the one place that checks the source.
   const commandSurfaceListeners = new Set();

@@ -358,10 +358,10 @@ test('rename editor keeps workspace hotkeys and native editing keys inert', () =
 test('the Quick Run chord is not swallowed by the editable guard (measured on the live machine)', () => {
   // Reported from the real machine: the chord did nothing at all while any input had focus, so the palette
   // could not be reopened - or dismissed with its own chord - until the creator clicked somewhere else. The
-  // chord is an explicit Alt accelerator that types nothing into a text field, so a focused input is no
+  // chord is an explicit Alt+Shift accelerator that types nothing into a text field, so a focused input is no
   // reason to ignore it. The second half holds the guard's actual job: text editing still owns its own keys.
   const h = createHarness({ activeElement: { matches: (selector) => selector.includes('input') } });
-  h.listeners[0].handler(key({ key: 'a', altKey: true }));
+  h.listeners[0].handler(key({ key: 'a', altKey: true, shiftKey: true }));
   assert.equal(h.called.quickRun, 1, 'the chord reaches the surface even though an input has focus');
 
   h.listeners[0].handler(key({ key: 'a', ctrlKey: true }));
@@ -369,19 +369,16 @@ test('the Quick Run chord is not swallowed by the editable guard (measured on th
 
   // And the same chord arriving from the field itself, which is what a keypress inside the palette looks like.
   const typed = createHarness();
-  const event = key({ key: 'a', altKey: true });
+  const event = key({ key: 'a', altKey: true, shiftKey: true });
   event.target = { matches: (selector) => selector.includes('input') };
   typed.listeners[0].handler(event);
   assert.equal(typed.called.quickRun, 1, 'the chord works from inside the input it is typed into');
 });
 
-test('the bare-letter chord reaches Quick Run from inside a field and types nothing (Alt+A)', () => {
-  // Alt+A is one modifier and one letter, so the exemption this chord gets from the editable guard matters
-  // far more than it did for Alt+Shift+X: this is exactly the case where a workspace chord could steal an
-  // ordinary keystroke from a field the creator is typing in.
+test('the Alt+Shift+A chord reaches Quick Run from inside a field and types nothing', () => {
   const h = createHarness({ activeElement: { matches: (selector) => selector.includes('input') } });
   let prevented = false;
-  const event = key({ key: 'a', altKey: true });
+  const event = key({ key: 'a', altKey: true, shiftKey: true });
   event.preventDefault = () => { prevented = true; };
 
   h.listeners[0].handler(event);
@@ -390,15 +387,15 @@ test('the bare-letter chord reaches Quick Run from inside a field and types noth
   assert.equal(prevented, true, 'and the letter never reaches that field: the default is prevented');
 });
 
-test('the chord Alt+A replaced no longer opens Quick Run', () => {
+test('Alt+A no longer opens Quick Run after the shortcut swap', () => {
   const h = createHarness();
   let prevented = false;
-  const event = key({ key: 'X', altKey: true, shiftKey: true });
+  const event = key({ key: 'a', altKey: true });
   event.preventDefault = () => { prevented = true; };
 
   h.listeners[0].handler(event);
 
-  assert.equal(h.called.quickRun, 0, 'Alt+Shift+X is bound to nothing now');
+  assert.equal(h.called.quickRun, 0, 'Alt+A is reserved for Papers activation now');
   assert.equal(prevented, false, 'and it is left alone rather than swallowed');
 });
 
@@ -476,7 +473,7 @@ test('the Quick Run chord reaches the callback the entry file supplies', () => {
     key: 'a',
     code: 'KeyA',
     altKey: true,
-    shiftKey: false,
+    shiftKey: true,
     ctrlKey: false,
     metaKey: false,
     preventDefault() { prevented += 1; },
@@ -590,7 +587,7 @@ test('the open palette keeps its own keys: Escape is not also a workspace Escape
   assert.equal(h.commandSpies['selectAllVisible:calls'], 0, 'Ctrl+A belongs to the search line while it is open');
   h.listeners[0].handler(key({ key: 'Delete' }));
   assert.equal(h.commandSpies['moveSelectionToBin:calls'], 0, 'and Delete must not bin anything behind the palette');
-  h.listeners[0].handler(key({ key: 'a', altKey: true }));
+  h.listeners[0].handler(key({ key: 'a', altKey: true, shiftKey: true }));
   assert.equal(h.called.quickRun, 1, 'but the chord it was opened with still reaches it, so it can be dismissed');
 });
 
@@ -603,7 +600,7 @@ test('the chord punches through every modal layer, and nothing else does', () =>
     h.elements[layer].hidden = false;
     h.store.setSelection(['a']);
     let prevented = 0;
-    const event = key({ key: 'a', altKey: true });
+    const event = key({ key: 'a', altKey: true, shiftKey: true });
     event.preventDefault = () => { prevented += 1; };
     h.listeners[0].handler(event);
     assert.equal(h.called.quickRun, 1, `the chord reaches the surface through an open ${layer}`);
@@ -690,8 +687,8 @@ test('a claimed picker Delete keydown is not also dispatched as a workspace dele
   assert.equal(h.commandSpies['deleteSelectedSets:calls'], 0);
 });
 
-test('the global command surface does not let the host Alt+A keydown toggle Quick Run closed', () => {
+test('the global command surface does not let the host Alt+Shift+A keydown toggle Quick Run closed', () => {
   const h = createHarness({ commandSurface: true });
-  h.listeners[0].handler(key({ key: 'a', altKey: true }));
+  h.listeners[0].handler(key({ key: 'a', altKey: true, shiftKey: true }));
   assert.equal(h.called.quickRun, 0);
 });

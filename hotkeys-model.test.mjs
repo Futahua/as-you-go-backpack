@@ -47,8 +47,7 @@ import {
 } from './public/app/hotkeys-model.js';
 
 test('no two actions in one scope share a default chord, and the cheap chord is claimed exactly once', () => {
-  // Alt+A is a single letter with a single modifier, which is what makes it cheap to press and easy to
-  // collide with. Every default in a scope is checked, not just the one that changed.
+  // The Quick Run default is checked with every other binding so the swapped chord cannot silently collide.
   const claimed = new Map();
   for (const action of HOTKEY_CATALOG) {
     for (const binding of action.defaults) {
@@ -57,7 +56,7 @@ test('no two actions in one scope share a default chord, and the cheap chord is 
       claimed.set(key, action.id);
     }
   }
-  assert.equal(claimed.get(`${HOTKEY_SCOPE_WORKSPACE}:Alt+A`), 'workspace.quick-run', 'Alt+A opens Quick Run');
+  assert.equal(claimed.get(`${HOTKEY_SCOPE_WORKSPACE}:Alt+Shift+A`), 'workspace.quick-run', 'Alt+Shift+A opens Quick Run');
   assert.equal(claimed.has(`${HOTKEY_SCOPE_WORKSPACE}:Alt+Shift+X`), false, 'and nothing claims the chord it replaced');
 });
 
@@ -69,16 +68,16 @@ test('a stored override keeps its binding when a catalog default changes', () =>
   assert.deepEqual(effectiveBindings('workspace.quick-run', preferences), ['Alt+Q'], 'the override is what applies');
   assert.deepEqual(
     effectiveBindings('workspace.quick-run', {}),
-    ['Alt+A'],
+    ['Alt+Shift+A'],
     'and someone with no override simply gets the catalog default',
   );
   assert.equal(canonicalizeBinding({ key: 'q', altKey: true }), 'Alt+Q', 'the stored chord is the one that matches');
-  assert.equal(effectiveBindings('workspace.quick-run', preferences).includes('Alt+A'), false, 'the new default does not join an overridden action');
+  assert.equal(effectiveBindings('workspace.quick-run', preferences).includes('Alt+Shift+A'), false, 'the new default does not join an overridden action');
 });
 
 test('the explicit catalog contains every current Backpack action exactly once', () => {
   assert.deepEqual(HOTKEY_CATALOG.map(({ id, group, scope, defaults }) => ({ id, group, scope, defaults })), [
-    { id: 'workspace.quick-run', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['Alt+A'] },
+    { id: 'workspace.quick-run', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['Alt+Shift+A'] },
   { id: 'workspace.escape', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['Escape'] },
     { id: 'workspace.group-selection', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['G'] },
     { id: 'workspace.edit-set-membership', group: 'Workspace', scope: HOTKEY_SCOPE_WORKSPACE, defaults: ['Ctrl+G'] },

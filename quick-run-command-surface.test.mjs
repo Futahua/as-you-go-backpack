@@ -15,7 +15,7 @@ import {
 /**
  * The launcher overlay's mode marker and its one event.
  *
- * The creator's correction: Alt+A is a LAUNCHER, not a window switcher. The overlay renders the command
+ * The creator's correction: Alt+Shift+A is a LAUNCHER, not a window switcher. The overlay renders the command
  * surface on top of whatever they are using, and Papers does not come forward. The host opens a 640x220
  * window on the project URL with a marker on it, and that marker is what says "you are the command surface
  * now" - there is no second product and no second page. This file holds the parts of that contract this
