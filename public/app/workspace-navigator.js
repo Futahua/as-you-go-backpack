@@ -57,6 +57,35 @@ export function navigatorDragItemIds(itemId, selectedIds) {
   return selected.has(itemId) ? [...selected] : [itemId];
 }
 
+export function navigatorAyGDragPayload({ itemId, selectedIds, resolveIdentity }) {
+  const sourceIds = navigatorDragItemIds(itemId, selectedIds);
+  const itemIds = [];
+  const placementIds = [];
+  for (const sourceId of sourceIds) {
+    const identity = typeof resolveIdentity === 'function'
+      ? resolveIdentity(sourceId)
+      : { itemId: sourceId, placementId: null };
+    const canonicalId = identity?.itemId;
+    if (typeof canonicalId !== 'string' || !canonicalId) continue;
+    if (!itemIds.includes(canonicalId)) itemIds.push(canonicalId);
+    const placementId = identity?.placementId;
+    if (typeof placementId === 'string' && placementId) placementIds.push([canonicalId, placementId]);
+  }
+  return { itemIds, placementIds };
+}
+
+function normalizePlacementPairs(pairs, itemIds) {
+  const allowed = new Set(itemIds);
+  const byItem = new Map();
+  for (const pair of pairs || []) {
+    if (!Array.isArray(pair) || pair.length < 2) continue;
+    const [itemId, placementId] = pair;
+    if (!allowed.has(itemId) || typeof placementId !== 'string' || !placementId) continue;
+    byItem.set(itemId, placementId);
+  }
+  return [...byItem.entries()];
+}
+
 function uniquePaths(paths) {
   const seen = new Set();
   const out = [];
@@ -86,6 +115,7 @@ export function navigatorNativeDragSourceMatches(source, droppedPaths, now = Dat
 export function navigatorBreadcrumbMovePlan({
   segment,
   rootId,
+  aygDrag = null,
   aygItemIds = [],
   machinePaths = [],
   nativeSource = null,
@@ -99,14 +129,16 @@ export function navigatorBreadcrumbMovePlan({
       && navigatorNativeDragSourceMatches(nativeSource, droppedPaths, now)) paths = uniquePaths(nativeSource.paths);
     return paths.length ? { kind: 'machine-move', paths, destination: segment.path } : null;
   }
-  let itemIds = [...new Set((aygItemIds || []).filter((id) => typeof id === 'string' && id))];
+  let itemIds = [...new Set(((aygDrag?.itemIds ?? aygItemIds) || []).filter((id) => typeof id === 'string' && id))];
+  let placementIds = normalizePlacementPairs(aygDrag?.placementIds, itemIds);
   if (itemIds.length === 0 && nativeSource?.mode === 'ayg'
     && navigatorNativeDragSourceMatches(nativeSource, droppedPaths, now)) {
     itemIds = [...new Set((nativeSource.itemIds || []).filter((id) => typeof id === 'string' && id))];
+    placementIds = normalizePlacementPairs(nativeSource.placementIds, itemIds);
   }
   const destination = segment.item?.id || rootId;
   return itemIds.length && destination
-    ? { kind: 'ayg-move', itemIds, destination }
+    ? { kind: 'ayg-move', itemIds, placementIds, destination }
     : null;
 }
 
@@ -369,26 +401,39 @@ export function createWorkspaceNavigator(o) {
       return [];
     }
   }
+  function parseAyGDragPayload(dataTransfer) {
+    try {
+      const parsed = JSON.parse(dataTransfer?.getData?.(NAVIGATOR_AYG_DRAG_TYPE) || 'null');
+      if (Array.isArray(parsed)) return { itemIds: parsed, placementIds: [] };
+      if (!parsed || typeof parsed !== 'object') return { itemIds: [], placementIds: [] };
+      return {
+        itemIds: Array.isArray(parsed.itemIds) ? parsed.itemIds : [],
+        placementIds: Array.isArray(parsed.placementIds) ? parsed.placementIds : [],
+      };
+    } catch {
+      return { itemIds: [], placementIds: [] };
+    }
+  }
   async function droppedPaths(files) {
     if (!files.length) return [];
     const result = await o.host.resolveDroppedTargets(files).catch(() => null);
     const entries = result?.targets || result || [];
     return uniquePaths(entries.map((entry) => typeof entry === 'string' ? entry : entry?.target || entry?.path));
   }
-  async function handleBreadcrumbDrop(segment, event) {
+  async function handleNavigatorDrop(segment, event) {
     const files = [...(event.dataTransfer?.files || [])];
     const resolvedPaths = await droppedPaths(files);
     const plan = navigatorBreadcrumbMovePlan({
       segment,
       rootId: o.rootId,
-      aygItemIds: parseDragList(event.dataTransfer, NAVIGATOR_AYG_DRAG_TYPE),
+      aygDrag: parseAyGDragPayload(event.dataTransfer),
       machinePaths: parseDragList(event.dataTransfer, NAVIGATOR_MACHINE_DRAG_TYPE),
       nativeSource: s.nativeDragSource,
       droppedPaths: resolvedPaths,
     });
     s.nativeDragSource = null;
     if (plan?.kind === 'ayg-move') {
-      await o.moveAyGItemsToFolder?.(plan.itemIds, plan.destination);
+      await o.moveAyGItemsToFolder?.(plan.itemIds, plan.placementIds, plan.destination);
       render();
       return;
     }
@@ -415,6 +460,26 @@ export function createWorkspaceNavigator(o) {
     }
     await o.dropNavigatorFiles?.(files, segment.item?.id || o.rootId);
     render();
+  }
+  function installNavigatorDropTarget(element, segment) {
+    element.addEventListener('dragover',(event)=>{
+      const types=[...(event.dataTransfer?.types || [])];
+      const internalType = segment.path ? NAVIGATOR_MACHINE_DRAG_TYPE : NAVIGATOR_AYG_DRAG_TYPE;
+      if(!types.includes('Files')&&!types.includes(internalType))return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect=types.includes(internalType)?'move':'copy';
+      element.classList.add('drop-target');
+    });
+    element.addEventListener('dragleave',(event)=>{
+      if(!element.contains(event.relatedTarget))element.classList.remove('drop-target');
+    });
+    element.addEventListener('drop',(event)=>{
+      event.preventDefault();
+      event.stopPropagation();
+      element.classList.remove('drop-target');
+      void handleNavigatorDrop(segment,event);
+    });
   }
   function setLocation(segments) {
     const key = segments.map((segment) => segment.key || segment.label).join('\u0000');
@@ -443,23 +508,7 @@ export function createWorkspaceNavigator(o) {
       crumb.title = segment.title || segment.label;
       crumb.draggable=true;
       crumb.addEventListener('dragstart',event=>event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify(segment.path?{mode:'machine',path:segment.path,machineRoot:segment.path,view:'nav',name:segment.label}:{mode:'ayg',currentId:segment.item?.id||o.rootId,view:'nav',name:segment.label,icon:segment.item?.icon})));
-      crumb.addEventListener('dragover',(event)=>{
-        const types=[...(event.dataTransfer?.types || [])];
-        if(!types.includes('Files')&&!types.includes(NAVIGATOR_AYG_DRAG_TYPE)&&!types.includes(NAVIGATOR_MACHINE_DRAG_TYPE))return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEffect='move';
-        crumb.classList.add('drop-target');
-      });
-      crumb.addEventListener('dragleave',(event)=>{
-        if(!crumb.contains(event.relatedTarget))crumb.classList.remove('drop-target');
-      });
-      crumb.addEventListener('drop',(event)=>{
-        event.preventDefault();
-        event.stopPropagation();
-        crumb.classList.remove('drop-target');
-        void handleBreadcrumbDrop(segment,event);
-      });
+      installNavigatorDropTarget(crumb,segment);
       crumb.addEventListener('contextmenu',event=>{
         if(!event.shiftKey)return;
         event.preventDefault();event.stopPropagation();
@@ -469,7 +518,7 @@ export function createWorkspaceNavigator(o) {
         void breadcrumbPopup.show(crumb,parent);
       });
       if (segment.activate) crumb.addEventListener('click', segment.activate);
-      else crumb.disabled = true;
+      else crumb.setAttribute('aria-disabled','true');
       locTrack.append(crumb);
     });
     if (key !== s.locationKey) {
@@ -511,8 +560,12 @@ export function createWorkspaceNavigator(o) {
       const id = x.id, row = d.createElement('div');
       row.draggable=true;
       row.addEventListener('dragstart',event=>{
-        const itemIds=navigatorDragItemIds(id,o.getSession().selected);
-        event.dataTransfer?.setData(NAVIGATOR_AYG_DRAG_TYPE,JSON.stringify(itemIds));
+        const dragPayload=navigatorAyGDragPayload({
+          itemId:id,
+          selectedIds:o.getSession().selected,
+          resolveIdentity:o.resolveAyGDragIdentity,
+        });
+        event.dataTransfer?.setData(NAVIGATOR_AYG_DRAG_TYPE,JSON.stringify(dragPayload));
         if(event.ctrlKey)return;
         const saved=navigatorSavedStateForItem(x);
         if(saved)event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify(saved));
@@ -523,13 +576,17 @@ export function createWorkspaceNavigator(o) {
         row.draggable = true;
         row.addEventListener('dragstart', (event) => {
           if(!event.ctrlKey)return;
-          const itemIds = navigatorDragItemIds(id, o.getSession().selected);
+          const dragPayload = navigatorAyGDragPayload({
+            itemId:id,
+            selectedIds:o.getSession().selected,
+            resolveIdentity:o.resolveAyGDragIdentity,
+          });
           const paths = aygNavigatorNativePaths({
             itemId: id,
             selectedIds: o.getSession().selected,
             resolvePaths: o.nativeDragPaths,
           });
-          rememberNativeDrag({ mode:'ayg', itemIds, paths });
+          rememberNativeDrag({ mode:'ayg', ...dragPayload, paths });
           beginNavigatorNativeDrag({
             event,
             paths,
@@ -551,6 +608,7 @@ export function createWorkspaceNavigator(o) {
         s.expanded.has(x.id)?s.expanded.delete(x.id):s.expanded.add(x.id);
         render();
       });
+      if(x.kind==='group')installNavigatorDropTarget(row,{item:x});
       f.append(row); if (x.kind==='group'&&s.expanded.has(x.id)) f.append(aygChildren(x.id,depth+1));
     } return f;
   }
@@ -749,6 +807,7 @@ export function createWorkspaceNavigator(o) {
     if(folder&&s.view==='tree'){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'▾':'▸';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
     const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x); hydrateMachineArt(art,x);
     const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name; row.append(lead,art,label);
+    if(folder&&!searchResult)installNavigatorDropTarget(row,{path:x.path});
     if(!searchResult&&s.view==='nav'){
       row.classList.add('machine-list-row');
       const type=d.createElement('span'); type.className='workspace-navigator-machine-type'; type.textContent=searchTypeLabel(x);

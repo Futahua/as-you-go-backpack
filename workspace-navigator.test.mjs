@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   aygNavigatorNativePaths,
   beginNavigatorNativeDrag,
+  navigatorAyGDragPayload,
   navigatorBreadcrumbMovePlan,
   navigatorDragItemIds,
   navigatorNativeDragSourceMatches,
@@ -79,14 +80,32 @@ test('navigator breadcrumb drag identity follows the current AYG selection', () 
   assert.deepEqual(navigatorDragItemIds('c', new Set(['a', 'b'])), ['c']);
 });
 
+test('AYG drag payload canonicalizes placement rows to shortcut records plus exact placement ids', () => {
+  assert.deepEqual(navigatorAyGDragPayload({
+    itemId: 'placement-b',
+    selectedIds: new Set(['placement-a', 'placement-b']),
+    resolveIdentity: (id) => ({
+      itemId: id === 'placement-a' ? 'shortcut-a' : 'shortcut-b',
+      placementId: id,
+    }),
+  }), {
+    itemIds: ['shortcut-a', 'shortcut-b'],
+    placementIds: [['shortcut-a', 'placement-a'], ['shortcut-b', 'placement-b']],
+  });
+});
+
 test('breadcrumb move plans keep AYG reparenting and Opus filesystem moves separate', () => {
   assert.deepEqual(navigatorBreadcrumbMovePlan({
     segment: { item: { id: 'folder-b' } },
     rootId: 'root',
-    aygItemIds: ['a', 'b', 'a'],
+    aygDrag: {
+      itemIds: ['a', 'b', 'a'],
+      placementIds: [['a', 'placement-a'], ['b', 'placement-b']],
+    },
   }), {
     kind: 'ayg-move',
     itemIds: ['a', 'b'],
+    placementIds: [['a', 'placement-a'], ['b', 'placement-b']],
     destination: 'folder-b',
   });
   assert.deepEqual(navigatorBreadcrumbMovePlan({
@@ -104,6 +123,7 @@ test('a recent native Ctrl-drag can return through Files only when exact source 
   const source = {
     mode: 'ayg',
     itemIds: ['a'],
+    placementIds: [['a', 'placement-a']],
     paths: ['D:\\Files\\a.txt'],
     startedAt: 1000,
   };
@@ -119,6 +139,7 @@ test('a recent native Ctrl-drag can return through Files only when exact source 
   }), {
     kind: 'ayg-move',
     itemIds: ['a'],
+    placementIds: [['a', 'placement-a']],
     destination: 'folder-b',
   });
 });
@@ -144,6 +165,24 @@ test('provider switching stays inline and navigator no longer constructs a Home 
   assert.doesNotMatch(switchProvider, /pickTarget\(/);
   assert.doesNotMatch(source, /button\(d,'Home'/);
   assert.match(source, /if\(!event\.ctrlKey\)return;/, 'ordinary HTML5 drag must remain available for pills and breadcrumbs');
+});
+
+
+test('tree rows and breadcrumbs share the same real drop targets', async () => {
+  const source = await readFile(new URL('./public/app/workspace-navigator.js', import.meta.url), 'utf8');
+  assert.match(source, /installNavigatorDropTarget\(crumb,segment\)/);
+  assert.match(source, /if\(x\.kind==='group'\)installNavigatorDropTarget\(row,\{item:x\}\)/);
+  assert.match(source, /if\(folder&&!searchResult\)installNavigatorDropTarget\(row,\{path:x\.path\}\)/);
+  assert.doesNotMatch(source, /else crumb\.disabled = true/);
+});
+
+test('navigator composition preserves record and placement identity for AYG moves', async () => {
+  const source = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  assert.match(source, /resolveAyGDragIdentity:\(id\)=>\{/);
+  assert.match(source, /shortcutByRecordOrPlacementId\(id\)/);
+  assert.match(source, /itemId:record\.id,placementId:visiblePlacementIdFor\(id\)/);
+  assert.match(source, /moveAyGItemsToFolder:\(itemIds,placementIds,folderId\)=>commands\.dragDropToFolder\(\{/);
+  assert.match(source, /placementIds:new Map\(placementIds\|\|\[\]\)/);
 });
 
 test('saved navigator shortcuts retain the identity needed to hydrate the same icon as their row', () => {

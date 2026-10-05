@@ -4936,7 +4936,17 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     isWebLink,
     isAbsoluteWindowsPath,
     nativeDragPaths: nativeDragPathsForItemIds,
-    moveAyGItemsToFolder:(itemIds,folderId)=>commands.dragDropToFolder({itemIds,placementIds:new Map(),folderId}),
+    resolveAyGDragIdentity:(id)=>{
+      if(group(id)||windowLayout(id))return {itemId:id,placementId:null};
+      const record=shortcutByRecordOrPlacementId(id);
+      if(!record)return {itemId:id,placementId:null};
+      return {itemId:record.id,placementId:visiblePlacementIdFor(id)};
+    },
+    moveAyGItemsToFolder:(itemIds,placementIds,folderId)=>commands.dragDropToFolder({
+      itemIds,
+      placementIds:new Map(placementIds||[]),
+      folderId,
+    }),
     selectAyG: (id, visibleIds, modifiers = {}) => commands.selectItem(id, {
       shiftKey: false,
       ctrlKey: modifiers.ctrlKey === true,
