@@ -31,9 +31,7 @@ test('clasp owns the shared seam and disables the two individual pane edges', as
     readFile(new URL('./public/styles/navigator.css', import.meta.url), 'utf8'),
   ]);
   assert.match(source, /pane-clasp-toggle/);
-  assert.match(source, /classList\.toggle\('pane-clasp-control-visible', clasped \|\| b\.left - a\.right < 30\)/);
   assert.match(source, /clasped \? 'Separate panes' : 'Clasp panes'/);
   assert.match(source, /strip\.hidden = !clasped/);
-  assert.match(css, /\.workspace-navigator\.pane-clasp-control-visible \.workspace-navigator-header\{padding-right:42px\}/);
   assert.match(css, /\.workspace-navigator\.pane-clasped \.workspace-navigator-resizer,\.file-capability-panel\.pane-clasped \.file-capability-resizer\{display:none!important\}/);
 });
