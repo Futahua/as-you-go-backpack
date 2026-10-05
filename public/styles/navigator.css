@@ -33,5 +33,10 @@
 .navigator-saved-pills::-webkit-scrollbar{display:none}
 .navigator-saved-track{display:grid;grid-auto-flow:column;grid-template-rows:repeat(var(--pill-rows,3),24px);grid-auto-columns:max-content;align-content:start;justify-content:start;gap:2px 4px;width:max-content;min-width:100%;height:100%}
 .navigator-saved-pill{max-width:240px;height:24px;box-sizing:border-box}
-.navigator-pills-height-grip{height:6px;width:100%;cursor:row-resize;touch-action:none;border-radius:3px;background:var(--border-subtle)}
-.navigator-pills-height-grip:hover,.navigator-pills-height-grip:active{background:var(--text-muted)}
+.navigator-pills-height-grip{height:6px;width:100%;cursor:row-resize;touch-action:none;background:transparent}
+.navigator-saved-pills{position:relative}
+.navigator-saved-clear{position:sticky;z-index:3;top:2px;left:calc(100% - 24px);float:right;width:22px;height:22px;display:grid;place-items:center;margin-bottom:-22px;padding:0;border:1px solid transparent;border-radius:6px;background:var(--surface-raised);color:var(--text-muted);opacity:0;pointer-events:none;transition:opacity .12s ease,color .12s ease,border-color .12s ease,background .12s ease}
+.navigator-saved-pills:hover .navigator-saved-clear,.navigator-saved-clear:focus-visible{opacity:1;pointer-events:auto}
+.navigator-saved-clear:hover{border-color:var(--border);color:var(--text)}
+.navigator-saved-clear.armed{opacity:1;pointer-events:auto;border-color:#9f3434;background:#5a2020;color:#ffb0b0}
+.navigator-saved-clear svg{width:13px;height:13px}

@@ -633,3 +633,9 @@ and translates wheel motion into horizontal panning without a visible scrollbar.
 Quick Run's existing observer follows the resized viewport. AYG suite 1848 passed;
 isolated Chromium asserted 28px collapsed pill height, drop restoration and wheel
 panning after overflow. All changes remain in the local Backpack project.
+
+Navigator saved states are shared UI state, not workspace-document authority. All
+current As You Go surfaces use the same registered Backpack project/origin, so the
+saved-pill owner persists through that origin's local storage and synchronizes live
+surfaces with storage/BroadcastChannel events. Pill height is shared the same way;
+the workspace model remains untouched.

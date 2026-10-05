@@ -115,7 +115,6 @@ export function createWorkspaceNavigator(o) {
   const saveState=button(d,'Save current navigation',['M10 4v12','M4 10h12']);
   const quickSearch=button(d,'Quick Run in navigator',['M8.5 3a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11','M12.5 12.5 17 17']);
   navActions.append(saveState,quickSearch);head.insertBefore(navActions,collapse);
-  saveState.remove();
   quickSearch.addEventListener('click',()=>o.openPaneQuickRun?.(panel));
   const loc = d.createElement('div'); loc.className = 'workspace-navigator-location';
   const locTrack = d.createElement('div'); locTrack.className = 'workspace-navigator-location-track'; loc.append(locTrack);
@@ -211,9 +210,14 @@ export function createWorkspaceNavigator(o) {
       ? svg(['M8.5 3.5a5 5 0 1 0 0 10a5 5 0 1 0 0-10', 'M12.2 12.2 16.5 16.5'])
       : svg(['M12.5 4.5 7 10l5.5 5.5']);
     const nav = s.view === 'nav';
-    back.hidden = fwd.hidden = up.hidden = home.hidden = !nav;
-    reveal.hidden = s.mode !== 'machine';
-    paste.hidden = s.mode === 'machine';
+    // Keep the toolbar spatially stable when the pane narrows or changes mode.
+    // Context-specific controls stay visible but disabled instead of disappearing.
+    back.hidden = fwd.hidden = up.hidden = home.hidden = false;
+    if (!nav) back.disabled = fwd.disabled = up.disabled = home.disabled = true;
+    reveal.hidden = false;
+    paste.hidden = false;
+    reveal.disabled = s.mode !== 'machine';
+    paste.disabled = s.mode === 'machine';
   }
   function setMode(mode) {
     s.mode = mode;
