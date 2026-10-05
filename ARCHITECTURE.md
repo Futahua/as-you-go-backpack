@@ -639,3 +639,11 @@ current As You Go surfaces use the same registered Backpack project/origin, so t
 saved-pill owner persists through that origin's local storage and synchronizes live
 surfaces with storage/BroadcastChannel events. Pill height is shared the same way;
 the workspace model remains untouched.
+
+Pane clasp ownership — 2026-10-05: navigator and preview keep independent width
+and resizer ownership while unclasped. The link clasp is the only coordinator that
+may join them: it snapshots the independent layout, snaps to one rendered seam,
+disables both pane-owned edge hit targets, and makes the paired seam the sole resize
+path. Unclasp restores the independent layout (or opens a real gap if they originally
+touched). Saved navigator pills resolve the same shortcut identity/icon hydration
+path as the rows they came from; this remains UI state, not workspace authority.

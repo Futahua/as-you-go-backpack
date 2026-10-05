@@ -37,4 +37,5 @@ test('navigator keeps the height grip invisible and toolbar controls present', a
   assert.match(css, /\.navigator-saved-clear\.armed\{[^}]*#9f3434/);
   assert.doesNotMatch(source, /back\.hidden = fwd\.hidden = up\.hidden = home\.hidden = !nav/);
   assert.doesNotMatch(source, /saveState\.remove\(\)/);
+  assert.doesNotMatch(source, /Save current navigation/);
 });

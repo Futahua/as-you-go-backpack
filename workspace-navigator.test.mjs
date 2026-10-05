@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   aygNavigatorNativePaths,
   beginNavigatorNativeDrag,
+  navigatorSavedStateForItem,
 } from './public/app/workspace-navigator.js';
 
 test('navigator native drag cancels Chromium drag before starting one Windows drag', async () => {
@@ -66,4 +67,14 @@ test('AYG navigator drags the whole current selection only when the dragged row 
     resolvePaths,
   }), ['D:\\Files\\c.txt']);
   assert.deepEqual(calls, [['a', 'b'], ['c']]);
+});
+
+test('saved navigator shortcuts retain the identity needed to hydrate the same icon as their row', () => {
+  assert.deepEqual(navigatorSavedStateForItem({
+    id: 'placement-1', shortcutId: 'shortcut-1', kind: 'shortcut', name: 'Report.pptx',
+    target: 'D:\\Files\\Report.pptx', icon: null,
+  }), {
+    mode: 'action', itemId: 'shortcut-1', name: 'Report.pptx', icon: null,
+    art: { kind: 'shortcut', icon: null, target: 'D:\\Files\\Report.pptx', shortcutId: 'shortcut-1' },
+  });
 });
