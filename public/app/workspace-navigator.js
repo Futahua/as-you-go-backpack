@@ -1,6 +1,9 @@
 const svg = (paths) => `<svg viewBox="0 0 20 20" aria-hidden="true">${paths.map((d) => `<path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</svg>`;
 import { createBreadcrumbPopup } from './navigator-breadcrumb-popup.js';
 import { createNavigatorSavedStates } from './navigator-saved-states.js';
+export const NAVIGATOR_AYG_DRAG_TYPE = 'application/x-papers-ayg-navigator-items';
+export const NAVIGATOR_MACHINE_DRAG_TYPE = 'application/x-papers-machine-navigator-items';
+const NATIVE_DRAG_SOURCE_TTL_MS = 30_000;
 function button(doc, title, paths) {
   const b = doc.createElement('button');
   b.type = 'button'; b.className = 'navigator-icon-button'; b.title = title;
@@ -48,6 +51,65 @@ export function aygNavigatorNativePaths({ itemId, selectedIds, resolvePaths }) {
   return resolvePaths(selected.has(itemId) ? [...selected] : [itemId]);
 }
 
+export function navigatorDragItemIds(itemId, selectedIds) {
+  if (typeof itemId !== 'string' || !itemId) return [];
+  const selected = selectedIds instanceof Set ? selectedIds : new Set(selectedIds || []);
+  return selected.has(itemId) ? [...selected] : [itemId];
+}
+
+function uniquePaths(paths) {
+  const seen = new Set();
+  const out = [];
+  for (const value of paths || []) {
+    if (typeof value !== 'string' || !value) continue;
+    const key = value.replace(/\//g, '\\').toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+  return out;
+}
+
+export function navigatorSelectedPaths({ mode, selected, selectedIds, resolvePaths }) {
+  if (mode === 'machine') return uniquePaths(selected?.path ? [selected.path] : []);
+  if (typeof resolvePaths !== 'function') return [];
+  return uniquePaths(resolvePaths([...(selectedIds || [])]));
+}
+
+export function navigatorNativeDragSourceMatches(source, droppedPaths, now = Date.now()) {
+  if (!source || !Number.isFinite(source.startedAt) || now - source.startedAt > NATIVE_DRAG_SOURCE_TTL_MS) return false;
+  const expected = uniquePaths(source.paths).map((path) => path.replace(/\//g, '\\').toLocaleLowerCase()).sort();
+  const actual = uniquePaths(droppedPaths).map((path) => path.replace(/\//g, '\\').toLocaleLowerCase()).sort();
+  return expected.length > 0 && expected.length === actual.length && expected.every((path, index) => path === actual[index]);
+}
+
+export function navigatorBreadcrumbMovePlan({
+  segment,
+  rootId,
+  aygItemIds = [],
+  machinePaths = [],
+  nativeSource = null,
+  droppedPaths = [],
+  now = Date.now(),
+}) {
+  if (!segment) return null;
+  if (segment.path) {
+    let paths = uniquePaths(machinePaths);
+    if (paths.length === 0 && nativeSource?.mode === 'machine'
+      && navigatorNativeDragSourceMatches(nativeSource, droppedPaths, now)) paths = uniquePaths(nativeSource.paths);
+    return paths.length ? { kind: 'machine-move', paths, destination: segment.path } : null;
+  }
+  let itemIds = [...new Set((aygItemIds || []).filter((id) => typeof id === 'string' && id))];
+  if (itemIds.length === 0 && nativeSource?.mode === 'ayg'
+    && navigatorNativeDragSourceMatches(nativeSource, droppedPaths, now)) {
+    itemIds = [...new Set((nativeSource.itemIds || []).filter((id) => typeof id === 'string' && id))];
+  }
+  const destination = segment.item?.id || rootId;
+  return itemIds.length && destination
+    ? { kind: 'ayg-move', itemIds, destination }
+    : null;
+}
+
 export function navigatorSavedStateForItem(item) {
   if (!item || typeof item.name !== 'string') return null;
   if (item.kind === 'group') {
@@ -73,6 +135,7 @@ export function createWorkspaceNavigator(o) {
   if (!panel || !o.workspace || !o.host?.fileCapability) return Object.freeze({
     render() {},
     syncCanvasSelection() {},
+    copySelectionPaths() { return false; },
     isMachineMode: () => false,
     isCollapsed: () => true,
     setCollapsed() {},
@@ -105,6 +168,7 @@ export function createWorkspaceNavigator(o) {
     searchFilters: { name:'', path:'', type:'', size:'', modified:'' },
     searchSort: { key:null, direction:1 },
     machineSort: { key:'name', direction:1 },
+    nativeDragSource: null,
   };
   try {
     const savedWidthRaw = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-width');
@@ -126,10 +190,10 @@ export function createWorkspaceNavigator(o) {
   const collapse = button(d,'Collapse navigator',['M12.5 4.5 7 10l5.5 5.5']); collapse.classList.add('workspace-navigator-collapse');
   const tools = d.createElement('div'); tools.className = 'workspace-navigator-toolbar';
   const back = button(d,'Back',['M12.5 4.5 7 10l5.5 5.5']), fwd = button(d,'Forward',['M7.5 4.5 13 10l-5.5 5.5']);
-  const up = button(d,'Up',['M5 11l5-5 5 5','M10 6v9']), home = button(d,'Home',['M3.5 9.5 10 4l6.5 5.5','M5.5 8.5v7h9v-7']), refresh = button(d,'Refresh',['M15.5 7A6 6 0 1 0 16 12','M15.5 7V3.5','M15.5 7H12']), copy = button(d,'Copy',['M7 7h9v9H7z','M4 13H3.5A1.5 1.5 0 0 1 2 11.5v-8A1.5 1.5 0 0 1 3.5 2h8A1.5 1.5 0 0 1 13 3.5V4']);
+  const up = button(d,'Up',['M5 11l5-5 5 5','M10 6v9']), refresh = button(d,'Refresh',['M15.5 7A6 6 0 1 0 16 12','M15.5 7V3.5','M15.5 7H12']), copy = button(d,'Copy',['M7 7h9v9H7z','M4 13H3.5A1.5 1.5 0 0 1 2 11.5v-8A1.5 1.5 0 0 1 3.5 2h8A1.5 1.5 0 0 1 13 3.5V4']);
   const move = button(d,'Move',['M4 2.5h7l3 3v12H4z','M11 2.5v4h4','M8 11h8','M13 8l3 3-3 3']), paste = button(d,'Paste',['M6 5h8v12H6z','M8 5V3h4v2']);
   const rename = button(d,'Rename',['M4 15h4l8-8-4-4-8 8z','M11 4l4 4']), del = button(d,'Delete',['M4 6h12','M7 6v10h6V6','M8 4h4']);
-  const reveal = button(d,'Reveal',['M3 6h5l1.5 2H17v8H3z','M3 9h14']); tools.append(back,fwd,up,home,refresh,copy,move,paste,rename,del,reveal);
+  const reveal = button(d,'Reveal',['M3 6h5l1.5 2H17v8H3z','M3 9h14']); tools.append(back,fwd,up,refresh,copy,move,paste,rename,del,reveal);
   head.append(provider, tools, viewToggle, collapse);
   const navActions=d.createElement('div');navActions.className='navigator-state-actions';
   const quickSearch=button(d,'Quick Run in navigator',['M8.5 3a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11','M12.5 12.5 17 17']);
@@ -231,8 +295,8 @@ export function createWorkspaceNavigator(o) {
     const nav = s.view === 'nav';
     // Keep the toolbar spatially stable when the pane narrows or changes mode.
     // Context-specific controls stay visible but disabled instead of disappearing.
-    back.hidden = fwd.hidden = up.hidden = home.hidden = false;
-    if (!nav) back.disabled = fwd.disabled = up.disabled = home.disabled = true;
+    back.hidden = fwd.hidden = up.hidden = false;
+    if (!nav) back.disabled = fwd.disabled = up.disabled = true;
     reveal.hidden = false;
     paste.hidden = false;
     reveal.disabled = s.mode !== 'machine';
@@ -274,12 +338,83 @@ export function createWorkspaceNavigator(o) {
       if (!stat?.ok || stat.entry?.kind !== 'folder') root = null;
     }
     if (!root) {
-      const picked = await o.host.pickTarget('folder').catch(() => null);
-      root = typeof picked === 'string' ? picked : picked?.path || picked?.target || null;
+      const selectedPaths = o.nativeDragPaths?.([...o.getSession().selected]) || [];
+      const visiblePaths = o.nativeDragPaths?.(o.itemsIn(o.getState(), currentAyG()).map((item) => item.id)) || [];
+      for (const candidate of uniquePaths([...selectedPaths, ...visiblePaths])) {
+        const stat = await o.host.fileCapability('stat', { path: candidate }).catch(() => null);
+        if (!stat?.ok) continue;
+        root = stat.entry?.kind === 'folder' ? candidate : parentPath(candidate);
+        if (root) break;
+      }
     }
-    if (!root || !o.isAbsoluteWindowsPath(root)) return;
+    if (!root || !o.isAbsoluteWindowsPath(root)) {
+      o.setStatus('Opus needs a local file or folder in this AYG location before it can switch inline.');
+      return;
+    }
     clearSearch({ renderNow: false });
     await enterMachine(root, false);
+  }
+  function rememberNativeDrag(source) {
+    s.nativeDragSource = {
+      ...source,
+      paths: uniquePaths(source.paths),
+      startedAt: Date.now(),
+    };
+  }
+  function parseDragList(dataTransfer, type) {
+    try {
+      const parsed = JSON.parse(dataTransfer?.getData?.(type) || '[]');
+      return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string' && value) : [];
+    } catch {
+      return [];
+    }
+  }
+  async function droppedPaths(files) {
+    if (!files.length) return [];
+    const result = await o.host.resolveDroppedTargets(files).catch(() => null);
+    const entries = result?.targets || result || [];
+    return uniquePaths(entries.map((entry) => typeof entry === 'string' ? entry : entry?.target || entry?.path));
+  }
+  async function handleBreadcrumbDrop(segment, event) {
+    const files = [...(event.dataTransfer?.files || [])];
+    const resolvedPaths = await droppedPaths(files);
+    const plan = navigatorBreadcrumbMovePlan({
+      segment,
+      rootId: o.rootId,
+      aygItemIds: parseDragList(event.dataTransfer, NAVIGATOR_AYG_DRAG_TYPE),
+      machinePaths: parseDragList(event.dataTransfer, NAVIGATOR_MACHINE_DRAG_TYPE),
+      nativeSource: s.nativeDragSource,
+      droppedPaths: resolvedPaths,
+    });
+    s.nativeDragSource = null;
+    if (plan?.kind === 'ayg-move') {
+      await o.moveAyGItemsToFolder?.(plan.itemIds, plan.destination);
+      render();
+      return;
+    }
+    if (plan?.kind === 'machine-move') {
+      const result = await o.host.fileCapability('move', { paths: plan.paths, destination: plan.destination });
+      if (!result?.ok) o.setStatus(result?.message || 'Move failed.');
+      else {
+        s.selected = null;
+        s.machineListings.clear();
+        render();
+      }
+      return;
+    }
+    if (!files.length) return;
+    if (segment.path) {
+      if (!resolvedPaths.length) return;
+      const result = await o.host.fileCapability('copy', { paths: resolvedPaths, destination: segment.path });
+      if (!result?.ok) o.setStatus(result?.message || 'Copy failed.');
+      else {
+        s.machineListings.clear();
+        render();
+      }
+      return;
+    }
+    await o.dropNavigatorFiles?.(files, segment.item?.id || o.rootId);
+    render();
   }
   function setLocation(segments) {
     const key = segments.map((segment) => segment.key || segment.label).join('\u0000');
@@ -308,6 +443,23 @@ export function createWorkspaceNavigator(o) {
       crumb.title = segment.title || segment.label;
       crumb.draggable=true;
       crumb.addEventListener('dragstart',event=>event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify(segment.path?{mode:'machine',path:segment.path,machineRoot:segment.path,view:'nav',name:segment.label}:{mode:'ayg',currentId:segment.item?.id||o.rootId,view:'nav',name:segment.label,icon:segment.item?.icon})));
+      crumb.addEventListener('dragover',(event)=>{
+        const types=[...(event.dataTransfer?.types || [])];
+        if(!types.includes('Files')&&!types.includes(NAVIGATOR_AYG_DRAG_TYPE)&&!types.includes(NAVIGATOR_MACHINE_DRAG_TYPE))return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect='move';
+        crumb.classList.add('drop-target');
+      });
+      crumb.addEventListener('dragleave',(event)=>{
+        if(!crumb.contains(event.relatedTarget))crumb.classList.remove('drop-target');
+      });
+      crumb.addEventListener('drop',(event)=>{
+        event.preventDefault();
+        event.stopPropagation();
+        crumb.classList.remove('drop-target');
+        void handleBreadcrumbDrop(segment,event);
+      });
       crumb.addEventListener('contextmenu',event=>{
         if(!event.shiftKey)return;
         event.preventDefault();event.stopPropagation();
@@ -358,20 +510,29 @@ export function createWorkspaceNavigator(o) {
     for (const x of o.itemsIn(o.getState(), parent).filter((v) => v.kind !== 'window-layout')) {
       const id = x.id, row = d.createElement('div');
       row.draggable=true;
-      row.addEventListener('dragstart',event=>{if(event.ctrlKey)return;const saved=navigatorSavedStateForItem(x);if(saved)event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify(saved));});
+      row.addEventListener('dragstart',event=>{
+        const itemIds=navigatorDragItemIds(id,o.getSession().selected);
+        event.dataTransfer?.setData(NAVIGATOR_AYG_DRAG_TYPE,JSON.stringify(itemIds));
+        if(event.ctrlKey)return;
+        const saved=navigatorSavedStateForItem(x);
+        if(saved)event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify(saved));
+      });
       row.className = 'workspace-navigator-row'; row.dataset.id = id; row.style.paddingLeft = `${4 + depth * 13}px`; row.classList.toggle('selected', o.getSession().selected.has(id));
       const ownNativePaths = o.nativeDragPaths?.([id]) || [];
       if (ownNativePaths.length > 0) {
         row.draggable = true;
         row.addEventListener('dragstart', (event) => {
           if(!event.ctrlKey)return;
+          const itemIds = navigatorDragItemIds(id, o.getSession().selected);
+          const paths = aygNavigatorNativePaths({
+            itemId: id,
+            selectedIds: o.getSession().selected,
+            resolvePaths: o.nativeDragPaths,
+          });
+          rememberNativeDrag({ mode:'ayg', itemIds, paths });
           beginNavigatorNativeDrag({
             event,
-            paths: aygNavigatorNativePaths({
-              itemId: id,
-              selectedIds: o.getSession().selected,
-              resolvePaths: o.nativeDragPaths,
-            }),
+            paths,
             host: o.host,
           });
         });
@@ -412,7 +573,6 @@ export function createWorkspaceNavigator(o) {
     back.disabled=s.view!=='nav'||s.aygHi<=0;
     fwd.disabled=s.view!=='nav'||s.aygHi>=s.aygHistory.length-1;
     up.disabled=s.view!=='nav'||currentAyG()===o.rootId;
-    home.disabled=s.view!=='nav'||currentAyG()===o.rootId;
     if (!body.childElementCount) body.innerHTML = '<p class="workspace-navigator-empty">Workspace is empty.</p>';
   }
   async function machineList(path, force = false) {
@@ -577,7 +737,12 @@ export function createWorkspaceNavigator(o) {
     row.draggable = true;
     row.title = x.path;
     row.addEventListener('dragstart',(event)=>{
-      if(!event.ctrlKey){event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify({mode:'action',path:x.path,name:x.name}));return;}
+      event.dataTransfer?.setData(NAVIGATOR_MACHINE_DRAG_TYPE,JSON.stringify([x.path]));
+      if(!event.ctrlKey){
+        event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify({mode:'action',path:x.path,name:x.name}));
+        return;
+      }
+      rememberNativeDrag({ mode:'machine', paths:[x.path] });
       beginNavigatorNativeDrag({ event, paths: [x.path], host: o.host });
     });
     const folder=x.kind==='folder', lead=d.createElement(folder&&s.view==='tree'?'button':'span'); lead.className=folder&&s.view==='tree'?'navigator-tree-toggle':'navigator-tree-spacer';
@@ -828,7 +993,6 @@ export function createWorkspaceNavigator(o) {
     if(s.mode==='ayg'){const g=o.getState().groups.find((x)=>x.id===currentAyG());navigateAyG(g?.parentId||o.rootId);return;}
     const p=parentPath(s.path);if(p&&p.toLocaleLowerCase()!==s.path.toLocaleLowerCase())void loadMachine(p,true);
   });
-  home.addEventListener('click',()=>{if(s.mode==='ayg')navigateAyG(o.rootId);else if(s.machineRoot)void loadMachine(s.machineRoot,true);});
   refresh.addEventListener('click',()=>{if(s.mode==='machine'&&s.path)s.machineListings.delete(s.path.toLocaleLowerCase());render();});
   copy.addEventListener('click',async()=>{if(s.mode==='ayg')return o.copyAyG();if(!s.selected)return;const p=await o.host.pickTarget('folder').catch(()=>null),dst=typeof p==='string'?p:p?.path||p?.target;if(dst){const r=await o.host.fileCapability('copy',{paths:[s.selected.path],destination:dst});if(!r?.ok){o.setStatus(r?.message||'Copy failed.');return;}s.machineListings.clear();render();}});
   move.addEventListener('click',async()=>{if(s.mode==='ayg')return o.cutAyG();if(!s.selected)return;const p=await o.host.pickTarget('folder').catch(()=>null),dst=typeof p==='string'?p:p?.path||p?.target;if(dst){const r=await o.host.fileCapability('move',{paths:[s.selected.path],destination:dst});if(!r?.ok){o.setStatus(r?.message||'Move failed.');return;}s.selected=null;s.machineListings.clear();render();}});
@@ -836,6 +1000,26 @@ export function createWorkspaceNavigator(o) {
   rename.addEventListener('click',async()=>{if(s.mode==='ayg')return o.renameAyG();if(!s.selected)return;const n=d.defaultView?.prompt('Rename',s.selected.name)?.trim();if(n&&n!==s.selected.name){const r=await o.host.fileCapability('rename',{path:s.selected.path,newName:n});if(!r?.ok){o.setStatus(r?.message||'Rename failed.');return;}s.selected=null;s.machineListings.clear();render();}});
   del.addEventListener('click',async()=>{if(s.mode==='ayg')return o.deleteAyG();if(!s.selected||!d.defaultView?.confirm(`Move "${s.selected.name}" to Recycle Bin?`))return;const r=await o.host.fileCapability('delete',{paths:[s.selected.path]});if(!r?.ok){o.setStatus(r?.message||'Delete failed.');return;}s.selected=null;s.machineListings.clear();render();});
   reveal.addEventListener('click',()=>{const p=s.selected?.path||s.path;if(p)void o.host.fileCapability('reveal',{path:p});});
+  async function copySelectionPaths(){
+    const paths=navigatorSelectedPaths({
+      mode:s.mode,
+      selected:s.selected,
+      selectedIds:o.getSession().selected,
+      resolvePaths:o.nativeDragPaths,
+    });
+    if(!paths.length){
+      o.setStatus('No selected item has a local filesystem path.');
+      return false;
+    }
+    try{
+      await o.host.copyText(paths.join('\r\n'));
+      o.setStatus(`Copied ${paths.length} path${paths.length===1?'':'s'}.`);
+      return true;
+    }catch(error){
+      o.setStatus(error instanceof Error?error.message:'Could not copy selected paths.');
+      return false;
+    }
+  }
   function render(){
     syncChrome();
     if (s.collapsed) return;
@@ -906,6 +1090,7 @@ export function createWorkspaceNavigator(o) {
   return Object.freeze({
     render,
     syncCanvasSelection,
+    copySelectionPaths,
     isMachineMode: () => s.mode === 'machine',
     isCollapsed: () => s.collapsed,
     setCollapsed,

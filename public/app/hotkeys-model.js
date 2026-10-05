@@ -96,6 +96,13 @@ const BASE_ACTIONS = [
     defaults: ['Ctrl+C'],
   },
   {
+    id: 'workspace.copy-paths',
+    label: 'Copy selected paths',
+    group: 'Workspace',
+    scope: HOTKEY_SCOPE_WORKSPACE,
+    defaults: ['Ctrl+Shift+S'],
+  },
+  {
     id: 'workspace.cut',
     label: 'Cut selection',
     group: 'Workspace',

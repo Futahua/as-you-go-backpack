@@ -39,7 +39,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
   });
   const called = {
   quickRun: 0, quickRunSeeds: [],
-    close: 0, permanentDelete: 0, beginPicker: 0, beginRename: 0, pickerOpens: true, status: [], paneToggles: 0,
+    close: 0, permanentDelete: 0, beginPicker: 0, beginRename: 0, pickerOpens: true, status: [], paneToggles: 0, pathCopies: 0,
   };
   const commandSpies = {};
   for (const name of [
@@ -70,6 +70,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     beginSetRename: () => { called.beginRename += 1; return true; },
     commandSurface,
     openQuickRun: (seed) => { called.quickRun += 1; called.quickRunSeeds.push(seed); return true; },
+    copySelectionPaths: () => { called.pathCopies += 1; return true; },
     toggleSidePanes: () => { called.paneToggles += 1; return true; },
   });
   beforeMount?.(documentMock);
@@ -118,6 +119,17 @@ test('Ctrl+C and Ctrl+X stay internal while Ctrl+V defers to the paste event', (
   assert.equal(h.commandSpies['cutSelection:calls'], 1);
   assert.equal(h.commandSpies['pasteInto:calls'], 0);
   assert.equal(h.commandSpies['pasteClipboard:calls'], 0);
+});
+
+test('Ctrl+Shift+S copies selected filesystem paths without invoking ordinary copy', () => {
+  const h = createHarness();
+  let prevented = false;
+  const event = key({ key: 's', ctrlKey: true, shiftKey: true });
+  event.preventDefault = () => { prevented = true; };
+  h.listeners[0].handler(event);
+  assert.equal(prevented, true);
+  assert.equal(h.called.pathCopies, 1);
+  assert.equal(h.commandSpies['copySelection:calls'], 0);
 });
 
 test('paste event forwards browser clipboard files and text to clipboard arbitration', () => {

@@ -43,3 +43,4 @@
 .navigator-saved-clear:hover{border-color:var(--border);color:var(--text)}
 .navigator-saved-clear.armed{opacity:1;pointer-events:auto;border-color:#9f3434;background:#5a2020;color:#ffb0b0}
 .navigator-saved-clear svg{width:13px;height:13px}
+.workspace-navigator-crumb.drop-target{background:var(--surface-soft);color:var(--accent);outline:1px solid var(--accent)}

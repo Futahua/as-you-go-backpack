@@ -49,6 +49,7 @@ export function createKeyboardController({
   // Quick Run (STAGE 5). The controller reports the chord and nothing more: opening the
   // surface is the entry file's job, so this stays inert until something passes a callback.
   openQuickRun = () => false,
+  copySelectionPaths = () => false,
   toggleSidePanes = () => false,
 }) {
   let abortController = null;
@@ -196,6 +197,11 @@ export function createKeyboardController({
       if (matches('workspace.copy')) {
         event.preventDefault();
         commands.copySelection();
+        return;
+      }
+      if (matches('workspace.copy-paths')) {
+        event.preventDefault();
+        void copySelectionPaths();
         return;
       }
       if (matches('workspace.cut')) {

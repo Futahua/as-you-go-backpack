@@ -4936,6 +4936,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     isWebLink,
     isAbsoluteWindowsPath,
     nativeDragPaths: nativeDragPathsForItemIds,
+    moveAyGItemsToFolder:(itemIds,folderId)=>commands.dragDropToFolder({itemIds,placementIds:new Map(),folderId}),
     selectAyG: (id, visibleIds, modifiers = {}) => commands.selectItem(id, {
       shiftKey: false,
       ctrlKey: modifiers.ctrlKey === true,
@@ -5299,6 +5300,7 @@ const keyboard = createKeyboardController({
   beginSetRename,
   commandSurface: commandSurfaceMode === 'overlay',
   openQuickRun,
+  copySelectionPaths: () => workspaceNavigator?.copySelectionPaths?.() ?? false,
   toggleSidePanes: () => {
     if (!workspaceNavigator || !fileCapabilityPanel || fileCapabilityPanel.isFullPage?.()) return false;
     const bothCollapsed = workspaceNavigator.isCollapsed?.() === true
