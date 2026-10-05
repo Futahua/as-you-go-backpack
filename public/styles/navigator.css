@@ -30,6 +30,7 @@
 .workspace-navigator-location{display:flex;align-items:center;gap:5px}.workspace-navigator-location>.navigator-state-actions{position:sticky;left:0;align-self:stretch;box-shadow:8px 0 10px var(--surface-raised);border-radius:5px}.workspace-navigator-location>.navigator-state-actions button{width:22px;height:22px}
 .navigator-saved-pills{min-height:22px;border:1px dashed var(--border-subtle);border-radius:6px;padding:2px}.navigator-saved-pills:empty{display:flex}.navigator-saved-pills.drop-target{border-color:var(--accent);background:var(--surface-soft)}.workspace-navigator .navigator-quick-run{top:var(--navigator-run-top,100px);max-height:calc(100% - var(--navigator-run-top,100px) - 5px)}
 .workspace-navigator-header{flex-wrap:wrap;min-width:0;align-content:flex-start}
+.workspace-navigator.pane-clasp-control-visible .workspace-navigator-header{padding-right:42px}
 .workspace-navigator-toolbar{flex:1 1 160px;flex-wrap:wrap;overflow:visible}
 .workspace-navigator-header .navigator-icon-button{flex-shrink:0}
 .navigator-saved-pills{display:block;width:100%;max-width:100%;box-sizing:border-box;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;flex-wrap:initial}

@@ -138,11 +138,13 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
     clasp.hidden = !active;
     setClaspClasses();
     if (!active) {
+      left.classList.remove('pane-clasp-control-visible');
       strip.hidden = true;
       return;
     }
     const a = left.getBoundingClientRect();
     const b = right.getBoundingClientRect();
+    left.classList.toggle('pane-clasp-control-visible', clasped || b.left - a.right < 30);
     const center = (a.right + b.left) / 2;
     clasp.style.left = `${Math.round(center - 15)}px`;
     clasp.style.top = `${Math.round(Math.max(a.top, b.top) + 4)}px`;
