@@ -104,6 +104,7 @@ import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
 import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-capability-panel.js';
+import { installPairedPaneResizer } from './app/paired-pane-resizer.js';
 import { createWorkspaceNavigator } from './app/workspace-navigator.js';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { endExactWindowCandidateProcess } from './app/window-layout-process-end.js';
@@ -4921,6 +4922,13 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     document,
     host,
     workspace: workspaceElement,
+    openPaneQuickRun:panel=>{
+      const layer=elements.quickRunLayer;panel.append(layer);layer.classList.add('navigator-quick-run');const pills=panel.querySelector('.navigator-saved-pills');
+      const position=()=>layer.style.setProperty('--navigator-run-top',(pills.getBoundingClientRect().bottom-panel.getBoundingClientRect().top+4)+'px');
+      layer.navigatorPillsObserver?.disconnect();layer.navigatorPillsObserver=new ResizeObserver(position);layer.navigatorPillsObserver.observe(pills);position();quickRun.open();
+    },
+    runPinnedQuickRun:key=>quickRun.activateKey(key),
+    openPinnedUrl:(url,name)=>{fileCapabilityPanel.syncSelection({mode:'web',item:{url,name}});fileCapabilityPanel.setExpanded(true);},
     rootId: SCOPE_ROOT_ID || ROOT_ID,
     getState: () => state,
     getSession: () => session,
@@ -4992,6 +5000,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     render();
   });
   workspaceNavigator.render();
+  installPairedPaneResizer({document,navigator:workspaceNavigator,preview:fileCapabilityPanel});
   syncFileCapabilitySelection();
 } else {
   document.querySelector('#workspace-navigator')?.setAttribute('hidden', '');
@@ -5067,6 +5076,7 @@ const pointer = createPointerController({
   visiblePlacementIdFor,
   closeMenu,
   nativeDragPaths: nativeDragPathsForItemIds,
+  dropIntoPills:(ids,x,y)=>workspaceNavigator?.pinDroppedItems?.(ids,x,y)===true,
   startNativeDrag: (paths) => host.fileCapability('native-drag', { paths }).catch((error) => {
     setStatus(error instanceof Error ? error.message : 'Native file drag failed.');
   }),
@@ -5319,6 +5329,10 @@ const QUICK_RUN_TOGGLE_COALESCE_MS = 300;
 let quickRunToggleHandledAt = 0;
 
 function openQuickRun(seed) {
+  if(elements.quickRunLayer.classList.contains('navigator-quick-run')){
+    elements.quickRunLayer.navigatorPillsObserver?.disconnect();
+    elements.quickRunLayer.classList.remove('navigator-quick-run');document.querySelector('.workspace')?.append(elements.quickRunLayer);
+  }
   if (SCOPE_ROOT_ID) {
     setStatus('Quick Run is unavailable inside a project folder.');
     return;

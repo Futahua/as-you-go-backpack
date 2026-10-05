@@ -14,3 +14,4 @@ body {
 
 button, input, textarea, select { font: inherit; }
 button { color: inherit; }
+*{scrollbar-width:thin;scrollbar-color:var(--border-strong) var(--surface-soft)}*::-webkit-scrollbar{width:8px;height:8px}*::-webkit-scrollbar-track{background:var(--surface-soft)}*::-webkit-scrollbar-thumb{background:var(--border-strong);border:2px solid var(--surface-soft);border-radius:8px}*::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}*::-webkit-scrollbar-corner{background:var(--surface-soft)}

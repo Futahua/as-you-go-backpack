@@ -1,3 +1,8 @@
+import { browserTabClosePlan, createPaneFillControl } from './browser-pane-actions.js';
+import { installBrowserTabDrag, insertBrowserTab } from './browser-tab-drag.js';
+import { installChromeFocusPolicy } from './chrome-focus-policy.js';
+import { createBrowserSourceSelection } from './browser-source-selection.js';
+
 const SEARCH_DEBOUNCE_MS = 120;
 const VERIFY_ATTEMPTS = 40;
 const VERIFY_DELAY_MS = 250;
@@ -61,6 +66,7 @@ function normalizePickerTarget(result) {
 
 function createButton(documentRef, label, className) {
   const button = documentRef.createElement('button');
+  button.tabIndex = -1;
   button.type = 'button';
   button.textContent = label;
   if (className) button.className = className;
@@ -292,6 +298,8 @@ export function createFileCapabilityPanel(options) {
     return tab;
   }
 
+  const browserSourceSelection = createBrowserSourceSelection();
+
   function activeBrowserTab() {
     return state.browserTabs.find((tab) => tab.id === state.activeBrowserTabId) || null;
   }
@@ -327,6 +335,9 @@ export function createFileCapabilityPanel(options) {
   setButtonSvg(documentRef, expandButton, 'Expand file preview', ['M3.5 4.5h13v11h-13z']);
   expandButton.setAttribute('aria-pressed', 'false');
   header.append(openTabButton, expandButton);
+  const fillTabButton = createButton(documentRef, '', 'file-capability-icon-button file-capability-fill-tab');
+  setButtonSvg(documentRef, fillTabButton, 'Fill this Papers tab', ['M7 3H3v4', 'M13 3h4v4', 'M3 13v4h4', 'M17 13v4h-4']);
+  header.insertBefore(fillTabButton, expandButton);
 
   const searchWrap = documentRef.createElement('div');
   searchWrap.className = 'file-capability-search';
@@ -425,6 +436,8 @@ export function createFileCapabilityPanel(options) {
 
   function setExpanded(expanded) {
     state.expanded = Boolean(expanded);
+    fillTabButton.hidden = !state.expanded || state.fullPage;
+    if (!state.expanded) paneFill.setFilled(false);
     panel.classList.toggle('expanded', state.expanded);
     workspace?.classList.toggle('file-capability-expanded', state.expanded);
     setButtonSvg(
@@ -575,7 +588,20 @@ export function createFileCapabilityPanel(options) {
           const tab = pending[cursor++];
           if (!tab) continue;
           const expectedUrl = tab.url;
-          const result = await host.fileCapability('browser-favicon-resolve', { url: expectedUrl }).catch(() => null);
+          const result = await host.fileCapability('browser-favicon-resolve', { url: expectedUrl }).catch((error) => ({
+            __debugError: error instanceof Error ? error.message : String(error),
+          }));
+          try {
+            windowRef.localStorage.setItem('papers:ayg:favicon-debug:' + encodeURIComponent(expectedUrl), JSON.stringify({
+              ok: result?.ok ?? null,
+              code: result?.code ?? null,
+              message: result?.message ?? null,
+              debugError: result?.__debugError ?? null,
+              faviconType: typeof result?.faviconUrl,
+              faviconLength: typeof result?.faviconUrl === 'string' ? result.faviconUrl.length : null,
+              faviconPrefix: typeof result?.faviconUrl === 'string' ? result.faviconUrl.slice(0, 64) : null,
+            }));
+          } catch {}
           const faviconUrl = safeBrowserFavicon(result?.faviconUrl);
           if (!faviconUrl || !state.browserTabs.includes(tab) || tab.url !== expectedUrl) continue;
           tab.faviconUrl = faviconUrl;
@@ -932,6 +958,16 @@ export function createFileCapabilityPanel(options) {
     return input ? DEFAULT_SEARCH_URL + encodeURIComponent(input) : DEFAULT_BROWSER_HOME;
   }
 
+  function closeBrowserTabs(tabId, others = false) {
+    const plan = browserTabClosePlan(state.browserTabs, state.activeBrowserTabId, tabId, others);
+    if (!plan) return;
+    state.browserTabs = plan.tabs;
+    state.activeBrowserTabId = plan.activeId;
+    for (const tab of plan.closed) void host.fileCapability('browser-tab-close', { tabId: tab.id }).catch(() => {});
+    persistBrowserTabs();
+    renderBrowserWorkspace();
+  }
+
   function renderBrowserWorkspace() {
     panel.classList.add('browser-mode');
     inspector.classList.add('browser-mode');
@@ -945,6 +981,14 @@ export function createFileCapabilityPanel(options) {
       const item = documentRef.createElement('div');
       item.className = 'file-capability-browser-tab';
       item.dataset.browserTabId = tab.id;
+      item.title = browserTabFallbackTitle(tab);
+      item.addEventListener('contextmenu', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const result = await host.fileCapability('browser-tab-menu', { tabId: tab.id, hasOthers: state.browserTabs.length > 1 }).catch(() => null);
+        if (result?.ok && result.action === 'close') closeBrowserTabs(tab.id);
+        else if (result?.ok && result.action === 'close-others') closeBrowserTabs(tab.id, true);
+      });
       const select = createButton(documentRef, '', 'file-capability-browser-tab-label');
       const favicon = documentRef.createElement('img');
       favicon.className = 'file-capability-browser-tab-favicon';
@@ -956,6 +1000,11 @@ export function createFileCapabilityPanel(options) {
       tabText.className = 'file-capability-browser-tab-text';
       tabText.textContent = browserTabFallbackTitle(tab);
       select.append(favicon, tabText);
+      const fallbackIcon=documentRef.createElement('span');
+      fallbackIcon.className='file-capability-browser-tab-monogram';
+      fallbackIcon.textContent=browserTabFallbackTitle(tab).slice(0,1).toUpperCase();
+      fallbackIcon.hidden=Boolean(tab.faviconUrl);
+      select.prepend(fallbackIcon);
       select.addEventListener('click', () => {
         state.browserDownloadsOpen = false;
         state.activeBrowserTabId = tab.id;
@@ -967,15 +1016,7 @@ export function createFileCapabilityPanel(options) {
       close.title = 'Close tab';
       close.addEventListener('click', (event) => {
         event.stopPropagation();
-        const index = state.browserTabs.findIndex((candidate) => candidate.id === tab.id);
-        if (index < 0) return;
-        state.browserTabs.splice(index, 1);
-        void host.fileCapability('browser-tab-close', { tabId: tab.id }).catch(() => {});
-        if (state.activeBrowserTabId === tab.id) {
-          state.activeBrowserTabId = state.browserTabs[Math.min(index, state.browserTabs.length - 1)]?.id || null;
-        }
-        persistBrowserTabs();
-        renderBrowserWorkspace();
+        closeBrowserTabs(tab.id);
       });
       item.append(select, close);
       tabsBar.append(item);
@@ -991,6 +1032,17 @@ export function createFileCapabilityPanel(options) {
       windowRef?.setTimeout?.(() => preview.querySelector('.file-capability-browser-address')?.select?.(), 0);
     });
     tabsBar.append(add);
+    installBrowserTabDrag(tabsBar, {
+      tabs:()=>state.browserTabs,
+      reorder:tabs=>{state.browserTabs=tabs;persistBrowserTabs();renderBrowserWorkspace();},
+      open:(url,index)=>{
+        const tab=createBrowserTab(url);
+        if(!tab)return;
+        state.browserTabs=insertBrowserTab(state.browserTabs.filter(item=>item.id!==tab.id),tab,index);
+        state.browserDownloadsOpen=false;
+        persistBrowserTabs();renderBrowserWorkspace();
+      },
+    });
 
     const toolbar = documentRef.createElement('form');
     toolbar.className = 'file-capability-browser-toolbar';
@@ -1134,6 +1186,7 @@ export function createFileCapabilityPanel(options) {
       renderEmptySelection(0);
       return;
     }
+    if (!browserSourceSelection.update(source, url)) return;
     ++state.inspectGeneration;
     state.context = null;
     state.inspectedPath = null;
@@ -2135,6 +2188,7 @@ export function createFileCapabilityPanel(options) {
       renderWebSelection(selection.item);
       return;
     }
+    browserSourceSelection.clear();
     if (selection?.mode === 'multiple') {
       renderMultipleSelection({
         selectionCount: selection.selectionCount,
@@ -2199,6 +2253,13 @@ export function createFileCapabilityPanel(options) {
     }
   }
 
+  const paneFill = createPaneFillControl({
+    panel, button: fillTabButton, refresh: refreshPreviewGeometry,
+    schedule: (callback) => windowRef.requestAnimationFrame(callback),
+  });
+  fillTabButton.hidden = !state.expanded || state.fullPage;
+  const releaseChromeFocus = installChromeFocusPolicy(documentRef);
+
   const api = Object.freeze({
     syncSelection,
     previewPath(path, name = basename(path)) {
@@ -2209,8 +2270,10 @@ export function createFileCapabilityPanel(options) {
       setExpandedWithPreviewLifecycle(true);
     },
     setExpanded: setExpandedWithPreviewLifecycle,
+    setWidth:setPanelWidth,
     refreshPreviewGeometry,
     destroy() {
+      releaseChromeFocus();
       if (state.searchTimer) clearTimeout(state.searchTimer);
       clearPreview();
       workspace?.classList.remove('file-capability-docked', 'file-capability-expanded');

@@ -1,4 +1,6 @@
 const svg = (paths) => `<svg viewBox="0 0 20 20" aria-hidden="true">${paths.map((d) => `<path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</svg>`;
+import { createBreadcrumbPopup } from './navigator-breadcrumb-popup.js';
+import { createNavigatorSavedStates } from './navigator-saved-states.js';
 function button(doc, title, paths) {
   const b = doc.createElement('button');
   b.type = 'button'; b.className = 'navigator-icon-button'; b.title = title;
@@ -109,8 +111,15 @@ export function createWorkspaceNavigator(o) {
   const rename = button(d,'Rename',['M4 15h4l8-8-4-4-8 8z','M11 4l4 4']), del = button(d,'Delete',['M4 6h12','M7 6v10h6V6','M8 4h4']);
   const reveal = button(d,'Reveal',['M3 6h5l1.5 2H17v8H3z','M3 9h14']); tools.append(back,fwd,up,home,refresh,copy,move,paste,rename,del,reveal);
   head.append(provider, tools, viewToggle, collapse);
+  const navActions=d.createElement('div');navActions.className='navigator-state-actions';
+  const saveState=button(d,'Save current navigation',['M10 4v12','M4 10h12']);
+  const quickSearch=button(d,'Quick Run in navigator',['M8.5 3a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11','M12.5 12.5 17 17']);
+  navActions.append(saveState,quickSearch);head.insertBefore(navActions,collapse);
+  saveState.remove();
+  quickSearch.addEventListener('click',()=>o.openPaneQuickRun?.(panel));
   const loc = d.createElement('div'); loc.className = 'workspace-navigator-location';
   const locTrack = d.createElement('div'); locTrack.className = 'workspace-navigator-location-track'; loc.append(locTrack);
+  loc.prepend(navActions);
   const search = d.createElement('div'); search.className = 'workspace-navigator-search';
   const searchInput = d.createElement('input');
   searchInput.type = 'search';
@@ -120,6 +129,7 @@ export function createWorkspaceNavigator(o) {
   searchInput.setAttribute('aria-label', 'Search files with Everything');
   const searchInfo = d.createElement('div'); searchInfo.className = 'workspace-navigator-search-info';
   search.append(searchInput, searchInfo);
+  const savedPills=d.createElement('div');savedPills.className='navigator-saved-pills';search.insertBefore(savedPills,searchInfo);
   const body = d.createElement('div'); body.className = 'workspace-navigator-body';
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
   panel.replaceChildren(head,search,loc,body,resizer);
@@ -261,8 +271,28 @@ export function createWorkspaceNavigator(o) {
       const crumb = d.createElement('button');
       crumb.type = 'button';
       crumb.className = 'workspace-navigator-crumb';
-      crumb.textContent = segment.label;
+      const art = d.createElement('span');
+      art.className = 'workspace-navigator-crumb-art';
+      art.setAttribute('aria-hidden','true');
+      const item = segment.item || {kind:'folder'};
+      art.innerHTML = icon(item);
+      if(segment.path) loadMachineArt(art,{path:segment.path,kind:'folder'});
+      else hydrateArt(art,item);
+      const label = d.createElement('span');
+      label.className = 'workspace-navigator-crumb-label';
+      label.textContent = segment.label;
+      crumb.append(art,label);
       crumb.title = segment.title || segment.label;
+      crumb.draggable=true;
+      crumb.addEventListener('dragstart',event=>event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify(segment.path?{mode:'machine',path:segment.path,machineRoot:segment.path,view:'nav',name:segment.label}:{mode:'ayg',currentId:segment.item?.id||o.rootId,view:'nav',name:segment.label,icon:segment.item?.icon})));
+      crumb.addEventListener('contextmenu',event=>{
+        if(!event.shiftKey)return;
+        event.preventDefault();event.stopPropagation();
+        const parent = segment.path
+          ? {kind:'folder',path:parentPath(segment.path)}
+          : {kind:'group',id:segment.item?.parentId || o.rootId};
+        void breadcrumbPopup.show(crumb,parent);
+      });
       if (segment.activate) crumb.addEventListener('click', segment.activate);
       else crumb.disabled = true;
       locTrack.append(crumb);
@@ -284,20 +314,13 @@ export function createWorkspaceNavigator(o) {
   function navigateAyG(id,record=true){if(!record)s.aygSkipHistory=true;o.navigateAyG(id);}
   function aygCrumbs(){
     const groups=o.getState().groups||[],out=[];let id=currentAyG();
-    while(id&&id!==o.rootId){const g=groups.find((x)=>x.id===id);if(!g)break;out.unshift({id:g.id,name:g.name});id=g.parentId;}
+    while(id&&id!==o.rootId){const g=groups.find((x)=>x.id===id);if(!g)break;out.unshift({id:g.id,name:g.name,item:g});id=g.parentId;}
     return [{id:o.rootId,name:'As you Go'},...out];
   }
   async function enterAyG(x){
     if(x.kind==='group'){
-      const nextView=s.view==='tree'?'nav':'tree';
-      if(nextView==='tree'){
-        let cursor=x;
-        while(cursor&&cursor.id!==o.rootId){
-          s.expanded.add(cursor.id);
-          cursor=(o.getState().groups||[]).find((candidate)=>candidate.id===cursor.parentId);
-        }
-      }
-      setView(nextView,false);
+      s.expanded.clear();
+      setView('nav',false);
       navigateAyG(x.id);
       return;
     }
@@ -311,11 +334,14 @@ export function createWorkspaceNavigator(o) {
     const f = d.createDocumentFragment();
     for (const x of o.itemsIn(o.getState(), parent).filter((v) => v.kind !== 'window-layout')) {
       const id = x.id, row = d.createElement('div');
+      row.draggable=true;
+      row.addEventListener('dragstart',event=>{if(event.ctrlKey)return;event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify(x.kind==='group'?{mode:'ayg',currentId:x.id,view:'nav',name:x.name,icon:x.icon}:{mode:'action',itemId:x.shortcutId||x.id,name:x.name,icon:x.icon}));});
       row.className = 'workspace-navigator-row'; row.dataset.id = id; row.style.paddingLeft = `${4 + depth * 13}px`; row.classList.toggle('selected', o.getSession().selected.has(id));
       const ownNativePaths = o.nativeDragPaths?.([id]) || [];
       if (ownNativePaths.length > 0) {
         row.draggable = true;
         row.addEventListener('dragstart', (event) => {
+          if(!event.ctrlKey)return;
           beginNavigatorNativeDrag({
             event,
             paths: aygNavigatorNativePaths({
@@ -327,7 +353,7 @@ export function createWorkspaceNavigator(o) {
           });
         });
       }
-      if (x.kind === 'group' && s.view === 'tree') {
+      if (x.kind === 'group' && (s.view === 'tree' || s.expanded.has(x.id))) {
         const t = d.createElement('button'); t.type='button'; t.className='navigator-tree-toggle'; t.textContent=s.expanded.has(x.id)?'▾':'▸';
         t.addEventListener('click',(e)=>{e.stopPropagation(); s.expanded.has(x.id)?s.expanded.delete(x.id):s.expanded.add(x.id); render();}); row.append(t);
       } else { const sp=d.createElement('span'); sp.className='navigator-tree-spacer'; row.append(sp); }
@@ -338,19 +364,10 @@ export function createWorkspaceNavigator(o) {
       row.addEventListener('contextmenu',(e)=>{
         if(!e.shiftKey||x.kind!=='group')return;
         e.preventDefault();e.stopPropagation();
-        if(s.view==='nav'){
-          let cursor=x;
-          while(cursor&&cursor.id!==o.rootId){
-            const parent=(o.getState().groups||[]).find((candidate)=>candidate.id===cursor.parentId);
-            if(parent)s.expanded.add(parent.id);
-            cursor=parent;
-          }
-          setView('tree',false);
-        }
         s.expanded.has(x.id)?s.expanded.delete(x.id):s.expanded.add(x.id);
         render();
       });
-      f.append(row); if (s.view==='tree'&&x.kind==='group'&&s.expanded.has(x.id)) f.append(aygChildren(x.id,depth+1));
+      f.append(row); if (x.kind==='group'&&s.expanded.has(x.id)) f.append(aygChildren(x.id,depth+1));
     } return f;
   }
   function renderAyG() {
@@ -364,6 +381,7 @@ export function createWorkspaceNavigator(o) {
       setLocation(aygCrumbs().map((crumb)=>({
         key:crumb.id,
         label:crumb.name,
+        item:crumb.item,
         activate:()=>navigateAyG(crumb.id),
       })));
       body.replaceChildren(aygChildren(current));
@@ -536,6 +554,7 @@ export function createWorkspaceNavigator(o) {
     row.draggable = true;
     row.title = x.path;
     row.addEventListener('dragstart',(event)=>{
+      if(!event.ctrlKey){event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify({mode:'action',path:x.path,name:x.name}));return;}
       beginNavigatorNativeDrag({ event, paths: [x.path], host: o.host });
     });
     const folder=x.kind==='folder', lead=d.createElement(folder&&s.view==='tree'?'button':'span'); lead.className=folder&&s.view==='tree'?'navigator-tree-toggle':'navigator-tree-spacer';
@@ -561,13 +580,12 @@ export function createWorkspaceNavigator(o) {
       if(e.shiftKey&&!e.ctrlKey){
         e.preventDefault();
         if(folder){
-          const nextView=s.view==='tree'?'nav':'tree';
-          setView(nextView,false);
+          s.machineExpanded.clear();
+          setView('nav',false);
           if(searchResult){
             clearSearch({renderNow:false});
             void enterMachine(x.path,false);
-          }else if(nextView==='nav')void loadMachine(x.path,true);
-          else void revealMachinePathInTree(x.path).then(()=>render());
+          }else void loadMachine(x.path,true);
         }else{
           void o.host.fileCapability('open',{path:x.path});
         }
@@ -602,18 +620,13 @@ export function createWorkspaceNavigator(o) {
     row.addEventListener('contextmenu',(e)=>{
       if(!e.shiftKey||!folder)return;
       e.preventDefault();e.stopPropagation();
-      if(s.view==='nav'){
-        let ancestor=parentPath(x.path), root=s.machineRoot?.toLocaleLowerCase();
-        while(ancestor&&root&&ancestor.toLocaleLowerCase().startsWith(root)){s.machineExpanded.add(ancestor);if(ancestor.toLocaleLowerCase()===root)break;const next=parentPath(ancestor);if(!next||next===ancestor)break;ancestor=next;}
-        setView('tree',false);
-      }
       void toggleMachine(x.path);
     });
     return row;
   }
   async function machineTree(path, depth, generation) {
     const fragment=d.createDocumentFragment(), result=await machineList(path);
-    if(generation!==s.renderGen||s.mode!=='machine'||s.view!=='tree'||!result?.ok)return fragment;
+    if(generation!==s.renderGen||s.mode!=='machine'||!result?.ok)return fragment;
     for(const x of result.items||[]){fragment.append(machineRow(x,depth));if(x.kind==='folder'&&s.machineExpanded.has(x.path))fragment.append(await machineTree(x.path,depth+1,generation));}
     return fragment;
   }
@@ -648,6 +661,7 @@ export function createWorkspaceNavigator(o) {
       key:entry.path.toLocaleLowerCase(),
       label:entry.name,
       title:entry.path,
+      path:entry.path,
       activate:()=>void loadMachine(entry.path,true),
     })));
   }
@@ -670,7 +684,14 @@ export function createWorkspaceNavigator(o) {
     if(items.length){
       body.append(machineColumnHeader());
       const rows=d.createElement('div'); rows.className='workspace-navigator-machine-rows';
-      for (const x of items) rows.append(machineRow(x));
+      for (const x of items) {
+        rows.append(machineRow(x));
+        if(x.kind==='folder'&&s.machineExpanded.has(x.path)) {
+          const branch=await machineTree(x.path,1,gen);
+          if(gen!==s.renderGen)return;
+          rows.append(branch);
+        }
+      }
       body.append(rows);
     }else body.innerHTML='<p class="workspace-navigator-empty">This folder is empty.</p>';
   }
@@ -684,7 +705,7 @@ export function createWorkspaceNavigator(o) {
     }
     persistUi('papers:ayg:navigator-machine-root', s.machineRoot);
     s.mode = 'machine';
-    if (fromGesture) setView(s.view==='tree'?'nav':'tree', false);
+    if (fromGesture) setView('nav', false);
     syncChrome();
     if (s.view === 'nav') await loadMachine(path, false);
     else render();
@@ -801,12 +822,68 @@ export function createWorkspaceNavigator(o) {
     else if(s.view==='tree')void renderMachineTree();
     else if(s.path)void loadMachine(s.path,false);
   }
+  const breadcrumbPopup = createBreadcrumbPopup({
+    document:d,
+    children:async parent=>parent.path ? (await machineList(parent.path))?.items || []
+      : o.itemsIn(o.getState(),parent.id).filter(item=>item.kind!=='window-layout'),
+    art:(element,item)=>{element.innerHTML=icon(item);if(item.path)loadMachineArt(element,item);else hydrateArt(element,item);},
+    activate:async item=>{if(item.path){if(item.kind==='folder'){s.machineExpanded.clear();setView('nav',false);await enterMachine(item.path,false);}else await o.host.fileCapability('open',{path:item.path});}else await enterAyG(item);},
+  });
+  const savedStates=createNavigatorSavedStates({document:d,container:savedPills,
+    fromDrop:async data=>{
+      try{const item=JSON.parse(data.getData('application/x-papers-pill'));if(item&&typeof item.name==='string'&&['ayg','machine','action'].includes(item.mode))return item;}catch{}
+      const raw=(data.getData('text/uri-list')||data.getData('text/plain')||'').trim();
+      if(!raw)return null;
+      if(o.isAbsoluteWindowsPath(raw))return {mode:'action',path:raw,name:raw.split(/[\\/]/).pop()||raw};
+      try{const url=new URL(raw);if(['https:','http:'].includes(url.protocol))return {mode:'action',url:raw,name:url.hostname};}catch{}
+      return null;
+    },
+    snapshot:()=>{
+      const item=s.mode==='ayg'?(o.getState().groups||[]).find(g=>g.id===currentAyG()):null;
+      return {mode:s.mode,view:s.view,currentId:currentAyG(),path:s.path,machineRoot:s.machineRoot,expanded:[...s.expanded],machineExpanded:[...s.machineExpanded],query:s.searchQuery,name:s.mode==='machine'?(s.path?.split(/[\\/]/).filter(Boolean).pop()||s.path||'Folder'):(item?.name||'As you Go'),icon:item?.icon||null};
+    },
+    restore:async saved=>{
+      if(saved.mode==='action'){
+        if(saved.quickRunKey)return o.runPinnedQuickRun?.(saved.quickRunKey);
+        if(saved.itemId)return o.activateAyG(saved.itemId);
+        if(saved.path)return o.host.fileCapability('open',{path:saved.path});
+        if(saved.url)return o.openPinnedUrl?.(saved.url,saved.name);
+        return;
+      }
+      clearSearch({renderNow:false});s.mode=saved.mode;s.expanded=new Set(saved.expanded||[]);s.machineExpanded=new Set(saved.machineExpanded||[]);s.machineRoot=saved.machineRoot;s.path=saved.path;setView(saved.view,false);
+      if(saved.mode==='ayg')navigateAyG(saved.currentId||o.rootId);else render();
+      if(saved.query){searchInput.value=saved.query;searchInput.dispatchEvent(new d.defaultView.Event('input',{bubbles:true}));}
+    },
+    art:(element,saved)=>{element.innerHTML=icon({kind:'folder',icon:typeof saved.icon==='string'?saved.icon:null});if(saved.path)loadMachineArt(element,{path:saved.path,kind:'folder'});},
+  });
+  saveState.addEventListener('click',()=>savedStates.save());
   syncChrome(); render();
+  o.workspace.addEventListener('pointerdown',(event)=>{
+    if(event.button!==0||panel.contains(event.target))return;
+    const canvas=event.target?.closest?.('#graph-viewport, .icon-item, #icon-grid, #workspace-backdrop');
+    if(!canvas&&event.target!==o.workspace)return;
+    s.expanded.clear();
+    s.machineExpanded.clear();
+    clearSearch({renderNow:false});
+    s.mode='ayg';
+    setView('nav',false);
+    render();
+  });
   return Object.freeze({
     render,
     syncCanvasSelection,
     isMachineMode: () => s.mode === 'machine',
     isCollapsed: () => s.collapsed,
     setCollapsed,
+    pinDroppedItems(ids,x,y){
+      const rect=savedPills.getBoundingClientRect();
+      if(x<rect.left||x>rect.right||y<rect.top||y>rect.bottom)return false;
+      for(const id of ids){
+        const item=[...(o.getState().groups||[]),...o.itemsIn(o.getState(),currentAyG())].find(item=>item.id===id||item.shortcutId===id);
+        if(item)savedStates.add(item.kind==='group'?{mode:'ayg',currentId:item.id,view:'nav',name:item.name,icon:item.icon}:{mode:'action',itemId:item.shortcutId||item.id,name:item.name,icon:item.icon});
+      }
+      return true;
+    },
+    setWidth(width){s.width=Math.round(Math.max(176,Math.min(d.defaultView.innerWidth*.55,width)));o.workspace.style.setProperty('--workspace-navigator-width',s.width+'px');persistUi('papers:ayg:navigator-width',s.width);},
   });
 }

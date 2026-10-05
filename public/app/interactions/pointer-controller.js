@@ -17,6 +17,7 @@ export function createPointerController({
   visiblePlacementIdFor,
   closeMenu,
   nativeDragPaths = () => [],
+  dropIntoPills = () => false,
   startNativeDrag = () => Promise.resolve(),
   onDragTrail = () => {},
   clearDragTrail = () => {},
@@ -338,6 +339,9 @@ export function createPointerController({
         clearDragTrail();
         setSuppressGraphClick(true);
         clearDragVisuals();
+        if(dropIntoPills(drag.itemIds,event.clientX,event.clientY)){
+          restoreInitialDragPositions(drag);drag=null;graph.reheat(0.2);return;
+        }
         const { hitBin, hitFolderId } = hitTest(event);
         const dragCopy = {
           itemIds: [...drag.itemIds],

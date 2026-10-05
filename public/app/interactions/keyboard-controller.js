@@ -53,6 +53,19 @@ export function createKeyboardController({
 }) {
   let abortController = null;
 
+  function claimPaneTab(event) {
+    if (event.defaultPrevented || commandSurface || event.key !== 'Tab'
+      || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
+      || event.isComposing || event.repeat) return false;
+    if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden
+      || !elements.linkEditLayer.hidden || !elements.promptLayer.hidden
+      || elements.quickRunLayer?.hidden === false) return false;
+    if (!toggleSidePanes()) return false;
+    event.preventDefault();
+    event.stopPropagation?.();
+    return true;
+  }
+
   function mount() {
     abortController = new AbortController();
     document.addEventListener('keydown', (event) => {
@@ -88,6 +101,7 @@ export function createKeyboardController({
       // were. Ctrl+A in the search line selected every item behind it for the same reason. The chord is
       // exempt because it has to be able to dismiss the palette it opened.
       if (elements.quickRunLayer?.hidden === false && !matches('workspace.quick-run')) return;
+      if (claimPaneTab(event)) return;
       // An editable control owns its keys: while a field has focus, Enter, Escape, the arrows and the
       // clipboard chords are the field's own and must not reach the workspace. The one exception is the Quick
       // Run chord, an explicit Alt+Shift accelerator that types nothing into a field - measured on the live
@@ -118,17 +132,6 @@ export function createKeyboardController({
         // sort, so a letter goes to type-to-run rather than nowhere. Measured in the host: with an opacity
         // slider focused, a letter did nothing at all before this line existed.
         if (!typingTarget) openOnTypedCharacter();
-        return;
-      }
-      if (
-        event.key === 'Tab'
-        && !event.shiftKey
-        && !event.ctrlKey
-        && !event.altKey
-        && !event.metaKey
-        && toggleSidePanes()
-      ) {
-        event.preventDefault();
         return;
       }
 
@@ -248,6 +251,8 @@ export function createKeyboardController({
       // by a list kept in step by hand.
       openOnTypedCharacter();
     }, { signal: abortController.signal });
+    // Reserve the pane gesture before focused chrome or tree controls can consume it.
+    document.addEventListener('keydown', claimPaneTab, { capture: true, signal: abortController.signal });
 
     document.addEventListener('paste', (event) => {
       if (event.defaultPrevented || commandSurface) return;

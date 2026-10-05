@@ -57,12 +57,29 @@
   z-index: 8;
   top: 4px;
   right: 5px;
-  width: 30px;
+  width: 64px;
   height: 30px;
   box-sizing: border-box;
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+.file-capability-panel.expanded.fills-tab {
+  inset: 0;
+  width: auto;
+  max-width: none;
+  border-radius: 0;
+  transition: none;
+}
+.file-capability-panel.fills-tab .file-capability-resizer { display: none; }
+.file-capability-panel.expanded.browser-mode .file-capability-fill-tab {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
 }
 
 .file-capability-panel.expanded.browser-mode .file-capability-open-tab {
@@ -433,7 +450,7 @@
   display: flex;
   align-items: end;
   gap: 2px;
-  padding: 4px 39px 0 5px;
+  padding: 4px 72px 0 5px;
   overflow-x: auto;
   overflow-y: hidden;
   border-bottom: 1px solid var(--border-subtle);
@@ -760,3 +777,12 @@
     width: calc(100vw - 12px);
   }
 }
+.file-capability-browser-tab.drop-before{box-shadow:inset 2px 0 var(--accent)}.file-capability-browser-tab.drop-after{box-shadow:inset -2px 0 var(--accent)}
+.file-capability-browser-tab-close{visibility:hidden}.file-capability-browser-tab:hover .file-capability-browser-tab-close{visibility:visible}
+.file-capability-panel.expanded.browser-mode .file-capability-header{isolation:isolate;background:var(--surface-soft)}
+.file-capability-panel.expanded.browser-mode .file-capability-header::before{content:"";position:absolute;z-index:-1;inset:0 0 0 -24px;background:linear-gradient(to right,transparent,var(--surface-soft) 24px);pointer-events:none}
+.file-capability-browser-tabs{margin-right:72px;padding-right:5px}
+.file-capability-browser-tab{min-width:52px;container-type:inline-size}
+.file-capability-browser-tab-monogram{flex:0 0 12px;width:12px;text-align:center;font-size:10px}
+@container (max-width:100px){.file-capability-browser-tab-text{display:none}.file-capability-browser-tab-label{justify-content:center;padding-inline:2px;gap:0}}
+.file-capability-browser-tabs{scrollbar-width:none}.file-capability-browser-tabs::-webkit-scrollbar{display:none}

@@ -515,3 +515,121 @@ commit adapter and presentation/selection callbacks. Widget removal routes throu
 the channel command; it never acquires a local writer. The entry keeps hoisted
 compatibility delegates for callbacks wired before construction. Observation cadence
 still belongs to `window-layout-runtime.js`; native identity remains host-owned.
+
+## Browser pane controls — 2026-10-05
+
+public/app/browser-pane-actions.js owns the tab-close plan shared by the close
+button and native tab-menu intent, plus the reversible surface-local fill control.
+The panel remains its browser metadata/persistence owner; no second writer or tab
+store is introduced. Native menu display is requested through the existing host
+bridge/file capability seam. Full-pane presentation changes only this surface's
+viewport; monitor video fullscreen belongs to Papers browserVideoFullscreen.ts.
+public/app/chrome-focus-policy.js removes workspace buttons and tab labels from
+sequential Tab focus while leaving text inputs and the separate browser document
+alone. Dynamic controls and tabindex updates use the same policy.
+
+Browser-source-selection.js distinguishes a changed workspace shortcut from an
+unchanged selection refresh. The panel activates/navigates a shortcut only on
+change, preserving manual browser tab choice through repeated synchronization.
+Nonweb selection clears the guard so selecting a web shortcut again remains an
+explicit activation. Papers independently gates native view presentation by
+host surface visibility and pane demand, including delayed opens.
+
+## Paired-pane Tab priority — 2026-10-05
+
+Plain Tab is reserved in document capture for the paired Navigator/Preview toggle,
+before focused workspace controls can consume it. The same guard protects dialogs,
+Quick Run, composing events and held-key repeats. Workspace text inputs no longer
+send plain Tab into chrome focus traversal. Nontext inputs (including opacity
+sliders) and selects join buttons outside sequential focus; mouse use remains.
+Isolated Chromium proof: three focused controls produce three pane toggles, zero
+button activations; slider/button tabindex -1 and modal Tab stays native.
+
+## Explicit Navigator mouse views — 2026-10-05
+
+Shift+left-click now chooses Nav instead of toggling the current view for AYG
+groups, machine folders, search folders and filesystem shortcut folders.
+Shift+right-click remains a Tree expansion gesture. The toolbar view toggle
+retains its explicit toggle behavior. Isolated real Chromium nested-group proof:
+Tree -> Shift-left A gives Nav -> Shift-left B stays Nav -> Shift-right C gives
+Tree -> Shift-left A gives Nav. AYG suite: 1846 passed / 0 failed.
+
+## Inline branches and canvas reset — 2026-10-05
+
+Creator correction supersedes the preceding whole-view Shift-right behavior:
+Shift-right expands/collapses a branch beneath its row without replacing the
+current Nav directory with the root Tree. Applies to AYG groups and filesystem
+folders. Shift-left clears temporary expansion and navigates directly in Nav.
+Left canvas pointerdown clears temporary branches/search and returns to the
+canvas session directory in AYG Nav; navigator controls do not trigger this.
+Isolated Chromium proof: consecutive Shift-left stays Nav, Shift-right stays
+Nav with nested child directly below the row, canvas click removes that branch,
+and subsequent Shift-left stays Nav. Full AYG suite: 1846 passed / 0 failed.
+
+## Breadcrumb sibling popup — 2026-10-05
+
+navigator-breadcrumb-popup.js owns an ephemeral themed sibling list opened by
+Shift-right on a breadcrumb. AYG breadcrumbs resolve siblings in their parent
+group; machine breadcrumbs resolve their parent directory through the existing
+cached host listing. Popup Shift-right expands/collapses only its local branch,
+without changing navigator view or expansion state. Row click activates/navigates;
+outside pointerdown or Escape disposes the popup and listeners. Uses existing
+icons and theme variables. Isolated Chromium verified sibling list, inline child
+expansion, Escape disposal and preserved main Nav view. AYG: 1846 passed / 0 failed.
+
+## Browser tab drag and selection search — 2026-10-05
+
+browser-tab-drag.js owns drop URL/search parsing and position-aware insertion
+and reordering. Tabs keep their existing IDs and WebContents; order is persisted
+through the existing panel metadata writer. Text drops create Google searches,
+HTTP(S) link drops navigate, and tab drops reorder at the pointer midpoint.
+Selection context menu exposes Search Google in new tab, through the existing
+native browser tab creation seam. Close buttons are visible only on tab hover.
+AYG suite 1848 passed. Papers 1367 passed / 4 skipped; typecheck passed.
+Isolated Chromium pane proof asserted phrase search creation, existing-tab
+reordering, hidden unhovered close controls and preserved selection refreshes.
+
+Browser strip presentation — 2026-10-05: fixed right controls have reserved space
+and a fading theme backdrop. Tab container queries hide labels below 100px,
+with favicon/monogram and full-title tooltip. Wheel events pan an overflowing
+strip horizontally, including its scrollbar region; Ctrl-wheel remains native.
+Isolated Chromium proof with 16 tabs asserted compact labels, wheel scrolling,
+and strip bounds ending before the fixed controls. Focused drag tests: 2 passed.
+
+## Shared pane boundary and themed scrollbars — 2026-10-05
+
+paired-pane-resizer.js owns only coordinated touching-edge presentation. When
+Navigator and Preview overlap/touch, its separator moves both existing width
+owners together, preserving minimum/maximum widths and a 6px shared drag gap.
+It is hidden for collapsed, full-page or filled previews. Resize observers keep
+it aligned. Native browser geometry refreshes through the existing preview API.
+Base scrollbar styles now use theme tokens for popup and Proxima surfaces.
+AYG suite: 1848 passed; isolated Chromium drag proof confirmed both edges move,
+6px gap, separator remains visible, and computed thin themed scrollbar style.
+
+## Saved navigator states and embedded Quick Run — 2026-10-05
+
+navigator-saved-states.js stores explicit UI snapshots in localStorage and renders
+named directory/icon pills below Everything. Snapshots restore provider, directory,
+view, branches and search without introducing another workspace document writer.
+Navigator plus records the current snapshot; magnifier mounts the existing Quick
+Run layer inside the navigator. Ordinary Quick Run invocation restores the layer
+to its workspace placement. Compact action controls have a themed backdrop.
+Browser tab scrollbar is hidden while wheel panning and drag insertion remain.
+AYG suite: 1848 passed. Isolated Chromium saved C, navigated into D, and restored
+C via its pill, with existing sibling popup/inline expansion behaviors passing.
+
+Pill drag refinement — 2026-10-05: plus removed. Breadcrumb, navigator, sibling
+popup and Quick Run rows supply structured pill drops; paths/HTTP links accepted.
+Canvas pointer drops pin activation records while restoring initial graph positions.
+Folder breadcrumbs restore navigation; item/Quick Run pills invoke existing actions.
+Embedded Quick Run starts below the pill row and tracks row wrapping. MMB deletion
+remains. AYG 1848 passed; isolated Chromium verified dropped folder pill restoration.
+
+Pill height and wrapped controls — 2026-10-05: Navigator header and tools wrap
+instead of clipping on narrow surfaces. Full-width saved-pill viewport has a
+horizontal height separator, persists its height, lays out as many rows as fit,
+and translates wheel motion into horizontal panning without a visible scrollbar.
+Quick Run's existing observer follows the resized viewport. AYG suite 1848 passed;
+isolated Chromium asserted 28px collapsed pill height, drop restoration and wheel
+panning after overflow. All changes remain in the local Backpack project.

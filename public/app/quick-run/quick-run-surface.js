@@ -130,6 +130,8 @@ function rowNode(document, view, onRowClick, clearHover, hydrateIcons) {
   const item = document.createElement('li');
   item.className = ROW_CLASS + (view.highlighted ? ' highlighted' : '');
   item.dataset.quickRunKey = view.key;
+  item.draggable=true;
+  item.addEventListener('dragstart',event=>{event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify({mode:'action',quickRunKey:view.key,name:view.primary,icon:view.icon}));});
   item.dataset.quickRunHighlighted = view.highlighted ? 'true' : 'false';
   item.dataset.quickRunHovered = 'false';
   item.addEventListener('mouseover', () => {
@@ -598,6 +600,7 @@ export function mountQuickRun(input) {
   paint();
 
   const surface = {
+    activateKey:activate,
     /**
      * The keyboard controller's openQuickRun callback: open on the current state and show the line.
      *

@@ -179,7 +179,7 @@ test('Ctrl+Enter reveals the selection', () => {
   assert.equal(h.commandSpies['revealSelection:calls'], 1);
 });
 
-test('plain Tab toggles the paired Navigator and Preview panes only from workspace chrome', () => {
+test('plain Tab toggles paired panes even when a workspace input has focus', () => {
   const h = createHarness();
   let prevented = false;
   const event = key({ key: 'Tab' });
@@ -190,10 +190,30 @@ test('plain Tab toggles the paired Navigator and Preview panes only from workspa
 
   const editing = createHarness({ activeElement: { matches: (selector) => selector.includes('input') } });
   editing.listeners[0].handler(key({ key: 'Tab' }));
-  assert.equal(editing.called.paneToggles, 0, 'Tab remains native while an editable control owns focus');
+  assert.equal(editing.called.paneToggles, 1, 'workspace inputs cannot divert the pane gesture');
 
   h.listeners[0].handler(key({ key: 'Tab', shiftKey: true }));
   assert.equal(h.called.paneToggles, 1, 'Shift+Tab remains native reverse focus');
+});
+
+test('pane Tab capture suppresses control navigation but respects transient layers and repeats', () => {
+  const h = createHarness();
+  const capture = h.listeners.find((entry) => entry.options?.capture);
+  assert.ok(capture);
+  let prevented = 0;
+  let stopped = 0;
+  const event = key({ key: 'Tab' });
+  event.preventDefault = () => { prevented++; event.defaultPrevented = true; };
+  event.stopPropagation = () => { stopped++; };
+  capture.handler(event);
+  h.listeners[0].handler(event);
+  assert.equal(h.called.paneToggles, 1);
+  assert.equal(prevented, 1);
+  assert.equal(stopped, 1);
+  capture.handler(key({ key: 'Tab', repeat: true }));
+  h.elements.confirmLayer.hidden = false;
+  capture.handler(key({ key: 'Tab' }));
+  assert.equal(h.called.paneToggles, 1);
 });
 
 test('Bin mode suppresses copy/cut/paste and destroys the listener', () => {
