@@ -73,6 +73,7 @@ export function bindQuickRunWorkspace({
   dismissCommandSurface = null,
   activateLayoutMember = null,
   copyText = null,
+  startFileDrag = null,
   hydrateIcons = null,
   getCardSize = null,
   onCardSizeChanged = null,
@@ -244,5 +245,17 @@ export function bindQuickRunWorkspace({
     },
   });
 
-  return surface;
+  if(startFileDrag)elements.layer.addEventListener('dragstart',event=>{
+    const key=event.target?.closest?.('[data-quick-run-key]')?.dataset.quickRunKey;
+    if(!key)return;
+    const current=revalidateQuickRunRow(getState(),key);
+    const file=current.ok?planQuickRunCopyPath(current.row):null;
+    if(!file||!(/^[A-Za-z]:[\\/]|^\\\\/.test(file.target.path)))return;
+    event.preventDefault();void startFileDrag([file.target.path]);
+  });
+  return Object.freeze({ ...surface, filePathForKey(key) {
+    const current = revalidateQuickRunRow(getState(), key);
+    const copy = current.ok ? planQuickRunCopyPath(current.row) : null;
+    return copy?.target?.path ?? null;
+  } });
 }

@@ -256,6 +256,11 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /fileCapability\('browser-tab-close'/);
   assert.match(source, /fileCapability\('browser-tabs-visible'/);
   assert.match(source, /function renderBrowserWorkspace\(\)/);
+  assert.match(
+    source,
+    /function renderEmptySelection\(selectionCount = 0\) \{[\s\S]*if \(selectionCount === 0\)[\s\S]*createBrowserTab\(DEFAULT_BROWSER_HOME, \{ title: 'Google' \}\)[\s\S]*renderBrowserWorkspace\(\);[\s\S]*return;/,
+    'no selection should default the preview pane to the persisted browser workspace',
+  );
   assert.match(source, /windowRef\?\.localStorage\?\.setItem\(browserStorageKey/);
   assert.match(css, /\.file-capability-browser-shell/);
   assert.match(css, /\.file-capability-browser-tabs/);

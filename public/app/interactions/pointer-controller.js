@@ -248,7 +248,9 @@ export function createPointerController({
         || event.clientY <= 0
         || event.clientX >= Number(window.innerWidth || Infinity)
         || event.clientY >= Number(window.innerHeight || Infinity);
-      if (outsideWindow && !drag.ancestorOnly) {
+      const nativeSurface=document.querySelector?.('.file-capability-native-preview')?.getBoundingClientRect();
+      const overNativeSurface=nativeSurface&&event.clientX>=nativeSurface.left&&event.clientX<=nativeSurface.right&&event.clientY>=nativeSurface.top&&event.clientY<=nativeSurface.bottom;
+      if ((outsideWindow || overNativeSurface) && !drag.ancestorOnly) {
         const paths = nativeDragPaths(drag.itemIds);
         if (paths.length > 0) {
           if (elements.grid.hasPointerCapture(event.pointerId)) elements.grid.releasePointerCapture(event.pointerId);

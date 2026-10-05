@@ -2,6 +2,7 @@ import { browserTabClosePlan, createPaneFillControl } from './browser-pane-actio
 import { installBrowserTabDrag, insertBrowserTab } from './browser-tab-drag.js';
 import { installChromeFocusPolicy } from './chrome-focus-policy.js';
 import { createBrowserSourceSelection } from './browser-source-selection.js';
+import { createPreviewGeometryScheduler } from './preview-geometry-scheduler.js';
 
 const SEARCH_DEBOUNCE_MS = 120;
 const VERIFY_ATTEMPTS = 40;
@@ -487,6 +488,8 @@ export function createFileCapabilityPanel(options) {
   }
 
   function closeNativePreview() {
+    state.nativeGeometry?.dispose();
+    state.nativeGeometry = null;
     state.nativePreviewObserver?.disconnect();
     state.nativePreviewObserver = null;
     const sessionId = state.nativePreviewSessionId;
@@ -874,6 +877,8 @@ export function createFileCapabilityPanel(options) {
         let nativeDragStarted = false;
         row.addEventListener('dragstart', (event) => {
           nativeDragStarted = false;
+          event.preventDefault();
+          void host.fileCapability('native-drag',{paths:[download.path]}).catch(error=>setStatus(error instanceof Error?error.message:'Native file drag failed.'));
           row.classList.add('dragging');
           const payload = JSON.stringify([{
             target: download.path,
@@ -1425,9 +1430,14 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     state.nativePreviewSessionId = opened.sessionId;
+    const sessionId = opened.sessionId;
+    state.nativeGeometry = createPreviewGeometryScheduler({
+      schedule:callback=>documentRef.defaultView.requestAnimationFrame(callback),
+      send:rect=>host.fileCapability('preview-native-move',{sessionId,rect}),
+    });
     const move = () => {
       if (!state.nativePreviewSessionId || !state.expanded) return;
-      void host.fileCapability('preview-native-move', { sessionId: state.nativePreviewSessionId, rect: nativePreviewRect(surface) }).catch(() => {});
+      state.nativeGeometry?.update(nativePreviewRect(surface));
     };
     if (typeof ResizeObserver === 'function') {
       state.nativePreviewObserver = new ResizeObserver(move);
@@ -1808,6 +1818,29 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderEmptySelection(selectionCount = 0) {
+    if (selectionCount === 0) {
+      ++state.inspectGeneration;
+      state.context = null;
+      state.inspectedPath = null;
+      state.inspectedUrl = null;
+      state.lastPreviewResult = null;
+      disarmDelete();
+      renameRow.hidden = true;
+      copyPathButton.hidden = true;
+      revealButton.hidden = true;
+      openTabButton.hidden = true;
+      actions.hidden = true;
+      if (!activeBrowserTab()) {
+        if (state.browserTabs.length > 0) {
+          state.activeBrowserTabId = state.browserTabs.at(-1).id;
+          persistBrowserTabs();
+        } else {
+          createBrowserTab(DEFAULT_BROWSER_HOME, { title: 'Google' });
+        }
+      }
+      renderBrowserWorkspace();
+      return;
+    }
     panel.classList.remove('browser-mode');
     inspector.classList.remove('browser-mode');
     ++state.inspectGeneration;
@@ -2221,10 +2254,7 @@ export function createFileCapabilityPanel(options) {
     if (!surface) return;
     const rect = nativePreviewRect(surface);
     if (state.nativePreviewSessionId) {
-      void host.fileCapability('preview-native-move', {
-        sessionId: state.nativePreviewSessionId,
-        rect,
-      }).catch(() => {});
+      state.nativeGeometry?.update(rect);
     }
     if (state.pdfPreviewSessionId) {
       void host.fileCapability('preview-pdf-move', {

@@ -446,7 +446,9 @@ function allActivePlacementIds(shortcutId) {
  * navigation or selection changes between gesture and commit shouldn't
  * change which placement the action targets. */
 function visiblePlacementIdFor(shortcutId) {
-  const record = shortcut(shortcutId);
+  const record = shortcutByRecordOrPlacementId(shortcutId);
+  const selectedPlacement = record?.placements.find((placement) => placement.id === shortcutId && !placement.bin);
+  if (selectedPlacement) return selectedPlacement.id;
   const visibleParentId = graph._getNode(shortcutId)?.parentIds?.[0];
 
   return record?.placements.find((placement) =>
@@ -4928,6 +4930,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
       layer.navigatorPillsObserver?.disconnect();layer.navigatorPillsObserver=new ResizeObserver(position);layer.navigatorPillsObserver.observe(pills);position();quickRun.open();
     },
     runPinnedQuickRun:key=>quickRun.activateKey(key),
+    pinnedQuickRunPath:key=>quickRun.filePathForKey(key),
     openPinnedUrl:(url,name)=>{fileCapabilityPanel.syncSelection({mode:'web',item:{url,name}});fileCapabilityPanel.setExpanded(true);},
     rootId: SCOPE_ROOT_ID || ROOT_ID,
     getState: () => state,
@@ -4936,6 +4939,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     isWebLink,
     isAbsoluteWindowsPath,
     nativeDragPaths: nativeDragPathsForItemIds,
+    dropNavigatorFiles:(files,destination)=>commands.dropFiles(files,destination),
     resolveAyGDragIdentity:(id)=>{
       if(group(id)||windowLayout(id))return {itemId:id,placementId:null};
       const record=shortcutByRecordOrPlacementId(id);
@@ -4954,7 +4958,12 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     }),
     activateAyG: (id) => commands.activateItem(id),
     navigateAyG: (id) => commands.goToWorkspaceFolder(id),
-    renameAyG: () => {
+    renameAyG: async (id, name) => {
+      if (id && name) {
+        const record = shortcutByRecordOrPlacementId(id);
+        await store.commit(renameItem(store.getSnapshot(), record?.id ?? id, name));
+        return;
+      }
       const onlyId = session.selected.size === 1 ? [...session.selected][0] : null;
       if (!onlyId) return;
       const chosen = shortcutByRecordOrPlacementId(onlyId);
@@ -5074,6 +5083,7 @@ const drop = createDropController({
   commands,
 });
 
+const dragWorkspaceFiles=paths=>host.fileCapability('native-drag',{paths}).catch(error=>setStatus(error instanceof Error?error.message:'Native file drag failed.'));
 const pointer = createPointerController({
   window,
   document,
@@ -5290,6 +5300,7 @@ const quickRun = bindQuickRunWorkspace({
   dismissCommandSurface: quickRunDismissCommandSurface,
   activateLayoutMember: activateWindowLayoutMember,
   copyText: quickRunCopyText,
+  startFileDrag:dragWorkspaceFiles,
   hydrateIcons: quickRunHydrateIcons,
   getCardSize: () => state.view?.quickRunCardSize ?? null,
   onCardSizeChanged: quickRunCardSizeChanged,

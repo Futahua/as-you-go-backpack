@@ -138,12 +138,16 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
     clasp.hidden = !active;
     setClaspClasses();
     if (!active) {
+      if(left.style.maxWidth)left.style.maxWidth='';
       strip.hidden = true;
       return;
     }
     const a = left.getBoundingClientRect();
     const b = right.getBoundingClientRect();
     const center = (a.right + b.left) / 2;
+    const available=Math.max(176,b.left-a.left);
+    const limit=active?available+'px':'';
+    if(left.style.maxWidth!==limit)left.style.maxWidth=limit;
     clasp.style.left = `${Math.round(center - 15)}px`;
     clasp.style.top = `${Math.round(Math.max(a.top, b.top) + 4)}px`;
     strip.hidden = !clasped;

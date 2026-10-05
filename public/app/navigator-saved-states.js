@@ -11,7 +11,7 @@ export function decodeNavigatorSavedStates(raw) {
   }
 }
 
-export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop }) {
+export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile }) {
   const win = document.defaultView;
   const storage = win?.localStorage;
   const key = 'papers:ayg:navigator-saved-states';
@@ -145,6 +145,8 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
     clear.hidden = states.length === 0;
     for (const state of states) {
       const pill = document.createElement('button');
+      pill.draggable=true;
+      pill.addEventListener('dragstart',event=>dragFile?.(event,state));
       pill.type = 'button';
       pill.tabIndex = -1;
       pill.className = 'navigator-saved-pill';
@@ -155,7 +157,7 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
       const label = document.createElement('span');
       label.textContent = state.name;
       pill.append(image, label);
-      pill.addEventListener('click', () => restore(state));
+      pill.addEventListener('click', (event) => restore(state, { run: event.shiftKey === true }));
       pill.addEventListener('mousedown', (event) => { if (event.button === 1) event.preventDefault(); });
       pill.addEventListener('auxclick', (event) => {
         if (event.button !== 1) return;

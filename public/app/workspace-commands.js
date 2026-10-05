@@ -685,11 +685,11 @@ export function createWorkspaceCommands({
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
     const destination = scopedDestination(folderId);
-    if (!scopeAllowsSelection(itemIds) || !scopeAllowsDestination(destination)) return;
+    if (!scopeAllowsSelection(itemIds) || !scopeAllowsDestination(destination)) return false;
     const movable = itemIds.filter((draggedId) => !isAncestorItem(draggedId));
     if (movable.length === 0) {
       setStatus('The path to this folder cannot be moved into another folder.');
-      return;
+      return false;
     }
     try {
       const groupIds = movable.filter((draggedId) =>
@@ -707,9 +707,15 @@ export function createWorkspaceCommands({
       for (const shortcutId of wholeShortcutIds) {
         next = collapsePlacements(next, shortcutId, destination);
       }
-      await store.commit(removeGraphRestPositions(removeGraphPositions(next, ctxId, movable), ctxId, movable));
+      const committed = await store.commit(removeGraphRestPositions(removeGraphPositions(next, ctxId, movable), ctxId, movable));
+      if (committed !== true) {
+        setStatus('Move could not be committed.');
+        return false;
+      }
+      return true;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      return false;
     }
   }
 
