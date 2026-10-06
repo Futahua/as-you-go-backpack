@@ -1,6 +1,15 @@
+import { moveNavigatorFiles, retryNavigatorFileLinks } from './navigator-file-transfer.js';
 const svg = (paths) => `<svg viewBox="0 0 20 20" aria-hidden="true">${paths.map((d) => `<path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</svg>`;
 import { createBreadcrumbPopup } from './navigator-breadcrumb-popup.js';
 import { createNavigatorSavedStates } from './navigator-saved-states.js';
+import { assignSpatialFolderHues, FOLDER_DISTANCE } from '../graph-model-20260730b.js';
+export function navigatorBranchHues(branches, colors = new Map()) {
+ const nodes=branches.map(b=>({...b,x:b.depth*13,y:b.start*34})),pairs=[];
+ for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){const a=nodes[i],b=nodes[j],gap=Math.max(0,a.start-b.end,b.start-a.end)*34;if(Math.hypot(a.x-b.x,gap)<FOLDER_DISTANCE)pairs.push([a,b]);}
+ assignSpatialFolderHues(nodes,colors,{cx:0,cy:0},new Map(),null,pairs);return colors;
+}
+export function navigatorFolderPill(saved,groups){if(saved?.mode!=='action'||!saved.quickRunKey?.startsWith('folder:'))return saved;const id=saved.quickRunKey.slice(7);return groups.some(g=>g.id===id&&!g.bin)?{...saved,mode:'ayg',currentId:id,view:'nav'}:saved;}
+
 export const NAVIGATOR_AYG_DRAG_TYPE = 'application/x-papers-ayg-navigator-items';
 export const NAVIGATOR_MACHINE_DRAG_TYPE = 'application/x-papers-machine-navigator-items';
 const NATIVE_DRAG_SOURCE_TTL_MS = 30_000;
@@ -43,6 +52,38 @@ export function beginNavigatorNativeDrag({ event, paths, host }) {
     // The cancelled HTML5 drag stays cancelled if the host seam is unavailable.
   }
   return true;
+}
+
+export function navigatorCapturedDropPaths(source, files, now=Date.now()) {
+  if(!source||!Number.isFinite(source.startedAt)||now-source.startedAt>NATIVE_DRAG_SOURCE_TTL_MS)return [];
+  const paths=uniquePaths(source.paths);
+  const names=files.map(file=>file?.name?.toLowerCase()).filter(Boolean).sort();
+  const expected=paths.map(path=>path.split(/[\\/]/).pop().toLowerCase()).sort();
+  return names.length===expected.length&&names.length>0&&names.every((name,i)=>name===expected[i])?paths:[];
+}
+
+export async function navigatorResolveDropPaths(source, files, resolve) {
+  const captured=navigatorCapturedDropPaths(source,files);
+  return captured.length?captured:await resolve(files);
+}
+
+// Electron startDrag advertises copyLink on Windows. The negotiated cursor
+// effect must be allowed by the source or Chromium cancels before firing drop.
+// The navigator's move plan, not this transport effect, owns the file operation.
+export function navigatorDropEffect(effectAllowed, preferred='move') {
+  const allowed={none:[],copy:['copy'],link:['link'],move:['move'],copyLink:['copy','link'],copyMove:['copy','move'],linkMove:['link','move'],all:['copy','link','move'],uninitialized:['copy','link','move']}[effectAllowed]||['copy','link','move'];
+  return allowed.includes(preferred)?preferred:allowed.includes('copy')?'copy':allowed.includes('link')?'link':'none';
+}
+
+export async function navigatorNewFolderDestination({mode,selected,currentId,path,rootId,stat,isAbsoluteWindowsPath}) {
+  if(mode==='machine')return {mode:'machine',parent:selected?.kind==='folder'?selected.path:selected?.path?parentPath(selected.path):path};
+  if(selected?.kind==='group')return {mode:'ayg',parent:selected.id};
+  if(selected?.target&&isAbsoluteWindowsPath(selected.target)){
+    const result=await stat(selected.target);
+    if(!result?.ok)throw Error(result?.message||'Selected target is unavailable.');
+    if(result.entry?.kind==='folder')return {mode:'machine',parent:selected.target};
+  }
+  return {mode:'ayg',parent:selected?.parentId||currentId||rootId};
 }
 
 export function aygNavigatorNativePaths({ itemId, selectedIds, resolvePaths }) {
@@ -125,7 +166,7 @@ export function navigatorBreadcrumbMovePlan({
   if (!segment) return null;
   if (segment.path) {
     let paths = uniquePaths(machinePaths);
-    if (paths.length === 0 && nativeSource?.mode === 'machine'
+    if (paths.length === 0 && ['machine','ayg'].includes(nativeSource?.mode)
       && navigatorNativeDragSourceMatches(nativeSource, droppedPaths, now)) paths = uniquePaths(nativeSource.paths);
     return paths.length ? { kind: 'machine-move', paths, destination: segment.path } : null;
   }
@@ -231,6 +272,7 @@ export function createWorkspaceNavigator(o) {
     machineSort: { key:'name', direction:1 },
     internalDragSource: null,
     nativeDragSource: null,
+    activeDropTarget: null,
   };
   try {
     const savedWidthRaw = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-width');
@@ -246,17 +288,15 @@ export function createWorkspaceNavigator(o) {
   }
   const head = d.createElement('header'); head.className = 'workspace-navigator-header';
   const provider = d.createElement('button'); provider.type = 'button'; provider.className = 'workspace-navigator-provider';
-  const viewToggle = button(d,'Switch navigation mode',['M4 5h3','M4 10h3','M4 15h3','M9 5h7','M9 10h7','M9 15h7']);
-  viewToggle.classList.add('workspace-navigator-view-toggle');
-  const viewLabel = d.createElement('span'); viewLabel.className = 'workspace-navigator-view-label'; viewToggle.append(viewLabel);
   const collapse = button(d,'Collapse navigator',['M12.5 4.5 7 10l5.5 5.5']); collapse.classList.add('workspace-navigator-collapse');
   const tools = d.createElement('div'); tools.className = 'workspace-navigator-toolbar';
   const back = button(d,'Back',['M12.5 4.5 7 10l5.5 5.5']), fwd = button(d,'Forward',['M7.5 4.5 13 10l-5.5 5.5']);
   const up = button(d,'Up',['M5 11l5-5 5 5','M10 6v9']), refresh = button(d,'Refresh',['M15.5 7A6 6 0 1 0 16 12','M15.5 7V3.5','M15.5 7H12']), copy = button(d,'Copy',['M7 7h9v9H7z','M4 13H3.5A1.5 1.5 0 0 1 2 11.5v-8A1.5 1.5 0 0 1 3.5 2h8A1.5 1.5 0 0 1 13 3.5V4']);
-  const move = button(d,'Move',['M4 2.5h7l3 3v12H4z','M11 2.5v4h4','M8 11h8','M13 8l3 3-3 3']), paste = button(d,'Paste',['M6 5h8v12H6z','M8 5V3h4v2']);
+  const move = button(d,'Cut',['M7 13L16 3','M7 7l9 10','M7 6a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0','M7 14a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0']), paste = button(d,'Paste',['M6 5h8v12H6z','M8 5V3h4v2']);
   const rename = button(d,'Rename',['M4 15h4l8-8-4-4-8 8z','M11 4l4 4']), del = button(d,'Delete',['M4 6h12','M7 6v10h6V6','M8 4h4']);
-  const reveal = button(d,'Reveal',['M3 6h5l1.5 2H17v8H3z','M3 9h14']); tools.append(back,fwd,up,refresh,copy,move,paste,rename,del,reveal);
-  head.append(provider, tools, viewToggle, collapse);
+  const newFolder = button(d,'New folder',['M10 4v12','M4 10h12']);
+  const reveal = button(d,'Reveal',['M3 6h5l1.5 2H17v8H3z','M3 9h14']); tools.append(back,fwd,up,refresh,newFolder,copy,move,paste,rename,del,reveal);
+  head.append(provider, tools, collapse);
   const navActions=d.createElement('div');navActions.className='navigator-state-actions';
   const quickSearch=button(d,'Quick Run in navigator',['M8.5 3a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11','M12.5 12.5 17 17']);
   navActions.append(quickSearch);head.insertBefore(navActions,collapse);
@@ -277,25 +317,7 @@ export function createWorkspaceNavigator(o) {
   const body = d.createElement('div'); body.className = 'workspace-navigator-body';
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
   panel.replaceChildren(head,search,loc,body,resizer);
-  body.addEventListener('dragover',event=>{
-    if(![...event.dataTransfer.types].includes('Files'))return;
-    event.preventDefault();event.dataTransfer.dropEffect=s.mode==='machine'?'copy':'link';
-  });
-  body.addEventListener('drop',async event=>{
-    const files=[...event.dataTransfer.files];if(!files.length)return;
-    event.preventDefault();event.stopPropagation();
-    const row=event.target.closest?.('.workspace-navigator-row');
-    if(s.mode==='ayg'){
-      const folder=(o.getState().groups||[]).find(group=>group.id===row?.dataset.id);
-      await o.dropNavigatorFiles?.(files,folder?.id||currentAyG());
-    }else{
-      const targets=await o.host.resolveDroppedTargets(files);
-      const paths=(targets||[]).map(item=>item.target||item.path).filter(Boolean);
-      const destination=row?.dataset.folderPath||s.path;
-      if(paths.length&&destination)await o.host.fileCapability('copy',{paths,destination});
-      s.machineListings.clear();render();
-    }
-  });
+  installNavigatorDropTarget(body,()=>s.mode==='machine'?{path:s.view==='tree'?s.machineRoot:s.path}:{item:{id:s.view==='tree'?o.rootId:currentAyG()}});
   o.workspace.style.setProperty('--workspace-navigator-width', `${s.width}px`);
   const icon = (x) => x.icon ? `<img src="${x.icon}" alt="">` : (x.kind === 'group' || x.kind === 'folder')
     ? svg(['M2.5 6h5l1.5 2h8.5v8.5h-15z']) : o.isWebLink(x)
@@ -363,9 +385,6 @@ export function createWorkspaceNavigator(o) {
     provider.textContent = s.mode === 'machine' ? 'Opus' : 'As you Go';
     provider.title = s.mode === 'machine' ? 'Switch to As you Go' : 'Switch to Opus';
     provider.setAttribute('aria-label', provider.title);
-    viewLabel.textContent = s.view === 'tree' ? 'Tree' : 'Nav';
-    viewToggle.title = s.view === 'tree' ? 'Switch to navigation mode' : 'Switch to tree mode';
-    viewToggle.setAttribute('aria-label', viewToggle.title);
     panel.classList.toggle('collapsed', s.collapsed);
     o.workspace.classList.toggle('navigator-collapsed', s.collapsed);
     collapse.title = s.collapsed ? 'Expand navigator' : 'Collapse navigator';
@@ -381,7 +400,7 @@ export function createWorkspaceNavigator(o) {
     reveal.hidden = false;
     paste.hidden = false;
     reveal.disabled = s.mode !== 'machine';
-    paste.disabled = s.mode === 'machine';
+    paste.disabled = false;
   }
   function setMode(mode) {
     s.mode = mode;
@@ -468,13 +487,26 @@ export function createWorkspaceNavigator(o) {
   }
   async function droppedPaths(files) {
     if (!files.length) return [];
-    const result = await o.host.resolveDroppedTargets(files).catch(() => null);
+    let timer;
+    const result = await Promise.race([
+      o.host.resolveDroppedTargets(files).catch(() => null),
+      new Promise(resolve=>{timer=setTimeout(()=>resolve(null),2000);}),
+    ]).finally(()=>clearTimeout(timer));
     const entries = result?.targets || result || [];
     return uniquePaths(entries.map((entry) => typeof entry === 'string' ? entry : entry?.target || entry?.path));
   }
+  const pendingFileLinks=new Map();
+  async function retargetMovedFiles(moves){
+    for(const move of moves)pendingFileLinks.set(move.oldPath.toLowerCase(),move);
+    const saved=await o.retargetMovedFiles?.(moves);
+    if(saved===true){
+      savedStates.retargetPaths(moves);
+      for(const move of moves)pendingFileLinks.delete(move.oldPath.toLowerCase());
+    }
+    return saved;
+  }
   async function handleNavigatorDrop(segment, event) {
     const files = [...(event.dataTransfer?.files || [])];
-    const resolvedPaths = await droppedPaths(files);
     const transferredAyG = parseAyGDragPayload(event.dataTransfer);
     const transferredMachine = parseDragList(event.dataTransfer, NAVIGATOR_MACHINE_DRAG_TYPE);
     const dragSources = navigatorDropDragSources({
@@ -482,12 +514,14 @@ export function createWorkspaceNavigator(o) {
       transferredMachine,
       internalDragSource:s.internalDragSource,
     });
+    const nativeSource=s.nativeDragSource;
+    const resolvedPaths=await navigatorResolveDropPaths(nativeSource,files,droppedPaths);
     const plan = navigatorBreadcrumbMovePlan({
       segment,
       rootId: o.rootId,
       aygDrag: dragSources.ayg,
       machinePaths: dragSources.machine,
-      nativeSource: s.nativeDragSource,
+      nativeSource: nativeSource,
       droppedPaths: resolvedPaths,
     });
     s.internalDragSource = null;
@@ -499,20 +533,21 @@ export function createWorkspaceNavigator(o) {
       return;
     }
     if (plan?.kind === 'machine-move') {
-      const result = await o.host.fileCapability('move', { paths: plan.paths, destination: plan.destination });
-      if (!result?.ok) o.setStatus(result?.message || 'Move failed.');
+      const result = await moveNavigatorFiles({host:o.host,paths:plan.paths,destination:plan.destination,retarget:retargetMovedFiles});
+      if (!result?.ok) reportDropResult(result?.message || 'Move failed.');
       else {
+        reportDropResult(`Moved to (${plan.destination})`);
         s.selected = null;
         s.machineListings.clear();
         render();
       }
       return;
     }
-    if (!files.length) return;
+    if (!files.length) {reportDropResult('The drop did not contain a readable file. Nothing moved.');return;}
     if (segment.path) {
-      if (!resolvedPaths.length) return;
+      if (!resolvedPaths.length) {reportDropResult(`Could not resolve the dropped file path (${files.map(file=>file.name).join(', ')}). Nothing moved.`);return;}
       const result = await o.host.fileCapability('copy', { paths: resolvedPaths, destination: segment.path });
-      if (!result?.ok) o.setStatus(result?.message || 'Copy failed.');
+      if (!result?.ok) reportDropResult(result?.message || 'Copy failed.');
       else {
         s.machineListings.clear();
         render();
@@ -522,25 +557,61 @@ export function createWorkspaceNavigator(o) {
     await o.dropNavigatorFiles?.(files, segment.item?.id || o.rootId);
     render();
   }
-  function installNavigatorDropTarget(element, segment) {
+  const moveHint=d.createElement('div');moveHint.className='navigator-move-hint';moveHint.hidden=true;d.body.append(moveHint);
+  let dropPending=false,dropNoticeTimer;
+  function reportDropResult(message){
+    dropPending=false;o.setStatus(message);moveHint.textContent=message;moveHint.hidden=false;
+    moveHint.classList.remove('fading');
+    clearTimeout(dropNoticeTimer);dropNoticeTimer=setTimeout(()=>{
+      moveHint.classList.add('fading');
+      dropNoticeTimer=setTimeout(()=>{moveHint.hidden=true;moveHint.classList.remove('fading');},250);
+    },1500);
+  }
+  d.addEventListener('dragend',()=>{if(!dropPending)moveHint.hidden=true;});
+  function installNavigatorDropTarget(element, destination) {
+    // Rows and expanded branch bodies share this handler. Stopping propagation
+    // makes the deepest nested branch (or directly hovered folder row) win.
     element.addEventListener('dragover',(event)=>{
+      const segment=typeof destination==='function'?destination():destination;
       const types=[...(event.dataTransfer?.types || [])];
       const internalType = segment.path ? NAVIGATOR_MACHINE_DRAG_TYPE : NAVIGATOR_AYG_DRAG_TYPE;
       const expectedMode = segment.path ? 'machine' : 'ayg';
       if(!types.includes('Files')&&!types.includes(internalType)&&s.internalDragSource?.mode!==expectedMode)return;
       event.preventDefault();
       event.stopPropagation();
-      event.dataTransfer.dropEffect=types.includes(internalType)?'move':'copy';
-      element.classList.add('drop-target');
+      clearTimeout(dropNoticeTimer);
+      moveHint.classList.remove('fading');
+      event.dataTransfer.dropEffect=navigatorDropEffect(event.dataTransfer.effectAllowed,types.includes(internalType)?'move':'copy');
+      const paths=s.nativeDragSource?.paths||[];
+      if(segment.path&&paths.length){
+        event.dataTransfer.dropEffect=navigatorDropEffect(event.dataTransfer.effectAllowed,'move');moveHint.textContent=`move to (${segment.path})`;
+        moveHint.style.left=`${event.clientX+14}px`;moveHint.style.top=`${event.clientY+18}px`;moveHint.hidden=false;
+      }else moveHint.hidden=true;
+      if(s.activeDropTarget!==element){
+        s.activeDropTarget?.classList.remove('drop-target');
+        s.activeDropTarget=element;
+        element.classList.add('drop-target');
+      }
     });
     element.addEventListener('dragleave',(event)=>{
-      if(!element.contains(event.relatedTarget))element.classList.remove('drop-target');
+      if(!element.contains(event.relatedTarget)&&s.activeDropTarget===element){
+        if(!dropPending)moveHint.hidden=true;
+        element.classList.remove('drop-target');
+        s.activeDropTarget=null;
+      }
     });
     element.addEventListener('drop',(event)=>{
       event.preventDefault();
       event.stopPropagation();
-      element.classList.remove('drop-target');
-      void handleNavigatorDrop(segment,event);
+      s.activeDropTarget?.classList.remove('drop-target');
+      s.activeDropTarget=null;
+      dropPending=true;
+      clearTimeout(dropNoticeTimer);moveHint.classList.remove('fading');
+      moveHint.style.left=`${event.clientX+14}px`;moveHint.style.top=`${event.clientY+18}px`;
+      moveHint.textContent='Checking dropped file…';moveHint.hidden=false;
+      void handleNavigatorDrop(typeof destination==='function'?destination():destination,event)
+        .catch(error=>reportDropResult(error.message||'Move failed.'))
+        .finally(()=>{if(dropPending){dropPending=false;moveHint.hidden=true;}});
     });
   }
   function setLocation(segments) {
@@ -616,10 +687,12 @@ export function createWorkspaceNavigator(o) {
     }
     await o.activateAyG(x.shortcutId||x.id);render();
   }
+  const branchColors=new Map();let treeBranches=[],treeRowIndex=0;
+  function paintTreeBranches(branches=treeBranches){navigatorBranchHues(branches,branchColors);for(const b of branches){const color=b.id.startsWith('group-proxima-')?'oklch(68% 0.18 145deg)':`oklch(68% 0.18 ${branchColors.get(b.id)}deg)`;b.row.style.setProperty('--branch-color',color);b.children.style.setProperty('--branch-color',color);}}
   function aygChildren(parent, depth = 0) {
     const f = d.createDocumentFragment();
     for (const x of o.itemsIn(o.getState(), parent).filter((v) => v.kind !== 'window-layout')) {
-      const id = x.id, row = d.createElement('div');
+      const id = x.id, row = d.createElement('div');const start=treeRowIndex++;
       row.draggable=true;
       row.addEventListener('dragstart',event=>{
         const dragPayload=navigatorAyGDragPayload({
@@ -639,7 +712,6 @@ export function createWorkspaceNavigator(o) {
       if (ownNativePaths.length > 0) {
         row.draggable = true;
         row.addEventListener('dragstart', (event) => {
-          if(!event.ctrlKey)return;
           const dragPayload = navigatorAyGDragPayload({
             itemId:id,
             selectedIds:o.getSession().selected,
@@ -658,14 +730,27 @@ export function createWorkspaceNavigator(o) {
           });
         });
       }
-      if (x.kind === 'group' && (s.view === 'tree' || s.expanded.has(x.id))) {
-        const t = d.createElement('button'); t.type='button'; t.className='navigator-tree-toggle'; t.textContent=s.expanded.has(x.id)?'▾':'▸';
+      if (x.kind === 'group') {
+        const t = d.createElement('button'); t.type='button'; t.className='navigator-tree-toggle'; t.textContent=s.expanded.has(x.id)?'':'>';
         t.addEventListener('click',(e)=>{e.stopPropagation(); s.expanded.has(x.id)?s.expanded.delete(x.id):s.expanded.add(x.id); render();}); row.append(t);
       } else { const sp=d.createElement('span'); sp.className='navigator-tree-spacer'; row.append(sp); }
       const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x);
       hydrateArt(art, x);
-      const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name||'Untitled'; row.append(art,label);
-      row.addEventListener('click',(e)=>{if(e.shiftKey&&!e.ctrlKey){e.preventDefault();void enterAyG(x);return;}o.selectAyG(id,visibleIds(),{ctrlKey:e.ctrlKey});});
+      const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=(x.id.startsWith('group-proxima-')?'\u2605 ':'')+(x.name||'Untitled');
+      if(x.kind!=='group'&&!o.isWebLink(x)&&o.isAbsoluteWindowsPath(x.target)){
+        void o.host.fileCapability('stat',{path:x.target}).then(result=>{
+          if(result?.ok&&result.entry?.kind==='folder'&&label.isConnected){
+            row.classList.add('navigator-filesystem-link');
+            installNavigatorDropTarget(row,{path:x.target});
+            const marker=d.createElement('span');marker.className='navigator-linked-folder-marker';marker.textContent=' <';label.append(marker);
+          }
+        }).catch(()=>{});
+      }
+
+      if(x.id.startsWith('group-proxima-'))label.classList.add('navigator-proxima-label');
+      if(x.kind==='group'&&s.expanded.has(x.id)){const h=d.createElement('span');h.className='navigator-tree-folder-heading';h.append(art,label);row.append(h);row.classList.add('navigator-tree-expanded');}else row.append(art,label);
+      row.tabIndex=-1;
+      row.addEventListener('click',(e)=>{row.focus({preventScroll:true});if(e.shiftKey&&!e.ctrlKey){e.preventDefault();void enterAyG(x);return;}o.selectAyG(id,visibleIds(),{ctrlKey:e.ctrlKey});body.tabIndex=-1;body.focus({preventScroll:true});});
       row.addEventListener('contextmenu',(e)=>{
         if(!e.shiftKey||x.kind!=='group')return;
         e.preventDefault();e.stopPropagation();
@@ -673,13 +758,13 @@ export function createWorkspaceNavigator(o) {
         render();
       });
       if(x.kind==='group')installNavigatorDropTarget(row,{item:x});
-      f.append(row); if (x.kind==='group'&&s.expanded.has(x.id)) f.append(aygChildren(x.id,depth+1));
+      f.append(row);if(x.kind==='group'&&s.expanded.has(x.id)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left',`${14+depth*13}px`);children.append(aygChildren(x.id,depth+1));installNavigatorDropTarget(children,{item:x});f.append(children);treeBranches.push({id,depth,start,end:treeRowIndex-1,row,children});}
     } return f;
   }
-  function renderAyG() {
+  function renderAyG() {treeBranches=[];treeRowIndex=0;
     if(s.view==='tree'){
       setLocation([{key:'ayg-root',label:'As you Go'}]);
-      body.replaceChildren(aygChildren(o.rootId));
+      body.replaceChildren(aygChildren(o.rootId));paintTreeBranches();
     }
     else{
       const current=currentAyG();
@@ -690,7 +775,7 @@ export function createWorkspaceNavigator(o) {
         item:crumb.item,
         activate:()=>navigateAyG(crumb.id),
       })));
-      body.replaceChildren(aygChildren(current));
+      body.replaceChildren(aygChildren(current));paintTreeBranches();
     }
     back.disabled=s.view!=='nav'||s.aygHi<=0;
     fwd.disabled=s.view!=='nav'||s.aygHi>=s.aygHistory.length-1;
@@ -864,16 +949,15 @@ export function createWorkspaceNavigator(o) {
       if(!event.ctrlKey){
         rememberInternalDrag({mode:'machine',paths:[x.path]});
         event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify({mode:'action',path:x.path,name:x.name}));
-        return;
       }
       rememberNativeDrag({ mode:'machine', paths:[x.path] });
       beginNavigatorNativeDrag({ event, paths: [x.path], host: o.host });
     });
     row.addEventListener('dragend',()=>{s.internalDragSource=null;});
-    const folder=x.kind==='folder', lead=d.createElement(folder&&s.view==='tree'?'button':'span'); lead.className=folder&&s.view==='tree'?'navigator-tree-toggle':'navigator-tree-spacer';
-    if(folder&&s.view==='tree'){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'▾':'▸';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
+    const folder=x.kind==='folder', lead=d.createElement(folder?'button':'span'); lead.className=folder?'navigator-tree-toggle':'navigator-tree-spacer';
+    if(folder){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'':'>';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
     const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x); hydrateMachineArt(art,x);
-    const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name; row.append(lead,art,label);
+    const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name;row.append(lead);if(folder&&!searchResult&&s.machineExpanded.has(x.path)){const h=d.createElement('span');h.className='navigator-tree-folder-heading';h.append(art,label);row.append(h);row.classList.add('navigator-tree-expanded');}else row.append(art,label);
     if(folder&&!searchResult)installNavigatorDropTarget(row,{path:x.path});
     if(!searchResult&&s.view==='nav'){
       row.classList.add('machine-list-row');
@@ -938,19 +1022,11 @@ export function createWorkspaceNavigator(o) {
     });
     return row;
   }
-  async function machineTree(path, depth, generation) {
-    const fragment=d.createDocumentFragment(), result=await machineList(path);
-    if(generation!==s.renderGen||s.mode!=='machine'||!result?.ok)return fragment;
-    for(const x of result.items||[]){fragment.append(machineRow(x,depth));if(x.kind==='folder'&&s.machineExpanded.has(x.path))fragment.append(await machineTree(x.path,depth+1,generation));}
-    return fragment;
-  }
-  async function renderMachineTree() {
-    const generation=++s.renderGen, root=s.machineRoot; if(!root)return;
-    setLocation([{key:root.toLocaleLowerCase(),label:root,title:root}]);
-    const fragment=d.createDocumentFragment(); fragment.append(machineRow({path:root,name:root,kind:'folder'}));
-    if(s.machineExpanded.has(root))fragment.append(await machineTree(root,1,generation));
-    if(generation===s.renderGen&&s.mode==='machine'&&s.view==='tree')body.replaceChildren(fragment);
-  }
+  async function machineTree(path,depth,generation,tree){
+ const fragment=d.createDocumentFragment(),result=await machineList(path);if(generation!==s.renderGen||s.mode!=='machine'||!result?.ok)return fragment;
+ for(const x of result.items||[]){const start=tree.index++,row=machineRow(x,depth);fragment.append(row);if(x.kind==='folder'&&s.machineExpanded.has(x.path)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left',`${14+depth*13}px`);children.append(await machineTree(x.path,depth+1,generation,tree));installNavigatorDropTarget(children,{path:x.path});fragment.append(children);tree.branches.push({id:`machine:${x.path.toLowerCase()}`,depth,start,end:tree.index-1,row,children});}}return fragment;
+ }
+ async function renderMachineTree(){const generation=++s.renderGen,root=s.machineRoot;if(!root)return;setLocation([{key:root.toLowerCase(),label:root,title:root,path:root}]);const tree={index:1,branches:[]},fragment=d.createDocumentFragment(),row=machineRow({path:root,name:root,kind:'folder'});fragment.append(row);if(s.machineExpanded.has(root)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left','14px');children.append(await machineTree(root,1,generation,tree));installNavigatorDropTarget(children,{path:root});fragment.append(children);tree.branches.push({id:`machine:${root.toLowerCase()}`,depth:0,start:0,end:tree.index-1,row,children});}if(generation===s.renderGen&&s.mode==='machine'&&s.view==='tree'){body.replaceChildren(fragment);paintTreeBranches(tree.branches);}}
   function machinePathCrumbs(path) {
     const normalized=String(path||'').replace(/\//g,'\\').replace(/\\+$/,'');
     const unc=normalized.match(/^\\\\([^\\]+)\\([^\\]+)(?:\\(.*))?$/);
@@ -998,15 +1074,16 @@ export function createWorkspaceNavigator(o) {
     if(items.length){
       body.append(machineColumnHeader());
       const rows=d.createElement('div'); rows.className='workspace-navigator-machine-rows';
+      const tree={index:0,branches:[]};
       for (const x of items) {
-        rows.append(machineRow(x));
+        const start=tree.index++,row=machineRow(x);rows.append(row);
         if(x.kind==='folder'&&s.machineExpanded.has(x.path)) {
-          const branch=await machineTree(x.path,1,gen);
+          const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left','14px');children.append(await machineTree(x.path,1,gen,tree));
           if(gen!==s.renderGen)return;
-          rows.append(branch);
+          rows.append(children);tree.branches.push({id:`machine:${x.path.toLowerCase()}`,depth:0,start,end:tree.index-1,row,children});
         }
       }
-      body.append(rows);
+      body.append(rows);paintTreeBranches(tree.branches);
     }else body.innerHTML='<p class="workspace-navigator-empty">This folder is empty.</p>';
   }
   async function enterMachine(path, fromGesture = false) {
@@ -1085,7 +1162,6 @@ export function createWorkspaceNavigator(o) {
   searchInput.addEventListener('keydown',(event)=>{
     if(event.key==='Escape'&&searchInput.value){event.preventDefault();clearSearch();}
   });
-  viewToggle.addEventListener('click',()=>setView(s.view==='tree'?'nav':'tree'));
   function setCollapsed(collapsed){
     s.collapsed=Boolean(collapsed);
     persistUi('papers:ayg:navigator-collapsed',s.collapsed?'1':'0');
@@ -1119,10 +1195,77 @@ export function createWorkspaceNavigator(o) {
     if(s.mode==='ayg'){const g=o.getState().groups.find((x)=>x.id===currentAyG());navigateAyG(g?.parentId||o.rootId);return;}
     const p=parentPath(s.path);if(p&&p.toLocaleLowerCase()!==s.path.toLocaleLowerCase())void loadMachine(p,true);
   });
-  refresh.addEventListener('click',()=>{if(s.mode==='machine'&&s.path)s.machineListings.delete(s.path.toLocaleLowerCase());render();});
-  copy.addEventListener('click',async()=>{if(s.mode==='ayg')return o.copyAyG();if(!s.selected)return;const p=await o.host.pickTarget('folder').catch(()=>null),dst=typeof p==='string'?p:p?.path||p?.target;if(dst){const r=await o.host.fileCapability('copy',{paths:[s.selected.path],destination:dst});if(!r?.ok){o.setStatus(r?.message||'Copy failed.');return;}s.machineListings.clear();render();}});
-  move.addEventListener('click',async()=>{if(s.mode==='ayg')return o.cutAyG();if(!s.selected)return;const p=await o.host.pickTarget('folder').catch(()=>null),dst=typeof p==='string'?p:p?.path||p?.target;if(dst){const r=await o.host.fileCapability('move',{paths:[s.selected.path],destination:dst});if(!r?.ok){o.setStatus(r?.message||'Move failed.');return;}s.selected=null;s.machineListings.clear();render();}});
-  paste.addEventListener('click',()=>o.pasteAyG(destination()));
+  refresh.addEventListener('click',async()=>{
+    if(s.mode==='machine'&&s.path)s.machineListings.delete(s.path.toLocaleLowerCase());
+    if(pendingFileLinks.size){
+      refresh.disabled=true;
+      try{
+        const saved=await retryNavigatorFileLinks({host:o.host,moves:[...pendingFileLinks.values()],retarget:retargetMovedFiles});
+        o.setStatus(saved?'Moved file links updated.':'Moved file links still could not be saved. Resolve any workspace save conflict, then Refresh to retry.');
+      }catch(error){o.setStatus(error.message||'Moved file links could not be saved. Refresh to retry.');}
+      finally{refresh.disabled=false;}
+    }
+    render();
+  });
+  newFolder.addEventListener('click',async()=>{
+    const existing=body.querySelector('[data-new-folder] input');if(existing){existing.focus();return;}
+    const state=o.getState(),selectedId=[...o.getSession().selected].at(-1);
+    const selected=s.mode==='machine'?s.selected:
+      state.groups.find(item=>item.id===selectedId)||[o.rootId,...state.groups.map(item=>item.id)].flatMap(id=>o.itemsIn(state,id)).find(item=>item.id===selectedId);
+    let target;
+    newFolder.disabled=true;
+    try{target=await navigatorNewFolderDestination({mode:s.mode,selected,currentId:currentAyG(),path:s.path,rootId:o.rootId,isAbsoluteWindowsPath:o.isAbsoluteWindowsPath,stat:path=>o.host.fileCapability('stat',{path})});}
+    catch(error){o.setStatus(error.message||'Folder destination is unavailable.');return;}
+    finally{newFolder.disabled=false;}
+    const {mode,parent}=target;
+    if(!parent){o.setStatus('Open a folder first.');return;}
+    const row=d.createElement('div');row.className='workspace-navigator-row';row.dataset.newFolder='true';
+    const input=d.createElement('input');input.className='navigator-inline-rename';input.type='text';input.value='New folder';input.setAttribute('aria-label','New folder name');row.append(input);body.prepend(row);
+    let busy=false;
+    const save=async()=>{
+      if(busy)return;const name=input.value.trim();if(!name){input.focus();return;}
+      busy=true;input.disabled=true;
+      try{
+        if(mode==='ayg'){if(await o.createAyGFolder(parent,name)===false)throw Error('Folder could not be saved.');}
+        else{const result=await o.host.fileCapability('create-folder',{path:parent,newName:name});if(!result?.ok)throw Error(result?.message||'Folder could not be created.');s.machineListings.clear();}
+        row.remove();render();
+      }catch(error){o.setStatus(error.message||'Folder could not be created.');busy=false;input.disabled=false;input.focus();}
+    };
+    ['click','pointerdown','dblclick'].forEach(type=>input.addEventListener(type,event=>event.stopPropagation()));
+    input.addEventListener('keydown',event=>{event.stopPropagation();if(event.key==='Enter'){event.preventDefault();void save();}else if(event.key==='Escape'&&!busy){event.preventDefault();row.remove();}});
+    input.addEventListener('blur',()=>{if(!busy)row.remove();});input.focus();input.select();
+  });
+  let machineClipboard=null;
+  function copyNavigator(cut=false){
+    if(s.mode==='ayg'){machineClipboard=null;return cut?o.cutAyG():o.copyAyG();}
+    if(s.selected)machineClipboard={paths:[s.selected.path],cut,base:o.getSession().clipboard};
+  }
+  async function pasteNavigator(){
+    if(machineClipboard&&machineClipboard.base!==o.getSession().clipboard)machineClipboard=null;
+    if(s.mode==='ayg'){
+      if(machineClipboard){await o.linkNavigatorPaths?.(machineClipboard.paths,destination());return;}
+      return o.pasteAyG(destination());
+    }
+    const clipboard=o.getSession().clipboard;
+    const source=machineClipboard||{paths:o.nativeDragPaths?.(clipboard?.ids||[])||[],cut:clipboard?.mode==='cut'};
+    if(!source.paths.length){o.setStatus('Copy files before pasting into a real folder.');return;}
+    const result=source.cut?await moveNavigatorFiles({host:o.host,paths:source.paths,destination:s.path,retarget:retargetMovedFiles})
+      :await o.host.fileCapability('copy',{paths:source.paths,destination:s.path});
+    if(!result?.ok)o.setStatus(result?.message||'File transfer failed.');else{s.machineListings.clear();render();if(source.cut)machineClipboard=null;}
+  }
+  copy.addEventListener('click',()=>copyNavigator());
+  move.addEventListener('click',()=>copyNavigator(true));
+  paste.addEventListener('click',()=>void pasteNavigator());
+  d.addEventListener('keydown',event=>{
+    if(s.collapsed||!panel.contains(event.target)||event.target?.closest?.('input,textarea,[contenteditable="true"]')||!event.ctrlKey||event.altKey)return;
+    const key=event.key.toLowerCase();if(!['c','x','v'].includes(key))return;
+    event.preventDefault();event.stopImmediatePropagation();
+    if(key==='v')void pasteNavigator();else copyNavigator(key==='x');
+  },true);
+  d.addEventListener('paste',event=>{
+    if(s.mode!=='machine'||!panel.contains(event.target)||event.target?.closest?.('input,textarea,[contenteditable="true"]'))return;
+    event.preventDefault();event.stopImmediatePropagation();void pasteNavigator();
+  },true);
   rename.addEventListener('click',()=>{
     if(s.mode==='ayg'&&o.getSession().selected.size!==1){o.setStatus('Select one item to rename.');return;}
     const row=body.querySelector('.workspace-navigator-row.selected');
@@ -1208,10 +1351,23 @@ export function createWorkspaceNavigator(o) {
     return { kind:saved?.mode === 'ayg' ? 'group' : 'folder', icon:typeof saved?.icon === 'string' ? saved.icon : null };
   };
   const savedStates=createNavigatorSavedStates({document:d,container:savedPills,
+    decorateLabel:(label,saved)=>{
+      const normalized=navigatorFolderPill(saved,o.getState().groups||[]);
+      if(normalized.mode==='ayg'){label.textContent=(s.expanded.has(normalized.currentId)?'':'> ')+saved.name;return;}
+      if(saved.mode==='machine'){label.textContent=saved.name+' <';label.closest('.navigator-saved-pill')?.classList.add('navigator-filesystem-link');return;}
+      const target=saved.path||saved.art?.target||o.nativeDragPaths?.([saved.itemId])?.[0];
+      if(target&&o.isAbsoluteWindowsPath(target))void o.host.fileCapability('stat',{path:target}).then(result=>{
+        if(label.isConnected&&result?.ok&&result.entry?.kind==='folder'){
+          label.textContent=saved.name+' <';
+          label.closest('.navigator-saved-pill')?.classList.add('navigator-filesystem-link');
+        }
+      }).catch(()=>{});
+    },
     dragFile:(event,saved)=>{
+      s.nativeDragSource=null;
       const target=saved.path||saved.art?.target;
       const paths=target&&o.isAbsoluteWindowsPath(target)?[target]:o.nativeDragPaths?.([saved.itemId])||[];
-      if(paths.length)beginNavigatorNativeDrag({event,paths,host:o.host});
+      if(paths.length){rememberNativeDrag({mode:saved.itemId?'ayg':'machine',itemIds:saved.itemId?[saved.itemId]:[],paths});beginNavigatorNativeDrag({event,paths,host:o.host});}
     },
     fromDrop:async data=>{
       if(data.files?.length){
@@ -1220,7 +1376,7 @@ export function createWorkspaceNavigator(o) {
         const path=typeof item==='string'?item:item?.target||item?.path;
         if(path)return {mode:'action',path,name:item?.name||path.split(/[\\/]/).pop()||path};
       }
-      try{const item=JSON.parse(data.getData('application/x-papers-pill'));if(item&&typeof item.name==='string'&&['ayg','machine','action'].includes(item.mode))return item;}catch{}
+      try{const item=JSON.parse(data.getData('application/x-papers-pill'));if(item&&typeof item.name==='string'&&['ayg','machine','action'].includes(item.mode))return navigatorFolderPill(item,o.getState().groups||[]);}catch{}
       const raw=(data.getData('text/uri-list')||data.getData('text/plain')||'').trim();
       if(!raw)return null;
       if(o.isAbsoluteWindowsPath(raw))return {mode:'action',path:raw,name:raw.split(/[\\/]/).pop()||raw};
@@ -1232,6 +1388,7 @@ export function createWorkspaceNavigator(o) {
       return {mode:s.mode,view:s.view,currentId:currentAyG(),path:s.path,machineRoot:s.machineRoot,expanded:[...s.expanded],machineExpanded:[...s.machineExpanded],query:s.searchQuery,name:s.mode==='machine'?(s.path?.split(/[\\/]/).filter(Boolean).pop()||s.path||'Folder'):(item?.name||'As you Go'),icon:item?.icon||null};
     },
     restore:async (saved, modifiers)=>{
+      saved=navigatorFolderPill(saved,o.getState().groups||[]);
       if(saved.mode==='action'){
         if(await activateNavigatorFilePill(saved, modifiers, { ...o, currentAyG }))return;
         if(saved.quickRunKey)return o.runPinnedQuickRun?.(saved.quickRunKey);
@@ -1241,10 +1398,10 @@ export function createWorkspaceNavigator(o) {
         return;
       }
       clearSearch({renderNow:false});s.mode=saved.mode;s.expanded=new Set(saved.expanded||[]);s.machineExpanded=new Set(saved.machineExpanded||[]);s.machineRoot=saved.machineRoot;s.path=saved.path;setView(saved.view,false);
-      if(saved.mode==='ayg')navigateAyG(saved.currentId||o.rootId);else render();
+      if(saved.mode==='ayg')navigateAyG(saved.currentId||o.rootId);syncChrome();render();
       if(saved.query){searchInput.value=saved.query;searchInput.dispatchEvent(new d.defaultView.Event('input',{bubbles:true}));}
     },
-    art:(element,saved)=>{const item=savedArtItem(saved);element.innerHTML=icon(item);const path=saved.path||(o.isAbsoluteWindowsPath(item.target)?item.target:null);if(path)loadMachineArt(element,{path,kind:saved.mode==='machine'?'folder':'file'});else hydrateArt(element,item);},
+    art:(element,saved)=>{const folder=navigatorFolderPill(saved,o.getState().groups||[]);const linked=(folder.currentId||'').startsWith('group-proxima-');element.classList.toggle('navigator-proxima-pill-art',linked);const item=savedArtItem(saved);element.innerHTML=icon(item);const path=saved.path||(o.isAbsoluteWindowsPath(item.target)?item.target:null);if(path)loadMachineArt(element,{path,kind:saved.mode==='machine'?'folder':'file'});else hydrateArt(element,item);},
   });
   syncChrome(); render();
   o.workspace.addEventListener('pointerdown',(event)=>{

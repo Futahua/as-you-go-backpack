@@ -1,5 +1,98 @@
 # As you Go — architecture and change guide
 
+## Alt+Q second-use input trace — 2026-10-06
+
+Creator evidence: the parity correction still works only once after refresh.
+The existing diagnostic window title now keeps a bounded (220-character) trace
+of each pointerdown: press count, whether its target is a member/disabled,
+button/modifier flags, mode, refresh/activation stages and the actual verdict.
+Peek's diagnostic title preserves this trace instead of overwriting it.
+No click/activation behavior was changed by this diagnostic addition.
+
+A private Windows desktop probe used Electron input events only in its own
+synthetic window, then the actual host focus-release helper and hide/park/reveal
+sequence four times. It delivered four pointerdowns and four clicks, retained
+non-focusability and reported no modifiers. This excludes that simplified cycle
+as a reproduction; it does not exercise the creator's live DWM Peek session.
+Evidence: `D:/CodexTemp/shift-drag-proof/input-cycle-result.json`. Focused
+widget/Peek tests passed (25). A real failed second press is needed to identify
+which boundary fails; creator input remains untouched by the probe.
+
+## Alt+Q icon and list route parity — 2026-10-06
+
+Creator evidence: everything except icon clicks works, including adding from the
+list, bringing that exact window forward, and dismissing. The list previously
+awaited the existing native control refresh before activateWidgetMember; icons
+skipped refresh and passed through the legacy isolate-mode click handler.
+activateWidgetMember now owns the existing refresh for both routes. Plain Alt+Q
+pointerdown directly invokes that same function, preserving its press-scoped
+follow-up-click suppression and bypassing legacy isolate-command consumption.
+Modified/Alt+W handling stays in the existing click handler. No new native broker,
+writer, foreground policy, or cooldown is introduced.
+
+The real surface test asserts one refresh -> activation -> hide sequence even
+when isolation would consume ordinary clicks, and no duplicate follow-up action.
+Full project suite: 1,903 passed. Normal Papers restarted to load the local
+route correction without desktop input or a host rebuild. Creator-visible
+behavior remains open pending eye testing.
+
+## Alt+Q press delivery — 2026-10-06
+
+Creator reports Peek and other behavior work but clicks still fail after the
+queue correction. Plain Alt+Q member activation now begins at the card's
+pointerdown handler, rather than depending on a later click event after native
+Peek dismissal changes window state. The existing activation/dismissal helper
+remains the action owner. The same press's follow-up click is ignored; every
+fresh pointerdown resets the marker without any timeout. Alt+W and modifier
+selection/drag behavior retain their existing handling. The frameless window's
+existing diagnostic title records activation requested and its actual verdict.
+
+Tests verify activation with no subsequent click, no duplicate action when the
+click does arrive, immediate next press, and unchanged modified/legacy presses.
+Full project suite: 1,902 passed. Normal Papers restarted to load the local
+project change, without desktop input or a host rebuild. Actual creator-visible
+behavior remains open until the installed eye test.
+
+## Alt+Q interaction queue cancellation — 2026-10-06
+
+The creator confirmed the renderer no longer freezes, but icon clicks still wait
+on subsequent summons. The existing Shift Peek lifecycle previously queued end
+behind the renderer's unfinished begin reply; endAndWait then waited on that old
+reply before activation. End now immediately sends the existing host cancellation
+request and replaces the renderer queue tail with its release acknowledgement.
+The host remains the sole native preview serialization/generation owner. A fresh
+begin waits for release, while late old replies cannot end a newer target.
+
+Tests cover unfinished old begins, pending real releases, late replies, and two
+back-to-back Alt+Q activations/dismissals without completing either old begin
+reply. Full project suite: 1,900 passed. Normal Papers restarted to load the local
+project correction; creator interaction eye test remains outstanding. No host
+build or publication was required.
+
+## Alt+Q picker and mode wave — 2026-10-06
+
+Follow-up: the wave uses an isolated negative stacking layer so the tracking dot
+keeps its card corner anchor. Ctrl+middle-click reuses the existing close action
+and, on success, awaits the existing scoped remove-member writer command with
+one stale retry. Full project suite: 1,898 passed. An isolated offscreen Electron
+check confirmed dot corner placement, wave animation, button hit testing and mode
+cleanup without desktop input. Real desktop foreground behavior remains for the
+creator to confirm.
+
+Opening the widget window list awaits the existing Shift Peek lifecycle's end
+before showing its chooser. An Alt+Q list addition waits for the workspace's
+committed acknowledgement, closes the chooser, matches the exact committed member
+through the existing identity policy, awaits the existing native control sync, then
+uses the same foreground activation and dismissal as an icon click. Legacy picker
+behavior and removal remain unchanged.
+
+`window-layout-widget-mode-effect.js` reuses `createSetEffectsController` and
+its Anime.js wash to mark Alt+Q mode with a blue wave behind the card controls.
+It follows the existing interaction-mode message, cancels on dismissal or
+legacy mode, and is disposed on page exit. A hidden Electron fixture verified
+the gradient advances, controls remain hit-testable, and legacy removes the
+effect without desktop input.
+
 This is the machine-local “As you Go” Backpack project. It is a modular, vanilla-JavaScript
 app served as static files from `public/` inside the Papers host. Read `README.md` for
 ownership, data and behavior; read this file before changing the code so new work lands in
@@ -647,6 +740,54 @@ disables both pane-owned edge hit targets, and makes the paired seam the sole re
 path. Unclasp restores the independent layout (or opens a real gap if they originally
 touched). Saved navigator pills resolve the same shortcut identity/icon hydration
 path as the rows they came from; this remains UI state, not workspace authority.
+
+## Navigator file transfers — 2026-10-06
+
+Creator request: linked file drags onto real folders move the actual files and
+show the destination beside the cursor. Copying AYG file selections into real
+folders copies the files; copying real files into AYG creates shortcut links.
+`navigator-file-transfer.js` verifies source absence and destination presence
+before requesting the existing workspace writer to retarget AYG references.
+Saved-pill paths follow verified moves through their existing shared UI store.
+The navigator owns clipboard provider routing, transient destination notices and
+folder markers; Papers retains its existing generic file-operation seam.
+
+When the physical move succeeds but its workspace link save fails, the live
+navigator retains the verified old/new paths. Its existing Refresh action
+rechecks the filesystem and retries only the link save, never the file move.
+The existing workspace-ready commit helper owns coordination readiness and
+durable acknowledgement; an optimistic in-memory target does not count as a
+saved link. Pending recovery is session-local and must be retried before closing
+that view. This recovery does not establish the cause of a particular save
+refusal; conflict and writer failures still remain visible through the existing
+workspace save system.
+
+Native drop negotiation must respect the source's `effectAllowed`. Electron
+43.1.1 starts Windows file drags with copy/link transport effects; demanding a
+move cursor cancels the drop before the navigator receives it. The navigator
+negotiates an allowed effect while keeping actual move/copy authority in its
+existing transfer plan. A real Chromium drag reproduced zero drop events with
+the old move effect and one with the compatible effect (isolated synthetic UI).
+
+The navigator toolbar plus creates inside the selected folder or in the selected
+item's parent; without selection it uses the displayed location. Real folder
+links in AYG create real subfolders through the same filesystem capability. Its
+inline name field commits on Enter and cancels on Escape or blur. AYG folders
+use the existing createGroup/workspace writer; Opus folders use the generic
+host create-folder capability, which creates exactly one child directory and
+reports collisions instead of overwriting existing contents.
+
+Restored clasp intent is suspended while either pane is collapsed. A collapsed
+Proxima preview uses a compact border instead of the expanded full-height edge.
+When both panes become eligible again, the existing width owners snap back to
+one seam before the clasp and paired resize strip are shown.
+
+Folder previews retain the existing active browser and its tabs. If no browser
+tabs exist, they show an empty browser tab with an empty address field. The
+blank tab is local UI state until an address is entered; its first navigation
+opens the existing generic native browser host. It does not load a homepage or
+request native browser resources for about:blank. Opus uses a muted blue pane
+background to distinguish its filesystem provider.
 
 ## Alt+Q widget input and activation — 2026-10-06
 

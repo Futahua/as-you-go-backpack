@@ -856,10 +856,10 @@ export function projectNearPairs(nearPairs, colors, {
  * exactly as before. When present it is filled with the work the solver did,
  * so a benchmark can tell pair discovery apart from projection effort without
  * timing internals or guessing. */
-export function assignSpatialFolderHues(folders, colors, center, hueState = new Map(), diagnostics = null) {
+export function assignSpatialFolderHues(folders, colors, center, hueState = new Map(), diagnostics = null, proximityPairs = null) {
   const list = [...folders].sort((a, b) => a.id.localeCompare(b.id));
   const folderById = new Map(list.map((folder) => [folder.id, folder]));
-  const nearPairs = findNearPairs(list);
+  const nearPairs = proximityPairs ?? findNearPairs(list);
 
   if (diagnostics) {
     diagnostics.spatialEntities = list.length;

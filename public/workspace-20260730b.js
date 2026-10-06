@@ -47,6 +47,7 @@ import {
   getGraphRestPosition,
   setGraphRestPositions,
   removeGraphPositions,
+  removeGraphRestPositions,
   setToolbarPosition,
   getToolbarPosition,
   forkPlacement,
@@ -4879,6 +4880,7 @@ const commands = createWorkspaceCommands({
   isItemInScope: (id) => itemInScope(state, id, SCOPE_ROOT_ID),
   isDestinationInScope: (id) => destinationInScope(state, id, SCOPE_ROOT_ID),
   removeGraphPositions,
+  removeGraphRestPositions,
   setGraphPositions,
   createWebLink,
   createDroppedShortcuts,
@@ -4944,6 +4946,25 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     isAbsoluteWindowsPath,
     nativeDragPaths: nativeDragPathsForItemIds,
     dropNavigatorFiles:(files,destination)=>commands.dropFiles(files,destination),
+    linkNavigatorPaths:async(paths,destination)=>{
+      const targets=[];for(const path of paths){const stat=await host.fileCapability('stat',{path});if(stat?.ok)targets.push({target:path,path,name:stat.entry?.name||path.split(/[\\/]/).pop(),kind:stat.entry?.kind});}
+      await commands.dropResolvedTargets(targets,destination);
+    },
+    retargetMovedFiles:async moves=>{
+      const key=path=>String(path||'').replace(/\//g,'\\').toLowerCase();
+      const build=()=>{
+        let next=store.getSnapshot();
+        for(const {oldPath,newPath} of moves)for(const record of next.shortcuts||[]){
+          // A failed save may already have installed the optimistic target.
+          // Recommit it durably instead of treating equal in-memory paths as success.
+          if([key(oldPath),key(newPath)].includes(key(record.target)))next=updateShortcut(next,record.id,{...record,target:newPath});
+        }
+        return next;
+      };
+      const saved=await commitWhenWorkspaceReady(build,{requireDurable:true});
+      if(saved)render();return saved===true;
+    },
+
     resolveAyGDragIdentity:(id)=>{
       if(group(id)||windowLayout(id))return {itemId:id,placementId:null};
       const record=shortcutByRecordOrPlacementId(id);
@@ -4962,6 +4983,9 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     }),
     activateAyG: (id) => commands.activateItem(id),
     navigateAyG: (id) => commands.goToWorkspaceFolder(id),
+    createAyGFolder: async (parentId,name) => {
+      return Boolean(await store.commit(createGroup(store.getSnapshot(),name,parentId)));
+    },
     renameAyG: async (id, name) => {
       if (id && name) {
         const record = shortcutByRecordOrPlacementId(id);
@@ -5326,8 +5350,14 @@ const keyboard = createKeyboardController({
   commandSurface: commandSurfaceMode === 'overlay',
   openQuickRun,
   copySelectionPaths: () => workspaceNavigator?.copySelectionPaths?.() ?? false,
+  reservePaneTabAcrossControls: EMBEDDED_SURFACE === 'proxima',
   toggleSidePanes: () => {
-    if (!workspaceNavigator || !fileCapabilityPanel || fileCapabilityPanel.isFullPage?.()) return false;
+    if (!workspaceNavigator) return false;
+    if (EMBEDDED_SURFACE === 'proxima') {
+      workspaceNavigator.setCollapsed?.(!(workspaceNavigator.isCollapsed?.() === true));
+      return true;
+    }
+    if (!fileCapabilityPanel || fileCapabilityPanel.isFullPage?.()) return false;
     const bothCollapsed = workspaceNavigator.isCollapsed?.() === true
       && fileCapabilityPanel.isExpanded?.() === false;
     workspaceNavigator.setCollapsed?.(!bothCollapsed);
@@ -5335,6 +5365,16 @@ const keyboard = createKeyboardController({
     return true;
   },
 });
+
+if (EMBEDDED_SURFACE === 'proxima') {
+  window.addEventListener('message', (event) => {
+    if (event.source !== window.parent) return;
+    const expected = embeddedParentOrigin();
+    if (expected !== '*' && event.origin !== expected) return;
+    if (event.data?.type !== 'papers:proxima-toggle-left-pane') return;
+    workspaceNavigator?.setCollapsed?.(!(workspaceNavigator?.isCollapsed?.() === true));
+  });
+}
 
 // The three entrances to one surface, in one place.
 //

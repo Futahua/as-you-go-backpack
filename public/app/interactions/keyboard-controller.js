@@ -51,6 +51,7 @@ export function createKeyboardController({
   openQuickRun = () => false,
   copySelectionPaths = () => false,
   toggleSidePanes = () => false,
+  reservePaneTabAcrossControls = false,
 }) {
   let abortController = null;
 
@@ -58,9 +59,9 @@ export function createKeyboardController({
     if (event.defaultPrevented || commandSurface || event.key !== 'Tab'
       || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
       || event.isComposing || event.repeat) return false;
-    if (!elements.editorLayer.hidden || !elements.confirmLayer.hidden
+    if (!reservePaneTabAcrossControls && (!elements.editorLayer.hidden || !elements.confirmLayer.hidden
       || !elements.linkEditLayer.hidden || !elements.promptLayer.hidden
-      || elements.quickRunLayer?.hidden === false) return false;
+      || elements.quickRunLayer?.hidden === false)) return false;
     if (!toggleSidePanes()) return false;
     event.preventDefault();
     event.stopPropagation?.();

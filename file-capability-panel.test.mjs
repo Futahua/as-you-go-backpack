@@ -36,6 +36,7 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   const workspace = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
   const html = await readFile(new URL('./public/workspace-20260730b.html', import.meta.url), 'utf8');
   const proximaPreviewHtml = await readFile(new URL('./public/proxima-preview.html', import.meta.url), 'utf8');
+  const proximaPreviewSidecar = await readFile(new URL('./public/app/proxima-preview-sidecar.js', import.meta.url), 'utf8');
   const navigator = await readFile(new URL('./public/app/workspace-navigator.js', import.meta.url), 'utf8');
   const navigatorCss = await readFile(new URL('./public/styles/navigator.css', import.meta.url), 'utf8');
   const dropController = await readFile(new URL('./public/app/interactions/drop-controller.js', import.meta.url), 'utf8');
@@ -51,8 +52,9 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(source, /setButtonSvg\(documentRef, copyPathButton, 'Copy path'/);
   assert.match(source, /setButtonSvg\(documentRef, revealButton, 'Reveal in file manager'/);
   assert.match(source, /No visual preview available yet\./);
-  assert.match(source, /Folder navigation stays in your file manager\./);
-  assert.match(source, /Multiple preview will take shape here\./);
+  assert.match(source, /createBrowserTab\('about:blank',\{title:'New tab',sourceKey:'folder-blank'\}\)/);
+  assert.match(source, /function renderMultipleSelection\(\)\s*\{\s*renderEmptySelection\(\)/);
+  assert.doesNotMatch(source, /Multiple preview will take shape here|The file pane is observing this selection/);
   assert.match(css, /\.file-capability-panel \{[\s\S]*width: 38px/);
   assert.match(css, /\.file-capability-panel\.expanded \{[\s\S]*bottom: 8px[\s\S]*var\(--file-capability-width/);
   assert.match(css, /\.file-capability-panel \{[\s\S]*bottom: auto/);
@@ -65,21 +67,27 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(html, /frame-src papers-file-preview: blob:/);
   assert.match(html, /style-src 'self' 'unsafe-inline'/);
   assert.match(proximaPreviewHtml, /style-src 'self' 'unsafe-inline'/);
+  assert.doesNotMatch(
+    proximaPreviewSidecar,
+    /previewRectTransform|parentFrameOffset|translatePreviewRect/,
+    'Proxima preview geometry must be translated once by Papers, not again inside AYG',
+  );
+  assert.match(proximaPreviewSidecar, /papers:proxima-preview-dispose/);
   assert.match(html, /id="workspace-navigator"/);
   assert.match(html, /id="parent-graph-toggle"/);
   assert.match(navigator, /fileCapability\('list'/);
   assert.match(navigator, /fileCapability\('copy'/);
-  assert.match(navigator, /fileCapability\('move'/);
+  assert.match(navigator, /moveNavigatorFiles\(/);
   assert.match(navigator, /fileCapability\('rename'/);
   assert.match(navigator, /fileCapability\('delete'/);
   assert.match(navigator, /clearCanvasForMachine/);
   assert.match(navigator, /previewMachinePath/);
-  assert.match(navigator, /workspace-navigator-view-toggle/);
+  assert.doesNotMatch(navigator, /workspace-navigator-view-toggle/);
   assert.match(navigator, /workspace-navigator-resizer/);
-  assert.match(navigator, /head\.append\(provider, tools, viewToggle, collapse\)/);
+  assert.match(navigator, /head\.append\(provider, tools, collapse\)/);
   assert.match(navigator, /panel\.replaceChildren\(head,search,loc,body,resizer\)/);
   assert.doesNotMatch(navigator, /panel\.replaceChildren\(head,tools,search/);
-  assert.match(navigator, /const move = button\(d,'Move',\['M4 2\.5h7l3 3v12H4z','M11 2\.5v4h4','M8 11h8','M13 8l3 3-3 3'\]\)/);
+  assert.match(navigator, /const move = button\(d,'Cut'/);
   assert.doesNotMatch(navigator, /Filters: ext:/);
   assert.match(navigatorCss, /\.workspace-navigator-search-info:empty\{display:none\}/);
   assert.match(navigator, /machineSort: \{ key:'name', direction:1 \}/);
@@ -107,7 +115,7 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /No results match these column filters/);
   assert.match(navigatorCss, /\.workspace-navigator-search-columns/);
   assert.match(navigatorCss, /grid-template-columns:24px minmax\(150px,1\.15fr\)/);
-  assert.match(navigator, /pickTarget\('folder'\)/);
+  assert.match(navigator, /pasteNavigator\(/);
   assert.match(navigator, /papers:ayg:navigator-machine-root/);
   assert.match(navigator, /row\.draggable = true/);
   assert.match(navigator, /beginNavigatorNativeDrag/);
@@ -122,7 +130,7 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /IntersectionObserver/);
   assert.match(navigator, /event\.shiftKey|e\.shiftKey/);
   assert.match(navigator, /contextmenu/);
-  assert.match(navigator, /workspace-navigator-view-toggle/);
+  assert.doesNotMatch(navigator, /workspace-navigator-view-toggle/);
   assert.match(navigator, /scrollBy\(\{ left: delta, behavior: 'smooth' \}\)/);
   assert.match(navigator, /loc\.scrollLeft = loc\.scrollWidth/);
   assert.match(navigator, /navigator-collapsed/);
@@ -258,7 +266,7 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /function renderBrowserWorkspace\(\)/);
   assert.match(
     source,
-    /function renderEmptySelection\(selectionCount = 0\) \{[\s\S]*if \(selectionCount === 0\)[\s\S]*createBrowserTab\(DEFAULT_BROWSER_HOME, \{ title: 'Google' \}\)[\s\S]*renderBrowserWorkspace\(\);[\s\S]*return;/,
+    /function renderEmptySelection\(\) \{[\s\S]*createBrowserTab\(DEFAULT_BROWSER_HOME, \{ title: 'Google' \}\)[\s\S]*renderBrowserWorkspace\(\);/,
     'no selection should default the preview pane to the persisted browser workspace',
   );
   assert.match(source, /windowRef\?\.localStorage\?\.setItem\(browserStorageKey/);

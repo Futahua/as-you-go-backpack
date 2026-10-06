@@ -45,6 +45,7 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
 
   let clasped = false;
   let dragging = false;
+  let previouslyEligible = false;
   let independent = null;
   try { clasped = storage?.getItem(CLASP_KEY) === '1'; } catch {}
   try {
@@ -81,8 +82,8 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
   };
 
   const setClaspClasses = () => {
-    left.classList.toggle('pane-clasped', clasped);
-    right.classList.toggle('pane-clasped', clasped);
+    left.classList.toggle('pane-clasped', clasped && eligible());
+    right.classList.toggle('pane-clasped', clasped && eligible());
     clasp.classList.toggle('active', clasped);
     clasp.setAttribute('aria-pressed', String(clasped));
     clasp.title = clasped ? 'Separate panes' : 'Clasp panes';
@@ -135,12 +136,18 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
 
   function refresh() {
     const active = eligible();
+    const reopened = active && !previouslyEligible;
+    previouslyEligible = active;
     clasp.hidden = !active;
     setClaspClasses();
     if (!active) {
       if(left.style.maxWidth)left.style.maxWidth='';
       strip.hidden = true;
       return;
+    }
+    if (clasped && reopened) {
+      left.style.maxWidth = '';
+      snapTogether();
     }
     const a = left.getBoundingClientRect();
     const b = right.getBoundingClientRect();

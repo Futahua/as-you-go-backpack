@@ -4,7 +4,20 @@ import { createWorkspaceStore } from './public/app/workspace-store.js';
 import { createWorkspaceCommands } from './public/app/workspace-commands.js';
 // The real one, not a stub: these tests exist to prove the set commands reach
 // the store, and a stubbed writer would pass whether or not they did.
-import { setItemSets } from './public/workspace-model-20260730b.js';
+import { setItemSets, moveSelection, removeGraphPositions, removeGraphRestPositions } from './public/workspace-model-20260730b.js';
+import { readFile } from 'node:fs/promises';
+
+test('live composition supplies the rest-position cleanup required before a move commit', async () => {
+  const source=await readFile(new URL('./public/workspace-20260730b.js',import.meta.url),'utf8');
+  const wiring=source.slice(source.indexOf('const commands = createWorkspaceCommands({'),source.indexOf('const commands = createWorkspaceCommands({')+2800);
+  assert.match(wiring,/\n\s+removeGraphRestPositions,/);
+});
+
+test('folder drop commits the real placement reparenting and both graph cleanups', async () => {
+  const h=createHarness({groups:[{id:'dest',parentId:'root',name:'Destination'}],shortcuts:[{id:'s',name:'File',target:'D:\\file.epub',placements:[{id:'p-s',parentId:'root',order:1}]}],model:{moveSelection,removeGraphPositions,removeGraphRestPositions}});
+  assert.equal(await h.commands.dragDropToFolder({itemIds:['s'],placementIds:new Map([['s','p-s']]),folderId:'dest'}),true);
+  assert.equal(h.store.getSnapshot().shortcuts[0].placements[0].parentId,'dest');
+});
 
 function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
   let state = { groups, shortcuts, view: { currentGroupId: 'root' } };

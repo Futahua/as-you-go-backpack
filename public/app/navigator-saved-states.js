@@ -11,7 +11,7 @@ export function decodeNavigatorSavedStates(raw) {
   }
 }
 
-export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile }) {
+export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile, decorateLabel }) {
   const win = document.defaultView;
   const storage = win?.localStorage;
   const key = 'papers:ayg:navigator-saved-states';
@@ -157,6 +157,7 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
       const label = document.createElement('span');
       label.textContent = state.name;
       pill.append(image, label);
+      decorateLabel?.(label,state);
       pill.addEventListener('click', (event) => restore(state, { run: event.shiftKey === true }));
       pill.addEventListener('mousedown', (event) => { if (event.button === 1) event.preventDefault(); });
       pill.addEventListener('auxclick', (event) => {
@@ -173,6 +174,11 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
 
   render();
   return {
+    retargetPaths(moves){
+      const replace=path=>moves.find(move=>typeof path==='string'&&move.oldPath.toLowerCase()===path.toLowerCase())?.newPath||path;
+      states=states.map(state=>({...state,path:replace(state.path),art:state.art?{...state.art,target:replace(state.art.target)}:state.art}));
+      persistStates();render();
+    },
     add(state) {
       if (!state) return;
       states.push(state);

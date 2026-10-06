@@ -135,6 +135,7 @@ export function createFileCapabilityPanel(options) {
       launchedPreview = { path: parsed.path, name: parsed.name || basename(parsed.path) };
     }
   } catch {}
+  const reservePlainTab = embeddedSurface === 'proxima-preview';
 
   if (!documentRef || !documentRef.body || !host || !host.fileCapability) {
     return Object.freeze({
@@ -190,6 +191,7 @@ export function createFileCapabilityPanel(options) {
     + encodeURIComponent(windowRef?.location?.host || windowRef?.location?.pathname || 'ayg');
 
   function safeBrowserUrl(value) {
+    if(value==='about:blank')return value;
     try {
       const parsed = new URL(String(value || '').trim());
       return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null;
@@ -582,7 +584,7 @@ export function createFileCapabilityPanel(options) {
 
   function hydrateBrowserFavicons() {
     if (state.browserFaviconHydration) return state.browserFaviconHydration;
-    const pending = state.browserTabs.filter((tab) => !safeBrowserFavicon(tab.faviconUrl));
+    const pending = state.browserTabs.filter((tab) => tab.url!=='about:blank' && !safeBrowserFavicon(tab.faviconUrl));
     if (pending.length === 0) return Promise.resolve();
     let cursor = 0;
     state.browserFaviconHydration = (async () => {
@@ -683,7 +685,7 @@ export function createFileCapabilityPanel(options) {
   function syncBrowserChrome(hostTab = null) {
     const active = activeBrowserTab();
     const address = preview.querySelector('.file-capability-browser-address');
-    if (address && active && documentRef.activeElement !== address) address.value = active.url;
+    if (address && active && documentRef.activeElement !== address) address.value = active.url==='about:blank'?'':active.url;
     const back = preview.querySelector('[data-browser-command="back"]');
     const forward = preview.querySelector('[data-browser-command="forward"]');
     if (back) back.disabled = hostTab ? !hostTab.canGoBack : false;
@@ -727,6 +729,7 @@ export function createFileCapabilityPanel(options) {
           url,
           rect: nativePreviewRect(surface),
           activate,
+          reservePlainTab,
         }).catch(() => null);
       if (!result?.ok || !result.tab) {
         state.browserTabs = state.browserTabs.filter((candidate) => candidate.id !== tab.id);
@@ -774,7 +777,7 @@ export function createFileCapabilityPanel(options) {
   function moveActiveBrowserTab() {
     const tab = activeBrowserTab();
     const surface = state.browserSurface;
-    if (!tab || !surface?.isConnected || !state.expanded) return;
+    if (!tab || tab.url==='about:blank' || !surface?.isConnected || !state.expanded) return;
     void host.fileCapability('browser-tab-move', {
       tabId: tab.id,
       rect: nativePreviewRect(surface),
@@ -785,12 +788,14 @@ export function createFileCapabilityPanel(options) {
     const tab = activeBrowserTab();
     const surface = state.browserSurface;
     if (!tab || !surface?.isConnected || !state.expanded) return false;
+    if(tab.url==='about:blank'){surface.textContent='';return true;}
     await nextLayoutTick();
     if (tab.id !== state.activeBrowserTabId || surface !== state.browserSurface) return false;
     const result = await host.fileCapability('browser-tab-open', {
       tabId: tab.id,
       url: tab.url,
       rect: nativePreviewRect(surface),
+      reservePlainTab,
     }).catch((error) => ({
       ok: false,
       message: error instanceof Error ? error.message : String(error),
@@ -808,7 +813,7 @@ export function createFileCapabilityPanel(options) {
 
   async function sendBrowserCommand(command) {
     const tab = activeBrowserTab();
-    if (!tab) return;
+    if (!tab || tab.url==='about:blank') return;
     const result = await host.fileCapability('browser-tab-command', {
       tabId: tab.id,
       command,
@@ -1118,7 +1123,7 @@ export function createFileCapabilityPanel(options) {
     address.autocomplete = 'off';
     address.spellcheck = false;
     address.placeholder = 'Enter URL';
-    address.value = state.browserDownloadsOpen ? 'Downloads' : (activeBrowserTab()?.url || '');
+    address.value = state.browserDownloadsOpen ? 'Downloads' : (activeBrowserTab()?.url==='about:blank'?'':activeBrowserTab()?.url || '');
     address.disabled = state.browserDownloadsOpen;
     address.addEventListener('pointerdown', (event) => {
       if (documentRef.activeElement === address) return;
@@ -1132,6 +1137,7 @@ export function createFileCapabilityPanel(options) {
       const tab = activeBrowserTab();
       const url = normalizeBrowserAddress(address.value);
       if (!tab || !url) return;
+      const wasBlank=tab.url==='about:blank';
       const previousOrigin = safeBrowserUrl(tab.url) ? new URL(tab.url).origin : null;
       const nextOrigin = new URL(url).origin;
       tab.url = url;
@@ -1139,6 +1145,7 @@ export function createFileCapabilityPanel(options) {
       if (previousOrigin && previousOrigin !== nextOrigin) tab.faviconUrl = '';
       tab.lastActiveAt = Date.now();
       persistBrowserTabs();
+      if(wasBlank){void openActiveBrowserTab();return;}
       void host.fileCapability('browser-tab-navigate', { tabId: tab.id, url })
         .then((result) => {
           if (result?.ok && result.tab) applyBrowserHostState(result.tab);
@@ -1391,7 +1398,12 @@ export function createFileCapabilityPanel(options) {
 
   function nativePreviewRect(node) {
     const rect = node.getBoundingClientRect();
-    return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)) };
+    return {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.max(1, Math.round(rect.width)),
+      height: Math.max(1, Math.round(rect.height)),
+    };
   }
 
   function nextLayoutTick() {
@@ -1661,10 +1673,9 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     if (data.kind === 'directory') {
-      const message = documentRef.createElement('p');
-      message.className = 'file-capability-empty';
-      message.textContent = 'Folder navigation stays in your file manager.';
-      preview.append(message);
+      if(!activeBrowserTab()&&state.browserTabs.length===0)
+        createBrowserTab('about:blank',{title:'New tab',sourceKey:'folder-blank'});
+      renderEmptySelection();
       return;
     }
     if (data.kind === 'binary') {
@@ -1817,8 +1828,7 @@ export function createFileCapabilityPanel(options) {
     }, { once: true });
   }
 
-  function renderEmptySelection(selectionCount = 0) {
-    if (selectionCount === 0) {
+  function renderEmptySelection() {
       ++state.inspectGeneration;
       state.context = null;
       state.inspectedPath = null;
@@ -1839,52 +1849,10 @@ export function createFileCapabilityPanel(options) {
         }
       }
       renderBrowserWorkspace();
-      return;
-    }
-    panel.classList.remove('browser-mode');
-    inspector.classList.remove('browser-mode');
-    ++state.inspectGeneration;
-    state.context = null;
-    state.inspectedPath = null;
-    state.inspectedUrl = null;
-    state.lastPreviewResult = null;
-    disarmDelete();
-    renameRow.hidden = true;
-    itemTitle.textContent = selectionCount > 0 ? `${selectionCount} item${selectionCount === 1 ? '' : 's'} selected` : 'Select a file';
-    itemMeta.textContent = selectionCount > 0 ? 'No local file content in this selection yet.' : '';
-    pathText.textContent = selectionCount > 0 ? 'Selection stays fully controlled by As you Go.' : 'Select a local file or folder in As you Go.';
-    copyPathButton.hidden = true;
-    revealButton.hidden = true;
-    openTabButton.hidden = true;
-    actions.hidden = true;
-    clearPreview();
-    const message = documentRef.createElement('p');
-    message.className = 'file-capability-empty';
-    message.textContent = selectionCount > 0
-      ? 'The file pane is observing this selection without changing how AYG selection or dragging works.'
-      : 'Preview appears here.';
-    preview.append(message);
   }
 
-  function renderMultipleSelection(selection) {
-    panel.classList.remove('browser-mode');
-    inspector.classList.remove('browser-mode');
-    ++state.inspectGeneration;
-    state.context = null;
-    state.inspectedPath = null;
-    state.lastPreviewResult = null;
-    const count = Number.isSafeInteger(selection?.selectionCount) ? selection.selectionCount : selection.items.length;
-    itemTitle.textContent = `${count} items selected`;
-    itemMeta.textContent = '';
-    pathText.textContent = 'Multiple preview is not defined yet.';
-    copyPathButton.hidden = true;
-    revealButton.hidden = true;
-    openTabButton.hidden = true;
-    clearPreview();
-    const message = documentRef.createElement('p');
-    message.className = 'file-capability-empty';
-    message.textContent = 'Multiple preview will take shape here.';
-    preview.append(message);
+  function renderMultipleSelection() {
+    renderEmptySelection();
   }
 
   async function inspectPath(target, context) {

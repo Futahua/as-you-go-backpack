@@ -48,3 +48,48 @@
 .workspace-navigator:not(.collapsed) .workspace-navigator-header{padding-right:38px}
 .workspace-navigator{grid-template-columns:minmax(0,1fr)}.workspace-navigator-header,.workspace-navigator-search,.workspace-navigator-location,.workspace-navigator-body{min-width:0;max-width:100%;box-sizing:border-box}
 .navigator-inline-rename{width:100%;min-width:0;box-sizing:border-box;background:var(--surface,#302d24);color:inherit;border:1px solid #7ba98c;border-radius:4px;padding:3px 5px;font:inherit;outline:none}
+
+.navigator-tree-expanded{grid-template-columns:20px minmax(0,1fr)}
+.navigator-tree-folder-heading{display:inline-flex;align-items:center;gap:3px;min-width:0;max-width:100%;width:max-content;box-sizing:border-box;padding:2px 4px;border:1px solid var(--branch-color);border-radius:0}
+.navigator-tree-folder-heading .workspace-navigator-art{flex:none}
+.navigator-tree-branch{position:relative}
+.navigator-tree-branch.drop-target{background:color-mix(in oklch,var(--branch-color) 13%,transparent)}
+.navigator-tree-branch:not(:empty)::before{content:"";position:absolute;left:var(--branch-left);top:3px;bottom:3px;width:2px;background:var(--branch-color);border-radius:1px;pointer-events:none}
+
+/* Only the folder's own row activates its subtree tint, never descendant hover. */
+.navigator-tree-expanded:hover{background:color-mix(in oklch,var(--branch-color) 9%,transparent)}
+.navigator-tree-expanded:hover + .navigator-tree-branch{background:color-mix(in oklch,var(--branch-color) 9%,transparent)}
+
+.workspace-navigator-row.machine-list-row .navigator-tree-folder-heading{grid-column:1 / span 2}
+
+.navigator-proxima-label{text-decoration:underline;text-decoration-color:oklch(68% 0.18 145deg);text-underline-offset:3px}
+
+.workspace-navigator-label.navigator-proxima-label{border-bottom:2px solid #79bd8c;padding-bottom:2px;text-decoration:none;width:max-content;max-width:100%;box-sizing:border-box}
+.navigator-saved-pill:has(.navigator-proxima-pill-art){border:1px solid #79bd8c}
+.workspace-navigator-label.navigator-proxima-label{color:#79bd8c}
+
+.navigator-move-hint {position:fixed;z-index:9999;pointer-events:none;padding:6px 10px;border:1px solid var(--border-strong);border-radius:7px;background:var(--surface-raised);color:var(--text);box-shadow:0 3px 12px #0003;}
+.navigator-move-hint{opacity:1;transition:opacity 250ms ease;}
+.navigator-move-hint.fading{opacity:0;}
+.navigator-move-hint[hidden]{display:none;}
+.workspace-navigator-row[data-new-folder] > input{grid-column:1 / -1;}
+.workspace-navigator{--opus-pane-background:color-mix(in srgb,var(--surface-raised) 70%,#23394d);}
+.workspace-navigator[data-mode="machine"]{background:var(--opus-pane-background);}
+.workspace-navigator .navigator-filesystem-link{background:var(--opus-pane-background);}
+.workspace-navigator .workspace-navigator-row.navigator-filesystem-link.selected{background:var(--accent-selection);}
+.workspace-navigator[data-mode="machine"] .workspace-navigator-machine-columns,
+.workspace-navigator[data-mode="machine"] .workspace-navigator-search-columns,
+.workspace-navigator[data-mode="machine"] .navigator-state-actions,
+.workspace-navigator[data-mode="machine"] .navigator-saved-clear{background:var(--opus-pane-background);}
+.workspace-navigator[data-mode="machine"] .workspace-navigator-location>.navigator-state-actions{box-shadow:8px 0 10px var(--opus-pane-background);}
+
+.workspace-navigator-machine-columns,.workspace-navigator-row.machine-list-row {grid-template-columns:14px 24px minmax(150px,1.25fr) 92px 76px 128px;}
+.workspace-navigator-machine-column-icon {grid-column:1 / span 2;}
+.workspace-navigator-row.machine-list-row > * {grid-row:1;}
+.workspace-navigator-row.machine-list-row > .navigator-tree-toggle {grid-column:1;}
+.workspace-navigator-row.machine-list-row > .workspace-navigator-art {grid-column:2;}
+.workspace-navigator-row.machine-list-row > .workspace-navigator-label {grid-column:3;}
+.workspace-navigator-row.machine-list-row > .navigator-tree-folder-heading {grid-column:2 / span 2;}
+.workspace-navigator-row.machine-list-row > .workspace-navigator-machine-type {grid-column:4;}
+.workspace-navigator-row.machine-list-row > .workspace-navigator-machine-size {grid-column:5;}
+.workspace-navigator-row.machine-list-row > .workspace-navigator-machine-modified {grid-column:6;}

@@ -4,6 +4,9 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 import {
+  navigatorNewFolderDestination,
+  navigatorFolderPill,
+  navigatorBranchHues,
   aygNavigatorNativePaths,
   beginNavigatorNativeDrag,
   navigatorAyGDragPayload,
@@ -16,6 +19,16 @@ import {
   activateNavigatorFilePill,
   deleteNavigatorSelection,
 } from './public/app/workspace-navigator.js';
+
+test('new folder follows selected AYG placement and real folders across providers',async()=>{
+ const base={currentId:'current',rootId:'root',path:'D:\\current',isAbsoluteWindowsPath:()=>true,stat:async()=>({ok:true,entry:{kind:'folder'}})};
+ assert.deepEqual(await navigatorNewFolderDestination({...base,mode:'ayg',selected:{kind:'group',id:'child'}}),{mode:'ayg',parent:'child'});
+ assert.deepEqual(await navigatorNewFolderDestination({...base,mode:'ayg',selected:{kind:'shortcut',parentId:'placement-parent',target:'D:\\linked'},stat:async()=>({ok:true,entry:{kind:'file'}})}),{mode:'ayg',parent:'placement-parent'});
+ assert.deepEqual(await navigatorNewFolderDestination({...base,mode:'ayg',selected:{kind:'shortcut',target:'D:\\linked'}}),{mode:'machine',parent:'D:\\linked'});
+ assert.deepEqual(await navigatorNewFolderDestination({...base,mode:'machine',selected:{kind:'folder',path:'D:\\chosen'}}),{mode:'machine',parent:'D:\\chosen'});
+ assert.deepEqual(await navigatorNewFolderDestination({...base,mode:'machine',selected:{kind:'file',path:'D:\\chosen\\file.pdf'}}),{mode:'machine',parent:'D:\\chosen'});
+ assert.deepEqual(await navigatorNewFolderDestination({...base,mode:'ayg'}),{mode:'ayg',parent:'current'});
+});
 
 test('navigator placement selection resolves its exact location for the AYG bin', async () => {
   const source=await readFile(new URL('./public/workspace-20260730b.js',import.meta.url),'utf8');
@@ -239,8 +252,14 @@ test('provider switching stays inline and the navigator no longer constructs a H
 
 test('tree rows and the tree root remain real drop targets', async () => {
   const source = await readFile(new URL('./public/app/workspace-navigator.js', import.meta.url), 'utf8');
+  const css = await readFile(new URL('./public/styles/navigator.css', import.meta.url), 'utf8');
   assert.match(source, /if\(x\.kind==='group'\)installNavigatorDropTarget\(row,\{item:x\}\)/);
   assert.match(source, /if\(folder&&!searchResult\)installNavigatorDropTarget\(row,\{path:x\.path\}\)/);
+  assert.match(source, /installNavigatorDropTarget\(children,\{item:x\}\)/);
+  assert.match(source, /installNavigatorDropTarget\(children,\{path:x\.path\}\)/);
+  assert.match(source, /s\.activeDropTarget\?\.classList\.remove\('drop-target'\)/);
+  assert.match(source, /s\.activeDropTarget=element/);
+  assert.match(css, /\.navigator-tree-branch\.drop-target\{background:color-mix\(in oklch,var\(--branch-color\) 13%,transparent\)\}/);
   assert.doesNotMatch(source, /else crumb\.disabled = true/);
 });
 
@@ -260,4 +279,64 @@ test('saved navigator shortcuts retain the identity needed to hydrate the same i
     mode: 'action', itemId: 'shortcut-1', name: 'Report.pptx', icon: null,
     art: { kind: 'shortcut', icon: null, target: 'D:\\Files\\Report.pptx', shortcutId: 'shortcut-1' },
   });
+});
+
+
+test('tree branch colors separate nearby guides including long parent spans', () => {
+  const branches = [
+    { id: 'parent', depth: 0, start: 0, end: 60 },
+    { id: 'nested', depth: 1, start: 35, end: 50 },
+    { id: 'sibling', depth: 0, start: 61, end: 65 },
+  ];
+  const colors = navigatorBranchHues(branches);
+  for (let i = 0; i < branches.length; i++) {
+    for (let j = i + 1; j < branches.length; j++) {
+      const delta = Math.abs(colors.get(branches[i].id) - colors.get(branches[j].id));
+      assert.ok(Math.min(delta, 360 - delta) >= 45 - 1e-6);
+    }
+  }
+  assert.equal(colors.size, 3);
+});
+
+
+test('Quick Run folder pills restore AYG navigation including linked Proxima roots', () => {
+  const id='group-proxima-linked';
+  const saved={mode:'action',name:'Test',quickRunKey:`folder:${id}`};
+  const restored=navigatorFolderPill(saved,[{id,name:'Test'}]);
+  assert.equal(restored.mode,'ayg');
+  assert.equal(restored.currentId,id);
+  assert.equal(restored.view,'nav');
+  assert.equal(navigatorFolderPill(saved,[]),saved);
+  const file={mode:'action',quickRunKey:'shortcut:file'};
+  assert.equal(navigatorFolderPill(file,[]),file);
+});
+
+test('native drop recovers captured paths only for matching file names and fresh source',async()=>{
+ const {navigatorCapturedDropPaths}=await import('./public/app/workspace-navigator.js');
+ const source={paths:['D:\\Documents\\Bailam2-Model.pdf'],startedAt:1000};
+ assert.deepEqual(navigatorCapturedDropPaths(source,[{name:'Bailam2-Model.pdf'}],1100),source.paths);
+ assert.deepEqual(navigatorCapturedDropPaths(source,[{name:'different.pdf'}],1100),[]);
+ assert.deepEqual(navigatorCapturedDropPaths(source,[{name:'Bailam2-Model.pdf'}],32000),[]);
+});
+
+test('matching internal native drop does not wait for host file resolution',async()=>{
+ const {navigatorResolveDropPaths}=await import('./public/app/workspace-navigator.js');
+ const source={paths:['D:\\Documents\\Bailam2-Model.pdf'],startedAt:Date.now()};
+ let called=false;
+ const paths=await navigatorResolveDropPaths(source,[{name:'Bailam2-Model.pdf'}],()=>{called=true;throw Error('host resolution unavailable');});
+ assert.deepEqual(paths,source.paths);assert.equal(called,false);
+ const external=await navigatorResolveDropPaths(source,[{name:'other.pdf'}],async()=>['D:\\other.pdf']);
+ assert.deepEqual(external,['D:\\other.pdf']);
+});
+
+test('Electron copyLink native drag negotiates an allowed drop while retaining the move plan',async()=>{
+ const {navigatorDropEffect}=await import('./public/app/workspace-navigator.js');
+ assert.equal(navigatorDropEffect('copyLink','move'),'copy');
+ assert.equal(navigatorDropEffect('all','move'),'move');
+ assert.equal(navigatorDropEffect('copyMove','move'),'move');
+ assert.equal(navigatorDropEffect('link','move'),'link');
+ assert.equal(navigatorDropEffect('none','move'),'none');
+ const paths=['D:\\Documents\\Bailam2-Model.pdf'];
+ const plan=navigatorBreadcrumbMovePlan({segment:{path:'D:\\destination'},nativeSource:{mode:'ayg',paths,startedAt:Date.now()},droppedPaths:paths});
+ assert.equal(plan.kind,'machine-move');assert.deepEqual(plan.paths,paths);
 });

@@ -5,6 +5,17 @@ Creator eye-test observations outrank earlier automated acceptance claims. These
 do not define Papers-wide behavior and are not permission to generalize As you Go into the
 Papers binary.
 
+## 2026-10-06 — Alt+Q interaction remains delayed after rendering fix
+
+The creator confirmed frames animate after the host throttling fix, but behavior
+and clicks still experience a cooldown. This supersedes any claim that renderer
+resumption alone resolves the problem. The creator rejected the cancellation queue fix too: Peek works while clicks
+remain unavailable. The creator further confirmed list-add activation/dismissal succeeds. Plain Alt+Q
+icons now use the same refresh/activation function and bypass legacy isolation
+consumption. The creator rejected this as well: it works once after refresh and subsequent
+icon presses fail. A bounded input trace is being loaded to distinguish native
+press delivery, modifiers and activation stages. This issue remains open.
+
 ## 2026-08-11 — Window layout eye test (release-eyetest-019r1)
 
 ### P1 — Layout card is visually cluttered and communicates window state incorrectly
