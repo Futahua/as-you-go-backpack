@@ -1,7 +1,15 @@
+/** A folder cannot contain itself, including case/separator variants and descendants. */
+export function navigatorFileMoveAllowed(paths,destination) {
+ const key=path=>String(path||'').replace(/\//g,'\\').replace(/\\+$/,'').toLowerCase();
+ const target=key(destination);
+ return Boolean(target)&&paths.every(path=>{const source=key(path);return source && target!==source && !target.startsWith(source+'\\');});
+}
+
 /** File operations stay in the existing host; AYG links follow verified moves. */
 export async function moveNavigatorFiles({host,paths,destination,retarget,sleep=ms=>new Promise(r=>setTimeout(r,ms))}) {
+ if(!navigatorFileMoveAllowed(paths,destination))return {ok:false,message:'A folder cannot be moved into itself or its contents.'};
  const result=await host.fileCapability('move',{paths,destination});
- if(!result?.ok)return result;
+ if(!result?.ok || typeof retarget !== 'function')return result;
  const pending=new Map(paths.map(oldPath=>[oldPath,destination.replace(/[\\/]$/,'')+'\\'+oldPath.split(/[\\/]/).pop()]));
  const verified=[];
  for(let attempt=0;attempt<30&&pending.size;attempt++){

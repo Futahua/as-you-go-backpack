@@ -84,7 +84,7 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /previewMachinePath/);
   assert.doesNotMatch(navigator, /workspace-navigator-view-toggle/);
   assert.match(navigator, /workspace-navigator-resizer/);
-  assert.match(navigator, /head\.append\(provider, tools, collapse\)/);
+  assert.match(navigator, /head\.append\(provider, tools, collapseAll, collapse\)/);
   assert.match(navigator, /panel\.replaceChildren\(head,search,loc,body,resizer\)/);
   assert.doesNotMatch(navigator, /panel\.replaceChildren\(head,tools,search/);
   assert.match(navigator, /const move = button\(d,'Cut'/);

@@ -142,6 +142,7 @@ export function createFileCapabilityPanel(options) {
       syncSelection() {},
       openSearch() {},
       refreshPreviewGeometry() {},
+      setTransientOverlay() {},
       destroy() {},
       isOpen: () => false,
     });
@@ -170,6 +171,7 @@ export function createFileCapabilityPanel(options) {
     htmlPreviewSessionId: null,
     htmlPreviewObserver: null,
     browserSessionId: null,
+    transientOverlay: false,
     browserObserver: null,
     browserTabs: [],
     activeBrowserTabId: null,
@@ -805,7 +807,7 @@ export function createFileCapabilityPanel(options) {
       return false;
     }
     surface.textContent = '';
-    void host.fileCapability('browser-tabs-visible', { visible: true }).catch(() => {});
+    void host.fileCapability('browser-tabs-visible', { visible: !state.transientOverlay }).catch(() => {});
     if (result.tab) applyBrowserHostState(result.tab);
     scheduleBrowserTabPolling();
     return true;
@@ -1399,8 +1401,8 @@ export function createFileCapabilityPanel(options) {
   function nativePreviewRect(node) {
     const rect = node.getBoundingClientRect();
     return {
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
+      x: state.transientOverlay ? -10000 : Math.round(rect.x),
+      y: state.transientOverlay ? -10000 : Math.round(rect.y),
       width: Math.max(1, Math.round(rect.width)),
       height: Math.max(1, Math.round(rect.height)),
     };
@@ -2270,6 +2272,11 @@ export function createFileCapabilityPanel(options) {
     setExpanded: setExpandedWithPreviewLifecycle,
     setWidth:setPanelWidth,
     refreshPreviewGeometry,
+    setTransientOverlay(active) {
+      state.transientOverlay = active === true;
+      if(state.browserSurface?.isConnected) void host.fileCapability('browser-tabs-visible', {visible:!state.transientOverlay && state.expanded}).catch(()=>{});
+      refreshPreviewGeometry();
+    },
     destroy() {
       releaseChromeFocus();
       if (state.searchTimer) clearTimeout(state.searchTimer);

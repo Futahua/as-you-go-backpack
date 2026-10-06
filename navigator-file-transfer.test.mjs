@@ -34,3 +34,21 @@ test('a denied stat is not mistaken for a removed source',async()=>{
  let updated=false;const r=await moveNavigatorFiles({host:{fileCapability:async(op,arg)=>op==='move'?{ok:true}:arg.path.includes('old')?{ok:false,code:'EACCES'}:{ok:true}},paths:['D:\\old\\a.pdf'],destination:'D:\\new',sleep:async()=>{},retarget:()=>{updated=true;}});
  assert.equal(r.ok,false);assert.equal(updated,false);
 });
+
+
+test('real folders reject self and descendant destinations before calling the host',async()=>{
+  const {navigatorFileMoveAllowed,moveNavigatorFiles}=await import('./public/app/navigator-file-transfer.js');
+  assert.equal(navigatorFileMoveAllowed(['D:/Work'], 'd:\\WORK\\'),false);
+  assert.equal(navigatorFileMoveAllowed(['D:/Work'], 'D:/Work/child'),false);
+  assert.equal(navigatorFileMoveAllowed(['D:/Work'], 'D:/Workmate'),true);
+  let calls=0;
+  const result=await moveNavigatorFiles({host:{fileCapability(){calls++;}},paths:['D:/Work'],destination:'D:/Work'});
+  assert.equal(result.ok,false);assert.equal(calls,0);
+});
+
+
+test('Opus moves call only the filesystem move, with no AYG verification or link update',async()=>{
+  const calls=[];
+  const result=await moveNavigatorFiles({host:{fileCapability:async(operation)=>{calls.push(operation);return {ok:true};}},paths:['D:/old/a.txt'],destination:'D:/new'});
+  assert.equal(result.ok,true);assert.deepEqual(calls,['move']);
+});

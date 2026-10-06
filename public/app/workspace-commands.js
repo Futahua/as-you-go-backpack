@@ -97,7 +97,7 @@ export function createWorkspaceCommands({
 
   /** Applies click / ctrl-click / shift-click selection rules. Takes plain
    * modifier flags and the ordered visible ids, not a DOM event. */
-  function selectItem(itemId, { shiftKey, ctrlKey, visibleItemIds }) {
+  function selectItem(itemId, { shiftKey, ctrlKey, visibleItemIds, syncNavigator = true }) {
     const session = store.getSession();
     if (shiftKey && session.selectionAnchor) {
       const from = visibleItemIds.indexOf(session.selectionAnchor);
@@ -115,7 +115,7 @@ export function createWorkspaceCommands({
       store.setSelection([itemId]);
       store.setSelectionAnchor(itemId);
     }
-    syncSelection();
+    syncSelection({ syncNavigator });
     saveWorkspaceView();
   }
 

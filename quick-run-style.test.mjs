@@ -151,3 +151,11 @@ test('the row icon is one fixed box, with the artwork contained in it', () => {
     `a ${boxHeight}px icon plus the row's padding stays inside the ${rowMinHeight}px row, so artwork cannot change how far a wheel notch travels`,
   );
 });
+
+
+test('canvas Quick Run paints in front of the right pane', async () => {
+  const paneCss = await readFile(new URL('./public/styles/file-capability.css', import.meta.url), 'utf8');
+  const paneIndex = Number(paneCss.match(/\.file-capability-panel\s*\{[^}]*z-index:\s*(\d+)/s)[1]);
+  const quickIndex = Number(css.match(/\.quick-run-layer\s*\{[^}]*z-index:\s*(\d+)/s)[1]);
+  assert.ok(quickIndex > paneIndex);
+});

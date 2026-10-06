@@ -10,7 +10,7 @@
  *
  * Placement is a judgement call, not a measurement: a command surface belongs near the top, over the
  * workspace, and out of the way of the floating toolbars at the top-left, so this is centred with a
- * bounded width. z-index 140 is above every modal layer on purpose, at the reviewer's ruling: the chord
+ * bounded width. z-index 1000 is above every modal layer on purpose, at the reviewer's ruling: the chord
  * opens Quick Run from inside the editor dialog, the prompt library and the Settings tab, so the palette
  * has to paint over them - and it has exclusive input while it is up, which a context menu (100) or a
  * dialog (120/130) painting above it would contradict. It stays below the informational band (2147483640)
@@ -27,7 +27,7 @@
 
 .quick-run-layer {
   position: absolute;
-  z-index: 140;
+  z-index: 1000;
   top: 72px;
   left: 50%;
   transform: translateX(-50%);

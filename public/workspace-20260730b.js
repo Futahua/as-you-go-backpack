@@ -32,6 +32,7 @@ import {
   itemsIntersectingMarquee,
   itemsIn,
   moveSelection,
+  reorderSelection,
   normalizeState,
   permanentlyDelete,
   renameItem,
@@ -4154,7 +4155,7 @@ function syncFileCapabilitySelection() {
   fileCapabilityPanel?.syncSelection(selection);
 }
 
-function syncSelection() {
+function syncSelection({ syncNavigator = true } = {}) {
   if (graph.isAttached) {
     graph.refreshSelection();
   } else {
@@ -4169,7 +4170,7 @@ function syncSelection() {
     ? '1 item selected'
     : `${session.selected.size} items selected`;
   syncFileCapabilitySelection();
-  void workspaceNavigator?.syncCanvasSelection(selectedFileCapabilityContext());
+  if (syncNavigator) void workspaceNavigator?.syncCanvasSelection(selectedFileCapabilityContext());
 }
 
 async function hydrateIcons() {
@@ -4976,7 +4977,23 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
       placementIds:new Map(placementIds||[]),
       folderId,
     }),
+    canMoveAyGItems: (ids,parentId) => {
+      try {moveSelection(store.getSnapshot(),ids,parentId);return true;} catch {return false;}
+    },
+    setAyGSelection: ids => { store.setSelection(ids); syncSelection({syncNavigator:false}); },
+    reorderAyGItems: async (ids,parentId,beforeId) => {
+      const snapshot=store.getSnapshot();
+      const existing=new Set(itemsIn(snapshot,parentId).map(item=>item.id));
+      const movedIds=ids.filter(id=>!existing.has(id));
+      const moved = moveSelection(snapshot,ids,parentId);
+      const ordered = reorderSelection(moved,ids,parentId,beforeId);
+      const context = graphContextId(session.currentId,session.binMode);
+      const saved = await store.commit(removeGraphRestPositions(removeGraphPositions(ordered,context,movedIds),context,movedIds),{requireDurable:true});
+      if(saved){store.setSelection(ids);syncSelection({syncNavigator:false});render();}
+      return Boolean(saved);
+    },
     selectAyG: (id, visibleIds, modifiers = {}) => commands.selectItem(id, {
+      syncNavigator: false,
       shiftKey: false,
       ctrlKey: modifiers.ctrlKey === true,
       visibleItemIds: visibleIds,
@@ -5317,8 +5334,8 @@ const quickRun = bindQuickRunWorkspace({
   // library, pressing the chord persisted the half-typed title through the dialog's own auto-save - the
   // launcher inventing a state change, which the ruling forbids. The dialog keeps the edit in memory and the
   // next deliberate action writes it.
-  onOpen: () => promptLibrary.setSuspended(true),
-  onClose: () => promptLibrary.setSuspended(false),
+  onOpen: () => { promptLibrary.setSuspended(true); fileCapabilityPanel?.setTransientOverlay?.(true); },
+  onClose: () => { promptLibrary.setSuspended(false); fileCapabilityPanel?.setTransientOverlay?.(false); },
   // The mode is a presentation fact, not a second surface: the same binding, session and rules in both.
   // What to tell the reader when there is nothing to search: the surface asks the loader, which is the only
   // thing here that knows whether the project is empty or unreadable.
@@ -5349,6 +5366,7 @@ const keyboard = createKeyboardController({
   beginSetRename,
   commandSurface: commandSurfaceMode === 'overlay',
   openQuickRun,
+  isCanvasTypeToRunEnabled: () => !workspaceNavigator || workspaceNavigator.isCollapsed() === true,
   copySelectionPaths: () => workspaceNavigator?.copySelectionPaths?.() ?? false,
   reservePaneTabAcrossControls: EMBEDDED_SURFACE === 'proxima',
   toggleSidePanes: () => {

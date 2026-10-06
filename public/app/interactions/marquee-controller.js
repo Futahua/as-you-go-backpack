@@ -6,6 +6,7 @@ export function createMarqueeController({
   elements,
   commands,
   itemsIntersectingMarquee,
+  itemSelector = '.icon-item',
 }) {
   let drag = null;
 
@@ -28,7 +29,7 @@ export function createMarqueeController({
   }
 
   function updateMarqueeSelection(bounds) {
-    const tiles = [...elements.grid.querySelectorAll('.icon-item')]
+    const tiles = [...elements.grid.querySelectorAll(itemSelector)]
       .map((tile) => {
         const rectangle = tile.getBoundingClientRect();
         return {

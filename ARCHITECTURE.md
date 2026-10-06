@@ -792,3 +792,21 @@ background to distinguish its filesystem provider.
 ## Alt+Q widget input and activation — 2026-10-06
 
 The host enables mouse activation for Peek mode before showInactive, since non-focusable Windows widgets return MA_NOACTIVATEANDEAT and discard physical icon presses. The shared widget activation path ends Peek, refreshes existing control bindings, activates the exact member, and hides through the existing host owner. Chooser additions reuse that path; legacy Alt+W stays non-focusable. Blue wash uses the existing selection-effects controller and Anime.js. Ctrl+MMB closes and removes the same member. Creator confirmed the installed repeated-click fix and authorized push. Host typecheck and 1396 tests passed; Backpack tests: 1904 passed. The bounded title trace remains available for input diagnosis.
+
+## Navigator direct manipulation — 2026-10-06
+
+`app/navigator-row-interactions.js` binds navigator row gestures. It reuses the canvas marquee controller (configurable tile selector) and model intersection math; AYG batch ordering uses existing `reorderSelection`, persisted through the workspace store. Row edge drags preview sibling ordering immediately; folder centers retain existing filesystem/folder drops. Opus custom display order is persisted by directory in local storage and a column sort overrides it. RMB marquee evaluates the cursor against its starting point on every move: left of the origin adds to the original baseline with a green rectangle, right subtracts intersections with a red rectangle. Crossing the origin switches mode live without accumulating intermediate selection changes. A plain right click leaves selection unchanged; Shift+right-click bypasses marquee to retain folder expansion. Double-click opens or runs AYG items through the existing activation owner; Opus retains its existing double-click activation. Drops outside the row body discard reorder previews and retain the existing destination owners. Batch pill drops preserve AYG names. Pane-collapse sits at the far right after collapse-all and clears AYG and machine expansion sets. Canvas type-to-run reads navigator collapse state; explicit Quick Run shortcuts remain available. Quick Run layers above the right pane; native preview surfaces yield through the existing geometry/visibility seam and return when the overlay closes. No physical input is injected during verification.
+
+### Cross-folder drag preview and invalid targets
+
+Navigator row drag previews can enter a folder center and leave via sibling edges without changing durable data during hover. Expanded folders expose live preview branches; closed folder centers use the existing drop owner and remain closed. The source DOM rows move between existing branches as the cursor moves. Drop commits the final AYG move and order together through existing model operations, or invokes the existing verified filesystem move/link-retarget owner for Opus. Model cycle validation blocks AYG self/descendant targets before highlighting. Shared `navigatorFileMoveAllowed` rejects filesystem self/descendant targets (case and separator normalized), both in the hover planner and immediately before a physical move.
+
+### Move origin correction
+
+AYG link retargeting and its cursor notification apply only to AYG-origin transfers into real directories. Opus reorder/moves and Opus clipboard moves omit the retarget callback; the shared file transfer helper returns the filesystem result directly, without entering AYG verification/retry logic. AYG-origin moves retain verified retargeting. Hovering a collapsed destination never expands it for reorder; its existing drop behavior remains in place.
+
+### Preview batch drop regression
+
+The live preview can move selected rows underneath the pointer. Hovering that previewed batch preserves the last valid reorder destination; in-pane native dragleave with a null related target also preserves it. Otherwise the drop fell through to ordinary folder append. The final AYG reorder requires a durable save acknowledgement, retains the batch selection, and reports save refusal explicitly.
+
+Breadcrumb popup folders reuse navigator disclosure arrows, outlined expanded headings, and branch guides; arrow click and Shift+right-click toggle the same popup-local expansion.

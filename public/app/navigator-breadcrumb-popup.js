@@ -1,5 +1,5 @@
 /** Temporary sibling browsing with local, reversible branch expansion. */
-export function createBreadcrumbPopup({ document, children, art, activate }) {
+export function createBreadcrumbPopup({ document, children, art, activate, paintBranches = () => {} }) {
   let popup = null, generation = 0;
   function close() {
     generation++; popup?.remove(); popup = null;
@@ -19,6 +19,16 @@ export function createBreadcrumbPopup({ document, children, art, activate }) {
     document.body.append(popup);
     document.addEventListener('pointerdown', outside, true);
     document.addEventListener('keydown', escape, true);
+    const branchRecords = new Map();
+    function repaint() {
+      if(current !== generation || !popup)return;
+      const rows = [...popup.querySelectorAll('.workspace-navigator-row')];
+      paintBranches(rows.flatMap((row,start)=>{
+        const record=branchRecords.get(row);
+        return record?.children?.isConnected
+          ? [{...record,start,end:start+record.children.querySelectorAll('.workspace-navigator-row').length}] : [];
+      }));
+    }
     async function appendRows(container, owner, depth) {
       const items = await children(owner);
       if (current !== generation || !container.isConnected) return;
@@ -29,13 +39,34 @@ export function createBreadcrumbPopup({ document, children, art, activate }) {
         row.style.paddingLeft = (6 + depth * 13) + 'px';
         const image = document.createElement('span'); image.className = 'workspace-navigator-art'; art(image, item);
         const label = document.createElement('span'); label.className = 'workspace-navigator-label'; label.textContent = item.name || item.path || 'Untitled';
-        row.append(image, label); container.append(row);
+        const folder = ['group','folder'].includes(item.kind);
+        const lead = document.createElement(folder ? 'button' : 'span');
+        lead.className = folder ? 'navigator-tree-toggle' : 'navigator-tree-spacer';
+        if (folder) { lead.type = 'button'; lead.textContent = '>'; }
+        row.append(lead, image, label); container.append(row);
         let branch = null;
+        async function toggle() {
+          if (branch) {
+            branch.remove(); branch = null;
+            branchRecords.delete(row);
+            row.replaceChildren(lead, image, label);
+            row.classList.remove('navigator-tree-expanded');lead.textContent = '>';
+          } else {
+            const heading = document.createElement('span');heading.className = 'navigator-tree-folder-heading';
+            heading.append(image,label);row.replaceChildren(lead,heading);
+            row.classList.add('navigator-tree-expanded');lead.textContent = '';
+            branch = document.createElement('div');branch.className = 'navigator-tree-branch';
+            branch.style.setProperty('--branch-left', `${16 + depth * 13}px`);
+            branchRecords.set(row,{id:item.path?`machine:${item.path.toLowerCase()}`:item.id,depth,row,children:branch});
+            row.after(branch);await appendRows(branch,item,depth + 1);
+          }
+          repaint();
+        }
+        if(folder)lead.addEventListener('click',event=>{event.stopPropagation();void toggle();});
         row.addEventListener('contextmenu', async event => {
           if (!event.shiftKey || !['group','folder'].includes(item.kind)) return;
           event.preventDefault(); event.stopPropagation();
-          if (branch) { branch.remove(); branch = null; }
-          else { branch = document.createElement('div'); row.after(branch); await appendRows(branch, item, depth + 1); }
+          await toggle();
         });
         row.addEventListener('click', () => { close(); void activate(item); });
       }

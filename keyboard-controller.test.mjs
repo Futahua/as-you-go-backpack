@@ -7,7 +7,7 @@ function fakeNode() {
   return { hidden: true };
 }
 
-function createHarness({ binMode = false, initialState = null, membershipMode = null, activeElement = null, commandSurface = false, beforeMount = null, afterMount = null } = {}) {
+function createHarness({ isCanvasTypeToRunEnabled = () => true, binMode = false, initialState = null, membershipMode = null, activeElement = null, commandSurface = false, beforeMount = null, afterMount = null } = {}) {
   const listeners = [];
   const documentMock = new EventTarget();
   documentMock.activeElement = activeElement;
@@ -69,6 +69,7 @@ function createHarness({ binMode = false, initialState = null, membershipMode = 
     setStatus: (text) => { called.status.push(text); },
     beginSetRename: () => { called.beginRename += 1; return true; },
     commandSurface,
+    isCanvasTypeToRunEnabled,
     openQuickRun: (seed) => { called.quickRun += 1; called.quickRunSeeds.push(seed); return true; },
     copySelectionPaths: () => { called.pathCopies += 1; return true; },
     toggleSidePanes: () => { called.paneToggles += 1; return true; },
@@ -703,4 +704,15 @@ test('the global command surface does not let the host Alt+Shift+A keydown toggl
   const h = createHarness({ commandSurface: true });
   h.listeners[0].handler(key({ key: 'a', altKey: true, shiftKey: true }));
   assert.equal(h.called.quickRun, 0);
+});
+
+
+test('left pane suppresses canvas typing and collapsing it restores type-to-run', () => {
+  let leftOpen = true;
+  const h = createHarness({ isCanvasTypeToRunEnabled: () => !leftOpen });
+  h.listeners[0].handler(key({ key: 'l' }));
+  assert.equal(h.called.quickRun, 0);
+  leftOpen = false;
+  h.listeners[0].handler(key({ key: 'l' }));
+  assert.deepEqual(h.called.quickRunSeeds, ['l']);
 });

@@ -1,17 +1,43 @@
 /** Saved navigation snapshots are shared UI state, separate from workspace documents. */
 const MODES = new Set(['ayg', 'machine', 'action']);
 
-export function decodeNavigatorSavedStates(raw) {
+/** Same targets share a pill even when saved through different entry points. */
+export function uniqueNavigatorSavedStates(states, resolveTarget = () => null) {
+  const seen = new Set(), result = [];
+  for (const state of states) {
+    if (!state || typeof state.name !== 'string' || !MODES.has(state.mode)) continue;
+    const keys = [];
+    const target = state.path || state.art?.target || resolveTarget(state);
+    if (typeof target === 'string' && target) {
+      const windows = /^[a-z]:[\\/]|^\\\\/i.test(target);
+      keys.push('target:' + (windows ? target.replace(/\//g,'\\').replace(/\\+$/,'').toLowerCase() : target));
+    }
+    if(state.mode==='ayg' && state.currentId)keys.push('group:'+state.currentId);
+    if(state.itemId || state.art?.shortcutId)keys.push('item:'+(state.itemId||state.art.shortcutId));
+    if(state.quickRunKey)keys.push(state.quickRunKey.startsWith('group:')?state.quickRunKey:'quick:'+state.quickRunKey);
+    const duplicate=keys.some(key=>seen.has(key));
+    keys.forEach(key=>seen.add(key));
+    if(!duplicate)result.push(state);
+    else if(state.itemId){
+      const index=result.findIndex(saved=>saved.itemId===state.itemId ||
+        (saved.path||saved.art?.target) && keys.includes('target:'+String(saved.path||saved.art.target).replace(/\//g,'\\').replace(/\\+$/,'').toLowerCase()));
+      if(index>=0)result[index]=state;
+    }
+  }
+  return result;
+}
+
+export function decodeNavigatorSavedStates(raw, resolveTarget) {
   try {
     const parsed = JSON.parse(raw || '[]');
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((state) => state && typeof state.name === 'string' && MODES.has(state.mode));
+    return uniqueNavigatorSavedStates(parsed,resolveTarget);
   } catch {
     return [];
   }
 }
 
-export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile, decorateLabel }) {
+export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile, decorateLabel, resolveTarget }) {
   const win = document.defaultView;
   const storage = win?.localStorage;
   const key = 'papers:ayg:navigator-saved-states';
@@ -19,7 +45,7 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   const channel = typeof win?.BroadcastChannel === 'function'
     ? new win.BroadcastChannel('papers:ayg:navigator-saved-states-v1')
     : null;
-  let states = decodeNavigatorSavedStates(storage?.getItem(key));
+  let states = decodeNavigatorSavedStates(storage?.getItem(key),resolveTarget);
   let clearArmed = false;
 
   const track = document.createElement('div');
@@ -62,7 +88,7 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   };
   const installRemoteStates = (next) => {
     states = Array.isArray(next)
-      ? next.filter((state) => state && typeof state.name === 'string' && MODES.has(state.mode))
+      ? uniqueNavigatorSavedStates(next,resolveTarget)
       : [];
     disarmClear();
     render();
@@ -118,7 +144,7 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
     container.classList.remove('drop-target');
     const state = await fromDrop?.(event.dataTransfer);
     if (!state) return;
-    states.push(state);
+    states=uniqueNavigatorSavedStates([...states,...(Array.isArray(state)?state:[state])],resolveTarget);
     persistStates();
     render();
   });
@@ -172,23 +198,26 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
     }
   }
 
+  // Persist removal of old duplicates so they cannot return after a reload.
+  try {storage?.setItem(key,JSON.stringify(states));} catch {}
   render();
   return {
     retargetPaths(moves){
       const replace=path=>moves.find(move=>typeof path==='string'&&move.oldPath.toLowerCase()===path.toLowerCase())?.newPath||path;
       states=states.map(state=>({...state,path:replace(state.path),art:state.art?{...state.art,target:replace(state.art.target)}:state.art}));
+      states=uniqueNavigatorSavedStates(states,resolveTarget);
       persistStates();render();
     },
     add(state) {
       if (!state) return;
-      states.push(state);
+      states=uniqueNavigatorSavedStates([...states,state],resolveTarget);
       persistStates();
       render();
     },
     save() {
       const state = snapshot();
       if (!state) return;
-      states.push(state);
+      states=uniqueNavigatorSavedStates([...states,state],resolveTarget);
       persistStates();
       render();
     },

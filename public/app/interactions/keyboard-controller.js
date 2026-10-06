@@ -49,6 +49,7 @@ export function createKeyboardController({
   // Quick Run (STAGE 5). The controller reports the chord and nothing more: opening the
   // surface is the entry file's job, so this stays inert until something passes a callback.
   openQuickRun = () => false,
+  isCanvasTypeToRunEnabled = () => true,
   copySelectionPaths = () => false,
   toggleSidePanes = () => false,
   reservePaneTabAcrossControls = false,
@@ -121,6 +122,7 @@ export function createKeyboardController({
       // palette with that character already in the line. The decision, including every reason to stay out of
       // an IME's or a field's way, is in quick-run/quick-run-type-to-run.js.
       const openOnTypedCharacter = () => {
+        if (!isCanvasTypeToRunEnabled()) return false;
         const typed = planQuickRunTypeToRun(event, { preferences, editingTarget: typingTarget });
         if (typed.kind !== 'open') return false;
         // The browser's own insertion is suppressed so the character cannot arrive twice - once by the

@@ -340,3 +340,13 @@ test('Electron copyLink native drag negotiates an allowed drop while retaining t
  const plan=navigatorBreadcrumbMovePlan({segment:{path:'D:\\destination'},nativeSource:{mode:'ayg',paths,startedAt:Date.now()},droppedPaths:paths});
  assert.equal(plan.kind,'machine-move');assert.deepEqual(plan.paths,paths);
 });
+
+
+test('closed folders use the existing drop handler without hover expansion and Opus omits link retargeting',async()=>{
+  const source=await readFile(new URL('./public/app/workspace-navigator.js',import.meta.url),'utf8');
+  const resolve=source.slice(source.indexOf('    resolveDestination:'),source.indexOf('    isNativeDrag:'));
+  assert.match(resolve,/if\(!container\)return null/);
+  assert.doesNotMatch(resolve,/expanded\.add|machineExpanded\.add|createElement/);
+  assert.match(source,/destination:plan\.parent\}/);
+  assert.match(source,/retarget:updatesLinks\?retargetMovedFiles:undefined/);
+});
