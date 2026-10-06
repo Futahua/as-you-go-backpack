@@ -21,12 +21,31 @@ export function installWindowLayoutPreviewInput({
   openWorkspacePicker,
 }) {
   let lastHoveredMember = null;
+  let peekDismissed = false;
+  const peekDefault=()=>widgetSurface&&documentRef.documentElement?.dataset?.widgetInteraction==='peek';
+  const onInteractionMode=(event)=>{
+    if(!widgetSurface||event.source!==windowRef||event.data?.type!=='papers:project:widget-interaction-mode')return;
+    if(event.data.mode==='dismissed'){
+      peekDismissed=true;
+      lastHoveredMember=null;
+      shiftPeek.apply({handled:true,held:false,end:true,begin:null});
+      cancelPreviewDwell();cancelListDwell();memberPopover.hide();memberPreview.cancel();
+      return;
+    }
+    peekDismissed = false;
+    documentRef.documentElement.dataset.widgetInteraction=event.data.mode==='peek'?'peek':'legacy';
+    shiftPeek.apply({handled:true,held:false,end:true,begin:null});
+    cancelPreviewDwell(); memberPreview.cancel();
+    if(peekDefault()&&lastHoveredMember?.isConnected)shiftPeek.apply({handled:true,held:true,end:false,begin:lastHoveredMember});
+  };
+  windowRef.addEventListener('message',onInteractionMode);
 
-  const onKeyDown = (event) => shiftPeek.apply(planWindowLayoutShiftPeekTransition('keydown', event, {
+
+  const onKeyDown = (event) => !peekDismissed && shiftPeek.apply(planWindowLayoutShiftPeekTransition('keydown', event, {
     held: shiftPeek.held,
     member: documentRef.querySelector('[data-wl-member]:hover'),
   }));
-  const onKeyUp = (event) => shiftPeek.apply(planWindowLayoutShiftPeekTransition('keyup', event, {
+  const onKeyUp = (event) => !peekDefault() && shiftPeek.apply(planWindowLayoutShiftPeekTransition('keyup', event, {
     held: shiftPeek.held,
   }));
   const onBlur = () => {
@@ -34,6 +53,7 @@ export function installWindowLayoutPreviewInput({
     shiftPeek.apply(planWindowLayoutShiftPeekTransition('blur', {}, { held: shiftPeek.held }));
   };
   const onNativeShift = (held) => {
+    if(peekDefault() || peekDismissed)return;
     shiftPeek.apply(planWindowLayoutShiftPeekTransition(held ? 'keydown' : 'keyup', { key: 'Shift' }, {
       held: shiftPeek.held,
       member: documentRef.querySelector('[data-wl-member]:hover')
@@ -41,6 +61,7 @@ export function installWindowLayoutPreviewInput({
     }));
   };
   const onMouseOver = (event) => {
+    if (peekDismissed) return;
     const listButton = event.target.closest('[data-wl-list]');
     const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
     if (!widgetSurface && listButton && listButton !== relatedListButton) {
@@ -50,7 +71,7 @@ export function installWindowLayoutPreviewInput({
     const member = event.target.closest('[data-wl-member]');
     const relatedMember = event.relatedTarget?.closest?.('[data-wl-member]') ?? null;
     if (member) lastHoveredMember = member;
-    const peekTransition = planWindowLayoutShiftPeekTransition('hover', event, {
+    const peekTransition = planWindowLayoutShiftPeekTransition('hover', peekDefault()?{shiftKey:true}:event, {
       held: shiftPeek.held,
       member,
       relatedMember,
@@ -73,10 +94,11 @@ export function installWindowLayoutPreviewInput({
     schedulePreviewDwell(member);
   };
   const onPointerMove = (event) => {
+    if (peekDismissed) return;
     if (shiftPeek.held && grid.matches(':hover')) shiftPeek.keepAlive();
     const member = event.target.closest('[data-wl-member]');
     if (member) lastHoveredMember = member;
-    const transition = planWindowLayoutShiftPeekTransition('pointermove', event, {
+    const transition = planWindowLayoutShiftPeekTransition('pointermove', peekDefault()?{shiftKey:true}:event, {
       held: shiftPeek.held,
       member,
     });
@@ -88,6 +110,7 @@ export function installWindowLayoutPreviewInput({
     if (transition.handled && transition.end) shiftPeek.apply(transition);
   };
   const onMouseOut = (event) => {
+    if (peekDismissed) return;
     const listButton = event.target.closest('[data-wl-list]');
     const relatedListButton = event.relatedTarget?.closest?.('[data-wl-list]') ?? null;
     if (listButton && listButton !== relatedListButton) cancelListDwell();
@@ -117,6 +140,15 @@ export function installWindowLayoutPreviewInput({
   const onPointerDown = (event) => {
     if (!event.target?.closest?.('[data-wl-member]')) return;
     cancelPreview();
+    if (peekDefault() && (event.button ?? 0) === 0
+      && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
+      // Activation is asynchronous. Late hover events must not re-enable DWM
+      // Peek while its caller is being hidden; that leaves a compositor ghost.
+      // Only a fresh host summon re-arms this hover session.
+      peekDismissed = true;
+      lastHoveredMember = null;
+      shiftPeek.apply({ handled: true, held: false, end: true, begin: null });
+    }
   };
   const onPageHide = () => {
     shiftPeek.end();
@@ -138,6 +170,7 @@ export function installWindowLayoutPreviewInput({
 
   return {
     dispose() {
+      windowRef.removeEventListener('message',onInteractionMode);
       windowRef.removeEventListener('keydown', onKeyDown);
       windowRef.removeEventListener('keyup', onKeyUp);
       windowRef.removeEventListener('blur', onBlur);

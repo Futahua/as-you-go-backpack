@@ -859,6 +859,7 @@ let windowControlLastSyncNote = '';
 let windowControlSignature = '';
 let windowControlNextSyncAt = 0;
 let windowControlSyncPending = false;
+let windowControlSyncCompletion = Promise.resolve();
 let windowControlUnavailable = '';
 function windowControlKey(layoutId, memberId) {
   return windowLayoutMemberKey(layoutId, memberId);
@@ -894,13 +895,15 @@ function windowControlEntries() {
   return entries;
 }
 async function syncWindowControls() {
-  if (windowControlSyncPending || typeof host.windowControlSync !== 'function') return;
+  if (windowControlSyncPending) return windowControlSyncCompletion;
+  if (typeof host.windowControlSync !== 'function') return;
   const entries = windowControlEntries();
   const signature = JSON.stringify([window.screenX, window.screenY, entries]);
   if (signature === windowControlSignature && Date.now() < windowControlNextSyncAt) return;
   windowControlSyncPending = true;
   try {
-    const response = await host.windowControlSync(entries);
+    windowControlSyncCompletion = host.windowControlSync(entries);
+    const response = await windowControlSyncCompletion;
     const allReady = response?.outcome === 'success'
       && (response.results ?? []).length === entries.length
       && (response.results ?? []).every((entry) => entry.ready);
@@ -1600,17 +1603,18 @@ async function closeWindowLayoutMember(layoutId, memberId) {
     : await capabilityForMember(layoutId, memberId);
   if (!capability) {
     setWindowLayoutTransientStatus(layoutId, 'Window is no longer available');
-    return;
+    return false;
   }
   const result = await host.closeWindowCapability(capability);
   if (result.outcome !== 'success') {
     setWindowLayoutTransientStatus(layoutId, result.error || 'Window could not be closed');
-    return;
+    return false;
   }
   windowLayoutRuntime.capabilities.delete(windowLayoutMemberKey(layoutId, memberId));
   windowLayoutWidgetPreviewCapabilities.delete(windowLayoutMemberKey(layoutId, memberId));
   if (descriptor) await retireClosedWindowEverywhere(descriptor, { source: 'explicit-close', reason: 'the creator closed it' });
   setWindowLayoutTransientStatus(layoutId, 'Window closed', 1200);
+  return true;
 }
 
 function restoreHoveredWindowLayoutPreview(layoutId) {
@@ -5391,7 +5395,7 @@ const promptLibrary = createPromptLibraryDialog({
 function bootstrapWindowLayoutWidget() {
   return bootstrapCompactWindowLayoutWidget({
     WIDGET_SURFACE, host, elements, createSafeBroadcastChannel, windowLayoutRuntime,
-    windowLayoutMemberPreview, windowLayoutMemberPopover,
+    windowLayoutMemberPreview, windowLayoutMemberPopover, windowLayoutShiftPeek,
     windowLayoutWidgetPreviewCapabilities, windowLayoutWidgetSelectionChannel,
     setWindowLayoutStatus, closeWindowLayoutMember, toggleWindowLayoutIsolateMode,
     cancelWindowLayoutPreviewDwell, scheduleWindowLayoutListDwell, cancelWindowLayoutListDwell,
@@ -5405,6 +5409,7 @@ function bootstrapWindowLayoutWidget() {
       windowControlSignature = '';
     },
     setPreviewSnapshot: (snapshot) => { windowLayoutWidgetPreviewSnapshot = snapshot; },
+    syncControls: async () => { await syncWindowControls(); await syncWindowControls(); },
   });
 }
 

@@ -19,3 +19,41 @@ test('superseded direct attempt cannot apply or clear successor ownership',async
 test('late list response cannot alter retired candidates or status',async()=>{const h=harness();let done;h.host.windowCandidates=()=>new Promise(resolve=>{done=resolve;});const pending=h.picker.open();await tick();await h.picker.close();done({outcome:'success',candidates:[{id:'late'}]});await pending;assert.equal(h.widgetState.candidates,null);assert.equal(h.calls.some(x=>x[0]==='status'),false);});
 test('list binding keeps exact retained row and reports failure without workspace mutation',async()=>{const h=harness();const row={id:'old',title:'retained'};h.widgetState.candidates=[row];h.deps.bindWindowLayoutPickerCandidate=async(id,value)=>{assert.equal(id,'old');assert.equal(value,row);return {bound:{outcome:'missing',error:'expired'}};};h.picker=createPicker(h.deps);assert.equal(await h.picker.candidate('old'),false);assert.equal(h.calls.some(x=>x[0]==='command'),false);assert.equal(h.calls.at(-1)[2],'expired');});
 test('missing list row is byte-zero no-op',async()=>{const h=harness();assert.equal(await h.picker.candidate('absent'),false);assert.deepEqual(h.calls,[]);});
+
+test('window list ends active peek before loading or displaying the chooser',async()=>{
+ const h=harness();h.deps.endPeek=async()=>h.calls.push(['peek-end']);
+ h.host.windowCandidates=async()=>{h.calls.push(['list']);return {outcome:'success',candidates:[]};};
+ h.host.windowCandidatePicker=async()=>{h.calls.push(['show']);return {action:'dismiss'};};
+ h.picker=createPicker(h.deps);await h.picker.open();
+ assert.ok(h.calls.findIndex(x=>x[0]==='peek-end')<h.calls.findIndex(x=>x[0]==='show'));
+});
+
+function candidateHarness({peek=true,ack='committed',removal=false}={}){
+ const h=harness();const descriptor={version:1,title:'Window',windowInstanceId:'W1234567890abcdef'};
+ const row={id:'candidate',windowInstanceId:descriptor.windowInstanceId};h.widgetState.candidates=[row];
+ if(removal)h.widgetState.snapshot.members=[{id:'member',descriptor}];
+ h.deps.bindWindowLayoutPickerCandidate=async()=>({bound:{outcome:'success',descriptor,capability:{version:1,bindingId:'binding'}},row});
+ h.deps.isPeekMode=()=>peek;h.deps.endPeek=async()=>h.calls.push(['peek-end']);
+ h.client.sendCommandAndWait=async()=>{h.calls.push(['commit']);return {type:ack,snapshot:{members:[{id:'new-member',descriptor}]}};};
+ h.deps.activateMember=async memberId=>{await h.deps.endPeek();h.calls.push(['activate',memberId]);h.calls.push(['hide']);};
+ h.host.widgetMinimize=async()=>h.calls.push(['hide']);h.setDom({innerHTML:'chooser'});
+ h.picker=createPicker(h.deps);return h;
+}
+test('Alt+Q addition commits then closes chooser, activates exact window and hides widget',async()=>{
+ const h=candidateHarness();assert.equal(await h.picker.candidate('candidate'),true);
+ const sequence=h.calls.map(x=>x[0]);
+ for(const [a,b] of [['commit','close'],['close','activate'],['peek-end','activate'],['activate','hide']])assert.ok(sequence.indexOf(a)<sequence.indexOf(b));
+ assert.deepEqual(h.calls.find(x=>x[0]==='activate')[1],'new-member');
+});
+test('unconfirmed addition never activates or hides',async()=>{
+ const h=candidateHarness({ack:'stale'});assert.equal(await h.picker.candidate('candidate'),false);
+ assert.ok(!h.calls.some(x=>['activate','hide'].includes(x[0])));
+});
+test('legacy addition and Alt+Q removal keep existing picker behavior',async()=>{
+ for(const options of [{peek:false},{removal:true}]){const h=candidateHarness(options);assert.equal(await h.picker.candidate('candidate'),true);assert.ok(!h.calls.some(x=>['activate','hide'].includes(x[0])));}
+});
+
+test('confirmed addition without exact committed member never activates a different window',async()=>{
+ const h=candidateHarness();h.client.sendCommandAndWait=async()=>({type:'committed',snapshot:{members:[{id:'other',descriptor:{windowInstanceId:'W0000000000000000'}}]}});
+ assert.equal(await h.picker.candidate('candidate'),false);assert.ok(!h.calls.some(x=>x[0]==='activate'));
+});

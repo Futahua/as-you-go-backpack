@@ -647,3 +647,7 @@ disables both pane-owned edge hit targets, and makes the paired seam the sole re
 path. Unclasp restores the independent layout (or opens a real gap if they originally
 touched). Saved navigator pills resolve the same shortcut identity/icon hydration
 path as the rows they came from; this remains UI state, not workspace authority.
+
+## Alt+Q widget input and activation — 2026-10-06
+
+The host enables mouse activation for Peek mode before showInactive, since non-focusable Windows widgets return MA_NOACTIVATEANDEAT and discard physical icon presses. The shared widget activation path ends Peek, refreshes existing control bindings, activates the exact member, and hides through the existing host owner. Chooser additions reuse that path; legacy Alt+W stays non-focusable. Blue wash uses the existing selection-effects controller and Anime.js. Ctrl+MMB closes and removes the same member. Creator confirmed the installed repeated-click fix and authorized push. Host typecheck and 1396 tests passed; Backpack tests: 1904 passed. The bounded title trace remains available for input diagnosis.

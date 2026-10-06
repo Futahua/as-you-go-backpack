@@ -11,22 +11,43 @@ import { createWindowLayoutWidgetChannelClient as defaultChannelClient,
   WINDOW_LAYOUT_CARD_MAX_WIDTH } from './window-layout-widget-channel.js';
 import { reconcileWindowLayoutIconSnapshotCache } from './window-layout-icon-hydration.js';
 import { windowLayoutMemberKey } from './window-layout-runtime.js';
+import { createWidgetModeEffect } from './window-layout-widget-mode-effect.js';
+export async function activateAndDismissWidgetMember({host, layoutId, memberId, peek, shiftPeek}) {
+  try {
+    await shiftPeek?.endAndWait();
+    return await host.windowControlActivate(layoutId, memberId);
+  } catch {
+    return {outcome:'helper-unavailable'};
+  } finally {
+    // Dismissal belongs to the Alt+Q click, not Windows' foreground verdict.
+    if (peek) await Promise.resolve().then(() => host.widgetMinimize(layoutId)).catch(() => undefined);
+  }
+}
+export async function closeAndRemoveWidgetMember({closeMember,client,layoutId,memberId}) {
+  if (await closeMember(layoutId,memberId)!==true) return false;
+  const command={kind:'remove-member',memberId};
+  let result=await client.sendCommandAndWait(command,{timeoutMs:30000});
+  if(result?.type==='stale')result=await client.sendCommandAndWait(command,{timeoutMs:30000});
+  return result?.type==='committed';
+}
+
 export function bootstrapWindowLayoutWidget({
   WIDGET_SURFACE, localStorage = globalThis.localStorage, document = globalThis.document,
   window = globalThis.window, CSS = globalThis.CSS, Element = globalThis.Element,
   crypto = globalThis.crypto, setTimeout = globalThis.setTimeout, clearTimeout = globalThis.clearTimeout,
   setInterval = globalThis.setInterval, clearInterval = globalThis.clearInterval,
-  host, elements, createSafeBroadcastChannel, windowLayoutRuntime, windowLayoutMemberPreview,
+  host, elements, createSafeBroadcastChannel, windowLayoutRuntime, windowLayoutMemberPreview, windowLayoutShiftPeek,
   windowLayoutMemberPopover, windowLayoutWidgetPreviewCapabilities, windowLayoutWidgetSelectionChannel,
   setWindowLayoutStatus, closeWindowLayoutMember, toggleWindowLayoutIsolateMode,
   cancelWindowLayoutPreviewDwell, scheduleWindowLayoutListDwell, cancelWindowLayoutListDwell,
   moveWindowLayoutMemberButton, evictStaleWidgetPreviewCapabilities,
   removeWindowLayoutCardPresentation, installWindowLayoutCardPresentation, windowLayoutCardMarkup,
   applyTheme, closeWindowLayoutCandidate, restoreHoveredWindowLayoutPreview, bindWindowLayoutPickerCandidate,
-  quickRun, menu, WINDOW_LAYOUT_DROP_OUT_PX, setWidgetClient, setControlSnapshot, setPreviewSnapshot,
+  quickRun, menu, WINDOW_LAYOUT_DROP_OUT_PX, setWidgetClient, setControlSnapshot, setPreviewSnapshot, syncControls = async () => {},
   createWindowLayoutWidgetChannelClient = defaultChannelClient, createBoundedRetry = defaultBoundedRetry,
 }) {
   const { layoutId } = WIDGET_SURFACE;
+  const widgetModeEffect=createWidgetModeEffect({document,windowRef:window,grid:elements.grid});
   const widgetOpacityStorageKey = `papers-window-layout-widget-opacity:${layoutId}`;
   const storedWidgetOpacity = localStorage.getItem(widgetOpacityStorageKey);
   const parsedWidgetOpacity = storedWidgetOpacity === null ? Number.NaN : Number(storedWidgetOpacity);
@@ -272,10 +293,21 @@ export function bootstrapWindowLayoutWidget({
       { widgetSurface: true },
     );
     installWindowLayoutCardPresentation(elements.grid);
+    widgetModeEffect.refresh();
     const card = elements.grid.querySelector('.window-layout-body');
     if (card) {
       card.addEventListener('pointerdown', (event) => {
         event.stopPropagation();
+        // The marker belongs to one press, with no timer or cooldown.
+        pointerActivatedMember = null;
+        const pressedMember = event.target.closest('[data-wl-member]');
+        if (document.documentElement.dataset.widgetInteraction==='peek'
+          && pressedMember && !pressedMember.disabled && event.button===0
+          && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
+          pointerActivatedMember = pressedMember.dataset.wlMember;
+          void activateWidgetMember(pressedMember.dataset.wlMember);
+          return;
+        }
         if (event.button === 0 && !event.ctrlKey && !event.shiftKey
           && !event.target.closest('button, input, [data-wl-member]')) {
           clearWidgetSelection();
@@ -474,10 +506,31 @@ export function bootstrapWindowLayoutWidget({
     }
   }
 
+  let pointerActivatedMember = null;
+  let widgetPressCount = 0;
+  const traceWidgetInput = detail => {
+    detail = String(detail).slice(-220);
+    if (!document.documentElement.dataset) return;
+    document.documentElement.dataset.widgetInputTrace = detail;
+    document.title = 'widget input | ' + detail;
+  };
+  window.addEventListener('pointerdown', event => {
+    const member = event.target?.closest?.('[data-wl-member]');
+    traceWidgetInput('press=' + (++widgetPressCount) + ' member=' + Boolean(member)
+      + ' disabled=' + Boolean(member?.disabled) + ' button=' + event.button
+      + ' ctrl=' + Boolean(event.ctrlKey) + ' shift=' + Boolean(event.shiftKey)
+      + ' alt=' + Boolean(event.altKey) + ' mode=' + document.documentElement.dataset?.widgetInteraction);
+  }, {capture:true});
+
   async function activateWidgetMember(memberId) {
+    traceWidgetInput(document.documentElement.dataset?.widgetInputTrace + ' refresh');
     windowLayoutMemberPreview.cancel();
-    const activated = await host.windowControlActivate(layoutId, memberId)
-      .catch(() => ({ outcome: 'helper-unavailable' }));
+    await syncControls();
+    traceWidgetInput(document.documentElement.dataset?.widgetInputTrace + ' activate');
+    const activated = await activateAndDismissWidgetMember({host,layoutId,memberId,
+      peek:document.documentElement.dataset.widgetInteraction==='peek',shiftPeek:windowLayoutShiftPeek});
+    traceWidgetInput(document.documentElement.dataset?.widgetInputTrace + ' result=' + String(activated?.outcome ?? 'no answer')
+      + (activated?.error ? ' ' + String(activated.error).slice(0,80) : ''));
     if (activated?.outcome !== 'activated') {
       setWindowLayoutStatus(layoutId, 'Windows did not give that window the foreground ('
         + String(activated?.outcome ?? 'no answer') + ').');
@@ -491,7 +544,7 @@ export function bootstrapWindowLayoutWidget({
       : members;
   }
 
-  function handleWidgetCardClick(event) {
+  function handleWidgetCardClick(event, fromPointerDown = false) {
     event.stopPropagation();
     const deleteButton = event.target.closest('[data-wl-delete]');
     if (deleteButton) {
@@ -513,6 +566,10 @@ export function bootstrapWindowLayoutWidget({
     }
     const member = event.target.closest('[data-wl-member]');
     if (member) {
+      if (!fromPointerDown && pointerActivatedMember===member.dataset.wlMember) {
+        pointerActivatedMember = null;
+        return;
+      }
       if (widgetDragJustMoved) {
         widgetDragJustMoved = false;
         return;
@@ -609,7 +666,9 @@ export function bootstrapWindowLayoutWidget({
       if (event.ctrlKey) {
         // Ctrl+MMB closes the native window/process, then the confirmed close
         // retires its exact member identity from every layout.
-        void closeWindowLayoutMember(layoutId, member.dataset.wlMember);
+        void closeAndRemoveWidgetMember({closeMember:closeWindowLayoutMember,client,layoutId,memberId:member.dataset.wlMember})
+          .then(removed=>{if(!removed)setWindowLayoutStatus(layoutId,'Window close or icon removal could not be confirmed.');})
+          .catch(error=>setWindowLayoutStatus(layoutId,error.message||'Window icon could not be removed.'));
       } else {
         // Plain MMB only unlinks the clicked icon from this layout.
         client.sendCommand({ kind: 'remove-member', memberId: member.dataset.wlMember });
@@ -676,6 +735,9 @@ export function bootstrapWindowLayoutWidget({
     layoutId, windowLayoutMemberPreview,
     setWindowLayoutStatus, closeWindowLayoutCandidate, restoreHoveredWindowLayoutPreview,
     elements, CSS, bindWindowLayoutPickerCandidate,
+    isPeekMode: () => document.documentElement.dataset.widgetInteraction==='peek',
+    endPeek: () => windowLayoutShiftPeek.endAndWait(),
+    activateMember: activateWidgetMember,
   });
   const openWidgetPicker = widgetPicker.open;
   const closeWidgetPicker = widgetPicker.close;
@@ -697,6 +759,7 @@ export function bootstrapWindowLayoutWidget({
 
   window.addEventListener('pagehide', () => {
     widgetHoverPolicy.dispose();
+    widgetModeEffect.dispose();
     widgetRoot.removeEventListener('pointerenter', onWidgetPointerEnter);
     widgetRoot.removeEventListener('pointermove', onWidgetPointerEnter);
     widgetRoot.removeEventListener('pointerleave', onWidgetPointerLeave);

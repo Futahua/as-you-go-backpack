@@ -40,7 +40,11 @@ function endWindowLayoutShiftPeek() {
   }
   windowLayoutShiftPeekGeneration += 1;
   windowLayoutShiftPeekKey = null;
-  void enqueueWindowLayoutShiftPeekHostOperation(() => host.windowPeekEnd()).catch(() => undefined);
+  // The host already serializes native preview operations and invalidates
+  // pending begins on end. Send cancellation now, rather than waiting for an
+  // obsolete begin reply in this renderer. A new gesture waits for this release,
+  // never for the old gesture's reply (which may be delayed or time out).
+  windowLayoutShiftPeekHostQueue = Promise.resolve().then(() => host.windowPeekEnd()).catch(() => undefined);
 }
 
 function deferWindowLayoutShiftPeekEnd() {
@@ -111,7 +115,8 @@ async function performWindowLayoutShiftPeek(layoutId, memberId, generation, atte
   // relayed it, the widget received it, resolved a capability and Peek began. The
   // native watcher is already proven separately, so nothing else needs proving.
   if (WIDGET_SURFACE) document.title = 'shift-peek | held=1 | begin=' + String(result?.outcome ?? 'empty')
-    + ' ' + String(result?.error ?? '').slice(0, 60);
+    + ' ' + String(result?.error ?? '').slice(0, 60)
+    + (document.documentElement?.dataset?.widgetInputTrace ? ' | '+document.documentElement.dataset.widgetInputTrace : '');
   if (generation !== windowLayoutShiftPeekGeneration) {
     // The lifecycle owner already ended or superseded this attempt. An extra
     // global end here could cancel a newer member's Peek.
@@ -134,5 +139,5 @@ function applyWindowLayoutShiftPeekTransition(transition) {
 }
 
 
-return { begin: beginWindowLayoutShiftPeek, end: endWindowLayoutShiftPeek, deferEnd: deferWindowLayoutShiftPeekEnd, keepAlive: keepWindowLayoutShiftPeekAlive, apply: applyWindowLayoutShiftPeekTransition, get held() { return windowLayoutShiftPeekHeld; }, get key() { return windowLayoutShiftPeekKey; } };
+return { async endAndWait(){windowLayoutShiftPeekHeld=false;endWindowLayoutShiftPeek();await windowLayoutShiftPeekHostQueue;}, begin: beginWindowLayoutShiftPeek, end: endWindowLayoutShiftPeek, deferEnd: deferWindowLayoutShiftPeekEnd, keepAlive: keepWindowLayoutShiftPeekAlive, apply: applyWindowLayoutShiftPeekTransition, get held() { return windowLayoutShiftPeekHeld; }, get key() { return windowLayoutShiftPeekKey; } };
 }

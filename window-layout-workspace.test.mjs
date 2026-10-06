@@ -1148,7 +1148,7 @@ test('middle-click splits data unlink from Ctrl+middle-click process close', asy
   const widgetEnd = widgetSource.indexOf('  async function handleWidgetCardContextMenu(event)', widgetStart);
   const widget = widgetSource.slice(widgetStart, widgetEnd);
   assert.match(widget, /const member = event\.target\.closest\('\[data-wl-member\]'\);/);
-  assert.match(widget, /if \(event\.ctrlKey\) \{[\s\S]*closeWindowLayoutMember\(layoutId, member\.dataset\.wlMember\)[\s\S]*\} else \{[\s\S]*kind: 'remove-member'/,
+  assert.match(widget, /if \(event\.ctrlKey\) \{[\s\S]*closeAndRemoveWidgetMember\(\{closeMember:closeWindowLayoutMember,client,layoutId,memberId:member\.dataset\.wlMember\}\)[\s\S]*\} else \{[\s\S]*kind: 'remove-member'/,
     'the widget closes only for Ctrl+MMB and sends a scoped unlink for plain MMB');
 });
 
@@ -1294,7 +1294,7 @@ test('detached picker re-entry invalidates stale chooser ownership before starti
 
 test('widget member gestures map plain left click to activation and plain right click to toggle', async () => {
   const source = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8');
-  const clickStart = source.indexOf('  function handleWidgetCardClick(event)');
+  const clickStart = source.indexOf('  function handleWidgetCardClick(event, fromPointerDown = false)');
   const clickEnd = source.indexOf('  function resetWidgetClearArm()', clickStart);
   const click = source.slice(clickStart, clickEnd);
   assert.match(click, /windowLayoutRuntime\.isolateMode\.click\(layoutId, memberId, false\)[\s\S]*if \(isolationTargets !== null\)/,
@@ -1307,7 +1307,7 @@ test('widget member gestures map plain left click to activation and plain right 
   const activateStart = source.indexOf('  async function activateWidgetMember(memberId)');
   const activateEnd = source.indexOf('  function widgetGroupTargets()', activateStart);
   const activate = source.slice(activateStart, activateEnd);
-  assert.match(activate, /host\.windowControlActivate\(layoutId, memberId\)/);
+  assert.match(activate, /activateAndDismissWidgetMember\(/);
   assert.match(activate, /activated\?\.outcome !== 'activated'[\s\S]*setWindowLayoutStatus/,
     'activation refusal remains visible to the creator');
 

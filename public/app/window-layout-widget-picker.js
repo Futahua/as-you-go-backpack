@@ -1,10 +1,11 @@
 /** Widget list/direct picker lifecycle. Commands await the existing workspace writer; no local persistence. */
 import { openWindowLayoutPickerSession, toWindowLayoutPickerRows } from './window-layout-picker-session.js';
-import { windowLayoutCandidateIsMember, windowLayoutPickMemberDescriptors, windowLayoutPickForBoundCandidate, windowLayoutHasValidInstanceId } from './window-layout-membership.js';
+import { windowLayoutCandidateIsMember, windowLayoutPickMemberDescriptors, windowLayoutPickForBoundCandidate, windowLayoutHasValidInstanceId, windowDescriptorIdentityRelation } from './window-layout-membership.js';
 export function createWindowLayoutWidgetPicker({
   host, widgetState, windowLayoutRuntime, client, layoutId, windowLayoutMemberPreview,
   setWindowLayoutStatus, closeWindowLayoutCandidate, restoreHoveredWindowLayoutPreview,
   elements, CSS, bindWindowLayoutPickerCandidate, crypto = globalThis.crypto,
+  isPeekMode = () => false, endPeek = async () => {}, activateMember,
 }) {
   let widgetPickerOpen = false;
   let widgetPickerGeneration = 0;
@@ -22,6 +23,8 @@ export function createWindowLayoutWidgetPicker({
     // 019G: a picker covering the desktop must clear/discard the hover preview.
     windowLayoutMemberPreview.cancel();
     try {
+      await endPeek();
+      if (!ownsPicker()) return;
       while (true) {
         const pickerId = crypto.randomUUID();
         let session;
@@ -136,6 +139,22 @@ export function createWindowLayoutWidgetPicker({
     if (acknowledgement?.type === 'error') {
       setWindowLayoutStatus(layoutId, acknowledgement.message || acknowledgement.code || 'Pick failed');
       return false;
+    }
+    if (isPeekMode() && pick.adds.length > 0) {
+      if (acknowledgement?.type !== 'committed') {
+        setWindowLayoutStatus(layoutId, 'Window addition was not confirmed. Try again.');
+        return false;
+      }
+      // Retire the chooser before activation so its close cannot take focus
+      // back from the newly added window. The existing workspace owns the add.
+      await closeWidgetPicker({ requireClosed: true });
+      const member = acknowledgement.snapshot?.members?.find(candidate =>
+        windowDescriptorIdentityRelation(candidate.descriptor, bound.descriptor)==='same');
+      if (!member || typeof activateMember !== 'function') {
+        setWindowLayoutStatus(layoutId, 'Window added, but its control was not confirmed.');
+        return false;
+      }
+      await activateMember(member.id);
     }
     return true;
   }

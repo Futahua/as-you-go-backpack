@@ -27,7 +27,7 @@ function node({ member = null, list = null, popover = false, connected = true } 
 function harness({ widgetSurface = false } = {}) {
   const calls = [];
   const windowRef = target();
-  const documentRef = { ...target(), querySelector: () => null };
+  const documentRef = { ...target(), documentElement:{dataset:{}}, querySelector: () => null };
   const grid = { ...target(), matches: () => true, contains: (candidate) => candidate?.inside === true };
   const shiftPeek = {
     held: false,
@@ -107,4 +107,50 @@ test('member press, scroll and resize cancel cosmetic preview work; pagehide als
   h.windowRef.emit('pagehide', {});
   assert.equal(h.calls.filter(([kind]) => kind === 'preview-cancel').length, 4);
   assert.equal(h.calls.filter(([kind]) => kind === 'end').length, 1);
+});
+
+test('Alt+Q mode peeks on hover without Shift while legacy retains thumbnail dwell',()=>{
+ const h=harness({widgetSurface:true});const member=node({member:'M1'});
+ h.windowRef.emit('message',{source:h.windowRef,data:{type:'papers:project:widget-interaction-mode',mode:'peek'}});
+ h.grid.emit('mouseover',{target:member,relatedTarget:null,shiftKey:false});
+ assert.ok(h.calls.some(([kind,t])=>kind==='apply'&&t.begin===member&&t.held));
+ assert.ok(!h.calls.some(([kind])=>kind==='preview-dwell'));
+ h.nativeShift(false);assert.equal(h.shiftPeek.held,true);
+ h.windowRef.emit('message',{source:h.windowRef,data:{type:'papers:project:widget-interaction-mode',mode:'legacy'}});
+ h.grid.emit('mouseover',{target:member,relatedTarget:null,shiftKey:false});
+ assert.ok(h.calls.some(([kind])=>kind==='preview-dwell'));
+});
+
+
+test('Alt+Q member activation disarms late hover until the next summon', () => {
+  const h = harness({ widgetSurface: true });
+  const member = node({ member: 'M1' });
+  const summon = () => h.windowRef.emit('message', { source: h.windowRef,
+    data: { type: 'papers:project:widget-interaction-mode', mode: 'peek' } });
+  summon();
+  h.grid.emit('mouseover', { target: member, relatedTarget: null });
+  assert.equal(h.shiftPeek.held, true);
+  h.documentRef.emit('pointerdown', { target: member, button: 0 });
+  assert.equal(h.shiftPeek.held, false);
+  const afterPress = h.calls.length;
+  h.grid.emit('pointermove', { target: member });
+  h.grid.emit('mouseover', { target: member, relatedTarget: null });
+  h.windowRef.emit('keydown', { key: 'Shift', shiftKey: true });
+  h.nativeShift(true);
+  assert.equal(h.calls.length, afterPress);
+  assert.equal(h.shiftPeek.held, false);
+  summon();
+  assert.equal(h.shiftPeek.held, false);
+  h.grid.emit('mouseover', { target: member, relatedTarget: null });
+  assert.equal(h.shiftPeek.held, true);
+});
+test('Alt+Q hide ends peek and ignores late hover until the next summon',()=>{
+ const h=harness({widgetSurface:true});const member=node({member:'M1'});
+ const message=mode=>h.windowRef.emit('message',{source:h.windowRef,data:{type:'papers:project:widget-interaction-mode',mode}});
+ message('peek');h.grid.emit('mouseover',{target:member,relatedTarget:null});assert.equal(h.shiftPeek.held,true);
+ message('dismissed');assert.equal(h.shiftPeek.held,false);const count=h.calls.length;
+ h.grid.emit('mouseover',{target:member,relatedTarget:null});h.grid.emit('pointermove',{target:member});h.nativeShift(true);
+ assert.equal(h.calls.length,count);
+ message('peek');assert.equal(h.shiftPeek.held,false);
+ h.grid.emit('mouseover',{target:member,relatedTarget:null});assert.equal(h.shiftPeek.held,true);
 });

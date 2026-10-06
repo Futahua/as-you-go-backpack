@@ -338,6 +338,23 @@ body:has(.icon-grid > .window-layout-card) .toolbar-float {
   overflow-wrap: anywhere;
   -webkit-app-region: drag;
 }
+:root[data-widget-surface="true"][data-widget-interaction="peek"] .icon-grid > .window-layout-card {
+  background: color-mix(in srgb,
+    color-mix(in srgb, #23394d 70%, var(--surface-soft)) var(--workspace-backdrop-opacity-percent, 100%), transparent);
+}
+.widget-mode-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+:root[data-widget-surface="true"] .window-layout-card:has(> .widget-mode-wave) {
+  isolation: isolate;
+}
 /* Keep only the thin outer card frame as the native drag handle. Chromium does
    not dispatch pointer/click events inside an app-region drag surface, so the
    card interior must be no-drag for a blank click to clear member selection.
