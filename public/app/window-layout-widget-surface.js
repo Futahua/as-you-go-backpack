@@ -1,3 +1,4 @@
+import { WINDOW_TAB_MIME, windowTabTransfer } from './window-tab-transfer.js';
 /** Compact widget surface: ephemeral presentation/input and channel wiring, no durable writer. */
 import { createWindowLayoutSelection } from './window-layout-selection.js';
 import { createWindowLayoutWidgetPicker } from './window-layout-widget-picker.js';
@@ -294,6 +295,19 @@ export function bootstrapWindowLayoutWidget({
     );
     installWindowLayoutCardPresentation(elements.grid);
     widgetModeEffect.refresh();
+    for (const button of elements.grid.querySelectorAll('[data-wl-member]')) {
+      const member = snapshot.members.find(member => member.id === button.dataset.wlMember);
+      button.draggable = Boolean(windowTabTransfer(member?.windowInstanceId ?? member?.descriptor?.windowInstanceId));
+      button.addEventListener('dragstart', event => {
+        const instance = windowTabTransfer(member?.windowInstanceId ?? member?.descriptor?.windowInstanceId);
+        if (!instance || event.ctrlKey || event.shiftKey) { event.preventDefault(); return; }
+        windowLayoutMemberPreview.cancel();
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData(WINDOW_TAB_MIME, instance);
+        widgetDragJustMoved = true;
+      });
+      button.addEventListener('dragend', () => { setTimeout(() => { widgetDragJustMoved = false; }, 0); });
+    }
     const card = elements.grid.querySelector('.window-layout-body');
     if (card) {
       card.addEventListener('pointerdown', (event) => {
@@ -302,7 +316,7 @@ export function bootstrapWindowLayoutWidget({
         pointerActivatedMember = null;
         const pressedMember = event.target.closest('[data-wl-member]');
         if (document.documentElement.dataset.widgetInteraction==='peek'
-          && pressedMember && !pressedMember.disabled && event.button===0
+          && pressedMember && !pressedMember.disabled && !pressedMember.draggable && event.button===0
           && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
           pointerActivatedMember = pressedMember.dataset.wlMember;
           void activateWidgetMember(pressedMember.dataset.wlMember);

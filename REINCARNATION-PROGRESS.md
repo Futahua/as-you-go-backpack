@@ -1,5 +1,9 @@
 # Reincarnation completion checklist
 
+> Historical handoff / proposal under [AGENTS.md](AGENTS.md), the sole governing document.
+> Dated instructions and implementation limits do not override current creator direction.
+> The current cleanup is docs/comments only; this file does not activate a code roadmap.
+
 Scope: preserve stable post-mortem behavior while bounding the unrelated context
 needed to change one capability. Follow Papers REINCARNATION-HANDOFF.md and the
 exact historical north star; faulty-refactor code is research, not a donor baseline.

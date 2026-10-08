@@ -452,6 +452,18 @@ export function mergeSurfaceSnapshots(base, local, current) {
           key !== 'toolbarPositions',
         );
       }
+    } else if (key === 'preferences' && isPlainObject(value)) {
+      // Preferences have independent owners. A stale surface changing one
+      // preference must not restore an older saved-pill list (or vice versa).
+      const basePreferences = isPlainObject(baseView[key]) ? baseView[key] : {};
+      const nextPreferences = { ...(isPlainObject(currentView[key]) ? currentView[key] : {}) };
+      for (const [name, preference] of Object.entries(value)) {
+        if (!sameJson(preference, basePreferences[name])) nextPreferences[name] = preference;
+      }
+      for (const name of Object.keys(basePreferences)) {
+        if (!Object.prototype.hasOwnProperty.call(value, name)) delete nextPreferences[name];
+      }
+      view[key] = nextPreferences;
     } else if (key === 'surfaceLocations' && isPlainObject(value)) {
       // Each Papers tab updates only its own opaque key. Merge by key so a
       // concurrent navigation in another tab cannot erase it.

@@ -127,8 +127,8 @@ test('marquee switches mode across its origin using the original baseline and ri
   assert.deepEqual(h.selection(),['b']);
   h.event('pointerup',{pointerId:2});
   h.event('pointerdown',{button:2,pointerId:3,clientX:50,clientY:40});
-  assert.equal(h.event('contextmenu',{}).defaultPrevented,true);
   h.event('pointerup',{pointerId:3});
+  assert.equal(h.event('contextmenu',{}).defaultPrevented,false);
   assert.deepEqual(h.selection(),['b']);h.binding.cancel();
 });
 
@@ -146,10 +146,20 @@ test('a drop on another destination consumes no pending reorder',async()=>{
 });
 
 
-test('Shift right click reaches the existing folder expansion handler',()=>{
+test('plain right click reaches folder expansion while preserving selection',()=>{
   const h=harness();
-  h.event('pointerdown',{button:2,pointerId:1,clientX:50,clientY:40,shiftKey:true});
+  h.event('pointerdown',{button:2,pointerId:1,clientX:50,clientY:40,shiftKey:false});
   h.event('pointerup',{pointerId:1});
-  assert.equal(h.event('contextmenu',{shiftKey:true}).defaultPrevented,false);
+  assert.equal(h.event('contextmenu',{shiftKey:false}).defaultPrevented,false);
   assert.deepEqual(h.selection(),['a']);h.binding.cancel();
+});
+
+
+test('marquee updates selection live but only finishes preview once on release',()=>{
+  let previews=0;const h=harness({finishSelection:()=>previews++});
+  h.event('pointerdown',{button:2,pointerId:1,clientX:90,clientY:29});
+  h.event('pointermove',{pointerId:1,clientX:0,clientY:55});
+  h.event('pointermove',{pointerId:1,clientX:0,clientY:85});
+  assert.equal(previews,0);assert.deepEqual(h.selection(),['a','b','c']);
+  h.event('pointerup',{pointerId:1});assert.equal(previews,1);h.binding.cancel();
 });

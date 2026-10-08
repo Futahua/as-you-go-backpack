@@ -1,5 +1,10 @@
-/** Saved navigation snapshots are shared UI state, separate from workspace documents. */
+/** Saved pills belong to document preferences; browser storage is a legacy fallback. */
 const MODES = new Set(['ayg', 'machine', 'action']);
+
+export function navigatorDropEffect(effectAllowed, preferred='move') {
+  const allowed={none:[],copy:['copy'],link:['link'],move:['move'],copyLink:['copy','link'],copyMove:['copy','move'],linkMove:['link','move'],all:['copy','link','move'],uninitialized:['copy','link','move']}[effectAllowed]||['copy','link','move'];
+  return allowed.includes(preferred)?preferred:allowed[0]||'none';
+}
 
 /** Same targets share a pill even when saved through different entry points. */
 export function uniqueNavigatorSavedStates(states, resolveTarget = () => null) {
@@ -37,7 +42,7 @@ export function decodeNavigatorSavedStates(raw, resolveTarget) {
   }
 }
 
-export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile, decorateLabel, resolveTarget }) {
+export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile, decorateLabel, resolveTarget, loadSavedStates, saveSavedStates, onSaveError = () => {} }) {
   const win = document.defaultView;
   const storage = win?.localStorage;
   const key = 'papers:ayg:navigator-saved-states';
@@ -45,7 +50,11 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   const channel = typeof win?.BroadcastChannel === 'function'
     ? new win.BroadcastChannel('papers:ayg:navigator-saved-states-v1')
     : null;
-  let states = decodeNavigatorSavedStates(storage?.getItem(key),resolveTarget);
+  const durableStates = loadSavedStates?.();
+  let durableSignature = JSON.stringify(durableStates);
+  let states = Array.isArray(durableStates) ? uniqueNavigatorSavedStates(durableStates,resolveTarget) : decodeNavigatorSavedStates(storage?.getItem(key),resolveTarget);
+  let saveQueue = Promise.resolve();
+  let pendingSaves = 0;
   let clearArmed = false;
 
   const track = document.createElement('div');
@@ -81,6 +90,13 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   const persistStates = () => {
     try { storage?.setItem(key, JSON.stringify(states)); } catch {}
     try { channel?.postMessage({ type: 'states', states }); } catch {}
+    if(saveSavedStates){
+      const snapshot=JSON.parse(JSON.stringify(states));
+      pendingSaves++;
+      saveQueue=saveQueue.catch(()=>{}).then(()=>saveSavedStates(snapshot)).then(saved=>{
+        if(saved===false)throw new Error('Saved items could not be saved.');
+      }).catch(onSaveError).finally(()=>{pendingSaves--;});
+    }
   };
   const persistHeight = (height) => {
     try { storage?.setItem(heightKey, String(height)); } catch {}
@@ -121,12 +137,12 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
 
   win?.addEventListener?.('storage', (event) => {
     if (event.storageArea && event.storageArea !== storage) return;
-    if (event.key === key) installRemoteStates(decodeNavigatorSavedStates(event.newValue));
+    if (!loadSavedStates && !pendingSaves && event.key === key) installRemoteStates(decodeNavigatorSavedStates(event.newValue));
     if (event.key === heightKey && event.newValue != null) applyHeight(Number(event.newValue) || 80);
   });
   if (channel) {
     channel.addEventListener('message', (event) => {
-      if (event.data?.type === 'states') installRemoteStates(event.data.states);
+      if (!loadSavedStates && !pendingSaves && event.data?.type === 'states') installRemoteStates(event.data.states);
       if (event.data?.type === 'height') applyHeight(Number(event.data.height) || 80);
     });
   }
@@ -134,7 +150,7 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   container.addEventListener('dragover', (event) => {
     event.preventDefault();
     event.stopPropagation();
-    event.dataTransfer.dropEffect = 'copy';
+    event.dataTransfer.dropEffect = navigatorDropEffect(event.dataTransfer.effectAllowed, 'copy');
     container.classList.add('drop-target');
   });
   container.addEventListener('dragleave', () => container.classList.remove('drop-target'));
@@ -201,7 +217,15 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   // Persist removal of old duplicates so they cannot return after a reload.
   try {storage?.setItem(key,JSON.stringify(states));} catch {}
   render();
+  if(!Array.isArray(durableStates)&&states.length&&saveSavedStates)persistStates();
   return {
+    syncDurable(){
+      // Earlier queued acknowledgements must not replace newer local additions.
+      if(pendingSaves)return;
+      const next=loadSavedStates?.();
+      const signature=JSON.stringify(next);
+      if(Array.isArray(next)&&signature!==durableSignature){durableSignature=signature;installRemoteStates(next);}
+    },
     retargetPaths(moves){
       const replace=path=>moves.find(move=>typeof path==='string'&&move.oldPath.toLowerCase()===path.toLowerCase())?.newPath||path;
       states=states.map(state=>({...state,path:replace(state.path),art:state.art?{...state.art,target:replace(state.art.target)}:state.art}));

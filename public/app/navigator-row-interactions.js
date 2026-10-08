@@ -12,7 +12,7 @@ export function navigatorReorderPlan({ rows, selected, target, after, sourceRows
 }
 
 /** Shares canvas marquee geometry/capture and the navigator's existing selection and drop owners. */
-export function bindNavigatorRowInteractions({ document, body, getSelection, setSelection, reorder, restore, isNativeDrag = () => false, resolveDestination = null, canMove = () => true, dropEffect = () => 'move' }) {
+export function bindNavigatorRowInteractions({ document, body, getSelection, setSelection, finishSelection = () => {}, reorder, restore, isNativeDrag = () => false, resolveDestination = null, canMove = () => true, dropEffect = () => 'move' }) {
   const marquee = document.createElement('div');
   marquee.className = 'navigator-marquee'; marquee.hidden = true; document.body.append(marquee);
   let subtract = false, base = [], suppressContext = false, source = null, pending = null;
@@ -23,12 +23,11 @@ export function bindNavigatorRowInteractions({ document, body, getSelection, set
     commands: {
       beginMarqueeSelection: () => {base = [...getSelection()]; return [];},
       updateMarqueeSelection: ids => setSelection(subtract ? base.filter(id => !ids.includes(id)) : [...new Set([...base, ...ids])]),
-      finishMarqueeSelection: () => {},
+      finishMarqueeSelection: ({moved}) => {if(moved)finishSelection();},
     },
   });
   body.addEventListener('pointerdown', event => {
     if (event.button !== 2 || event.target.closest('input, button, textarea')) return;
-    if (event.shiftKey) { suppressContext = false; return; }
     startX = event.clientX; subtract = false; suppressContext = true;
     marquee.classList.toggle('deselecting', false);
     controller.start(event); event.stopPropagation();
@@ -42,9 +41,8 @@ export function bindNavigatorRowInteractions({ document, body, getSelection, set
   });
   body.addEventListener('pointerup', event => {
     if (!controller.isActive(event.pointerId)) return;
-    controller.finish(event.pointerId);
-    suppressContext = true;
-    event.preventDefault();event.stopPropagation();
+    suppressContext = controller.finish(event.pointerId) === true;
+    if(suppressContext){event.preventDefault();event.stopPropagation();}
   });
   body.addEventListener('pointercancel', () => controller.cancel());
   body.addEventListener('contextmenu', event => {

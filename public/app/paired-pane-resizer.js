@@ -92,10 +92,10 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
 
   const seamBounds = (a, b) => {
     const viewport = win?.innerWidth || Math.max(a.right, b.right);
-    const previewMax = Math.max(300, Math.min(900, Math.floor(viewport * .75)));
+    const previewMax = Math.max(300, b.right - a.left - 182);
     return {
       min: Math.max(a.left + 179, b.right - previewMax - 3),
-      max: Math.min(b.right - 303, viewport * .55 + a.left + 3),
+      max: b.right - 303,
     };
   };
 
@@ -105,7 +105,7 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
     const bounds = seamBounds(a, b);
     if (bounds.min > bounds.max) return false;
     const x = Math.max(bounds.min, Math.min(bounds.max, requestedX));
-    navigator.setWidth(x - a.left - 3);
+    navigator.setWidth(x - a.left - 3, { nativeEdge: true });
     preview.setWidth(b.right - x - 3);
     preview.refreshPreviewGeometry();
     // Width owners are allowed to clamp (viewport, DPI, responsive CSS). Close
@@ -118,7 +118,7 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
       if (Math.abs(gap) <= 2) break;
       const leftWidth = cssWidth(left, actualLeft);
       const rightWidth = cssWidth(right, actualRight);
-      navigator.setWidth(leftWidth + gap / 2);
+      navigator.setWidth(leftWidth + gap / 2, { nativeEdge: true });
       preview.setWidth(rightWidth + gap / 2);
       preview.refreshPreviewGeometry();
     }
@@ -127,8 +127,17 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
     return Math.abs(finalRight.left - finalLeft.right) <= 3;
   };
 
+  const nativeChrome = () => right.classList.contains('native-chrome-layout');
+  const chromeEdge = () => Number.isFinite(Number(right.dataset?.chromeLeft)) ? Number(right.dataset.chromeLeft) : right.getBoundingClientRect().left;
+  const followChrome = () => {
+    const a = left.getBoundingClientRect();
+    const delta = chromeEdge() - a.right;
+    if (Math.abs(delta) > .5) navigator.setWidth(Math.max(176, cssWidth(left, a) + delta), { nativeEdge: true });
+  };
+
   const snapTogether = () => {
     if (!clasped || !eligible()) return;
+    if (nativeChrome()) { followChrome(); return; }
     const a = left.getBoundingClientRect();
     const b = right.getBoundingClientRect();
     applySeam((a.right + b.left) / 2);
@@ -145,19 +154,23 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
       strip.hidden = true;
       return;
     }
-    if (clasped && reopened) {
-      left.style.maxWidth = '';
+    if (nativeChrome()) {
+      const limit = Math.max(176, chromeEdge() - left.getBoundingClientRect().left) + 'px';
+      if (left.style.maxWidth !== limit) left.style.maxWidth = limit;
+    }
+    if (clasped && (reopened || nativeChrome())) {
+      if (!nativeChrome()) left.style.maxWidth = '';
       snapTogether();
     }
     const a = left.getBoundingClientRect();
     const b = right.getBoundingClientRect();
-    const center = (a.right + b.left) / 2;
+    const center = nativeChrome() ? chromeEdge() : (a.right + b.left) / 2;
     const available=Math.max(176,b.left-a.left);
     const limit=active?available+'px':'';
     if(left.style.maxWidth!==limit)left.style.maxWidth=limit;
     clasp.style.left = `${Math.round(center - 15)}px`;
     clasp.style.top = `${Math.round(Math.max(a.top, b.top) + 4)}px`;
-    strip.hidden = !clasped;
+    strip.hidden = !clasped || nativeChrome();
     if (!clasped) return;
     strip.style.left = `${Math.round(center - 5)}px`;
     strip.style.top = `${Math.round(Math.max(a.top, b.top))}px`;
@@ -181,14 +194,16 @@ export function installPairedPaneResizer({ document, navigator, preview }) {
     if (independent) {
       const widths = separatedPaneWidths(independent);
       navigator.setWidth(widths.leftWidth);
-      preview.setWidth(widths.rightWidth);
-      preview.refreshPreviewGeometry();
+      if (!nativeChrome()) {
+        preview.setWidth(widths.rightWidth);
+        preview.refreshPreviewGeometry();
+      }
     }
     win?.requestAnimationFrame?.(refresh);
   });
 
   strip.addEventListener('pointerdown', (event) => {
-    if (!clasped || event.button !== 0) return;
+    if (!clasped || nativeChrome() || event.button !== 0) return;
     dragging = true;
     strip.setPointerCapture?.(event.pointerId);
     left.classList.add('resizing');

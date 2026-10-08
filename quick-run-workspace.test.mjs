@@ -157,6 +157,7 @@ async function boot(options = {}) {
     dismissCommandSurface: options.dismissCommandSurface,
     activateLayoutMember: options.activateLayoutMember,
     copyText: (text) => harness.effects.copied.push(text),
+    startFileDrag: options.startFileDrag,
   });
   const type = (query) => {
     elements.input.value = query;
@@ -167,6 +168,18 @@ async function boot(options = {}) {
   };
   return { ...harness, elements, surface, type, key };
 }
+
+test('native Quick Run drag retains the authored shortcut identity for returning pill drops',async()=>{
+  const drags=[];
+  const h=await boot({startFileDrag:(paths,source)=>drags.push({paths,source})});
+  let prevented=false;
+  h.elements.layer.fire('dragstart',{
+    target:{closest:()=>({dataset:{quickRunKey:'shortcut:p-a'}})},
+    preventDefault(){prevented=true;},
+  });
+  assert.equal(prevented,true);
+  assert.deepEqual(drags,[{paths:['C:/Program Files/Editor/editor.exe'],source:{mode:'ayg',itemIds:['s-app'],quickRunKey:'shortcut:p-a'}}]);
+});
 
 const rowKeys = (elements) => elements.results.children.map((row) => row.dataset.quickRunKey);
 const highlighted = (elements) => elements.results.children.find((row) => row.dataset.quickRunHighlighted === 'true')?.dataset.quickRunKey ?? null;

@@ -1,5 +1,9 @@
 # Handoff: item sets, branch `feat/sets-ring`
 
+> Historical handoff / proposal under [AGENTS.md](AGENTS.md), the sole governing document.
+> Dated instructions and implementation limits do not override current creator direction.
+> The current cleanup is docs/comments only; this file does not activate a code roadmap.
+
 Read this whole file before touching anything.
 
 ## Where the code is

@@ -190,6 +190,22 @@ test('host bridge routes the shared file capability and unwraps its typed result
   assert.deepEqual(await promise, fileCapability);
 });
 
+test('office lifecycle requests survive cold startup beyond the quick RPC timeout', async (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const mock = createMockWindow();
+  const host = createHostBridge(mock);
+  for (const operation of ['office-editor-open', 'office-editor-save', 'office-editor-close', 'office-editor-close-owner']) {
+    let settled = false;
+    const promise = host.fileCapability(operation, {}).then(value => { settled = true; return value; });
+    context.mock.timers.tick(22000);
+    await Promise.resolve();
+    assert.equal(settled, false, operation);
+    const sent = mock.parent.messages.at(-1).message;
+    mock.dispatchMessage({ type: 'papers:host:result', requestId: sent.requestId, ok: true, fileCapability: { ok: true } });
+    assert.deepEqual(await promise, { ok: true });
+  }
+});
+
 test('host bridge sends dropped files flat and unwraps the returned targets array', async () => {
   const mock = createMockWindow();
   const host = createHostBridge(mock);

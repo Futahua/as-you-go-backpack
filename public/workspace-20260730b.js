@@ -79,8 +79,7 @@ import {
   forceX,
   forceY,
 } from './vendor/d3-force.js';
-import { zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
-import { select } from './vendor/d3-selection.js';
+import { select, zoom, zoomIdentity, zoomTransform } from './vendor/d3-zoom.js';
 import { animate } from './vendor/anime.js';
 import { visibleGraphItems, directSetMemberIdsVisible, inheritedSetMemberIdsVisible, graphEdges, binOriginEdges, seedPosition, assignSpatialFolderHues } from './graph-model-20260730b.js';
 import { belongsToSet } from './sets-model.js';
@@ -150,6 +149,7 @@ import { createEditorDialog } from './app/components/editor-dialog.js';
 import { createBinControls } from './app/components/bin-controls.js';
 import { createSetMembershipMode } from './app/components/set-membership-mode.js';
 import { bootstrapWorkspace } from './app/bootstrap.js';
+import { bindStateSnapshots } from './app/state-snapshots.js';
 import { createVisualObservability, hydrationSummaryDisagrees, semanticKeyForItem } from './app/visual-observability.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
@@ -207,7 +207,7 @@ const PICKUP_PROMPT = `You are picking up Papers and its Backpack projects.
 Canonical Papers repository: https://github.com/Futahua/Papers-3
 Primary-machine source checkout: D:\\Letters\\MatTroiSeConMoc\\PAPERS 3\\Papers-3
 
-Before acting, read AGENTS.md and HERMES.md completely from the current repository, then follow the document map in README.md. Treat those current files as authoritative over this copied orientation.
+Before acting, read AGENTS.md completely from the current repository, then follow the document map in README.md. Treat that governing file as authoritative over this copied orientation.
 
 I do not code or design technical architecture. I describe the experience I want; you must construct it, test it, protect my data, and explain the result in plain language. Clicking buttons, entering information, choosing files, opening applications, organizing work, and confirming actions are normal use—not configuration or permission to invent editors, frameworks, or product-wide abstractions.
 
@@ -242,7 +242,9 @@ function createInertBroadcastChannel(name) {
 function createSafeBroadcastChannel(name) {
   if (typeof BroadcastChannel !== 'function') return createInertBroadcastChannel(name);
   try {
-    return new BroadcastChannel(name);
+    const channelName = name === WINDOW_LAYOUT_WIDGET_CHANNEL && SCOPE_ROOT_ID
+      ? name + ":scope:" + SCOPE_ROOT_ID : name;
+    return new BroadcastChannel(channelName);
   } catch {
     return createInertBroadcastChannel(name);
   }
@@ -2069,9 +2071,10 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
   // Exactly one surface answers a widget. Reuse the document-writer election
   // rather than inventing a second one: the Web Lock already names a single
   // WRITER per project and hands it on when that surface dies.
-  isAuthoritative: () => !WIDGET_SURFACE
+  isAuthoritative: (layoutId) => !WIDGET_SURFACE
     && coordinationState === 'ready'
-    && surfaceCoordinator?.role === SURFACE_ROLE.WRITER,
+    && surfaceCoordinator?.role === SURFACE_ROLE.WRITER
+    && (!SCOPE_ROOT_ID || Boolean(windowLayoutFromState(layoutId))),
   getLayout: windowLayoutFromState,
   getHoverPolicy: () => {
     const preferences = state.view?.preferences?.hotkeys ?? {};
@@ -3812,13 +3815,8 @@ function createGraphController() {
     const tx = w / 2 - cx * k;
     const ty = h / 2 - cy * k;
     const transform = zoomIdentity.translate(tx, ty).scale(k);
-    // 043: the vendored d3-selection.js selection (what `select(viewport)`
-    // returns) has NO transition() method — the transition machinery is only
-    // bundled inside d3-zoom.js against its private selection copy, so the
-    // previous animated branch always threw `viewportSelection.transition is
-    // not a function` on normal first render. Apply the transform directly
-    // (the same zoomBehavior.transform the old non-animated branch used) so
-    // the initial fit works for every renderer.
+    // Selection and zoom share the same vendored instance, including the
+    // interrupt method used internally by a direct zoom transform.
     zoomBehavior.transform(viewportSelection, transform);
     return true;
   }
@@ -4155,7 +4153,7 @@ function syncFileCapabilitySelection() {
   fileCapabilityPanel?.syncSelection(selection);
 }
 
-function syncSelection({ syncNavigator = true } = {}) {
+function syncSelection({ syncNavigator = true, syncPreview = true } = {}) {
   if (graph.isAttached) {
     graph.refreshSelection();
   } else {
@@ -4169,7 +4167,7 @@ function syncSelection({ syncNavigator = true } = {}) {
   elements.selectionStatus.textContent = session.selected.size === 1
     ? '1 item selected'
     : `${session.selected.size} items selected`;
-  syncFileCapabilitySelection();
+  if(syncPreview)syncFileCapabilitySelection();
   if (syncNavigator) void workspaceNavigator?.syncCanvasSelection(selectedFileCapabilityContext());
 }
 
@@ -4980,7 +4978,17 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     canMoveAyGItems: (ids,parentId) => {
       try {moveSelection(store.getSnapshot(),ids,parentId);return true;} catch {return false;}
     },
-    setAyGSelection: ids => { store.setSelection(ids); syncSelection({syncNavigator:false}); },
+    setAyGSelection: ids => { store.setSelection(ids); syncSelection({syncNavigator:false,syncPreview:false}); },
+    finishAyGMarquee: () => syncFileCapabilitySelection(),
+    saveNavigatorSavedStates: async pills => {
+      const selected=[...store.getSession().selected];
+      const saved=await commitWhenWorkspaceReady(()=>{
+        const current=store.getSnapshot();
+        return {...current,view:{...current.view,preferences:{...current.view.preferences,navigatorSavedStates:pills}}};
+      },{requireDurable:true});
+      store.setSelection(selected);syncSelection({syncNavigator:false});
+      return saved===true;
+    },
     reorderAyGItems: async (ids,parentId,beforeId) => {
       const snapshot=store.getSnapshot();
       const existing=new Set(itemsIn(snapshot,parentId).map(item=>item.id));
@@ -5128,7 +5136,10 @@ const drop = createDropController({
   commands,
 });
 
-const dragWorkspaceFiles=paths=>host.fileCapability('native-drag',{paths}).catch(error=>setStatus(error instanceof Error?error.message:'Native file drag failed.'));
+const dragWorkspaceFiles=(paths,source)=>{
+  workspaceNavigator?.rememberNativeFileDrag?.({...source,mode:source?.mode||'machine',paths});
+  return host.fileCapability('native-drag',{paths}).catch(error=>setStatus(error instanceof Error?error.message:'Native file drag failed.'));
+};
 const pointer = createPointerController({
   window,
   document,
@@ -5196,6 +5207,13 @@ window.__papersFlushBeforeClose = async () => {
  * shared-document baseline has settled. Keep the mutation in the editor
  * layer's normal commit path, but give that transient startup refusal the
  * same bounded retry as window-layout creation. Other failures stay visible. */
+bindStateSnapshots({
+  document,button:document.querySelector('#snapshots'),getState:()=>store.getSnapshot(),
+  fileCapability:(operation,params)=>host.fileCapability(operation,params),
+  save:build=>commitWhenWorkspaceReady(build,{requireDurable:true}),
+  confirm:question=>confirmDialog.askConfirm(question),setStatus,
+});
+
 async function commitWhenWorkspaceReady(next, message) {
   const build = typeof next === 'function' ? next : () => next;
   let committed = await commit(build(), message);

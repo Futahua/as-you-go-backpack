@@ -1,5 +1,9 @@
 # As you Go post-feature refactor plan
 
+> Historical handoff / proposal under [AGENTS.md](AGENTS.md), the sole governing document.
+> Dated instructions and implementation limits do not override current creator direction.
+> The current cleanup is docs/comments only; this file does not activate a code roadmap.
+
 Status: proposed, to begin only after the current feature wave and its creator eye checks are accepted.
 
 ## Outcome

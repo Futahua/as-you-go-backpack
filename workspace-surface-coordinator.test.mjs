@@ -1676,3 +1676,14 @@ test('018: a transfer aborted after release still forces a disk reload before an
   assert.deepEqual(ordinary.installed.at(-1).groups, [{ id: 'before-abort' }], 'election always reloads, even after an aborted transfer');
   assert.equal(ordinary.coordinator.revision, disk.revision);
 });
+
+
+test('stale preference edits preserve newer pills and explicit pill removal survives rebase', () => {
+  const base = {view:{preferences:{navigatorSavedStates:['a','b'],theme:'old'}}};
+  const current = {view:{preferences:{navigatorSavedStates:['a','b','c','d','e'],theme:'old'}}};
+  const local = {view:{preferences:{navigatorSavedStates:['a','b'],theme:'new'}}};
+  assert.deepEqual(mergeSurfaceSnapshots(base,local,current).view.preferences,
+    {navigatorSavedStates:['a','b','c','d','e'],theme:'new'});
+  const cleared = {view:{preferences:{navigatorSavedStates:[],theme:'old'}}};
+  assert.deepEqual(mergeSurfaceSnapshots(base,cleared,current).view.preferences.navigatorSavedStates,[]);
+});

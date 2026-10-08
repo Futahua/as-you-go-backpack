@@ -350,3 +350,16 @@ test('closed folders use the existing drop handler without hover expansion and O
   assert.match(source,/destination:plan\.parent\}/);
   assert.match(source,/retarget:updatesLinks\?retargetMovedFiles:undefined/);
 });
+
+
+test('Everything IPC connection failures retry briefly but stale and unrelated failures do not',async()=>{
+  const {searchNavigatorFiles}=await import('./public/app/workspace-navigator.js');
+  let calls=0;
+  const result=await searchNavigatorFiles({query:'333',wait:async()=>{},search:async()=>++calls<3?{ok:false,error:'Everything IPC query failed (2)'}:{ok:true,results:[]}});
+  assert.equal(result.ok,true);assert.equal(calls,3);
+  calls=0;
+  await searchNavigatorFiles({query:'333',wait:async()=>{},search:async()=>{calls++;return{ok:false,error:'Other error'};}});
+  assert.equal(calls,1);
+  let current=true;
+  assert.equal(await searchNavigatorFiles({query:'old',isCurrent:()=>current,wait:async()=>{current=false;},search:async()=>({ok:false,error:'Everything IPC query failed (2)'})}),null);
+});

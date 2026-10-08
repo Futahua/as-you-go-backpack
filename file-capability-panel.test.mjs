@@ -105,7 +105,7 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigatorCss, /\.workspace-navigator-machine-columns/);
   assert.match(navigatorCss, /\.workspace-navigator-row\.machine-list-row/);
   assert.match(navigator, /fileCapability\('icon'/);
-  assert.match(navigator, /fileCapability\('search',\{query:normalized,limit:1000\}\)/);
+  assert.match(navigator, /searchNavigatorFiles\(\{query:normalized,search:query=>o\.host\.fileCapability\('search',\{query,limit:1000\}\)/);
   assert.match(navigator, /searchResult\.total/);
   assert.match(navigator, /formatSearchSize/);
   assert.match(navigator, /formatSearchDate/);
@@ -277,7 +277,7 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /inspector\.classList\.add\('browser-mode'\)/);
   assert.match(source, /inspector\.classList\.remove\('browser-mode'\)/);
   assert.match(source, /panel\.classList\.add\('browser-mode'\)/);
-  assert.match(source, /panel\.classList\.remove\('browser-mode'\)/);
+  assert.match(source, /panel\.classList\.remove\('browser-mode', 'native-chrome-layout'\)/);
   assert.match(css, /\.file-capability-inspector\.browser-mode[\s\S]*padding: 0[\s\S]*gap: 0/);
   assert.match(css, /\.file-capability-inspector\.browser-mode > \.file-capability-item-title/);
   assert.match(css, /\.file-capability-panel\.expanded\.browser-mode[\s\S]*grid-template-rows: minmax\(0, 1fr\)/);

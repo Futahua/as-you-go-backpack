@@ -1,5 +1,9 @@
 # As you Go — creator eye-test problems
 
+> Reference / evidence under [AGENTS.md](AGENTS.md), the sole governing document.
+> Dated instructions and implementation limits do not override current creator direction.
+> The current cleanup is docs/comments only; this file does not activate a code roadmap.
+
 This file records unresolved creator-observed behavior for this machine-local Backpack.
 Creator eye-test observations outrank earlier automated acceptance claims. These problems
 do not define Papers-wide behavior and are not permission to generalize As you Go into the

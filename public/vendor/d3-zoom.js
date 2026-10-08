@@ -2736,6 +2736,7 @@ function zoom_default2() {
   return zoom;
 }
 export {
+  select_default2 as select,
   Transform as ZoomTransform,
   zoom_default2 as zoom,
   identity2 as zoomIdentity,

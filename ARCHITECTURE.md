@@ -1,5 +1,9 @@
 # As you Go — architecture and change guide
 
+> Reference / evidence under [AGENTS.md](AGENTS.md), the sole governing document.
+> Dated instructions and implementation limits do not override current creator direction.
+> The current cleanup is docs/comments only; this file does not activate a code roadmap.
+
 ## Alt+Q second-use input trace — 2026-10-06
 
 Creator evidence: the parity correction still works only once after refresh.
@@ -795,7 +799,7 @@ The host enables mouse activation for Peek mode before showInactive, since non-f
 
 ## Navigator direct manipulation — 2026-10-06
 
-`app/navigator-row-interactions.js` binds navigator row gestures. It reuses the canvas marquee controller (configurable tile selector) and model intersection math; AYG batch ordering uses existing `reorderSelection`, persisted through the workspace store. Row edge drags preview sibling ordering immediately; folder centers retain existing filesystem/folder drops. Opus custom display order is persisted by directory in local storage and a column sort overrides it. RMB marquee evaluates the cursor against its starting point on every move: left of the origin adds to the original baseline with a green rectangle, right subtracts intersections with a red rectangle. Crossing the origin switches mode live without accumulating intermediate selection changes. A plain right click leaves selection unchanged; Shift+right-click bypasses marquee to retain folder expansion. Double-click opens or runs AYG items through the existing activation owner; Opus retains its existing double-click activation. Drops outside the row body discard reorder previews and retain the existing destination owners. Batch pill drops preserve AYG names. Pane-collapse sits at the far right after collapse-all and clears AYG and machine expansion sets. Canvas type-to-run reads navigator collapse state; explicit Quick Run shortcuts remain available. Quick Run layers above the right pane; native preview surfaces yield through the existing geometry/visibility seam and return when the overlay closes. No physical input is injected during verification.
+`app/navigator-row-interactions.js` binds navigator row gestures. It reuses the canvas marquee controller (configurable tile selector) and model intersection math; AYG batch ordering uses existing `reorderSelection`, persisted through the workspace store. Row edge drags preview sibling ordering immediately; folder centers retain existing filesystem/folder drops. Opus custom display order is persisted by directory in local storage and a column sort overrides it. RMB marquee evaluates the cursor against its starting point on every move: left of the origin adds to the original baseline with a green rectangle, right subtracts intersections with a red rectangle. Crossing the origin switches mode live without accumulating intermediate selection changes. A plain right click leaves selection unchanged and toggles folders; RMB dragging suppresses folder toggles and uses marquee. Double-click opens or runs AYG items through the existing activation owner; Opus retains its existing double-click activation. Drops outside the row body discard reorder previews and retain the existing destination owners. Batch pill drops preserve AYG names. Pane-collapse sits at the far right after collapse-all and clears AYG and machine expansion sets. Canvas type-to-run reads navigator collapse state; explicit Quick Run shortcuts remain available. Quick Run layers above the right pane; native preview surfaces yield through the existing geometry/visibility seam and return when the overlay closes. No physical input is injected during verification.
 
 ### Cross-folder drag preview and invalid targets
 
@@ -809,4 +813,12 @@ AYG link retargeting and its cursor notification apply only to AYG-origin transf
 
 The live preview can move selected rows underneath the pointer. Hovering that previewed batch preserves the last valid reorder destination; in-pane native dragleave with a null related target also preserves it. Otherwise the drop fell through to ordinary folder append. The final AYG reorder requires a durable save acknowledgement, retains the batch selection, and reports save refusal explicitly.
 
-Breadcrumb popup folders reuse navigator disclosure arrows, outlined expanded headings, and branch guides; arrow click and Shift+right-click toggle the same popup-local expansion.
+Breadcrumb popup folders reuse navigator disclosure arrows, outlined expanded headings, and branch guides; arrow click and plain right-click toggle the same popup-local expansion.
+
+Navigator saved pills persist in `view.preferences.navigatorSavedStates` through the existing checked workspace commit owner. Browser storage remains a same-session cache/broadcast channel only; startup prefers durable preferences, including an intentionally empty list. Existing cached pills migrate when no durable list exists. Failed saves produce status text.
+
+`app/state-snapshots.js` owns date-named, gzip-compressed state backups in durable preferences. Snapshot payloads omit snapshot history to avoid recursive growth. Its floating toolbar control and management panel reuse navigator presentation and row gestures. Restore first saves the current state as a safety snapshot, and checked commits own every write. State and snapshot metadata have no fixed size ceiling.
+
+Snapshot restore requires typing the exact `RESTORE <name>` phrase and accepting a separate final confirmation. Cancelling either stage leaves state untouched.
+
+The machine-local snapshot storage configuration uses existing file capabilities to copy the flushed state into a unique backup folder. Durable preferences store only metadata and SHA-256 hashes; chunked text reads verify the complete backup before restore. Embedded compressed snapshots remain readable for compatibility. Snapshot search filters only this list; renaming edits its row in place.

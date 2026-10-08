@@ -1,5 +1,9 @@
 # Why branch 3 was retired: the ring did not follow its members
 
+> Historical handoff / proposal under [AGENTS.md](AGENTS.md), the sole governing document.
+> Dated instructions and implementation limits do not override current creator direction.
+> The current cleanup is docs/comments only; this file does not activate a code roadmap.
+
 Snapshot of the ring-as-physics build at the point where a live run in Papers
 found a fault the unit tests could not. 533 tests passed, which is exactly the
 problem: none of them dragged a member the way a user does.

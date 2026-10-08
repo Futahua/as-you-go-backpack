@@ -124,6 +124,30 @@ export function createToolbarController({
   }
 
   function setupDragging() {
+      const finishDrag = (event, expectedElement = null) => {
+        if (!drag || drag.pointerId !== event.pointerId || (expectedElement && drag.element !== expectedElement)) return;
+        const active = drag;
+        // Clear the shared slot before releasing capture. Browsers may emit
+        // lostpointercapture synchronously; it must not reinterpret a
+        // successful release as a cancellation/rollback.
+        drag = null;
+        if (active.element.hasPointerCapture(event.pointerId)) {
+          active.element.releasePointerCapture(event.pointerId);
+        }
+        const { key, moved } = active;
+        active.element.classList.remove('toolbar-dragging');
+        if (!moved) return;
+        const rect = active.element.getBoundingClientRect();
+        const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
+        const nextState = setToolbarPosition(
+          getState(),
+          key,
+          toolbarPositionFromRect(rect, workspaceRect),
+        );
+        setState(nextState);
+        void persist(nextState).catch((error) =>
+          setStatus(error instanceof Error ? error.message : String(error)));
+      };
     toolbarElements().forEach((element) => {
       const signal = abortController.signal;
       element.addEventListener('pointerdown', (event) => {
@@ -185,30 +209,6 @@ export function createToolbarController({
         drag.element.style.bottom = 'auto';
       }, { signal });
 
-      const finishDrag = (event, expectedElement = null) => {
-        if (!drag || drag.pointerId !== event.pointerId || (expectedElement && drag.element !== expectedElement)) return;
-        const active = drag;
-        // Clear the shared slot before releasing capture. Browsers may emit
-        // lostpointercapture synchronously; it must not reinterpret a
-        // successful release as a cancellation/rollback.
-        drag = null;
-        if (active.element.hasPointerCapture(event.pointerId)) {
-          active.element.releasePointerCapture(event.pointerId);
-        }
-        const { key, moved } = active;
-        active.element.classList.remove('toolbar-dragging');
-        if (!moved) return;
-        const rect = active.element.getBoundingClientRect();
-        const workspaceRect = document.querySelector('.workspace').getBoundingClientRect();
-        const nextState = setToolbarPosition(
-          getState(),
-          key,
-          toolbarPositionFromRect(rect, workspaceRect),
-        );
-        setState(nextState);
-        void persist(nextState).catch((error) =>
-          setStatus(error instanceof Error ? error.message : String(error)));
-      };
       const cancelDrag = (event) => {
         if (!drag || drag.pointerId !== event.pointerId || drag.element !== element) return;
         rollbackActiveDrag();

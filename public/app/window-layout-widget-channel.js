@@ -504,7 +504,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
       // A snapshot-request counts as presence too: it only comes from a live
       // widget, so a surface that missed widget-ready still converges.
       onWidgetOpen?.(layoutId);
-      if (!isAuthoritative()) return;
+      if (!isAuthoritative(message.layoutId)) return;
       const layout = getLayout(layoutId);
       if (!layout) {
         post({ type: 'error', layoutId, clientId, code: 'unknown-layout' });
@@ -517,7 +517,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
     if (message.type === 'hover-policy-request') {
       if (!exactKeys(message, ['type', 'layoutId', 'clientId'])) return;
       if (!boundedString(message.layoutId, 'layoutId') || !boundedString(message.clientId, 'clientId')) return;
-      if (!isAuthoritative()) return;
+      if (!isAuthoritative(message.layoutId)) return;
       const policy = getHoverPolicy?.(message.layoutId);
       if (!policy || !Array.isArray(policy.blockedBindings) || policy.blockedBindings.length > 256) return;
       post({ type: 'hover-policy', layoutId: message.layoutId, clientId: message.clientId,
@@ -534,7 +534,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
       if (typeof width !== 'number' || typeof height !== 'number' || !Number.isFinite(width)
         || !Number.isFinite(height) || width < 1 || width > 2000 || height < 1 || height > 2000) return;
       // Durable: the callback replaces and saves workspace state.
-      if (!isAuthoritative()) return;
+      if (!isAuthoritative(message.layoutId)) return;
       onCardSize?.(message.layoutId, Math.round(width), Math.round(height));
       return;
     }
@@ -555,7 +555,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
         || typeof message.baseRevision !== 'number' || !Number.isFinite(message.baseRevision)) return;
       // Native window mutation and revision ownership: WRITER only. Dropped
       // before parsing, since a non-writer produces neither effect nor reply.
-      if (!isAuthoritative()) return;
+      if (!isAuthoritative(message.layoutId)) return;
       const command = windowLayoutWidgetParseCommand(message.command);
       if (!command) return;
       const { layoutId, clientId, commandId, baseRevision } = message;
@@ -609,7 +609,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
     revisionOf,
     noteCommitted(layoutId, { reason } = {}) {
       if (!boundedString(layoutId, 'layoutId')) return revisionOf(layoutId);
-      if (!isAuthoritative()) return revisionOf(layoutId);
+      if (!isAuthoritative(layoutId)) return revisionOf(layoutId);
       const revision = bump(layoutId);
       const layout = getLayout(layoutId);
       if (layout) post({ type: 'snapshot', layoutId, revision, ...(reason ? { reason } : {}), snapshot: buildSnapshot(layout) });
@@ -622,7 +622,7 @@ export function createWindowLayoutWidgetChannelWorkspace({
      * for a widget that already holds that snapshot. */
     broadcast(layoutId) {
       if (!boundedString(layoutId, 'layoutId')) return revisionOf(layoutId);
-      if (!isAuthoritative()) return revisionOf(layoutId);
+      if (!isAuthoritative(layoutId)) return revisionOf(layoutId);
       const layout = getLayout(layoutId);
       if (layout) {
         post({ type: 'snapshot', layoutId, revision: revisionOf(layoutId), snapshot: buildSnapshot(layout) });

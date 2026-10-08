@@ -262,18 +262,19 @@ export function createWorkspaceCommands({
     if (preserveSelection) return [...store.getSession().selected];
     store.clearSelection();
     store.setSelectionAnchor(null);
-    syncSelection();
+    syncSelection({syncPreview:false,syncNavigator:false});
     return [];
   }
 
   /** Replaces the transient marquee selection without saving on every move. */
   function updateMarqueeSelection(ids) {
     store.setSelection(ids);
-    syncSelection();
+    syncSelection({syncPreview:false,syncNavigator:false});
   }
 
   /** Ends a marquee gesture; saves the view only when it actually moved. */
   function finishMarqueeSelection({ moved }) {
+    syncSelection();
     if (moved) saveWorkspaceView();
   }
 

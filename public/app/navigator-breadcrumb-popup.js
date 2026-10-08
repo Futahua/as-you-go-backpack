@@ -64,7 +64,7 @@ export function createBreadcrumbPopup({ document, children, art, activate, paint
         }
         if(folder)lead.addEventListener('click',event=>{event.stopPropagation();void toggle();});
         row.addEventListener('contextmenu', async event => {
-          if (!event.shiftKey || !['group','folder'].includes(item.kind)) return;
+          if (!['group','folder'].includes(item.kind)) return;
           event.preventDefault(); event.stopPropagation();
           await toggle();
         });

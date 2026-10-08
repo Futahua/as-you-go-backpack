@@ -2,7 +2,8 @@ import { bindNavigatorRowInteractions } from './navigator-row-interactions.js';
 import { moveNavigatorFiles, retryNavigatorFileLinks, navigatorFileMoveAllowed } from './navigator-file-transfer.js';
 const svg = (paths) => `<svg viewBox="0 0 20 20" aria-hidden="true">${paths.map((d) => `<path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</svg>`;
 import { createBreadcrumbPopup } from './navigator-breadcrumb-popup.js';
-import { createNavigatorSavedStates } from './navigator-saved-states.js';
+import { createNavigatorSavedStates, navigatorDropEffect } from './navigator-saved-states.js';
+export { navigatorDropEffect } from './navigator-saved-states.js';
 import { assignSpatialFolderHues, FOLDER_DISTANCE } from '../graph-model-20260730b.js';
 export function navigatorBranchHues(branches, colors = new Map()) {
  const nodes=branches.map(b=>({...b,x:b.depth*13,y:b.start*34})),pairs=[];
@@ -13,6 +14,15 @@ export function navigatorFolderPill(saved,groups){if(saved?.mode!=='action'||!sa
 
 export const NAVIGATOR_AYG_DRAG_TYPE = 'application/x-papers-ayg-navigator-items';
 export const NAVIGATOR_MACHINE_DRAG_TYPE = 'application/x-papers-machine-navigator-items';
+export async function searchNavigatorFiles({search,query,isCurrent=()=>true,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))}) {
+  for(let attempt=0;attempt<3;attempt++){
+    if(!isCurrent())return null;
+    const result=await search(query).catch(error=>({ok:false,message:error instanceof Error?error.message:String(error),results:[]}));
+    if(!isCurrent())return null;
+    if(result.ok||attempt===2||!String(result.message||result.error||'').includes('Everything IPC query failed (2)'))return result;
+    await wait(350*(attempt+1));
+  }
+}
 const NATIVE_DRAG_SOURCE_TTL_MS = 30_000;
 function button(doc, title, paths) {
   const b = doc.createElement('button');
@@ -71,10 +81,6 @@ export async function navigatorResolveDropPaths(source, files, resolve) {
 // Electron startDrag advertises copyLink on Windows. The negotiated cursor
 // effect must be allowed by the source or Chromium cancels before firing drop.
 // The navigator's move plan, not this transport effect, owns the file operation.
-export function navigatorDropEffect(effectAllowed, preferred='move') {
-  const allowed={none:[],copy:['copy'],link:['link'],move:['move'],copyLink:['copy','link'],copyMove:['copy','move'],linkMove:['link','move'],all:['copy','link','move'],uninitialized:['copy','link','move']}[effectAllowed]||['copy','link','move'];
-  return allowed.includes(preferred)?preferred:allowed.includes('copy')?'copy':allowed.includes('link')?'link':'none';
-}
 
 export async function navigatorNewFolderDestination({mode,selected,currentId,path,rootId,stat,isAbsoluteWindowsPath}) {
   if(mode==='machine')return {mode:'machine',parent:selected?.kind==='folder'?selected.path:selected?.path?parentPath(selected.path):path};
@@ -244,6 +250,7 @@ export function createWorkspaceNavigator(o) {
     setCollapsed() {},
   });
   o.workspace.classList.add('navigator-docked');
+  let savedStates = null;
   const s = {
     mode: 'ayg',
     view: 'tree',
@@ -344,6 +351,7 @@ export function createWorkspaceNavigator(o) {
     },
     isNativeDrag: () => Boolean(s.nativeDragSource && Date.now()-s.nativeDragSource.startedAt<30_000),
     getSelection: () => s.mode==='ayg' ? o.getSession().selected : s.machineSelected,
+    finishSelection: () => {if(s.mode==='ayg')o.finishAyGMarquee?.();},
     setSelection: ids => {
       if(s.mode==='ayg') o.setAyGSelection?.(ids);
       else {s.machineSelected=new Set(ids);s.selected=s.machineRows.get(ids.at(-1))||null;}
@@ -706,7 +714,6 @@ export function createWorkspaceNavigator(o) {
       crumb.addEventListener('dragstart',event=>event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify(segment.path?{mode:'machine',path:segment.path,machineRoot:segment.path,view:'nav',name:segment.label}:{mode:'ayg',currentId:segment.item?.id||o.rootId,view:'nav',name:segment.label,icon:segment.item?.icon})));
       installNavigatorDropTarget(crumb,segment);
       crumb.addEventListener('contextmenu',event=>{
-        if(!event.shiftKey)return;
         event.preventDefault();event.stopPropagation();
         const parent = segment.path
           ? {kind:'folder',path:parentPath(segment.path)}
@@ -819,7 +826,7 @@ export function createWorkspaceNavigator(o) {
         e.preventDefault();e.stopPropagation();void enterAyG(x);
       });
       row.addEventListener('contextmenu',(e)=>{
-        if(!e.shiftKey||x.kind!=='group')return;
+        if(x.kind!=='group')return;
         e.preventDefault();e.stopPropagation();
         s.expanded.has(x.id)?s.expanded.delete(x.id):s.expanded.add(x.id);
         render();
@@ -1086,7 +1093,7 @@ export function createWorkspaceNavigator(o) {
       }
     });
     row.addEventListener('contextmenu',(e)=>{
-      if(!e.shiftKey||!folder)return;
+      if(!folder)return;
       e.preventDefault();e.stopPropagation();
       void toggleMachine(x.path);
     });
@@ -1219,7 +1226,7 @@ export function createWorkspaceNavigator(o) {
     const generation=++s.searchGeneration;
     if(!normalized){render();return;}
     renderSearch();
-    const result=await o.host.fileCapability('search',{query:normalized,limit:1000}).catch((error)=>({ok:false,message:error instanceof Error?error.message:String(error),results:[]}));
+    const result=await searchNavigatorFiles({query:normalized,search:query=>o.host.fileCapability('search',{query,limit:1000}),isCurrent:()=>generation===s.searchGeneration&&s.searchQuery===normalized});
     if(generation!==s.searchGeneration||s.searchQuery!==normalized)return;
     s.searchResult=result;
     renderSearch();
@@ -1231,6 +1238,7 @@ export function createWorkspaceNavigator(o) {
     s.searchTimer=setTimeout(()=>{s.searchTimer=null;void runSearch(searchInput.value);},120);
   });
   searchInput.addEventListener('keydown',(event)=>{
+    if(event.key==='Enter'){event.preventDefault();if(s.searchTimer)clearTimeout(s.searchTimer);s.searchTimer=null;void runSearch(searchInput.value);}
     if(event.key==='Escape'&&searchInput.value){event.preventDefault();clearSearch();}
   });
   function setCollapsed(collapsed){
@@ -1393,6 +1401,7 @@ export function createWorkspaceNavigator(o) {
     }
   }
   function render(){
+    savedStates?.syncDurable();
     syncChrome();
     if (s.collapsed) return;
     if(s.searchQuery){renderSearch();return;}
@@ -1422,7 +1431,10 @@ export function createWorkspaceNavigator(o) {
     if(saved?.itemId)return {kind:'shortcut',shortcutId:saved.itemId,icon:typeof saved.icon==='string'?saved.icon:null};
     return { kind:saved?.mode === 'ayg' ? 'group' : 'folder', icon:typeof saved?.icon === 'string' ? saved.icon : null };
   };
-  const savedStates=createNavigatorSavedStates({document:d,container:savedPills,
+  savedStates=createNavigatorSavedStates({document:d,container:savedPills,
+    loadSavedStates:()=>o.getState().view?.preferences?.navigatorSavedStates,
+    saveSavedStates:o.saveNavigatorSavedStates,
+    onSaveError:error=>o.setStatus(error.message||'Saved items could not be saved.'),
     resolveTarget:saved=>(saved.quickRunKey?o.pinnedQuickRunPath?.(saved.quickRunKey):null)||o.nativeDragPaths?.([saved.itemId||saved.art?.shortcutId])?.[0],
     decorateLabel:(label,saved)=>{
       const normalized=navigatorFolderPill(saved,o.getState().groups||[]);
@@ -1498,8 +1510,7 @@ export function createWorkspaceNavigator(o) {
     if(event.button!==0||panel.contains(event.target))return;
     const canvas=event.target?.closest?.('#graph-viewport, .icon-item, #icon-grid, #workspace-backdrop');
     if(!canvas&&event.target!==o.workspace)return;
-    s.expanded.clear();
-    s.machineExpanded.clear();
+    // Canvas focus does not change the navigator's folder expansion.
     clearSearch({renderNow:false});
     s.mode='ayg';
     setView('nav',false);
@@ -1507,6 +1518,7 @@ export function createWorkspaceNavigator(o) {
   });
   return Object.freeze({
     render,
+    rememberNativeFileDrag(source){rememberNativeDrag(source);},
     syncCanvasSelection,
     copySelectionPaths,
     isMachineMode: () => s.mode === 'machine',
@@ -1516,11 +1528,11 @@ export function createWorkspaceNavigator(o) {
       const rect=savedPills.getBoundingClientRect();
       if(x<rect.left||x>rect.right||y<rect.top||y>rect.bottom)return false;
       for(const id of ids){
-        const item=[...(o.getState().groups||[]),...o.itemsIn(o.getState(),currentAyG())].find(item=>item.id===id||item.shortcutId===id);
+        const item=[...(o.getState().groups||[]).map(group=>({...group,kind:'group'})),...o.itemsIn(o.getState(),currentAyG())].find(item=>item.id===id||item.shortcutId===id);
         if(item){const saved=navigatorSavedStateForItem(item);if(saved)savedStates.add(saved);}
       }
       return true;
     },
-    setWidth(width){s.width=Math.round(Math.max(176,Math.min(d.defaultView.innerWidth*.55,width)));o.workspace.style.setProperty('--workspace-navigator-width',s.width+'px');persistUi('papers:ayg:navigator-width',s.width);},
+    setWidth(width,{nativeEdge=false}={}){s.width=Math.round(Math.max(176,Math.min(d.defaultView.innerWidth*(nativeEdge?1:.55),width)));o.workspace.style.setProperty('--workspace-navigator-width',s.width+'px');persistUi('papers:ayg:navigator-width',s.width);},
   });
 }

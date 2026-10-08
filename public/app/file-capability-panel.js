@@ -1,8 +1,12 @@
-import { browserTabClosePlan, createPaneFillControl } from './browser-pane-actions.js';
+import { createPaneSelectionPolicy } from './pane-selection-policy.js';
+import { browserTabClosePlan } from './browser-pane-actions.js';
 import { installBrowserTabDrag, insertBrowserTab } from './browser-tab-drag.js';
 import { installChromeFocusPolicy } from './chrome-focus-policy.js';
 import { createBrowserSourceSelection } from './browser-source-selection.js';
 import { createPreviewGeometryScheduler } from './preview-geometry-scheduler.js';
+import { createEditorLoadingProgress } from './editor-loading-progress.js';
+import { installNativeWindowTabs } from './native-window-tabs.js';
+import { chromeLayoutBounds, trackChromeLayout } from './chrome-layout.js';
 
 const SEARCH_DEBOUNCE_MS = 120;
 const VERIFY_ATTEMPTS = 40;
@@ -163,6 +167,13 @@ export function createFileCapabilityPanel(options) {
     deleteArmed: false,
     previewObjectUrl: null,
     previewResourceId: null,
+    officeEditorAvailable: false,
+    officeEligible: false,
+    officeOpening: false,
+    officeProgress: null,
+    officeSessionId: null,
+    officeGeometry: null,
+    officeObserver: null,
     nativePreviewSessionId: null,
     nativePreviewObserver: null,
     pdfPreviewSessionId: null,
@@ -170,6 +181,9 @@ export function createFileCapabilityPanel(options) {
     pdfPreviewClosePromise: Promise.resolve(),
     htmlPreviewSessionId: null,
     htmlPreviewObserver: null,
+    chromePaneSource: null,
+    chromeResume: false,
+    chromeLayout: null,
     browserSessionId: null,
     transientOverlay: false,
     browserObserver: null,
@@ -339,10 +353,14 @@ export function createFileCapabilityPanel(options) {
   const expandButton = createButton(documentRef, '', 'file-capability-icon-button file-capability-expand');
   setButtonSvg(documentRef, expandButton, 'Expand file preview', ['M3.5 4.5h13v11h-13z']);
   expandButton.setAttribute('aria-pressed', 'false');
-  header.append(openTabButton, expandButton);
-  const fillTabButton = createButton(documentRef, '', 'file-capability-icon-button file-capability-fill-tab');
-  setButtonSvg(documentRef, fillTabButton, 'Fill this Papers tab', ['M7 3H3v4', 'M13 3h4v4', 'M3 13v4h4', 'M17 13v4h-4']);
-  header.insertBefore(fillTabButton, expandButton);
+  const editOfficeButton = createButton(documentRef, '', 'file-capability-icon-button');
+  setButtonSvg(documentRef, editOfficeButton, 'Edit document inline', ['M3 14.5v3h3L17 6.5 13.5 3z', 'M11.5 5l3.5 3.5']);
+  editOfficeButton.hidden = true;
+  const saveOfficeButton = createButton(documentRef, '', 'file-capability-icon-button');
+  setButtonSvg(documentRef, saveOfficeButton, 'Save document', ['M3 3h11l3 3v11H3z', 'M6 3v5h7V3', 'M6 17v-6h8v6']);
+  saveOfficeButton.hidden = true;
+  header.append(editOfficeButton, saveOfficeButton, openTabButton, expandButton);
+
 
   const searchWrap = documentRef.createElement('div');
   searchWrap.className = 'file-capability-search';
@@ -435,14 +453,14 @@ export function createFileCapabilityPanel(options) {
       if (result.providers.everything) names.push('Everything');
       if (result.providers.directoryOpus) names.push('Opus');
       if (result.providers.libreOffice) names.push('LibreOffice');
+      state.officeEditorAvailable = result.providers.officeEditor === true;
+      updateOfficeButtons();
       providerStatus.textContent = names.join(' · ');
     }).catch(() => {});
   }
 
   function setExpanded(expanded) {
     state.expanded = Boolean(expanded);
-    fillTabButton.hidden = !state.expanded || state.fullPage;
-    if (!state.expanded) paneFill.setFilled(false);
     panel.classList.toggle('expanded', state.expanded);
     workspace?.classList.toggle('file-capability-expanded', state.expanded);
     setButtonSvg(
@@ -455,11 +473,12 @@ export function createFileCapabilityPanel(options) {
     );
     expandButton.setAttribute('aria-pressed', String(state.expanded));
     openTabButton.hidden = state.fullPage || !state.expanded || !state.inspectedPath;
+    updateOfficeButtons();
   }
 
   function setPanelWidth(width) {
     const viewportWidth = documentRef.defaultView?.innerWidth ?? 1200;
-    const maxWidth = Math.max(300, Math.min(900, Math.floor(viewportWidth * 0.75)));
+    const maxWidth = Math.max(300, viewportWidth - 190);
     state.width = Math.max(300, Math.min(maxWidth, Math.round(width)));
     panel.style.setProperty('--file-capability-width', state.width + 'px');
     workspace?.style.setProperty('--file-capability-width', state.width + 'px');
@@ -490,6 +509,106 @@ export function createFileCapabilityPanel(options) {
     if (resourceId === state.previewResourceId) state.previewResourceId = null;
     void host.fileCapability('preview-release', { resourceId }).catch(() => {});
   }
+
+  function updateOfficeButtons() {
+    const editing = Boolean(state.officeSessionId);
+    editOfficeButton.hidden = !state.expanded || panel.classList.contains('browser-mode') || !state.officeEditorAvailable || !state.officeEligible;
+    editOfficeButton.disabled = state.officeOpening;
+    editOfficeButton.setAttribute('aria-pressed', String(editing));
+    editOfficeButton.title = editing ? 'Return to preview; unsaved work stays open in LibreOffice' : 'Edit document inline';
+    editOfficeButton.setAttribute('aria-label', editing ? 'Return to document preview' : 'Edit document inline');
+    saveOfficeButton.hidden = !state.expanded || !editing;
+  }
+
+  async function closeOfficeEditor() {
+    state.officeProgress?.stop();
+    state.officeProgress = null;
+    if (state.officeOpening) void host.fileCapability('office-editor-close-owner', {}).catch(() => {});
+    const sessionId = state.officeSessionId;
+    if (sessionId) {
+      const result = await host.fileCapability('office-editor-close', { sessionId }).catch(error => ({ ok: false, message: String(error) }));
+      if (!result?.ok) {
+        itemMeta.textContent = result?.message || 'Save the document before leaving its editor.';
+        return result || { ok: false };
+      }
+      if (state.officeSessionId !== sessionId) return result;
+    }
+    state.officeGeometry?.dispose();
+    state.officeGeometry = null;
+    state.officeObserver?.disconnect();
+    state.officeObserver = null;
+    state.officeSessionId = null;
+    state.officeOpening = false;
+    updateOfficeButtons();
+    return { ok: true };
+  }
+
+  async function editOfficeDocument() {
+    if (!state.inspectedPath || !state.officeEligible || state.officeOpening) return;
+    if (state.officeSessionId) {
+      if (!(await closeOfficeEditor())?.ok) return;
+      await inspectPath(state.inspectedPath, state.context);
+      return;
+    }
+    const target = state.inspectedPath, generation = ++state.inspectGeneration;
+    clearPreview();
+    state.officeOpening = true;
+    updateOfficeButtons();
+    const surface = documentRef.createElement('div');
+    surface.className = 'file-capability-native-preview';
+    surface.textContent = '';
+    preview.append(surface);
+    const loadId = `${Date.now()}:${generation}`;
+    state.officeProgress = createEditorLoadingProgress({
+      document: documentRef, container: preview,
+      active: () => state.officeOpening && generation === state.inspectGeneration,
+      status: async () => (await host.fileCapability('office-editor-status', { loadId }))?.progress,
+    });
+    await nextLayoutTick();
+    await state.pdfPreviewClosePromise.catch(() => {});
+    if (generation !== state.inspectGeneration || state.inspectedPath !== target) return;
+    const opened = await host.fileCapability('office-editor-open', { path: target, rect: nativePreviewRect(surface), loadId }).catch(error => ({ ok: false, message: String(error) }));
+    if (generation !== state.inspectGeneration || state.inspectedPath !== target) {
+      if (opened?.ok && opened.sessionId) void host.fileCapability('office-editor-close', { sessionId: opened.sessionId }).catch(() => {});
+      return;
+    }
+    state.officeOpening = false;
+    state.officeProgress?.stop();
+    state.officeProgress = null;
+    if (!opened?.ok || typeof opened.sessionId !== 'string') {
+      surface.textContent = opened?.message || 'The document could not be opened inline.';
+      updateOfficeButtons();
+      return;
+    }
+    surface.textContent = '';
+    state.officeSessionId = opened.sessionId;
+    if (!state.expanded) void host.fileCapability('office-editor-visible', { sessionId: opened.sessionId, visible: false }).catch(() => {});
+    saveOfficeButton.disabled = opened.readOnly === true;
+    const sessionId = opened.sessionId;
+    state.officeGeometry = createPreviewGeometryScheduler({
+      schedule: callback => documentRef.defaultView.requestAnimationFrame(callback),
+      send: rect => host.fileCapability('office-editor-move', { sessionId, rect }),
+    });
+    const move = () => { if (state.expanded && state.officeSessionId === sessionId) state.officeGeometry?.update(nativePreviewRect(surface)); };
+    if (typeof ResizeObserver === 'function') {
+      state.officeObserver = new ResizeObserver(move);
+      state.officeObserver.observe(surface);
+    }
+    updateOfficeButtons();
+    move();
+  }
+  editOfficeButton.addEventListener('click', () => { void editOfficeDocument(); });
+  saveOfficeButton.addEventListener('click', async () => {
+    const sessionId = state.officeSessionId;
+    if (!sessionId) return;
+    saveOfficeButton.disabled = true;
+    saveOfficeButton.setAttribute('aria-busy', 'true');
+    const result = await host.fileCapability('office-editor-save', { sessionId }).catch(error => ({ ok: false, message: String(error) }));
+    saveOfficeButton.disabled = false;
+    saveOfficeButton.removeAttribute('aria-busy');
+    if (state.officeSessionId !== sessionId) return;
+    itemMeta.textContent = result?.ok ? 'Saved' : (result?.message || 'Could not save the document.');
+  });
 
   function closeNativePreview() {
     state.nativeGeometry?.dispose();
@@ -547,6 +666,7 @@ export function createFileCapabilityPanel(options) {
   }
 
   function clearPreview({ preserveBrowser = false } = {}) {
+    void closeOfficeEditor();
     closeNativePreview();
     closePdfPreview();
     closeHtmlPreview();
@@ -569,6 +689,12 @@ export function createFileCapabilityPanel(options) {
       state.previewObjectUrl = null;
     }
     preview.replaceChildren();
+  }
+
+  function stopChromeLayout() {
+    state.chromeLayout?.stop();
+    state.chromeLayout = null;
+    void host.fileCapability('chrome-pane-visible', { visible: false }).catch(() => {});
   }
 
   function applyBrowserHostState(hostTab) {
@@ -981,6 +1107,36 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderBrowserWorkspace() {
+    const source = state.chromePaneSource;
+    stopChromeLayout();
+    panel.classList.add('browser-mode', 'native-chrome-layout');
+    inspector.classList.add('browser-mode');
+    if (!source || !state.expanded) return;
+    const generation = state.inspectGeneration;
+    const current = () => state.expanded && state.inspectedUrl === source.url && generation === state.inspectGeneration;
+    const move = rect => {
+      if (rect && current()) void host.fileCapability('chrome-pane-move', { rect }).catch(() => {});
+    };
+    state.chromeLayout = trackChromeLayout({ panel, header, viewport: windowRef, update: move });
+    providerStatus.textContent = '';
+    void nextLayoutTick().then(async () => {
+      if (!current()) return;
+      const rect = chromeLayoutBounds(panel, header, windowRef);
+      if (!rect) return;
+      await host.fileCapability('chrome-pane-visible', { visible: !state.transientOverlay });
+      if (!current()) return;
+      const result = await host.fileCapability('chrome-pane-open', {
+        source: state.chromeResume ? 'workspace:resume' : source.shortcutId ? 'shortcut:' + source.shortcutId : 'url:' + source.url,
+        url: source.url, rect,
+      }).catch(error => ({ ok: false, error: error.message || String(error) }));
+      if (!current()) return;
+      providerStatus.textContent = '';
+      if (!result?.ok) console.warn('Native pane:', result?.message || result?.error || 'Chrome could not be attached.');
+      state.chromeLayout?.refresh();
+      await host.fileCapability('chrome-pane-visible', { visible: !state.transientOverlay });
+    }).catch(error => { if (current()) { providerStatus.textContent = ''; console.warn('Native pane:', error); } });
+  }
+  function renderLegacyBrowserWorkspace() {
     panel.classList.add('browser-mode');
     inspector.classList.add('browser-mode');
     clearPreview();
@@ -1200,7 +1356,9 @@ export function createFileCapabilityPanel(options) {
       renderEmptySelection(0);
       return;
     }
-    if (!browserSourceSelection.update(source, url)) return;
+    browserSourceSelection.update(source, url);
+    state.chromeResume = false;
+    state.chromePaneSource = { ...source, url };
     ++state.inspectGeneration;
     state.context = null;
     state.inspectedPath = null;
@@ -1216,7 +1374,8 @@ export function createFileCapabilityPanel(options) {
     openTabButton.hidden = true;
     actions.hidden = true;
     state.browserDownloadsOpen = false;
-    browserTabForSource(source);
+    // Chrome owns tabs and session persistence; do not recreate legacy tab records.
+    clearPreview();
     renderBrowserWorkspace();
   }
 
@@ -1360,6 +1519,8 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderEntry(entry) {
+    state.officeEligible = entry?.kind === 'file' && /\.(?:docx?|odt|rtf|xlsx?|ods)$/i.test(entry.path || state.inspectedPath || '');
+    updateOfficeButtons();
     if (!entry) {
       itemTitle.textContent = basename(state.inspectedPath) || 'File';
       itemMeta.textContent = '';
@@ -1440,7 +1601,13 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     if (!opened || !opened.ok || typeof opened.sessionId !== 'string') {
-      surface.textContent = opened && opened.message ? opened.message : 'Windows preview could not be hosted.';
+      surface.textContent = 'Preparing another preview…';
+      const fallback = await host.fileCapability('preview', { path: target, skipWindowsPreview: true }).catch(error => ({ ok: false, message: error instanceof Error ? error.message : String(error) }));
+      if (generation !== state.inspectGeneration || state.inspectedPath !== target) {
+        if (fallback?.preview?.resourceId) void host.fileCapability('preview-release', { resourceId: fallback.preview.resourceId }).catch(() => {});
+        return;
+      }
+      renderPreview(fallback);
       return;
     }
     state.nativePreviewSessionId = opened.sessionId;
@@ -1831,10 +1998,21 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderEmptySelection() {
+      // The native host retains the active peer across previews and restart.
+      // Resume that peer without opening or selecting a Chrome tab.
+      if (nativeWindowTabs.hasWindows()) {
+        void nativeWindowTabs.showCurrent().catch(error => console.warn('Native pane:', error));
+        return;
+      }
+      state.chromeResume = true;
+      state.chromePaneSource ||= { url: DEFAULT_BROWSER_HOME, name: 'Chrome' };
+      clearPreview();
+      stopChromeLayout();
       ++state.inspectGeneration;
       state.context = null;
       state.inspectedPath = null;
-      state.inspectedUrl = null;
+      state.inspectedUrl = state.chromePaneSource.url;
+      setExpanded(true);
       state.lastPreviewResult = null;
       disarmDelete();
       renameRow.hidden = true;
@@ -1859,15 +2037,22 @@ export function createFileCapabilityPanel(options) {
 
   async function inspectPath(target, context) {
     if (!isAbsoluteWindowsPath(target)) return false;
-    panel.classList.remove('browser-mode');
-    inspector.classList.remove('browser-mode');
+    paneSelectionPolicy.hold();
     const generation = ++state.inspectGeneration;
+    if (state.officeSessionId) {
+      if (!(await closeOfficeEditor())?.ok || generation !== state.inspectGeneration) return false;
+    }
+    stopChromeLayout();
+    panel.classList.remove('browser-mode', 'native-chrome-layout');
+    inspector.classList.remove('browser-mode');
     state.inspectedPath = target;
     state.inspectedUrl = null;
     if (context !== undefined) state.context = context;
     disarmDelete();
     renameRow.hidden = true;
     itemTitle.textContent = basename(target) || target;
+    state.officeEligible = false;
+    updateOfficeButtons();
     itemMeta.textContent = 'Loading…';
     pathText.textContent = target;
     copyPathButton.hidden = false;
@@ -1986,11 +2171,21 @@ export function createFileCapabilityPanel(options) {
     const next = Boolean(expanded);
     if (next === state.expanded) return;
     setExpanded(next);
+    if (state.inspectedUrl) {
+      if (next) { if (state.inspectedUrl === 'native-window') nativeWindowTabs.showCurrent(); else renderBrowserWorkspace(); }
+      else stopChromeLayout();
+      return;
+    }
     if (!next) {
+      if (state.officeSessionId) void host.fileCapability('office-editor-visible', { sessionId: state.officeSessionId, visible: false }).catch(() => {});
       closeNativePreview();
       closePdfPreview();
       closeHtmlPreview();
       hideBrowserTabs();
+    }
+    else if (state.officeSessionId) {
+      void host.fileCapability('office-editor-visible', { sessionId: state.officeSessionId, visible: true }).catch(() => {});
+      refreshPreviewGeometry();
     }
     else if (state.lastPreviewResult?.preview?.kind === 'windows-preview-handler') renderPreview(state.lastPreviewResult);
     else if (['hosted-pdf', 'hosted-html'].includes(state.lastPreviewResult?.preview?.kind) && state.inspectedPath) {
@@ -2185,8 +2380,15 @@ export function createFileCapabilityPanel(options) {
   panel.addEventListener('pointerdown', (event) => event.stopPropagation());
   panel.addEventListener('click', (event) => event.stopPropagation());
 
-  function syncSelection(selection) {
+  const paneSelectionPolicy = createPaneSelectionPolicy();
+  async function syncSelection(selection) {
+    if (!paneSelectionPolicy.observe(selection)) return;
     if (state.fullPage) return;
+    const sourcePath = selection?.mode === 'single' ? selection.item?.path : selection?.path;
+    if (state.officeSessionId && sourcePath !== state.inspectedPath) {
+      const generation = ++state.inspectGeneration;
+      if (!(await closeOfficeEditor())?.ok || generation !== state.inspectGeneration) return false;
+    }
     if (selection?.mode === 'web') {
       renderWebSelection(selection.item);
       return;
@@ -2219,10 +2421,12 @@ export function createFileCapabilityPanel(options) {
   }
 
   function refreshPreviewGeometry() {
+    state.chromeLayout?.refresh();
     if (!state.expanded) return;
     const surface = preview.querySelector('.file-capability-native-preview');
     if (!surface) return;
     const rect = nativePreviewRect(surface);
+    if (state.officeSessionId) state.officeGeometry?.update(rect);
     if (state.nativePreviewSessionId) {
       state.nativeGeometry?.update(rect);
     }
@@ -2253,12 +2457,48 @@ export function createFileCapabilityPanel(options) {
     }
   }
 
-  const paneFill = createPaneFillControl({
-    panel, button: fillTabButton, refresh: refreshPreviewGeometry,
-    schedule: (callback) => windowRef.requestAnimationFrame(callback),
+  const nativeWindowTabs = installNativeWindowTabs({ document: documentRef, header, host,
+    lens: async () => {
+      const result = await host.fileCapability('browser-lens-screen', { nativeChrome: true });
+      if (result?.cancelled) return;
+      const url = result?.ok && safeBrowserUrl(result.url);
+      if (!url) throw new Error(result?.message || result?.error || 'Lens screen capture could not start.');
+      await nativeWindowTabs.showCurrent();
+      const opened = await host.fileCapability('chrome-pane-open', { source: 'lens:' + windowRef.crypto.randomUUID(), url, rect: chromeLayoutBounds(panel, header, windowRef) });
+      if (!opened?.ok) throw new Error(opened?.message || opened?.error || 'Lens could not open in Chrome.');
+    },
+    bounds: () => chromeLayoutBounds(panel, header, windowRef),
+    prepare: async () => {
+      paneSelectionPolicy.hold();
+      providerStatus.textContent = '';
+      const generation = ++state.inspectGeneration;
+      if ((await closeOfficeEditor())?.ok === false || generation !== state.inspectGeneration) return false;
+      clearPreview();
+      state.inspectedPath = null; state.inspectedUrl = 'native-window';
+      state.chromePaneSource = null;
+      state.chromeResume = false;
+      setExpanded(true);
+      panel.classList.add('browser-mode', 'native-chrome-layout');
+      inspector.classList.add('browser-mode');
+      if (!state.chromeLayout) state.chromeLayout = trackChromeLayout({ panel, header, viewport: windowRef,
+        update: rect => { if (rect) void host.fileCapability('chrome-pane-move', { rect }); } });
+      return true;
+    },
+    overlay: active => host.fileCapability('chrome-pane-visible', { visible: !active && Boolean(state.chromeLayout) && state.expanded }),
+    status: message => { providerStatus.textContent = ''; console.warn('Native pane:', message); },
   });
-  fillTabButton.hidden = !state.expanded || state.fullPage;
   const releaseChromeFocus = installChromeFocusPolicy(documentRef);
+  const releaseChromeLayout = host.onChromeLayout?.(rect => {
+    if (!state.chromeLayout || !state.inspectedUrl) return;
+    // Follow the real native left edge without the preview width clamps or
+    // transition. Native resizing remains entirely in Windows' move loop.
+    const box = panel.getBoundingClientRect();
+    const width = Math.max(1, Math.round(box.right - rect.x - 2));
+    panel.dataset.chromeLeft = String(rect.x);
+    state.width = width;
+    panel.style.setProperty('--file-capability-width', width + 'px');
+    workspace?.style.setProperty('--file-capability-width', width + 'px');
+  });
 
   const api = Object.freeze({
     syncSelection,
@@ -2274,10 +2514,14 @@ export function createFileCapabilityPanel(options) {
     refreshPreviewGeometry,
     setTransientOverlay(active) {
       state.transientOverlay = active === true;
+      if(state.chromeLayout) void host.fileCapability('chrome-pane-visible', { visible: !state.transientOverlay && state.expanded }).catch(() => {});
       if(state.browserSurface?.isConnected) void host.fileCapability('browser-tabs-visible', {visible:!state.transientOverlay && state.expanded}).catch(()=>{});
       refreshPreviewGeometry();
     },
     destroy() {
+      releaseChromeLayout?.();
+      nativeWindowTabs.destroy();
+      stopChromeLayout();
       releaseChromeFocus();
       if (state.searchTimer) clearTimeout(state.searchTimer);
       clearPreview();

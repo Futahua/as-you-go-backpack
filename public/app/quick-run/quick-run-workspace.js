@@ -251,7 +251,7 @@ export function bindQuickRunWorkspace({
     const current=revalidateQuickRunRow(getState(),key);
     const file=current.ok?planQuickRunCopyPath(current.row):null;
     if(!file||!(/^[A-Za-z]:[\\/]|^\\\\/.test(file.target.path)))return;
-    event.preventDefault();void startFileDrag([file.target.path]);
+    event.preventDefault();void startFileDrag([file.target.path], {mode:'ayg',itemIds:[current.row.shortcutId],quickRunKey:key});
   });
   return Object.freeze({ ...surface, filePathForKey(key) {
     const current = revalidateQuickRunRow(getState(), key);

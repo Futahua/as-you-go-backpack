@@ -840,77 +840,9 @@ persistently alter any set, membership or creator state.
 [2026-08-06 Asia/Saigon] WORKER - Assignment 004 PICKUP
 ======================================================================
 
-PLAIN-LANGUAGE PICKUP (HERMES RITUAL)
-1. What is being asked: closing Papers after entering As you Go closes
-   normally — no "Object has been destroyed" error dialog.
-2. Scope: the canonical Papers host source only, limited to the
-   BaseWindow/Backpack-project-surface lifecycle — src/main/index.ts's
-   window teardown and BackpackProjectRuntime.hide().
-3. What it does not authorize: Backpack feature changes, state.json,
-   the separate transient state-save rename retry, any other runtime/
-   window lifecycle refactor, and build/package/release/install/launch/
-   restart.
-4. Open product questions: none — the mechanism is specified and the
-   code confirms it: index.ts calls backpackProjectRuntime.hide() from
-   the BaseWindow `closed` event, after Electron destroyed the window;
-   hide() then dereferences this.window.contentView (backpackProject
-   Runtime.ts:53) and throws deterministically.
-5. Release/install authorized: no.
-6. Which machines/why main-binary change is required: this machine's
-   canonical Papers checkout; the crash lives in the host's own window
-   lifecycle, so the host source is the only correct place.
-
-PLAN
-- index.ts: run backpackProjectRuntime.hide() from `close` (window still
-  alive, cleanup legal) and keep the post-destruction bookkeeping
-  (hermesSurface.shutdown, nulling mainWindow/hostView) in `closed`.
-  Nothing cancels `close` in this codebase, and hide() will be
-  idempotent, so the move is safe.
-- backpackProjectRuntime.ts: make hide() idempotent and defensive with
-  explicit lifecycle conditions — clear this.view once; skip
-  contentView.removeChildView when the BaseWindow is already destroyed;
-  skip webContents.close() when the WebContents is already destroyed.
-  No broad catch; unrelated errors keep propagating.
-- tests/unit/backpackProjectRuntime.test.ts: behavioral tests through a
-  structural vi.mock of the minimal window/view boundary — normal hide,
-  double hide, hide after the window is destroyed, hide after the
-  webContents is destroyed, hide with nothing shown. No source-text
-  regex assertions.
-- Verification: vitest focused test + full unit suite + tsc typecheck +
-  git diff --check; report pre-existing failures separately. No launch,
-  no build, no install, no commit, no push.
-
 ======================================================================
 [2026-08-06 Asia/Saigon] WORKER - Assignment 004 CHECKPOINT
 ======================================================================
-
-WHAT CHANGED AND WHY (EXACT FILES)
-1. src/main/backpacks/backpackProjectRuntime.ts — hide() is now
-   idempotent and defensive with EXPLICIT lifecycle conditions and no
-   catch block: it clears this.view once (a second hide is a no-op),
-   calls contentView.removeChildView only when
-   this.window.isDestroyed() is false, and calls webContents.close()
-   only when view.webContents.isDestroyed() is false. Late hides (window
-   or WebContents already destroyed) now skip exactly the call that
-   would throw "Object has been destroyed" and do whatever is still
-   legal. Unrelated errors still propagate — nothing is swallowed.
-2. src/main/index.ts — the Backpack surface cleanup moved from the
-   BaseWindow `closed` event (which fires after Electron destroyed the
-   window) to `close` (window still alive). Post-destruction
-   bookkeeping (hermesSurface.shutdown, nulling mainWindow/hostView)
-   stays in `closed`. Nothing in this codebase cancels `close`, and
-   hide() is idempotent, so an earlier host-IPC hide followed by the
-   close-time hide is harmless. Only the close/closed hunk is mine: the
-   screen/windowBounds/saveWindowBounds hunks in the same file are the
-   pre-existing foreign working-tree changes, preserved untouched.
-3. tests/unit/backpackProjectRuntime.test.ts (new) — behavioral tests
-   over a structural vi.mock of the minimal window/view boundary (the
-   real class under test): normal hide detaches and closes exactly once;
-   double hide does nothing second time; hide with nothing shown is a
-   no-op; hide after the parent window is destroyed skips removal but
-   still closes the view; hide after the webContents is destroyed skips
-   close but still removes the view; hide after both are destroyed
-   touches neither. No source-text regex assertions.
 
 VERIFICATION (non-launching)
 - Focused lifecycle tests: 6/6 pass.
@@ -6119,7 +6051,6 @@ processes/windows, transcript + screenshots if available.
 STOP: 015 CHECKPOINT with exact files/APIs/counts/live evidence/
 cleanup/hunk-level separation. No commit/push, no 016.
 
-
 ======================================================================
 [2026-08-06 Asia/Saigon] WORKER - Assignment 015 CHECKPOINT
 ======================================================================
@@ -6202,7 +6133,6 @@ COUNTS
 
 NEXT: awaiting creator review of this checkpoint. 016 remains queued and
 was NOT started.
-
 
 ======================================================================
 [2026-08-07 Asia/Saigon] BRAIN - Assignment 015R CORRECTION + DISPATCH
@@ -6337,7 +6267,6 @@ Do not commit/push or begin 016.
 WORKER
 Append 015R PICKUP, perform only this correction, checkpoint, and stop.
 
-
 ======================================================================
 [2026-08-06 Asia/Saigon] WORKER - Assignment 015 REVIEW (015R)
 ======================================================================
@@ -6398,7 +6327,6 @@ REPORTED DEVIATIONS (no fix, recorded)
 
 STATE: Papers 15 modified + 6 untracked (pre-existing + 015 + this
 round's tests); As you Go 8 modified; NO COMMITS. 016 still queued.
-
 
 ======================================================================
 [2026-08-07 Asia/Saigon] BRAIN - Assignment 015R REJECTED; 015R2 DISPATCH
@@ -6472,7 +6400,6 @@ Start Menu target or start Assignment 016.
 WORKER
 Append 015R2 PICKUP, implement the correction now, checkpoint, and stop.
 
-
 ======================================================================
 [2026-08-06 Asia/Saigon] WORKER - Assignment 015 REVIEW 2 (015R2)
 ======================================================================
@@ -6530,7 +6457,6 @@ FINAL VERIFICATION (post-review code state)
 
 NO CORRECTIONS REQUIRED THIS ROUND. Deliverable stands. 016 queued.
 
-
 ======================================================================
 [2026-08-07 Asia/Saigon] BRAIN - 015R2 REJECTED + FRESH-BRAIN HANDOFF
 ======================================================================
@@ -6549,7 +6475,6 @@ cleanup. A fresh BRAIN must inspect current diffs, treat the complete preceding
 all twelve numbered outcomes. Require source evidence and targeted tests before
 any live proof or acceptance. Assignment 016 remains gated. Preserve all
 pre-015 unrelated Papers dirty hunks and commit nothing until acceptance.
-
 
 ======================================================================
 [2026-08-07 Asia/Saigon] WORKER - Assignment 015R3 CHECKPOINT
@@ -6595,7 +6520,6 @@ STATE
 015R3 is a partial implementation checkpoint, not acceptance. Assignment 016
 remains gated. A follow-up worker pass must clear the two blockers, rerun the
 full verification and append an acceptance-ready report before committing.
-
 
 ======================================================================
 [2026-08-07 Asia/Saigon] BRAIN - Assignment 015R3 DISPATCH
@@ -6709,7 +6633,6 @@ WORKER: clear blockers 1-2 (and audit 3), migrate fixtures, rerun:
 
 BASE remains da3dd6d (Papers) / 5254a6d docs (As you Go) — do not rebase.
 
-
 ======================================================================
 [2026-08-07 Asia/Saigon] WORKER - Assignment 015R3 FOLLOW-UP CHECKPOINT
 ======================================================================
@@ -6798,7 +6721,6 @@ If blocked, append one precise BLOCKER and stop. Do not package/install
 or start 016 early.
 
 BASE remains da3dd6d / 5254a6d — do not rebase.
-
 
 ======================================================================
 [2026-08-07 Asia/Saigon] WORKER - Assignment 015R3 LIVE-PROOF CHECKPOINT
@@ -9014,15 +8936,6 @@ Implement a generic, fail-closed Papers-owned detached Backpack surface seam:
   flush/stop acknowledgements so As You Go can prove no overlap. Papers routes
   bounded opaque state/commands only between registered surfaces; it does not
   interpret, persist or mediate the Backpack document.
-
-Tests must prove sender rejection/spoof resistance, exact-key/size rejection,
-one-window identity, ready/activate ordering, flush/stop before close,
-crash/project-close/shutdown idempotence, display clamp and cleanup. Use fakes;
-no launch, physical input or creator-window manipulation. Read Papers HERMES
-and current architecture/docs before editing, inspect the dirty tree and
-preserve all unrelated creator changes. Run focused tests, Papers full Vitest,
-typecheck and build. Do not commit. Write
-`workers/winter/reports/winter-018h1-papers-host.md`, acknowledge and STOP.
 
 GAZELLE and NING remain stopped. ROKETPUNCHA continues sole 017I2 integration.
 After 017I2 is accepted, BRAIN dispatches a non-overlapping As You Go 018 lane

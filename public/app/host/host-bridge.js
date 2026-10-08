@@ -29,6 +29,8 @@ export function createHostBridge(window) {
   const FILE_PREVIEW_REQUEST_TIMEOUT_MS = 45 * 1000;
   const FILE_MUTATION_REQUEST_TIMEOUT_MS = 30 * 1000;
   const pickListeners = new Set();
+  const chromeLayoutListeners = new Set();
+  const paneTabsListeners = new Set();
   const detachListeners = new Set();
   // The launcher overlay's invocation (the creator's "Alt+Shift+A anywhere", host side). A push, like the detach
   // lifecycle, so it is fanned out here rather than listened for by the page: every host-to-project message
@@ -70,6 +72,17 @@ export function createHostBridge(window) {
 
   window.addEventListener('message', (event) => {
     if (event.source !== window.parent) return;
+    if (event.data?.type === 'papers:project:pane-tabs' && Array.isArray(event.data.tabs)) {
+      for (const listener of paneTabsListeners) listener(event.data.tabs);
+      return;
+    }
+    if (event.data?.type === 'papers:project:chrome-layout') {
+      const rect = event.data.rect;
+      if (rect && ['x', 'y', 'width', 'height'].every(key => Number.isFinite(rect[key]))) {
+        for (const listener of chromeLayoutListeners) listener(rect);
+      }
+      return;
+    }
     // 016: the Papers-owned direct-pick session pushes one typed result.
     if (event.data?.type === 'papers:project:window-pick-result') {
       for (const listener of pickListeners) {
@@ -317,6 +330,11 @@ export function createHostBridge(window) {
           ? null
           : operation === 'preview'
             ? FILE_PREVIEW_REQUEST_TIMEOUT_MS
+            // Office may initialize its profile and retire a prior unsaved
+            // editor first. The native owner bounds those operations at 90s;
+            // let its result arrive rather than rejecting with quick RPCs.
+            : ['office-editor-open', 'office-editor-save', 'office-editor-close', 'office-editor-close-owner', 'runtime-prepare'].includes(operation)
+              ? INTERACTIVE_REQUEST_TIMEOUT_MS
             : ['copy', 'move', 'rename', 'delete'].includes(operation)
               ? FILE_MUTATION_REQUEST_TIMEOUT_MS
               : REQUEST_TIMEOUT_MS,
@@ -400,6 +418,11 @@ export function createHostBridge(window) {
     onPickResult: (callback) => {
       pickListeners.add(callback);
       return () => pickListeners.delete(callback);
+    },
+    onPaneTabs: callback => { paneTabsListeners.add(callback); return () => paneTabsListeners.delete(callback); },
+    onChromeLayout: (callback) => {
+      chromeLayoutListeners.add(callback);
+      return () => chromeLayoutListeners.delete(callback);
     },
     // 018A1/018X1 frozen detach lifecycle (As You Go half). Every call is an
     // enumerated argument-free request in the existing project vocabulary; the

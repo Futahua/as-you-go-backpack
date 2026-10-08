@@ -107,7 +107,7 @@
 }
 
 .file-capability-panel.embedded-surface-proxima.expanded {
-  width: min(var(--file-capability-width), 52vw);
+  width: min(var(--file-capability-width), calc(100vw - 190px));
 }
 
 .file-capability-panel.embedded-surface-proxima:not(.expanded) {
@@ -228,6 +228,20 @@
   padding: 0;
   gap: 0;
 }
+
+/* Chrome is a native peer; this shell contains only surrounding controls. */
+.native-chrome-layout > .file-capability-body { display: none; }
+.file-capability-panel.native-chrome-layout { transition: none; }
+.native-chrome-layout .file-capability-resizer { display: none; }
+body:has(.native-chrome-layout) .workspace.file-capability-docked.file-capability-expanded .explorer { transition: none; }
+.file-capability-panel.expanded.native-chrome-layout > .file-capability-header {
+  left: 1px;
+  right: 1px;
+  top: 1px;
+  width: auto;
+  background: var(--surface-raised);
+}
+.native-chrome-layout .file-capability-provider-status { margin-right: auto; }
 
 .file-capability-inspector.browser-mode > .file-capability-item-title,
 .file-capability-inspector.browser-mode > .file-capability-item-meta,
@@ -439,6 +453,21 @@
   background: var(--surface);
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.file-capability-editor-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.file-capability-editor-loading progress {
+  width: 100%;
+  height: 6px;
+  accent-color: #71a7ca;
 }
 
 .file-capability-browser-shell {
@@ -792,3 +821,29 @@
 .file-capability-browser-tab-monogram{flex:0 0 12px;width:12px;text-align:center;font-size:10px}
 @container (max-width:100px){.file-capability-browser-tab-text{display:none}.file-capability-browser-tab-label{justify-content:center;padding-inline:2px;gap:0}}
 .file-capability-browser-tabs{scrollbar-width:none}.file-capability-browser-tabs::-webkit-scrollbar{display:none}
+
+.file-capability-panel.expanded .file-capability-header:has(.pane-window-tabs) { left: 6px; width: auto; display: flex; gap: 4px; }
+.pane-window-tabs { display: flex; flex: 1; min-width: 0; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
+.pane-window-tab { display: flex; flex: 0 0 auto; max-width: 180px; }
+.pane-window-tabs button { height: 28px; padding: 2px 8px; background: var(--surface-raised); }
+.pane-window-tab [role=tab] { min-width: 50px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 6px 0 0 6px; }
+.pane-window-tab [aria-selected=true] { border-color: var(--accent); }
+.pane-window-release { min-width: 24px; border-radius: 0 6px 6px 0; }
+.file-capability-panel:not(.expanded) .pane-window-tabs { display: none; }
+.pane-window-tabs > button svg { display: block; width: 14px; height: 14px; }
+
+/* Share the established browser tab presentation and wheel-scrolling strip. */
+.pane-window-tabs.file-capability-browser-tabs { margin-right:0; padding:0; gap:2px; scrollbar-width:none; }
+.pane-window-tabs .pane-window-tab { display:grid; flex:0 1 170px; min-width:48px; max-width:180px; }
+.pane-window-tabs .file-capability-browser-tab-label, .pane-window-tabs .file-capability-browser-tab-close { border:0; background:transparent; padding:0 7px; }
+.pane-window-tabs .file-capability-browser-tab-close { padding:0; }
+.pane-window-tabs > button { flex:0 0 28px; border:0; border-radius:6px; }
+
+.pane-window-tabs > button:first-child { position:sticky; left:0; z-index:2; background:var(--surface); }
+
+.pane-window-tab.reorder-before { box-shadow:inset 3px 0 #73bdf0; }
+.pane-window-tab.reorder-after { box-shadow:inset -3px 0 #73bdf0; }
+
+.pane-window-tabs.detach-ready { background:#8a272b; box-shadow:inset 0 0 0 2px #e16468; }
+
+.file-capability-header:has(.pane-window-tabs) .file-capability-provider-status { display:none; }

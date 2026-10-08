@@ -267,3 +267,16 @@ test('a non-authoritative surface neither bumps a revision nor broadcasts', () =
   assert.equal(responder.revisionOf(LAYOUT.id), before, 'revision unchanged');
   assert.deepEqual(heard, [], 'nothing was posted');
 });
+
+
+test('a writer for another folder cannot close or mutate this widget', () => {
+  const bus = fakeBus(), seen = [], applied = [];
+  createWindowLayoutWidgetChannelWorkspace({ channel: bus.makeChannel(), getLayout: id => id === LAYOUT.id ? LAYOUT : null,
+    isAuthoritative: id => id === LAYOUT.id, applyCommand: () => applied.push('owner') });
+  createWindowLayoutWidgetChannelWorkspace({ channel: bus.makeChannel(), getLayout: () => null,
+    isAuthoritative: id => id === 'another-folder-layout', applyCommand: () => applied.push('other') });
+  const client = createWindowLayoutWidgetChannelClient({ channel: bus.makeChannel(), layoutId: LAYOUT.id, onMessage: msg => seen.push(msg) });
+  client.ready(); client.sendCommand({ kind: 'member-toggle', memberId: 'm1' });
+  assert.equal(seen.some(msg => msg.code === 'unknown-layout'), false);
+  assert.deepEqual(applied, ['owner']);
+});

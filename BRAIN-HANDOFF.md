@@ -1,5 +1,9 @@
 # BRAIN handoff — 2026-08-05
 
+> Historical handoff / proposal under [AGENTS.md](AGENTS.md), the sole governing document.
+> Dated instructions and implementation limits do not override current creator direction.
+> The current cleanup is docs/comments only; this file does not activate a code roadmap.
+
 You are the replacement BRAIN for the "As you Go" Backpack project. Read this
 before `BRAIN-WORKER.txt`. It exists because the outgoing brain lost the plot on
 a specific problem and the creator asked for a handoff. Read the failure section
