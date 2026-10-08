@@ -9,7 +9,7 @@ function pillFixture(options={}) {
     style:{setProperty(){}},classList:{add(){},remove(){}},children:[],setAttribute(){},after(){},
     append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;},
   });
-  const document={createElement:element,defaultView:{innerHeight:900,localStorage:{getItem:()=>null,setItem(){}},addEventListener(){}}};
+  const document={createElement:element,defaultView:{innerHeight:900,localStorage:options.storage||{getItem:()=>null,setItem(){}},addEventListener(){}}};
   const container=element();
   const saved=createNavigatorSavedStates({document,container,art(){},restore(){},...options});
   return {saved,container,names:()=>container.children[1].children.map(pill=>pill.children[1].textContent)};
@@ -156,4 +156,48 @@ test('shared cache cannot replace document-backed pills', () => {
   listeners.storage({key:'papers:ayg:navigator-saved-states',newValue:'[]'});
   listeners.broadcast({data:{type:'states',states:[]}});
   assert.deepEqual(fixture.names(),['a','b']);
+});
+
+
+test('cold navigator never saves a stale browser cache over the document loaded later', async()=>{
+  let ready=false,disk;
+  const cached=[{mode:'action',path:'D:/old.txt',name:'Old cached pill'}];
+  const durable=[{mode:'ayg',currentId:'work',name:'Work'},{mode:'action',path:'D:/new.txt',name:'New pill'}];
+  const writes=[],cacheWrites=[];
+  const fixture=pillFixture({isReady:()=>ready,loadSavedStates:()=>disk,
+    saveSavedStates:async value=>{writes.push(value);disk=value;return true;},
+    storage:{getItem:()=>JSON.stringify(cached),setItem:(_key,value)=>cacheWrites.push(value)},
+  });
+  assert.deepEqual(fixture.names(),[]);
+  assert.deepEqual(cacheWrites,[]);
+  disk=durable;ready=true;fixture.saved.syncDurable();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(fixture.names(),['Work','New pill']);
+  assert.deepEqual(writes,[]);
+  assert.deepEqual(disk,durable);
+});
+
+
+test('an explicitly empty document list wins over cached pills after hydration',async()=>{
+  let ready=false,disk;
+  const writes=[];
+  const fixture=pillFixture({isReady:()=>ready,loadSavedStates:()=>disk,
+    storage:{getItem:()=>JSON.stringify([{mode:'ayg',currentId:'old',name:'Removed folder'}]),setItem(){}},
+    saveSavedStates:async value=>{writes.push(value);return true;}});
+  disk=[];ready=true;fixture.saved.syncDurable();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(fixture.names(),[]);assert.deepEqual(writes,[]);
+});
+
+test('legacy cache migration waits for a loaded document without saved pills',async()=>{
+  let ready=false,disk;
+  const writes=[],legacy=[{mode:'ayg',currentId:'work',name:'Work'}];
+  const fixture=pillFixture({isReady:()=>ready,loadSavedStates:()=>disk,
+    storage:{getItem:()=>JSON.stringify(legacy),setItem(){}},
+    saveSavedStates:async value=>{writes.push(value);disk=value;return true;}});
+  await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(writes,[]);
+  ready=true;fixture.saved.syncDurable();
+  await new Promise(resolve=>setImmediate(resolve));
+  fixture.saved.syncDurable();
+  assert.deepEqual(writes,[legacy]);assert.deepEqual(fixture.names(),['Work']);
 });

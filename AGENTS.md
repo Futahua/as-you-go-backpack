@@ -81,7 +81,7 @@ in the actual Source checkout; do not depend on an obsolete hard-coded checkout 
   refreshes the preview once at completion.
 - Saved pills are durable, deduplicated, and retain authored AYG names. Linked folders use
   the theme's blue tint and trailing < marker; file pills do not get folder markers.
-  Earlier queued save acknowledgements must not replace newer additions. Pill drops
+  Earlier queued save acknowledgements must not replace newer additions. Navigator pills must wait for the durable document load before reading or migrating a browser cache; a loaded empty list is authoritative. Pill drops
   negotiate an effect allowed by the source; accepting a move-only drag pins the item
   without moving its underlying folder or file.
 - Left navigator open disables canvas type-to-run. Right pane alone permits Quick Run in
@@ -121,3 +121,5 @@ Serve public/; keep project.json, actions.json and state.json private. state.jso
 creator data ignored by Git. Use the existing store and durable persistence queue.
 Run focused checks for behavior changes and npm test for the integration checkpoint.
 Docs-only changes require consistency/link checks, not runtime reload or host release.
+
+Proxima embedded workspaces use Papers scope-bound writer leases, retain checked revisions, and map synthetic-root additions into the real project scope. Background window requests must have a bounded response through the verified embedded bridge.

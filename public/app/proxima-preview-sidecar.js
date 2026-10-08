@@ -22,6 +22,12 @@ const panel = createFileCapabilityPanel({
 });
 panel.openSearch();
 
+const releaseNativeEdge = host.onChromeLayout?.(rect => {
+  if (disposed || !Number.isFinite(rect?.x)) return;
+  window.parent.postMessage({ type: 'papers:proxima-preview-native-edge', x: rect.x, parentX: rect.parentX }, expectedParentOrigin);
+});
+
+
 window.addEventListener('keydown', (event) => {
   if (event.defaultPrevented || event.key !== 'Tab'
     || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey
@@ -34,6 +40,7 @@ window.addEventListener('keydown', (event) => {
 function disposePreview() {
   if (disposed) return;
   disposed = true;
+  releaseNativeEdge?.();
   panel.destroy();
 }
 

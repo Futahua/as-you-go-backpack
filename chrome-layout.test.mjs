@@ -39,3 +39,10 @@ test('layout coalesces updates and cancels pending work when Chrome leaves', () 
   events.get('resize')(); layout.stop(); callback();
   assert.equal(updates, 1); assert.equal(cancelled, true); assert.equal(events.size, 0);
 });
+
+test('native windows sit below the visible tabs even when preview header retains extra height', () => {
+  const panel = { getBoundingClientRect: () => ({ left: 600, top: 60, right: 1000, bottom: 800 }) };
+  const tabs = { getBoundingClientRect: () => ({ bottom: 92, height: 28 }) };
+  const header = { getBoundingClientRect: () => ({ bottom: 160 }), querySelector: () => tabs };
+  assert.equal(chromeLayoutBounds(panel, header, { innerWidth: 1000, innerHeight: 800 }).y, 93);
+});

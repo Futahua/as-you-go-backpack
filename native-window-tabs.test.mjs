@@ -140,3 +140,15 @@ test('reordering on the header bypasses the native content-region drop check', a
   assert.deepEqual(f.calls.find(c=>c.operation==='pane-window-reorder'),{operation:'pane-window-reorder',data:{tabId:'a',beforeId:''}});
   assert.equal(f.calls.some(c=>c.operation==='pane-window-drop'),false);f.api.destroy();
 });
+
+
+test('active-only tab switches retain existing strip nodes', () => {
+  const f = fixture();
+  f.push([{id:'one',title:'One',active:true},{id:'two',title:'Two',active:false}]);
+  const nodes=[...f.strip.children];
+  f.push([{id:'one',title:'One',active:false},{id:'two',title:'Two',active:true}]);
+  assert.deepEqual(f.strip.children,nodes);
+  assert.equal(nodes[1].children[0].attributes['aria-selected'],'false');
+  assert.equal(nodes[2].children[0].attributes['aria-selected'],'true');
+  f.api.destroy();
+});

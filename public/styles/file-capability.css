@@ -840,6 +840,7 @@ body:has(.native-chrome-layout) .workspace.file-capability-docked.file-capabilit
 .pane-window-tabs > button { flex:0 0 28px; border:0; border-radius:6px; }
 
 .pane-window-tabs > button:first-child { position:sticky; left:0; z-index:2; background:var(--surface); }
+.pane-window-tabs > .native-window-lens { position:sticky; left:30px; z-index:2; background:var(--surface); }
 
 .pane-window-tab.reorder-before { box-shadow:inset 3px 0 #73bdf0; }
 .pane-window-tab.reorder-after { box-shadow:inset -3px 0 #73bdf0; }

@@ -2422,6 +2422,14 @@ export function createFileCapabilityPanel(options) {
 
   function refreshPreviewGeometry() {
     state.chromeLayout?.refresh();
+    // Restored native tabs can already be visible before a selection creates
+    // the layout tracker. Keep their top/right/bottom attached to the sidecar
+    // during scroll without activating them or stealing a file preview.
+    if (documentRef.documentElement?.dataset.proximaPreviewSidecar === 'true'
+      && nativeWindowTabs?.hasWindows()) {
+      const rect = chromeLayoutBounds(panel, header, windowRef);
+      if (rect) void host.fileCapability('chrome-pane-move', { rect }).catch(() => {});
+    }
     if (!state.expanded) return;
     const surface = preview.querySelector('.file-capability-native-preview');
     if (!surface) return;
@@ -2458,8 +2466,8 @@ export function createFileCapabilityPanel(options) {
   }
 
   const nativeWindowTabs = installNativeWindowTabs({ document: documentRef, header, host,
-    lens: async () => {
-      const result = await host.fileCapability('browser-lens-screen', { nativeChrome: true });
+    lens: async (source = 'clipboard') => {
+      const result = await host.fileCapability('browser-lens-screen', { nativeChrome: true, source });
       if (result?.cancelled) return;
       const url = result?.ok && safeBrowserUrl(result.url);
       if (!url) throw new Error(result?.message || result?.error || 'Lens screen capture could not start.');
@@ -2470,6 +2478,7 @@ export function createFileCapabilityPanel(options) {
     bounds: () => chromeLayoutBounds(panel, header, windowRef),
     prepare: async () => {
       paneSelectionPolicy.hold();
+      if (state.inspectedUrl === 'native-window' && state.chromeLayout && state.expanded) return true;
       providerStatus.textContent = '';
       const generation = ++state.inspectGeneration;
       if ((await closeOfficeEditor())?.ok === false || generation !== state.inspectGeneration) return false;

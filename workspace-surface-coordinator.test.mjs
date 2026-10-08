@@ -5,6 +5,7 @@ import {
   SURFACE_ROLE,
   createSurfaceCoordinator,
   hostWriterLeaseAdapter,
+  chooseWorkspaceWriterLock,
   mergeSurfaceSnapshots,
 } from './public/app/workspace-surface-coordinator.js';
 
@@ -1686,4 +1687,10 @@ test('stale preference edits preserve newer pills and explicit pill removal surv
     {navigatorSavedStates:['a','b','c','d','e'],theme:'new'});
   const cleared = {view:{preferences:{navigatorSavedStates:[],theme:'old'}}};
   assert.deepEqual(mergeSurfaceSnapshots(base,cleared,current).view.preferences.navigatorSavedStates,[]);
+});
+
+test('embedded project editing uses its Papers scope lease even when browser locks are exposed', () => {
+  const rendererLock = { available: true }, hostLock = { available: true }, fallback = {};
+  assert.equal(chooseWorkspaceWriterLock({ embedded: true, rendererLock, hostLock, fallback }), hostLock);
+  assert.equal(chooseWorkspaceWriterLock({ embedded: false, rendererLock, hostLock, fallback }), rendererLock);
 });

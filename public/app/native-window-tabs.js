@@ -1,3 +1,4 @@
+import { isValidThumbnailSuccess } from './window-layout-preview.js';
 import { openWindowLayoutPickerSession } from './window-layout-picker-session.js';
 import { windowLayoutControlGlyphMarkup } from './window-layout-control-icons.js';
 import { WINDOW_TAB_MIME, windowTabTransfer, paneWindowPickerRows } from './window-tab-transfer.js';
@@ -12,17 +13,49 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   header.prepend(strip);
   let lensButton = null;
   if (lens) {
-    lensButton = document.createElement('button'); lensButton.type = 'button'; lensButton.className = 'file-capability-browser-nav native-window-lens'; lensButton.textContent = '⌾'; lensButton.title = 'Google Lens — select anywhere on this machine'; lensButton.setAttribute('aria-label','Google Lens screen capture');
-    lensButton.addEventListener('click', async event => { event.stopPropagation(); lensButton.disabled=true; try { await lens(); } catch(error) { status(error?.message || String(error)); } finally { lensButton.disabled=false; } });
-    header.append(lensButton);
+    lensButton = document.createElement('button'); lensButton.type = 'button'; lensButton.className = 'file-capability-browser-nav native-window-lens'; lensButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6l1.5-2h5L16 6h4a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="4"/><path d="M18 9h.01"/></svg>'; lensButton.title = 'Google Lens — click: copied image · right-click: screen region'; lensButton.setAttribute('aria-label','Google Lens copied image search');
+    const runLens = async (event, source) => { event.preventDefault(); event.stopPropagation(); if (lensButton.disabled) return; lensButton.disabled=true; try { await lens(source); } catch(error) { status(error?.message || String(error)); } finally { lensButton.disabled=false; } };
+    lensButton.addEventListener('click', event => { void runLens(event, 'clipboard'); });
+    lensButton.addEventListener('contextmenu', event => { void runLens(event, 'screen'); });
   }
   let disposed = false;
   let busy = false;
   let selectionGeneration = 0;
   let tabs = [];
   let dwell = null;
-  let initialTabs = true;
   let pointerDrag = null; let suppressClick = false;
+  let hoverTimer = null, hoverGeneration = 0;
+  const stopHover = () => {
+    ++hoverGeneration; clearTimeout(hoverTimer); hoverTimer = null;
+    void host.windowPreviewHide?.().catch(() => {});
+  };
+  const previewTab = (tab, button) => {
+    stopHover();
+    const generation = hoverGeneration;
+    hoverTimer = setTimeout(async () => {
+      try {
+        const listed = await host.windowCandidates({ includeNativeIcons: false });
+        if (disposed || generation !== hoverGeneration) return;
+        const candidate = listed.candidates?.find(item =>
+          tab.windowInstanceId ? item.windowInstanceId === tab.windowInstanceId
+            : tab.handle && item.handle === tab.handle);
+        if (!candidate) return;
+        const bound = await host.bindWindowCandidate(candidate.id);
+        if (disposed || generation !== hoverGeneration || !bound?.capability) return;
+        const show = async result => {
+          if (disposed || generation !== hoverGeneration || !isValidThumbnailSuccess(result)) return;
+          const box = button.getBoundingClientRect();
+          const win = document.defaultView || globalThis;
+          await host.windowPreviewShow(result.imageUrl, tab.title, result.width, result.height,
+            {x:Math.round((win.screenX||0)+box.left),y:Math.round((win.screenY||0)+box.top),width:Math.round(box.width),height:Math.round(box.height)});
+          if (generation !== hoverGeneration) await host.windowPreviewHide();
+        };
+        if (host.windowThumbnailCacheCapability) await show(await host.windowThumbnailCacheCapability(bound.capability));
+        if (generation !== hoverGeneration) return;
+        await show(await host.windowThumbnailCapability(bound.capability, {maxWidth:240,maxHeight:135}));
+      } catch { /* Unavailable capture leaves the current pane untouched. */ }
+    }, 180);
+  };
   const report = (error) => { if (!disposed) status(error?.message || String(error)); };
   const request = async (operation, data) => {
     const reply = await host.fileCapability(operation, data);
@@ -31,9 +64,9 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   };
   async function add() {
     if (busy || disposed) return;
+    stopHover();
     busy = true; render();
     try {
-      await overlay(true);
       const pickerId = globalThis.crypto.randomUUID();
       const session = await openWindowLayoutPickerSession({
         pickerId,
@@ -72,7 +105,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
     finally {
       busy = false;
       await host.windowCandidatePickerClose().catch(() => {});
-      if (!disposed) { await overlay(false).catch(() => {}); render(); }
+      if (!disposed) render();
     }
   }
   function render() {
@@ -88,7 +121,10 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       const label = document.createElement('span'); label.className = 'file-capability-browser-tab-text'; label.textContent = tab.title;
       button.append(icon, label);
       button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(tab.active));
+      button.addEventListener('pointerenter', () => previewTab(tab, button));
+      button.addEventListener('pointerleave', stopHover);
       button.addEventListener('click', async (event) => {
+        stopHover();
         event?.stopPropagation();
         if (suppressClick) { suppressClick = false; return; }
         if (disposed) return;
@@ -146,12 +182,24 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
     addButton.title = 'Existing windows — hover for the list'; addButton.setAttribute('aria-label', 'Existing windows');
     addButton.addEventListener('mouseenter', () => { if (!busy && !disposed) dwell = setTimeout(() => { dwell = null; void add(); }, 200); });
     addButton.addEventListener('mouseleave', () => { clearTimeout(dwell); dwell = null; });
-    addButton.disabled = busy; addButton.addEventListener('click', add); strip.prepend(addButton);
+    addButton.disabled = busy; addButton.addEventListener('click', add);
+    if (lensButton) strip.prepend(lensButton);
+    strip.prepend(addButton);
   }
   const unsubscribe = host.onPaneTabs((next) => {
     if (disposed) return;
-    tabs = next.filter(tab => typeof tab.id === 'string' && typeof tab.title === 'string'); render();
-    if (initialTabs && tabs.length) { initialTabs = false; void Promise.resolve().then(async () => { if (!disposed && selectionGeneration === 0 && await prepare() !== false) await overlay(false); }).catch(report); }
+    const updated = next.filter(tab => typeof tab.id === 'string' && typeof tab.title === 'string');
+    const presentation = list => JSON.stringify(list.map(tab => [tab.id, tab.title, tab.icon || '']));
+    const sameStrip = presentation(tabs) === presentation(updated);
+    tabs = updated;
+    if (sameStrip && !pointerDrag) {
+      for (const group of strip.children) {
+        const tab = tabs.find(item => item.id === group.getAttribute('data-pane-tab-id'));
+        if (!tab) continue;
+        group.classList?.toggle('active', Boolean(tab.active));
+        group.children[0]?.setAttribute('aria-selected', String(Boolean(tab.active)));
+      }
+    } else render();
   });
   render();
   strip.addEventListener('dragover', event => {
@@ -184,6 +232,6 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   return {
     hasWindows() { return !disposed && tabs.length > 0; },
     async showCurrent() { if (!disposed && await prepare() !== false) await overlay(false); },
-    destroy() { disposed = true; clearTimeout(dwell); unsubscribe(); strip.remove(); lensButton?.remove(); if (busy) void host.windowCandidatePickerClose().catch(() => {}); },
+    destroy() { stopHover(); disposed = true; clearTimeout(dwell); unsubscribe(); strip.remove(); lensButton?.remove(); if (busy) void host.windowCandidatePickerClose().catch(() => {}); },
   };
 }

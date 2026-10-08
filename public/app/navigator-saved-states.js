@@ -42,7 +42,7 @@ export function decodeNavigatorSavedStates(raw, resolveTarget) {
   }
 }
 
-export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile, decorateLabel, resolveTarget, loadSavedStates, saveSavedStates, onSaveError = () => {} }) {
+export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile, decorateLabel, resolveTarget, loadSavedStates, saveSavedStates, isReady = () => true, onSaveError = () => {} }) {
   const win = document.defaultView;
   const storage = win?.localStorage;
   const key = 'papers:ayg:navigator-saved-states';
@@ -50,9 +50,10 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   const channel = typeof win?.BroadcastChannel === 'function'
     ? new win.BroadcastChannel('papers:ayg:navigator-saved-states-v1')
     : null;
-  const durableStates = loadSavedStates?.();
+  let initialized = isReady();
+  const durableStates = initialized ? loadSavedStates?.() : undefined;
   let durableSignature = JSON.stringify(durableStates);
-  let states = Array.isArray(durableStates) ? uniqueNavigatorSavedStates(durableStates,resolveTarget) : decodeNavigatorSavedStates(storage?.getItem(key),resolveTarget);
+  let states = !initialized ? [] : Array.isArray(durableStates) ? uniqueNavigatorSavedStates(durableStates,resolveTarget) : decodeNavigatorSavedStates(storage?.getItem(key),resolveTarget);
   let saveQueue = Promise.resolve();
   let pendingSaves = 0;
   let clearArmed = false;
@@ -215,11 +216,23 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   }
 
   // Persist removal of old duplicates so they cannot return after a reload.
-  try {storage?.setItem(key,JSON.stringify(states));} catch {}
+  if(initialized)try {storage?.setItem(key,JSON.stringify(states));} catch {}
   render();
-  if(!Array.isArray(durableStates)&&states.length&&saveSavedStates)persistStates();
+  if(initialized&&!Array.isArray(durableStates)&&states.length&&saveSavedStates)persistStates();
   return {
     syncDurable(){
+      // Construction precedes the document load. Never import a browser cache
+      // into the save queue until we know whether the document owns a list.
+      if(!initialized){
+        if(!isReady())return;
+        initialized=true;
+        const loaded=loadSavedStates?.();
+        durableSignature=JSON.stringify(loaded);
+        installRemoteStates(Array.isArray(loaded)?loaded:decodeNavigatorSavedStates(storage?.getItem(key),resolveTarget));
+        try {storage?.setItem(key,JSON.stringify(states));} catch {}
+        if(!Array.isArray(loaded)&&states.length&&saveSavedStates)persistStates();
+        return;
+      }
       // Earlier queued acknowledgements must not replace newer local additions.
       if(pendingSaves)return;
       const next=loadSavedStates?.();

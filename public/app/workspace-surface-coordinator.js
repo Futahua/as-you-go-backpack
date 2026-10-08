@@ -1744,3 +1744,10 @@ export function createSurfaceCoordinator({
     },
   };
 }
+
+/** Scoped iframes use Papers' scope-bound lease instead of browser storage
+ * partition arbitration. All writes still carry the host's checked revision. */
+export function chooseWorkspaceWriterLock({ embedded, rendererLock, hostLock, fallback }) {
+  if (embedded && hostLock?.available) return hostLock;
+  return rendererLock.available ? rendererLock : hostLock?.available ? hostLock : fallback;
+}

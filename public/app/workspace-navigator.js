@@ -1433,6 +1433,7 @@ export function createWorkspaceNavigator(o) {
   };
   savedStates=createNavigatorSavedStates({document:d,container:savedPills,
     loadSavedStates:()=>o.getState().view?.preferences?.navigatorSavedStates,
+    isReady:()=>o.savedStatesReady?.() ?? true,
     saveSavedStates:o.saveNavigatorSavedStates,
     onSaveError:error=>o.setStatus(error.message||'Saved items could not be saved.'),
     resolveTarget:saved=>(saved.quickRunKey?o.pinnedQuickRunPath?.(saved.quickRunKey):null)||o.nativeDragPaths?.([saved.itemId||saved.art?.shortcutId])?.[0],

@@ -27,3 +27,15 @@ test('a navigator file preview holds against repeated empty workspace selection'
   assert.equal(policy.observe(empty), false);
   assert.equal(policy.observe({ mode: 'web', item: { url: 'https://example.com' } }), true);
 });
+
+
+test('repeated empty or multiple notifications never reassert the fallback', () => {
+  const policy = createPaneSelectionPolicy();
+  const empty = {mode:'empty',selectionCount:0};
+  assert.equal(policy.observe(empty),true);
+  assert.equal(policy.observe(structuredClone(empty)),false);
+  const file = {mode:'single',item:{path:'D:/a.jpg'}};
+  assert.equal(policy.observe(file),true);
+  assert.equal(policy.observe(empty),true);
+  assert.equal(policy.observe(empty),false);
+});

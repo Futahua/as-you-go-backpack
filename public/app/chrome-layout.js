@@ -3,7 +3,11 @@
 // back to the layout. No preview node is created or used as an input surface.
 export function chromeLayoutBounds(panel, header, viewport) {
   const box = panel.getBoundingClientRect();
-  const controls = header.getBoundingClientRect();
+  // The tab row is the visible boundary. The enclosing preview header can
+  // retain extra height from file-preview layout during restoration.
+  const tabStrip = header.querySelector?.('.pane-window-tabs');
+  const controls = (tabStrip && tabStrip.getBoundingClientRect().height > 0
+    ? tabStrip : header).getBoundingClientRect();
   const left = Math.max(0, Math.round(box.left + 1));
   const top = Math.max(0, Math.round(Math.max(box.top + 1, controls.bottom + 1)));
   const right = Math.min(viewport.innerWidth, Math.round(box.right - 1));

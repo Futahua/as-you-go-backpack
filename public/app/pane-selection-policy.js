@@ -11,8 +11,8 @@ export function createPaneSelectionPolicy() {
         item?.shortcutId ?? null, item?.path ?? null, item?.url ?? null,
         (selection?.items ?? []).map(entry => [entry.shortcutId ?? null, entry.path ?? null, entry.url ?? null]),
       ]);
+      if (current === key || held === key) return false;
       current = key;
-      if (held === key) return false;
       held = undefined;
       return true;
     },

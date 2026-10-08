@@ -171,6 +171,7 @@ import {
   SURFACE_ROLE,
   createSurfaceCoordinator,
   hostWriterLeaseAdapter,
+  chooseWorkspaceWriterLock,
   webLockAdapter,
 } from './app/workspace-surface-coordinator.js?build=coordination-v18';
 import {
@@ -4980,6 +4981,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     },
     setAyGSelection: ids => { store.setSelection(ids); syncSelection({syncNavigator:false,syncPreview:false}); },
     finishAyGMarquee: () => syncFileCapabilitySelection(),
+    savedStatesReady: () => workspaceLoad.ok,
     saveNavigatorSavedStates: async pills => {
       const selected=[...store.getSession().selected];
       const saved=await commitWhenWorkspaceReady(()=>{
@@ -5236,7 +5238,7 @@ const editorDialog = createEditorDialog({
   elements,
   document,
   getState: () => state,
-  getCurrentId: () => session.currentId,
+  getCurrentId: () => SCOPE_ROOT_ID && session.currentId === ROOT_ID ? SCOPE_ROOT_ID : session.currentId,
   closeMenu,
   host,
   iconCache,
@@ -5547,9 +5549,8 @@ if (WIDGET_SURFACE) {
     // local CAS writer. The fixed host lease must not be bypassed: without it,
     // every lockless surface would become an unchecked writer. Persistence
     // stays on the versioned CAS path whenever a real lock arbitrates.
-    const lock = rendererLock.available
-      ? rendererLock
-      : (hostLock?.available ? hostLock : localCasWriterLock);
+    const lock = chooseWorkspaceWriterLock({ embedded: EMBEDDED_SURFACE === 'proxima',
+      rendererLock, hostLock, fallback: localCasWriterLock });
     let channel;
     const coordinationNamespace = SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '';
     if (typeof BroadcastChannel === 'function') {
