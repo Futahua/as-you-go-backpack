@@ -1,10 +1,12 @@
+export const NATIVE_TAB_MIME='application/x-papers-native-pane-tab';
+export const PREVIEW_TAB_MIME='application/x-papers-preview-tab';
 import { isValidThumbnailSuccess } from './window-layout-preview.js';
 import { openWindowLayoutPickerSession } from './window-layout-picker-session.js';
 import { windowLayoutControlGlyphMarkup } from './window-layout-control-icons.js';
 import { WINDOW_TAB_MIME, windowTabTransfer, paneWindowPickerRows } from './window-tab-transfer.js';
 
 /** Retained window membership belongs to the native host, including restart recovery. */
-export function installNativeWindowTabs({ document, header, host, bounds, prepare, overlay, status, lens }) {
+export function installNativeWindowTabs({ document, header, host, bounds, prepare, overlay, status, lens, sliceId='main', sliceDocking=false }) {
   const strip = document.createElement('div');
   strip.className = 'pane-window-tabs file-capability-browser-tabs';
   strip.addEventListener('wheel', event => { if (strip.scrollWidth > strip.clientWidth) { event.preventDefault(); strip.scrollLeft += event.deltaY || event.deltaX; } }, { passive: false });
@@ -13,15 +15,17 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   header.prepend(strip);
   let lensButton = null;
   if (lens) {
-    lensButton = document.createElement('button'); lensButton.type = 'button'; lensButton.className = 'file-capability-browser-nav native-window-lens'; lensButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6l1.5-2h5L16 6h4a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="4"/><path d="M18 9h.01"/></svg>'; lensButton.title = 'Google Lens — click: copied image · right-click: screen region'; lensButton.setAttribute('aria-label','Google Lens copied image search');
+    lensButton = document.createElement('button'); lensButton.type = 'button'; lensButton.className = 'file-capability-browser-nav native-window-lens'; lensButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6l1.5-2h5L16 6h4a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="4"/><path d="M18 9h.01"/></svg>'; lensButton.title = 'Google Lens — click: screen region · right-click: copied image'; lensButton.setAttribute('aria-label','Google Lens screen region search');
     const runLens = async (event, source) => { event.preventDefault(); event.stopPropagation(); if (lensButton.disabled) return; lensButton.disabled=true; try { await lens(source); } catch(error) { status(error?.message || String(error)); } finally { lensButton.disabled=false; } };
-    lensButton.addEventListener('click', event => { void runLens(event, 'clipboard'); });
-    lensButton.addEventListener('contextmenu', event => { void runLens(event, 'screen'); });
+    lensButton.addEventListener('click', event => { void runLens(event, 'screen'); });
+    lensButton.addEventListener('contextmenu', event => { void runLens(event, 'clipboard'); });
   }
   let disposed = false;
   let busy = false;
   let selectionGeneration = 0;
   let tabs = [];
+  let documentTabs = [];
+  let documentDragId=null;
   let dwell = null;
   let pointerDrag = null; let suppressClick = false;
   let hoverTimer = null, hoverGeneration = 0;
@@ -112,7 +116,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
     if (pointerDrag) return;
     strip.replaceChildren();
     for (const tab of tabs) {
-      const group = document.createElement('span'); group.className = 'pane-window-tab file-capability-browser-tab' + (tab.active ? ' active' : '');
+      const group = document.createElement('span'); group.className = 'pane-window-tab file-capability-browser-tab' + (tab.active && !documentTabs.some(t=>t.active) ? ' active' : '');
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'file-capability-browser-tab-label'; button.title = tab.title;
       const icon = document.createElement(tab.icon ? 'img' : 'span');
@@ -120,7 +124,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       if (tab.icon) icon.src = tab.icon; else icon.textContent = '▣';
       const label = document.createElement('span'); label.className = 'file-capability-browser-tab-text'; label.textContent = tab.title;
       button.append(icon, label);
-      button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(tab.active));
+      button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(tab.active && !documentTabs.some(t=>t.active)));
       button.addEventListener('pointerenter', () => previewTab(tab, button));
       button.addEventListener('pointerleave', stopHover);
       button.addEventListener('click', async (event) => {
@@ -140,7 +144,9 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       release.addEventListener('click', () => { if (!disposed) void request('pane-window-detach', { tabId: tab.id }).catch(report); });
       group.addEventListener('click', event => { if (event.target === group) button.click?.(); });
       group.setAttribute('data-pane-tab-id', tab.id);
+      if(sliceDocking){group.draggable=true;group.addEventListener('dragstart',event=>{stopHover();event.dataTransfer.setData(NATIVE_TAB_MIME,JSON.stringify({id:tab.id,sliceId}));event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});group.addEventListener('dragend',()=>{void overlay(documentTabs.some(t=>t.active)).catch(report);});}
       group.addEventListener('pointerdown', event => {
+        if(sliceDocking)return;
         if (event.button !== 0 || event.target === release) return;
         suppressClick=false;
         pointerDrag = { id:tab.id, x:event.clientX, y:event.clientY, moved:false, pointerId:event.pointerId, beforeId:tab.id };
@@ -185,6 +191,16 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
     addButton.disabled = busy; addButton.addEventListener('click', add);
     if (lensButton) strip.prepend(lensButton);
     strip.prepend(addButton);
+    for (const tab of documentTabs) {
+      const group = document.createElement('span'); group.className = 'pane-window-tab file-capability-browser-tab' + (tab.active ? ' active' : '');
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'file-capability-browser-tab-label'; button.textContent = '▧ ' + tab.title; button.title = tab.title; button.setAttribute('role','tab'); button.setAttribute('aria-selected',String(Boolean(tab.active)));
+      button.addEventListener('click', event => { event.stopPropagation(); if(suppressClick){suppressClick=false;return;} stopHover(); tab.onSelect(); });
+      const close = document.createElement('button'); close.type='button'; close.className='file-capability-browser-tab-close'; close.textContent='×'; close.setAttribute('aria-label','Unpin '+tab.title); close.addEventListener('click',event=>{event.stopPropagation();tab.onClose();});
+      group.draggable=true;group.setAttribute('data-preview-tab-id',tab.id);
+      group.addEventListener('dragstart',event=>{documentDragId=tab.id;stopHover();event.dataTransfer.setData(PREVIEW_TAB_MIME,tab.id);event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});
+      group.addEventListener('dragend',()=>{documentDragId=null;for(const child of strip.children)child.classList?.remove('reorder-before','reorder-after');void overlay(documentTabs.some(t=>t.active)).catch(report);});
+      group.append(button,close); strip.append(group);
+    }
   }
   const unsubscribe = host.onPaneTabs((next) => {
     if (disposed) return;
@@ -196,17 +212,33 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       for (const group of strip.children) {
         const tab = tabs.find(item => item.id === group.getAttribute('data-pane-tab-id'));
         if (!tab) continue;
-        group.classList?.toggle('active', Boolean(tab.active));
-        group.children[0]?.setAttribute('aria-selected', String(Boolean(tab.active)));
+        group.classList?.toggle('active', Boolean(tab.active && !documentTabs.some(t=>t.active)));
+        group.children[0]?.setAttribute('aria-selected', String(Boolean(tab.active && !documentTabs.some(t=>t.active))));
       }
     } else render();
   });
   render();
   strip.addEventListener('dragover', event => {
+    if(sliceDocking&&Array.from(event.dataTransfer?.types??[]).includes(NATIVE_TAB_MIME)){event.preventDefault();event.dataTransfer.dropEffect='move';return;}
+    if(documentDragId&&Array.from(event.dataTransfer?.types??[]).includes(PREVIEW_TAB_MIME)){
+      event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect='move';
+      for(const child of strip.children)child.classList?.remove('reorder-before','reorder-after');
+      const target=event.target?.closest?.('[data-preview-tab-id]');if(target&&target.getAttribute('data-preview-tab-id')!==documentDragId){const box=target.getBoundingClientRect();target.classList?.add(event.clientX>(box.left+box.right)/2?'reorder-after':'reorder-before');}return;
+    }
     if (disposed || !Array.from(event.dataTransfer?.types ?? []).includes(WINDOW_TAB_MIME)) return;
     event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
   });
   strip.addEventListener('drop', async event => {
+    if(sliceDocking&&Array.from(event.dataTransfer?.types??[]).includes(NATIVE_TAB_MIME))return;
+    const previewId=(documentDragId||Array.from(event.dataTransfer?.types??[]).includes(PREVIEW_TAB_MIME))?event.dataTransfer?.getData(PREVIEW_TAB_MIME):null;
+    if(previewId){
+      const source=documentTabs.find(t=>t.id===previewId);if(!source)return;
+      event.preventDefault();event.stopPropagation();
+      const target=event.target?.closest?.('[data-preview-tab-id]');let beforeId='';
+      if(target){const id=target.getAttribute('data-preview-tab-id'),box=target.getBoundingClientRect();beforeId=event.clientX>(box.left+box.right)/2?(documentTabs[documentTabs.findIndex(t=>t.id===id)+1]?.id||''):id;}
+      if(beforeId!==previewId)source.onReorder?.(beforeId);
+      return;
+    }
     const instance = windowTabTransfer(event.dataTransfer?.getData(WINDOW_TAB_MIME));
     if (!instance || disposed || busy) return;
     event.preventDefault(); event.stopPropagation();
@@ -230,8 +262,14 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   });
   void request('pane-window-tabs', { rect: bounds() }).catch(() => {});
   return {
+    setDocumentTabs(next) { const key=tabs=>JSON.stringify(tabs.map(({id,title,active})=>({id,title,active})));const changed=key(next)!==key(documentTabs);documentTabs = next; if (!disposed && changed) render(); },
     hasWindows() { return !disposed && tabs.length > 0; },
+    async restoreCurrent() {
+      if (disposed || await prepare() === false) return;
+      await request('pane-window-tabs', { rect: bounds() });
+      if (!disposed) await overlay(false);
+    },
     async showCurrent() { if (!disposed && await prepare() !== false) await overlay(false); },
-    destroy() { stopHover(); disposed = true; clearTimeout(dwell); unsubscribe(); strip.remove(); lensButton?.remove(); if (busy) void host.windowCandidatePickerClose().catch(() => {}); },
+    destroy() { if(disposed)return;stopHover(); disposed = true; clearTimeout(dwell); unsubscribe(); strip.remove(); lensButton?.remove(); if (busy) void host.windowCandidatePickerClose().catch(() => {}); },
   };
 }

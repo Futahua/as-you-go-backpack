@@ -6,7 +6,7 @@
  *
  * prepare() (when provided) runs before installing a committed state — the
  * entry uses it to fold the current navigation session into the saved view.
- * The store clears the session selection directly before invoking prepare().
+ * Document edits clear selection before prepare(); pane preference saves may preserve it.
  * afterCommit() runs after the new state is installed but before persisting. */
 /** A queued save that was abandoned because its generation was invalidated.
  * It never reached persistence. */
@@ -209,6 +209,7 @@ export function createWorkspaceStore({
     isRedo = false,
     saveMetadata,
     requireDurable = false,
+    preserveSelection = false,
   } = {}) {
     if (!canMutateDocument()) {
       // Refused before the history stacks or the document are touched, so a
@@ -229,7 +230,7 @@ export function createWorkspaceStore({
     // Selection is cleared only after the initial normalization succeeds, so
     // a malformed state that makes normalizeState throw does not destroy the
     // current selection.
-    session.selected.clear();
+    if (!preserveSelection) session.selected.clear();
     if (prepare) final = normalizeState(prepare(final, session) ?? final);
     setState(final);
     afterCommit?.();

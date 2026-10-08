@@ -330,8 +330,21 @@ export function createWorkspaceNavigator(o) {
   search.append(searchInput, searchInfo);
   const savedPills=d.createElement('div');savedPills.className='navigator-saved-pills';search.insertBefore(savedPills,searchInfo);
   const body = d.createElement('div'); body.className = 'workspace-navigator-body';
+  const graphSlot = o.graphContent ? d.createElement('div') : null;
+  let refreshGraphVisibility = () => {};
+  if (graphSlot) {
+    graphSlot.className = 'navigator-graph-surface'; graphSlot.append(o.graphContent);
+    const graphToggle = button(d,'Switch list / graph',['M3 4h4v4H3z','M13 12h4v4h-4z','M7 6l8 8']);
+    let graphMode = false;
+    try { graphMode = d.defaultView.localStorage.getItem('papers:ayg:left-graph:'+o.rootId) === '1'; } catch {}
+    const apply = () => { const visible=graphMode&&s.mode==='ayg'&&!s.searchQuery;s.graphViewActive=visible;panel.classList.toggle('graph-mode',visible);graphSlot.hidden = !visible; body.hidden = visible; graphToggle.setAttribute('aria-pressed',String(graphMode)); };
+    refreshGraphVisibility=apply;
+    graphToggle.addEventListener('click',()=>{graphMode=!graphMode;persistUi('papers:ayg:left-graph:'+o.rootId,graphMode?'1':'0');apply();});
+    tools.append(graphToggle); apply();
+  }
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
   panel.replaceChildren(head,search,loc,body,resizer);
+  if (graphSlot) { panel.insertBefore(graphSlot,resizer); panel.classList.add('has-graph-surface'); }
   installNavigatorDropTarget(body,()=>s.mode==='machine'?{path:s.view==='tree'?s.machineRoot:s.path}:{item:{id:s.view==='tree'?o.rootId:currentAyG()}});
   const rowInteractions = bindNavigatorRowInteractions({document:d,body,
     dropEffect: allowed => navigatorDropEffect(allowed,'move'),
@@ -457,7 +470,7 @@ export function createWorkspaceNavigator(o) {
     collapse.innerHTML = s.collapsed
       ? svg(['M8.5 3.5a5 5 0 1 0 0 10a5 5 0 1 0 0-10', 'M12.2 12.2 16.5 16.5'])
       : svg(['M12.5 4.5 7 10l5.5 5.5']);
-    const nav = s.view === 'nav';
+    const nav = s.view === 'nav' || s.graphViewActive;
     // Keep the toolbar spatially stable when the pane narrows or changes mode.
     // Context-specific controls stay visible but disabled instead of disappearing.
     back.hidden = fwd.hidden = up.hidden = false;
@@ -836,7 +849,7 @@ export function createWorkspaceNavigator(o) {
     } return f;
   }
   function renderAyG() {treeBranches=[];treeRowIndex=0;
-    if(s.view==='tree'){
+    if(s.view==='tree'&&!s.graphViewActive){
       setLocation([{key:'ayg-root',label:'As you Go'}]);
       body.replaceChildren(aygChildren(o.rootId));paintTreeBranches();
     }
@@ -1242,7 +1255,7 @@ export function createWorkspaceNavigator(o) {
     if(event.key==='Escape'&&searchInput.value){event.preventDefault();clearSearch();}
   });
   function setCollapsed(collapsed){
-    s.collapsed=Boolean(collapsed);
+    s.collapsed=o.permanentPane ? false : Boolean(collapsed);
     persistUi('papers:ayg:navigator-collapsed',s.collapsed?'1':'0');
     render();
   }
@@ -1374,7 +1387,10 @@ export function createWorkspaceNavigator(o) {
     input.focus();input.select();
   });
   del.addEventListener('click',async()=>{
-    const r=await deleteNavigatorSelection(s.mode,s.selected,{...o,confirm:message=>d.defaultView?.confirm(message)});
+    let r;del.disabled=true;
+    try{r=await deleteNavigatorSelection(s.mode,s.selected,{...o,confirm:message=>d.defaultView?.confirm(message)});}
+    catch(error){o.setStatus(error.message||'Delete failed.');return;}
+    finally{del.disabled=false;}
     if(s.mode==='ayg'||!r)return;
     if(!r.ok){o.setStatus(r.message||'Delete failed.');return;}
     s.selected=null;s.machineListings.clear();render();
@@ -1401,6 +1417,7 @@ export function createWorkspaceNavigator(o) {
     }
   }
   function render(){
+    refreshGraphVisibility();
     savedStates?.syncDurable();
     syncChrome();
     if (s.collapsed) return;

@@ -105,7 +105,7 @@ import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
 import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-capability-panel.js';
-import { installPairedPaneResizer } from './app/paired-pane-resizer.js';
+import { installWorkspacePaneLayout } from './app/workspace-pane-layout.js';
 import { createWorkspaceNavigator } from './app/workspace-navigator.js';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { endExactWindowCandidateProcess } from './app/window-layout-process-end.js';
@@ -375,6 +375,7 @@ let suppressBlankClick = false;
 let suppressGraphClick = false;
 let zoomTimer = null;
 let fileCapabilityPanel = null;
+let paneLayout = null;
 let workspaceNavigator = null;
 
 function setStatus(text = '', options) {
@@ -4004,6 +4005,7 @@ function render() {
   if (WIDGET_SURFACE) return; // 019C: the widget renders only its own card
   syncWorkspaceTabIdentity();
   workspaceNavigator?.render();
+  paneLayout?.syncSettings();
   renderWindowLayoutPills();
   if (session.binMode && session.binCurrentId !== 'bin' && !group(session.binCurrentId)?.bin) {
     // The folder we'd drilled into was restored or deleted out from under
@@ -4147,11 +4149,7 @@ function syncFileCapabilitySelection() {
   ) {
     return;
   }
-  if (EMBEDDED_SURFACE === 'proxima') {
-    window.parent.postMessage({ type: 'papers:proxima-preview-selection', selection }, embeddedParentOrigin());
-    return;
-  }
-  fileCapabilityPanel?.syncSelection(selection);
+  paneLayout?.syncSelection(selection);
 }
 
 function syncSelection({ syncNavigator = true, syncPreview = true } = {}) {
@@ -4903,11 +4901,14 @@ const commands = createWorkspaceCommands({
   setStatus,
 });
 
-if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay' && EMBEDDED_SURFACE !== 'proxima') {
+if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
   fileCapabilityPanel = createFileCapabilityPanel({
     document,
     host,
     setStatus,
+    windowsOnly: true,
+    previewOnly: EMBEDDED_SURFACE === 'proxima',
+    onNativeSelected: () => paneLayout?.selectNative(),
     retargetShortcut: async ({ shortcutId, oldPath, newPath, nextName }) => {
       const record = shortcut(shortcutId);
       if (!record || record.target !== oldPath) return false;
@@ -4930,6 +4931,8 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     document,
     host,
     workspace: workspaceElement,
+    graphContent: document.querySelector('#explorer'),
+    permanentPane: true,
     openPaneQuickRun:panel=>{
       const layer=elements.quickRunLayer;panel.append(layer);layer.classList.add('navigator-quick-run');const pills=panel.querySelector('.navigator-saved-pills');
       const position=()=>layer.style.setProperty('--navigator-run-top',(pills.getBoundingClientRect().bottom-panel.getBoundingClientRect().top+4)+'px');
@@ -5044,11 +5047,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
         item: { shortcutId: null, path, name },
         items: [{ shortcutId: null, path, name }],
       };
-      if (EMBEDDED_SURFACE === 'proxima') {
-        window.parent.postMessage({ type: 'papers:proxima-preview-selection', selection }, embeddedParentOrigin());
-      } else {
-        void fileCapabilityPanel?.previewPath(path, name);
-      }
+      void paneLayout?.previewPath(path, name);
     },
     setStatus,
   });
@@ -5074,8 +5073,14 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     void saveWorkspaceView();
     render();
   });
+  document.querySelector('.workspace-navigator-toolbar')?.append(parentGraphToggle);
   workspaceNavigator.render();
-  installPairedPaneResizer({document,navigator:workspaceNavigator,preview:fileCapabilityPanel});
+  paneLayout = installWorkspacePaneLayout({externalWindows:EMBEDDED_SURFACE==='proxima',document,host,navigator:workspaceNavigator,windows:fileCapabilityPanel,setStatus,
+    isReady:()=>workspaceLoad.ok,
+    getSettings:()=>store.getSnapshot().view?.preferences?.paneLayouts?.[SCOPE_ROOT_ID || ROOT_ID],
+    saveSettings:settings=>commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,paneLayouts:{...current.view.preferences.paneLayouts,[SCOPE_ROOT_ID || ROOT_ID]:settings}}}};},{requireDurable:true,preserveSelection:true}),
+  });
+  window.addEventListener('pagehide',()=>paneLayout?.destroy(),{once:true});
   syncFileCapabilitySelection();
 } else {
   document.querySelector('#workspace-navigator')?.setAttribute('hidden', '');
@@ -5390,16 +5395,8 @@ const keyboard = createKeyboardController({
   copySelectionPaths: () => workspaceNavigator?.copySelectionPaths?.() ?? false,
   reservePaneTabAcrossControls: EMBEDDED_SURFACE === 'proxima',
   toggleSidePanes: () => {
-    if (!workspaceNavigator) return false;
-    if (EMBEDDED_SURFACE === 'proxima') {
-      workspaceNavigator.setCollapsed?.(!(workspaceNavigator.isCollapsed?.() === true));
-      return true;
-    }
-    if (!fileCapabilityPanel || fileCapabilityPanel.isFullPage?.()) return false;
-    const bothCollapsed = workspaceNavigator.isCollapsed?.() === true
-      && fileCapabilityPanel.isExpanded?.() === false;
-    workspaceNavigator.setCollapsed?.(!bothCollapsed);
-    fileCapabilityPanel.setExpanded?.(bothCollapsed);
+    if (!paneLayout || fileCapabilityPanel.isFullPage) return false;
+    paneLayout.toggleSurfaces();
     return true;
   },
 });
@@ -5410,7 +5407,7 @@ if (EMBEDDED_SURFACE === 'proxima') {
     const expected = embeddedParentOrigin();
     if (expected !== '*' && event.origin !== expected) return;
     if (event.data?.type !== 'papers:proxima-toggle-left-pane') return;
-    workspaceNavigator?.setCollapsed?.(!(workspaceNavigator?.isCollapsed?.() === true));
+    paneLayout?.toggleSurfaces();
   });
 }
 

@@ -1,0 +1,89 @@
+.workspace-two-pane .explorer:has(> #icon-grid:empty) { display:none; }
+.workspace-two-pane .workspace-navigator { border-radius:10px 0 0 10px; box-shadow:none; }
+.workspace-two-pane .workspace-window-pane { border-radius:0 10px 10px 0; box-shadow:none; }
+.workspace-two-pane .pane-clasp-toggle,.workspace-two-pane .paired-pane-resizer,.workspace-two-pane .workspace-navigator-resizer,.workspace-two-pane .workspace-navigator-collapse { display:none!important; }
+.workspace-two-pane .workspace-navigator.has-graph-surface { display:flex; flex-direction:column; }
+.workspace-two-pane .workspace-navigator-header,.workspace-two-pane .workspace-navigator-search,.workspace-two-pane .workspace-navigator-location { flex-shrink:0; }
+.workspace-two-pane .workspace-navigator-body,.workspace-two-pane .navigator-graph-surface { flex:1; min-height:0; position:relative; }
+.workspace-two-pane .navigator-graph-surface #icon-grid { position:absolute;inset:0;margin:0;padding:0;min-height:0;width:100%;height:100%; }
+.workspace-two-pane .navigator-graph-surface .graph-viewport { width:100%;height:100%; }
+.workspace-two-pane .independent-file-preview { position:fixed;min-width:0;max-width:none;max-height:none;z-index:905;margin:0;transform:none;transition:none; }
+.workspace-two-pane .independent-file-preview .file-capability-resizer,.workspace-two-pane .independent-file-preview .file-capability-expand { display:none; }
+.workspace-two-pane .workspace-pinned-preview { z-index:906; }
+.workspace-two-pane .workspace-pane-controls { display:flex;gap:3px;align-items:center;flex-wrap:wrap; }
+.workspace-two-pane .workspace-pane-controls button,.workspace-two-pane .workspace-pane-controls select { font:inherit;font-size:10px;padding:3px 5px;min-width:0;border:1px solid var(--border-subtle);border-radius:5px;background:var(--surface);color:var(--text); }
+.workspace-two-pane .workspace-pane-controls button[aria-pressed=true] { background:var(--surface-soft);border-color:var(--border-strong); }
+.workspace-two-pane .workspace-navigator-header { flex-wrap:wrap; }
+.workspace-two-pane [hidden] { display:none!important; }
+.workspace-two-pane .workspace-window-pane .file-capability-inspector { display:none; }
+.workspace-two-pane .independent-file-preview .file-capability-inspector { display:flex; }
+
+.workspace-two-pane .navigator-graph-surface .explorer { position:absolute;inset:0;display:block;margin:0;padding:0;min-width:0;min-height:0;overflow:hidden; }
+.workspace-two-pane .workspace-navigator .workspace-navigator-body[hidden] { display:none!important; }
+
+.workspace-two-pane .workspace.file-capability-docked.file-capability-expanded .navigator-graph-surface .explorer { right:0; }
+.workspace-two-pane .workspace-window-pane.embedded-surface-proxima { position:fixed;right:8px;left:auto;width:var(--file-capability-width); }
+
+.workspace-two-pane .workspace-window-pane .file-capability-expand { display:none; }
+
+.workspace-two-pane .workspace-navigator-toolbar .parent-graph-toggle { position:static;inset:auto;flex:0 0 28px;transform:none; }
+
+/* Workspace actions belong to the left pane, rather than a canvas behind it. */
+html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
+.workspace-two-pane .navigation { display:none; }
+.workspace-two-pane .workspace-left-actions { display:flex;align-items:center;gap:4px;flex-wrap:wrap; }
+.workspace-two-pane .workspace-left-actions .toolbar-shell { position:static!important;inset:auto!important;transform:none!important;margin:0;box-shadow:none; }
+.workspace-two-pane .workspace-left-actions .toolbar-drag-handle { display:none; }
+.workspace-two-pane .workspace-left-actions .toolbar-shell:has(> button[hidden]) { display:none; }
+.workspace-two-pane .workspace-navigator:not(.graph-mode) .backdrop-slider { display:none; }
+.workspace-two-pane .workspace-left-actions button { width:28px;height:28px; }
+.workspace-two-pane .workspace-left-actions .backdrop-slider { padding:0 4px; }
+
+.workspace-two-pane .preview-dock-handle { cursor:grab;touch-action:none;border:0;background:transparent;color:var(--text);font:inherit;font-weight:600;padding:5px 8px; }
+.workspace-two-pane .preview-dock-handle.dragging { cursor:grabbing; }
+.preview-dock-shield { position:fixed;inset:0;z-index:100000;cursor:grabbing; }
+.preview-dock-shield[hidden],.preview-split-cue[hidden] { display:none!important; }
+.preview-split-cue { position:absolute;box-sizing:border-box;pointer-events:none;border-radius:12px;background:rgb(170 180 185 / 7%);opacity:.45;transition:opacity 80ms ease; }
+.preview-split-cue.is-armed { opacity:1; }
+.preview-split-cue::before { content:"";position:absolute;inset:0;border-radius:inherit;padding:2px;background:linear-gradient(115deg,#7c9ca0,#a08eaa 36%,#a9a06f 68%,#7b9e94);mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;opacity:.78; }
+
+.workspace-two-pane .workspace-follow-preview.expanded { grid-template-rows:32px minmax(0,1fr); }
+.workspace-two-pane .workspace-follow-preview.expanded > .file-capability-header { position:static;width:auto;height:32px;justify-content:flex-start;padding:0 5px;border-bottom:1px solid var(--border-subtle); }
+.workspace-two-pane .workspace-follow-preview.expanded > .file-capability-body { grid-row:2;min-height:0; }
+.workspace-two-pane .workspace-follow-preview .preview-dock-handle { flex:1;text-align:left; }
+
+.workspace-two-pane .workspace-follow-preview .preview-dock-handle { flex:0 0 24px;padding:3px;display:grid;place-items:center; }
+.workspace-two-pane .preview-pane-label { flex:1;font-weight:600;pointer-events:none; }
+.preview-resize-edge { position:absolute;z-index:30;touch-action:none; }
+.preview-resize-top,.preview-resize-bottom { left:0;right:0;height:7px;cursor:ns-resize; }
+.preview-resize-top { top:-3px; }.preview-resize-bottom { bottom:-3px; }
+.preview-resize-left { top:0;bottom:0;left:-3px;width:7px;cursor:ew-resize; }
+.preview-resize-shield { position:fixed;inset:0;z-index:100000; }
+.preview-resize-shield[hidden],.preview-resize-edge[hidden] { display:none!important; }
+
+.pinned-tab-drop-cue { position:fixed;z-index:100001;pointer-events:none; }
+
+.window-slices-root > .file-capability-header,.window-slices-root > .file-capability-body { visibility:hidden;pointer-events:none; }
+.window-slices-region { position:fixed;inset:0;pointer-events:none;z-index:950; }
+.window-slice { position:absolute;box-sizing:border-box;display:flex;flex-direction:column;background:var(--surface-raised);border:1px solid var(--border-strong);overflow:hidden;pointer-events:auto; }
+.window-slice[hidden] { display:none!important; }
+.window-slice-header { display:flex;align-items:center;gap:3px;min-height:32px;height:32px;flex:0 0 32px;background:var(--surface-soft);border-bottom:1px solid var(--border-subtle);padding:0 3px; }
+.window-slice-header .pane-window-tabs { min-width:0;flex:1; }
+.window-slice-number { flex:0 0 18px;text-align:center;font-size:11px;color:var(--text-muted); }
+.window-slice-controls { display:flex;flex:0 0 auto;gap:2px; }
+.window-slice-controls button { border:0;background:transparent;color:var(--text);width:24px;height:26px;padding:0;font-size:16px; }
+.window-slice-controls button:hover { background:var(--surface); }
+.window-slice.slice-minimized .pane-window-tabs { visibility:hidden; }
+.window-slices-region.slice-page-maximized { z-index:1100; }
+.window-slice-drop { position:fixed;z-index:100002;pointer-events:none; }
+.slice-file-preview { position:fixed!important;min-width:0!important;max-width:none!important;min-height:0;z-index:1101!important;transition:none!important;box-shadow:none; }
+.slice-file-preview[hidden] { display:none!important; }
+
+.compact-file-preview .preview-pane-label,.compact-file-preview .file-capability-item-title,.compact-file-preview .file-capability-item-meta{display:none}
+.compact-file-preview .file-capability-header{display:flex;align-items:center;gap:6px;position:relative;height:32px;padding:2px 6px}
+.compact-file-preview .file-capability-path-row{flex:1;min-width:0;margin:0;display:flex}
+.compact-file-preview .file-capability-path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.compact-file-preview .file-capability-image-toolbar{display:flex;align-items:center;padding:0;border:0;flex:none}
+.compact-file-preview .file-capability-inspector{padding:0;gap:0}
+.compact-file-preview .file-capability-image-shell{grid-template-rows:minmax(0,1fr)}
+.preview-pin{width:28px;height:26px;padding:4px;flex:none}.preview-pin svg{width:18px;height:18px}

@@ -123,3 +123,27 @@ Run focused checks for behavior changes and npm test for the integration checkpo
 Docs-only changes require consistency/link checks, not runtime reload or host release.
 
 Proxima embedded workspaces use Papers scope-bound writer leases, retain checked revisions, and map synthetic-root additions into the real project scope. Background window requests must have a bounded response through the verified embedded bridge.
+
+- Main workspace composition: the left pane stays open and substitutes graph for list
+  while retaining search, breadcrumbs and actions. Workspace actions live in that pane;
+  graph appearance controls appear only in graph mode. Preview is independent of native
+  window tabs, with left/right half surfaces or a full-height middle column. Pinned file
+  previews are document tabs. Persist these preferences per workspace scope. Proxima
+  uses the scoped left composition and a separate sticky native-window surface beside
+  the scrolling project; the right surface remains visible above the workspace fold.
+
+Preview placement is changed by dragging its header into a pane half or middle column,
+using a translucent split cue. Cancelled or unarmed drops never change saved placement.
+
+Only the dedicated Preview grip docks/splits it. Shared preview edges resize its saved
+height or middle-column width; they never relocate native window tabs from the right pane.
+
+Pinned preview tabs can be dragged to reorder within the strip or into a split preview
+surface. Validate local saved preview identities on drop; never send preview IDs to
+native application-window detach/reorder operations. Proxima relays through its sidecar.
+
+Pane composition now resolves native size constraints in the pure `public/app/pane-layout-model.js`. Authored topology/ratios and explicit minimized state are durable; stacking and temporary neighbor minimization are presentation only. Reserve the strip height above a native window when satisfying its minimum height. Native placement observations cannot become authored resize intent. Saved slice membership arriving before preferences is reconciled after preferences load. Preview resize keeps the native surface presented. The Papers host serializes native geometry transactions and composes cut-outs across Backpack groups.
+
+Each additional numbered window group now has an X. Removing a split merges its native tabs and pinned previews into a retained group; the final group remains. Closing the primary group retains the main identity by promoting its neighbor. Group removal rolls back its presentation preferences if native placement fails. The isolated Electron fixture exercises the X control; pure tests cover nested and primary group removal.
+
+Creator-directed single-pane restoration, 2026-10-08: numbered native window groups are disabled; workspace composition uses the existing single native tab strip and the Papers pane engine from commit 561de29. Proxima likewise keeps one native right pane. Independent preview placement, compact preview controls and pinned document tabs are retained. Saved windowSlices preferences are left intact but dormant; no creator data is rewritten to remove them. Backup: D:\CodexTemp\pane-single-split-backup-20261008-2345. AYG suite 1983 passed, hidden composition fixture verifies no numbered window slices are installed.

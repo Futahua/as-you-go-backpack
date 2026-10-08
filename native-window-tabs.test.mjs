@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { installNativeWindowTabs } from './public/app/native-window-tabs.js';
+import { PREVIEW_TAB_MIME, installNativeWindowTabs } from './public/app/native-window-tabs.js';
 import { WINDOW_TAB_MIME, paneWindowPickerRows } from './public/app/window-tab-transfer.js';
 
 class Element {
@@ -151,4 +151,33 @@ test('active-only tab switches retain existing strip nodes', () => {
   assert.equal(nodes[1].children[0].attributes['aria-selected'],'false');
   assert.equal(nodes[2].children[0].attributes['aria-selected'],'true');
   f.api.destroy();
+});
+
+test('pinned preview tabs use local preview callbacks and never detach or select an external window',async()=>{
+ const f=fixture();let selected=0,closed=0;
+ f.push([{id:'native',title:'Chrome',active:true}]);
+ f.api.setDocumentTabs([{id:'preview',title:'Drawing.png',active:true,onSelect:()=>selected++,onClose:()=>closed++}]);
+ const tab=f.strip.children.at(-1);tab.children[0].listeners.click({stopPropagation(){}});tab.children[1].listeners.click({stopPropagation(){}});
+ assert.equal(selected,1);assert.equal(closed,1);assert.equal(f.calls.some(c=>['pane-window-select','pane-window-detach'].includes(c.operation)),false);assert.equal(tab.children[0].getAttribute('aria-selected'),'true');assert.equal(f.strip.children[1].children[0].getAttribute('aria-selected'),'false');f.api.destroy();
+});
+
+test('restoration prepares the visible window surface before requesting retained tabs', async()=>{
+ const f=fixture(); await settle(); f.calls.length=0;
+ await f.api.restoreCurrent();
+ assert.deepEqual(f.calls.map(c=>c.operation),['prepare','pane-window-tabs']);
+ assert.deepEqual(f.calls[1].data.rect,{x:10,y:20,width:400,height:600});
+ f.api.destroy();
+});
+
+test('pinned preview drag carries a local preview identity and reorders without native window mutations',async()=>{
+ const f=fixture();const reordered=[];
+ f.api.setDocumentTabs([{id:'one',title:'One',onSelect(){},onClose(){},onReorder:id=>reordered.push(id)},{id:'two',title:'Two',onSelect(){},onClose(){}}]);
+ const one=f.strip.children[1],two=f.strip.children[2],data=new Map();
+ const transfer={types:[PREVIEW_TAB_MIME],setData:(k,v)=>data.set(k,v),getData:k=>data.get(k)||''};
+ assert.equal(one.draggable,true);one.listeners.dragstart({dataTransfer:transfer});
+ two.getBoundingClientRect=()=>({left:100,right:200});two.closest=()=>two;
+ await f.strip.listeners.drop({target:two,clientX:180,dataTransfer:transfer,preventDefault(){},stopPropagation(){}});
+ assert.equal(data.get(PREVIEW_TAB_MIME),'one');assert.deepEqual(reordered,['']);
+ assert.equal(f.calls.some(c=>['pane-window-reorder','pane-window-drop','pane-window-detach'].includes(c.operation)),false);
+ one.listeners.dragend();f.api.destroy();
 });

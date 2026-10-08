@@ -636,3 +636,10 @@ test('0B: invalidating twice reports nothing the second time', () => {
   assert.equal(JSON.parse(store.invalidatePendingSaves()).items[0], 'A');
   assert.equal(store.invalidatePendingSaves(), null);
 });
+
+test('pane preference commits preserve live selection while ordinary document edits still clear it',async()=>{
+ const h=createHarness();h.store.setSelection(['root']);h.store.setSelectionAnchor('root');
+ await h.store.commit({...h.getState(),view:{previewSize:.6}},{preserveSelection:true});
+ assert.deepEqual([...h.store.getSession().selected],['root']);assert.equal(h.store.getSession().selectionAnchor,'root');
+ await h.store.commit({...h.getState(),items:['changed']});assert.equal(h.store.getSession().selected.size,0);
+});

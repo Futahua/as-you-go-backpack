@@ -347,8 +347,8 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.doesNotMatch(css, /file-capability-expand::before/);
   assert.match(source, /isFullPage: \(\) => state\.fullPage/);
   assert.match(workspace, /toggleSidePanes:[\s\S]*fileCapabilityPanel\.isFullPage/);
-  assert.match(workspace, /workspaceNavigator\.setCollapsed\?\.\(!bothCollapsed\)/);
-  assert.match(workspace, /fileCapabilityPanel\.setExpanded\?\.\(bothCollapsed\)/);
+  assert.match(workspace, /paneLayout\.toggleSurfaces\(\)/);
+  assert.match(workspace, /installWorkspacePaneLayout/);
   assert.match(css, /\.file-capability-native-preview/);
   assert.doesNotMatch(source, /frame\.src = data\.dataUrl/);
 });

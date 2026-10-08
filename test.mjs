@@ -116,7 +116,7 @@ test('the stylesheet entry aggregates local files in a stable order', async () =
     .map((match) => match[1]);
   const expected = [
     'tokens', 'base', 'workspace', 'toolbar', 'items', 'file-capability', 'navigator', 'graph', 'quick-run',
-    'context-menu', 'dialogs', 'utilities', 'responsive',
+    'context-menu', 'dialogs', 'utilities', 'responsive', 'workspace-pane-layout',
   ];
   assert.deepEqual(imports, expected, 'entry @imports must list every style file in order');
 

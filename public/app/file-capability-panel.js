@@ -120,12 +120,14 @@ async function waitForPathState(host, options) {
 }
 
 export function createFileCapabilityPanel(options) {
+  const previewOnly = options.previewOnly === true;
   const documentRef = options.document;
   const host = options.host;
   const setStatus = options.setStatus || (() => {});
   const retargetShortcut = options.retargetShortcut || (async () => false);
   const windowRef = documentRef?.defaultView ?? null;
   let launchedPreview = null;
+  let nativeLayoutManaged=false;
   let launchToken = null;
   let embeddedSurface = null;
   try {
@@ -323,11 +325,12 @@ export function createFileCapabilityPanel(options) {
     return state.browserTabs.find((tab) => tab.id === state.activeBrowserTabId) || null;
   }
 
-  loadBrowserTabs();
+  if (!previewOnly) loadBrowserTabs();
 
-  const workspace = documentRef.querySelector('.workspace');
+  const workspace = previewOnly ? null : documentRef.querySelector('.workspace');
   const panel = documentRef.createElement('aside');
   panel.className = 'file-capability-panel';
+  if (previewOnly) panel.classList.add('independent-file-preview');
   if (embeddedSurface === 'proxima') panel.classList.add('embedded-surface-proxima');
   panel.setAttribute('aria-label', 'File preview');
   panel.style.setProperty('--file-capability-width', state.width + 'px');
@@ -359,7 +362,9 @@ export function createFileCapabilityPanel(options) {
   const saveOfficeButton = createButton(documentRef, '', 'file-capability-icon-button');
   setButtonSvg(documentRef, saveOfficeButton, 'Save document', ['M3 3h11l3 3v11H3z', 'M6 3v5h7V3', 'M6 17v-6h8v6']);
   saveOfficeButton.hidden = true;
-  header.append(editOfficeButton, saveOfficeButton, openTabButton, expandButton);
+  header.append(editOfficeButton, saveOfficeButton);
+  if (!previewOnly) header.append(openTabButton);
+  header.append(expandButton);
 
 
   const searchWrap = documentRef.createElement('div');
@@ -439,6 +444,7 @@ export function createFileCapabilityPanel(options) {
   resultsPane.hidden = true;
   body.append(inspector);
   panel.append(resizer, header, body);
+  if(previewOnly){panel.classList.add('compact-file-preview');header.prepend(pathRow);}
   documentRef.body.append(panel);
   if (state.fullPage) {
     panel.classList.add('full-page');
@@ -666,6 +672,7 @@ export function createFileCapabilityPanel(options) {
   }
 
   function clearPreview({ preserveBrowser = false } = {}) {
+    header.querySelector('.file-capability-image-toolbar')?.remove();
     void closeOfficeEditor();
     closeNativePreview();
     closePdfPreview();
@@ -694,7 +701,7 @@ export function createFileCapabilityPanel(options) {
   function stopChromeLayout() {
     state.chromeLayout?.stop();
     state.chromeLayout = null;
-    void host.fileCapability('chrome-pane-visible', { visible: false }).catch(() => {});
+    if (!previewOnly) void host.fileCapability('chrome-pane-visible', { visible: false }).catch(() => {});
   }
 
   function applyBrowserHostState(hostTab) {
@@ -1115,9 +1122,9 @@ export function createFileCapabilityPanel(options) {
     const generation = state.inspectGeneration;
     const current = () => state.expanded && state.inspectedUrl === source.url && generation === state.inspectGeneration;
     const move = rect => {
-      if (rect && current()) void host.fileCapability('chrome-pane-move', { rect }).catch(() => {});
+      if (!nativeLayoutManaged && rect && current()) void host.fileCapability('chrome-pane-move', { rect }).catch(() => {});
     };
-    state.chromeLayout = trackChromeLayout({ panel, header, viewport: windowRef, update: move });
+    if (!nativeLayoutManaged) state.chromeLayout = trackChromeLayout({ panel, header, viewport: windowRef, update: move });
     providerStatus.textContent = '';
     void nextLayoutTick().then(async () => {
       if (!current()) return;
@@ -1132,7 +1139,7 @@ export function createFileCapabilityPanel(options) {
       if (!current()) return;
       providerStatus.textContent = '';
       if (!result?.ok) console.warn('Native pane:', result?.message || result?.error || 'Chrome could not be attached.');
-      state.chromeLayout?.refresh();
+      if (!nativeLayoutManaged) state.chromeLayout?.refresh();
       await host.fileCapability('chrome-pane-visible', { visible: !state.transientOverlay });
     }).catch(error => { if (current()) { providerStatus.textContent = ''; console.warn('Native pane:', error); } });
   }
@@ -1407,7 +1414,7 @@ export function createFileCapabilityPanel(options) {
     image.draggable = false;
     stage.append(image);
     viewport.append(stage);
-    shell.append(toolbar, viewport);
+    if(previewOnly){header.append(toolbar);shell.append(viewport);}else shell.append(toolbar, viewport);
     preview.append(shell);
 
     let scale = 1;
@@ -1998,6 +2005,7 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderEmptySelection() {
+      if (previewOnly) { clearPreview(); itemTitle.textContent = ''; itemMeta.textContent = ''; pathText.textContent = 'Select an item to preview.'; return; }
       // The native host retains the active peer across previews and restart.
       // Resume that peer without opening or selecting a Chrome tab.
       if (nativeWindowTabs.hasWindows()) {
@@ -2382,6 +2390,8 @@ export function createFileCapabilityPanel(options) {
 
   const paneSelectionPolicy = createPaneSelectionPolicy();
   async function syncSelection(selection) {
+    if (options.windowsOnly && selection?.mode !== 'web') return;
+    if (previewOnly && selection?.mode === 'web') return;
     if (!paneSelectionPolicy.observe(selection)) return;
     if (state.fullPage) return;
     const sourcePath = selection?.mode === 'single' ? selection.item?.path : selection?.path;
@@ -2421,11 +2431,11 @@ export function createFileCapabilityPanel(options) {
   }
 
   function refreshPreviewGeometry() {
-    state.chromeLayout?.refresh();
+    if (!nativeLayoutManaged) state.chromeLayout?.refresh();
     // Restored native tabs can already be visible before a selection creates
     // the layout tracker. Keep their top/right/bottom attached to the sidecar
     // during scroll without activating them or stealing a file preview.
-    if (documentRef.documentElement?.dataset.proximaPreviewSidecar === 'true'
+    if (!nativeLayoutManaged && documentRef.documentElement?.dataset.proximaPreviewSidecar === 'true'
       && nativeWindowTabs?.hasWindows()) {
       const rect = chromeLayoutBounds(panel, header, windowRef);
       if (rect) void host.fileCapability('chrome-pane-move', { rect }).catch(() => {});
@@ -2465,7 +2475,7 @@ export function createFileCapabilityPanel(options) {
     }
   }
 
-  const nativeWindowTabs = installNativeWindowTabs({ document: documentRef, header, host,
+  const nativeWindowTabs = previewOnly ? { hasWindows: () => false, showCurrent: async () => {}, destroy() {}, setDocumentTabs() {} } : installNativeWindowTabs({ document: documentRef, header, host,
     lens: async (source = 'clipboard') => {
       const result = await host.fileCapability('browser-lens-screen', { nativeChrome: true, source });
       if (result?.cancelled) return;
@@ -2477,6 +2487,7 @@ export function createFileCapabilityPanel(options) {
     },
     bounds: () => chromeLayoutBounds(panel, header, windowRef),
     prepare: async () => {
+      options.onNativeSelected?.();
       paneSelectionPolicy.hold();
       if (state.inspectedUrl === 'native-window' && state.chromeLayout && state.expanded) return true;
       providerStatus.textContent = '';
@@ -2496,8 +2507,9 @@ export function createFileCapabilityPanel(options) {
     overlay: active => host.fileCapability('chrome-pane-visible', { visible: !active && Boolean(state.chromeLayout) && state.expanded }),
     status: message => { providerStatus.textContent = ''; console.warn('Native pane:', message); },
   });
-  const releaseChromeFocus = installChromeFocusPolicy(documentRef);
-  const releaseChromeLayout = host.onChromeLayout?.(rect => {
+  const releaseChromeFocus = previewOnly ? () => {} : installChromeFocusPolicy(documentRef);
+  const releaseChromeLayout = previewOnly ? undefined : host.onChromeLayout?.(rect => {
+    if(nativeLayoutManaged)return;
     if (!state.chromeLayout || !state.inspectedUrl) return;
     // Follow the real native left edge without the preview width clamps or
     // transition. Native resizing remains entirely in Windows' move loop.
@@ -2510,6 +2522,11 @@ export function createFileCapabilityPanel(options) {
   });
 
   const api = Object.freeze({
+    replaceNativeTabs(){nativeLayoutManaged=true;stopChromeLayout();nativeWindowTabs.destroy();},
+    element: panel,
+    header,
+    setDocumentTabs: tabs => nativeWindowTabs.setDocumentTabs(tabs),
+    restoreWindows: () => nativeWindowTabs.restoreCurrent?.(),
     syncSelection,
     previewPath(path, name = basename(path)) {
       if (!isAbsoluteWindowsPath(path)) return false;
