@@ -118,7 +118,13 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
     let box={...target.group.slot};const side=target.side;
     if(side==='center'&&!groupDragId){cue.hidden=true;event.target?.closest?.('[data-pane-tab-id],[data-preview-tab-id]')?.classList.add('reorder-before');return;}
     cue.textContent=groupDragId?(side==='center'?'Swap groups':'Move group '+side):'';cue.classList.toggle('is-group-drop',Boolean(groupDragId));
-    if(side==='left'||side==='right'){box.width/=2;if(side==='right')box.x+=box.width;}else if(side==='top'||side==='bottom'){box.height/=2;if(side==='bottom')box.y+=box.height;}
+    cue.classList.toggle('is-group-insertion',Boolean(groupDragId&&side!=='center'));
+    if(groupDragId&&side!=='center'){
+      const thickness=6;
+      if(side==='left'||side==='right'){if(side==='right')box.x+=box.width-thickness;box.width=thickness;}
+      else{if(side==='bottom')box.y+=box.height-thickness;box.height=thickness;}
+      cue.textContent='';cue.setAttribute('aria-label','Insert group '+side);
+    }else if(side==='left'||side==='right'){box.width/=2;if(side==='right')box.x+=box.width;}else if(side==='top'||side==='bottom'){box.height/=2;if(side==='bottom')box.y+=box.height;}
     cue.hidden=false;Object.assign(cue.style,{left:box.x+'px',top:box.y+'px',width:box.width+'px',height:box.height+'px'});
   };
   const drop=async event=>{if(!mounted||!relevant(event))return;const target=destination(event);if(!target)return;event.preventDefault();event.stopPropagation();cue.hidden=true;

@@ -110,3 +110,5 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .window-slice-drop.is-group-drop { display:grid;place-items:center;color:var(--text-primary);font-weight:600;background:rgb(120 155 160 / 22%); }
 .workspace-left-actions > .native-window-lens { width:28px;height:28px;padding:5px;flex:0 0 28px; }
 .workspace-left-actions > .native-window-lens svg { width:18px;height:18px; }
+
+.window-slice-drop.is-group-insertion { border-radius:3px;background:var(--accent,#7c9ca0);box-shadow:0 0 8px rgb(124 156 160 / 40%); }
