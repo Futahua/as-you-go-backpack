@@ -99,7 +99,7 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
       if(shown&&!view.preview){
         const previewHost={...host,fileCapability:(operation,data={})=>host.fileCapability(operation,operation==='preview-pdf-open'?{...data,surfaceId:'pane:'+group.id}:data)};
         view.preview=createFileCapabilityPanel({document,host:previewHost,previewOnly:true,setStatus:onStatus});view.preview.element.classList.add('slice-file-preview');documentEdges(view,group.id);}
-      if(view.preview){view.preview.element.hidden=!shown;view.preview.setExpanded(Boolean(shown));
+      if(view.preview){view.preview.setPreviewSuspended?.(Boolean(active&&!shown&&group.presentation!=='minimized'));view.preview.element.hidden=!shown;view.preview.setExpanded(Boolean(active&&group.presentation!=='minimized'));
         for(const handle of view.preview.element.querySelectorAll('.slice-document-edge')){const edge=handle.className.split('slice-document-').at(-1);handle.hidden=group.presentation!=='normal'||edge==='right'&&group.slot.x+group.slot.width>=snapshot.viewport.x+snapshot.viewport.width-1||edge==='top'&&group.slot.y<=snapshot.viewport.y+1||edge==='bottom'&&group.slot.y+group.slot.height>=snapshot.viewport.y+snapshot.viewport.height-1;}
         if(shown){const r=group.content;Object.assign(view.preview.element.style,{left:r.x+'px',top:r.y+'px',width:r.width+'px',height:r.height+'px',right:'auto',bottom:'auto'});
           if(view.previewId!==active.id){view.previewId=active.id;void view.preview.previewPath(active.path,active.name);}view.preview.refreshPreviewGeometry();}}

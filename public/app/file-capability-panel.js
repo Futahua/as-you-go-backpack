@@ -178,6 +178,8 @@ export function createFileCapabilityPanel(options) {
     officeObserver: null,
     nativePreviewSessionId: null,
     nativePreviewObserver: null,
+    previewSuspended: false,
+    previewLastRect: null,
     pdfPreviewSessionId: null,
     pdfPreviewObserver: null,
     pdfPreviewClosePromise: Promise.resolve(),
@@ -2451,14 +2453,18 @@ export function createFileCapabilityPanel(options) {
     if (state.pdfPreviewSessionId) {
       void host.fileCapability('preview-pdf-move', {
         sessionId: state.pdfPreviewSessionId,
-        rect,
+        rect: state.previewSuspended && state.previewLastRect ? state.previewLastRect : rect,
+        visible: !state.previewSuspended,
       }).catch(() => {});
+      if (!state.previewSuspended) state.previewLastRect = rect;
     }
     if (state.htmlPreviewSessionId) {
       void host.fileCapability('preview-html-move', {
         sessionId: state.htmlPreviewSessionId,
-        rect,
+        rect: state.previewSuspended && state.previewLastRect ? state.previewLastRect : rect,
+        visible: !state.previewSuspended,
       }).catch(() => {});
+      if (!state.previewSuspended) state.previewLastRect = rect;
     }
     if (state.browserSessionId) {
       void host.fileCapability('browser-move', {
@@ -2536,6 +2542,7 @@ export function createFileCapabilityPanel(options) {
       setExpandedWithPreviewLifecycle(true);
     },
     setExpanded: setExpandedWithPreviewLifecycle,
+    setPreviewSuspended(value) {state.previewSuspended=Boolean(value);refreshPreviewGeometry();},
     setWidth:setPanelWidth,
     refreshPreviewGeometry,
     setTransientOverlay(active) {
