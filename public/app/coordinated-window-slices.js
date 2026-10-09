@@ -139,7 +139,12 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
       if(shown&&!view.preview){
         const previewHost={...host,fileCapability:(operation,data={})=>host.fileCapability(operation,['preview-pdf-open','preview-html-open','preview-native-open'].includes(operation)?{...data,surfaceId:'tab:'+active.id}:data)};
         view.preview=createFileCapabilityPanel({document,host:previewHost,previewOnly:true,setStatus:onStatus});view.preview.element.classList.add('slice-file-preview');retainedPreviews.set(active.id,view.preview);view.preview.setExpanded(true);void view.preview.previewPath(active.path,active.name);}
-      if(view.preview){documentEdgesOnce(view,group.id);view.preview.setPreviewSuspended?.(!shown);view.preview.element.hidden=!shown;
+      if(view.preview){documentEdgesOnce(view,group.id);
+        // Reattach the DOM surface before unsuspending its retained host. A
+        // hidden element otherwise yields a zero rectangle on the first move.
+        if(shown)view.preview.element.hidden=false;
+        view.preview.setPreviewSuspended?.(!shown);
+        if(!shown)view.preview.element.hidden=true;
         for(const handle of view.preview.element.querySelectorAll('.slice-document-edge')){const edge=handle.className.split('slice-document-').at(-1);handle.hidden=group.presentation!=='normal'||edge==='right'&&group.slot.x+group.slot.width>=snapshot.viewport.x+snapshot.viewport.width-1||edge==='top'&&group.slot.y<=snapshot.viewport.y+1||edge==='bottom'&&group.slot.y+group.slot.height>=snapshot.viewport.y+snapshot.viewport.height-1;}
         if(shown){const r=group.content;Object.assign(view.preview.element.style,{left:r.x+'px',top:r.y+'px',width:r.width+'px',height:r.height+'px',right:'auto',bottom:'auto'});
           view.preview.refreshPreviewGeometry?.();}}

@@ -1623,12 +1623,16 @@ export function createFileCapabilityPanel(options) {
     const sessionId = opened.sessionId;
     state.nativeGeometry = createPreviewGeometryScheduler({
       schedule:callback=>documentRef.defaultView.requestAnimationFrame(callback),
-      send:rect=>host.fileCapability('preview-native-move',{sessionId,rect,visible:!state.previewSuspended}),
+      // Visibility is part of the scheduler identity: a hidden tab may
+      // return at the identical rectangle without reopening its viewer.
+      send:({rect,visible})=>host.fileCapability('preview-native-move',{sessionId,rect,visible}),
     });
     const move = () => {
       if (!state.nativePreviewSessionId || !state.expanded) return;
-      state.nativeGeometry?.update(nativePreviewRect(surface));
+      const rect=state.previewSuspended&&state.previewLastRect?state.previewLastRect:nativePreviewRect(surface);
+      state.nativeGeometry?.update({rect,visible:!state.previewSuspended});
     };
+    refreshPreviewGeometry();
     if (typeof ResizeObserver === 'function') {
       state.nativePreviewObserver = new ResizeObserver(move);
       state.nativePreviewObserver.observe(surface);
@@ -1685,6 +1689,7 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     state.pdfPreviewSessionId = opened.sessionId;
+    refreshPreviewGeometry();
     const move = () => {
       if (!state.pdfPreviewSessionId || !state.expanded) return;
       void host.fileCapability('preview-pdf-move', {
@@ -1742,6 +1747,7 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     state.htmlPreviewSessionId = opened.sessionId;
+    refreshPreviewGeometry();
     const move = () => {
       if (!state.htmlPreviewSessionId || !state.expanded) return;
       void host.fileCapability('preview-html-move', {
@@ -2451,7 +2457,7 @@ export function createFileCapabilityPanel(options) {
       if (!state.previewSuspended) state.officeGeometry?.update(rect);
     }
     if (state.nativePreviewSessionId) {
-      state.nativeGeometry?.update(state.previewSuspended && state.previewLastRect ? state.previewLastRect : rect);
+      state.nativeGeometry?.update({rect:state.previewSuspended && state.previewLastRect ? state.previewLastRect : rect,visible:!state.previewSuspended});
       if (!state.previewSuspended) state.previewLastRect=rect;
     }
     if (state.pdfPreviewSessionId) {

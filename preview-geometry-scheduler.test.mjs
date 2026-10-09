@@ -11,3 +11,15 @@ test('resize bursts send newest geometry and never overlap host calls',async()=>
   scheduler.update({width:450});await frames.shift()();assert.equal(sent.length,2);
   scheduler.update({width:200});scheduler.dispose();await frames.shift()();assert.equal(sent.length,2);
 });
+
+test('hiding and showing a retained preview are delivered even when its rectangle is unchanged',async()=>{
+  const frames=[],sent=[];
+  const scheduler=createPreviewGeometryScheduler({schedule:frame=>frames.push(frame),send:async value=>{sent.push(value);}});
+  const rect={x:12,y:40,width:640,height:460};
+  for(const visible of [true,false,true]){
+    scheduler.update({rect,visible});
+    await frames.shift()();
+  }
+  assert.deepEqual(sent,[{rect,visible:true},{rect,visible:false},{rect,visible:true}]);
+  scheduler.dispose();
+});
