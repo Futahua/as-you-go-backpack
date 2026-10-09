@@ -314,9 +314,9 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(workspace, /data-papers-tab-icon/);
   assert.match(workspace, /FULL_PAGE_TAB_IDENTITY/);
   assert.match(source, /renderImagePreview\(source\)/);
-  assert.match(source, /Zoom out/);
-  assert.match(source, /Zoom in/);
-  assert.match(source, /Fit image to preview/);
+  assert.doesNotMatch(source, /Zoom out/);
+  assert.doesNotMatch(source, /Zoom in/);
+  assert.doesNotMatch(source, /Fit image to preview/);
   assert.match(source, /viewport\.addEventListener\('wheel'/);
   assert.doesNotMatch(source, /if \(!event\.ctrlKey\) return/);
   assert.match(source, /viewport\.addEventListener\('pointerdown'/);

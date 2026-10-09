@@ -12,7 +12,7 @@ export const paneSnapshotIsNewer=(previous,next)=>Boolean(next&&Array.isArray(ne
 /** Presentation only: snapshots own all native geometry, membership and selection.
  * No per-leaf rectangle, inferred minimum, resize ratio or automatic fallback is
  * sent back. Only a root viewport and explicit creator commands cross the bridge. */
-export function installCoordinatedWindowSlices({document,host,root,pagePanels=null,onSettings=()=>{},onPreviews=()=>{},onStatus=()=>{},onOuterEdge=()=>{},onActive=()=>{}}){
+export function installCoordinatedWindowSlices({document,host,root,pagePanels=null,resolvePreviewDrag=()=>null,onSettings=()=>{},onPreviews=()=>{},onStatus=()=>{},onOuterEdge=()=>{},onActive=()=>{}}){
   // This element supplies native geometry, including the first retained-window
   // mount. Legacy collapsed/expanded width animation exposes intermediate
   // widths that can fail native minimum sizes and must not drive this owner.
@@ -190,7 +190,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
       const source=event.dataTransfer.getData(GROUP_DRAG_MIME)||groupDragId;if(source){await command('relocate-group',{groupId:source,destination:target.group.id,side:target.side});return;}
       const preview=event.dataTransfer.getData(PREVIEW_TAB_MIME);let native;try{native=JSON.parse(event.dataTransfer.getData(NATIVE_TAB_MIME)||'null');}catch{}
       let id=preview?ref(preview):native?.id;
-      if(preview){const tab=protectedTabs.find(p=>p.id===preview)||previews.find(p=>p.id===preview);if(!tab)return;if(!tab.panel)await ensureDocument(tab);}
+      if(preview){let tab=protectedTabs.find(p=>p.id===preview)||previews.find(p=>p.id===preview);if(!tab){tab=resolvePreviewDrag(preview);if(!tab)return;previews=[...previews,tab];onPreviews(previews);}if(!tab.panel)await ensureDocument(tab);}
       if(!id){const instance=windowTabTransfer(event.dataTransfer.getData(WINDOW_TAB_MIME));if(!instance)return;
         id=snapshot.groups.flatMap(g=>g.tabs).find(t=>t.windowInstanceId===instance)?.id;
         if(!id){const listed=await host.windowCandidates({includeNativeIcons:false}),candidate=listed.candidates?.find(t=>t.windowInstanceId===instance);if(!candidate)return;

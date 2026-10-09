@@ -1391,20 +1391,6 @@ export function createFileCapabilityPanel(options) {
   function renderImagePreview(source) {
     const shell = documentRef.createElement('div');
     shell.className = 'file-capability-image-shell';
-    const toolbar = documentRef.createElement('div');
-    toolbar.className = 'file-capability-image-toolbar';
-    const zoomOut = createButton(documentRef, '−');
-    zoomOut.title = 'Zoom out';
-    zoomOut.setAttribute('aria-label', 'Zoom out');
-    const zoomLabel = documentRef.createElement('span');
-    zoomLabel.className = 'file-capability-image-zoom-label';
-    const zoomIn = createButton(documentRef, '+');
-    zoomIn.title = 'Zoom in';
-    zoomIn.setAttribute('aria-label', 'Zoom in');
-    const fit = createButton(documentRef, 'Fit');
-    fit.title = 'Fit image to preview';
-    toolbar.append(zoomOut, zoomLabel, zoomIn, fit);
-
     const viewport = documentRef.createElement('div');
     viewport.className = 'file-capability-image-viewport';
     const stage = documentRef.createElement('div');
@@ -1416,7 +1402,7 @@ export function createFileCapabilityPanel(options) {
     image.draggable = false;
     stage.append(image);
     viewport.append(stage);
-    if(previewOnly){header.append(toolbar);shell.append(viewport);}else shell.append(toolbar, viewport);
+    shell.append(viewport);
     preview.append(shell);
 
     let scale = 1;
@@ -1437,8 +1423,6 @@ export function createFileCapabilityPanel(options) {
       image.style.height = height + 'px';
       stage.style.width = Math.max(viewport.clientWidth, width) + 'px';
       stage.style.height = Math.max(viewport.clientHeight, height) + 'px';
-      zoomLabel.textContent = Math.round(scale * 100) + '%';
-      fit.classList.toggle('active', fitMode);
     };
     const step = (factor, anchorClientX = null, anchorClientY = null) => {
       const rect = viewport.getBoundingClientRect();
@@ -1454,12 +1438,6 @@ export function createFileCapabilityPanel(options) {
       viewport.scrollLeft = Math.max(0, beforeX * ratio - anchorX);
       viewport.scrollTop = Math.max(0, beforeY * ratio - anchorY);
     };
-    zoomOut.addEventListener('click', () => step(0.8));
-    zoomIn.addEventListener('click', () => step(1.25));
-    fit.addEventListener('click', () => {
-      fitMode = true;
-      apply();
-    });
     viewport.addEventListener('wheel', (event) => {
       event.preventDefault();
       step(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX, event.clientY);

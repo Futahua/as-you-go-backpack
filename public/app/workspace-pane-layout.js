@@ -1,3 +1,4 @@
+import {installPreviewPinDrag} from './preview-pin-drag.js';
 
 import { PREVIEW_TAB_MIME,createLensButton } from './native-window-tabs.js';
 import { previewDropSurface } from './preview-docking.js';
@@ -50,6 +51,7 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
     selectPinned(tab);
   });
   pin.textContent='';pin.title='Pin preview';pin.setAttribute('aria-label','Pin preview');pin.classList.add('preview-pin','file-capability-icon-button');pin.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6l-1 7 4 4v2H6v-2l4-4zM12 16v6"/></svg>';preview.header.append(pin);
+  const resolvePreviewDrag=installPreviewPinDrag({pin,getItem:()=>lastSelection?.mode==='single'?lastSelection.item:null,createId:()=>win.crypto.randomUUID()});
   const leftHeader=left.querySelector('.workspace-navigator-header');
   const actions=document.createElement('div');actions.className='workspace-left-actions';
   for(const action of document.querySelectorAll('.navigation .toolbar-shell')) {
@@ -104,7 +106,7 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
   win.addEventListener('resize',schedule);
   navigator.setCollapsed(false);windows.setExpanded(true);
   function syncSettings(){if(loaded||!isReady())return;loaded=true;const saved=getSettings();if(saved){settings={...settings,...saved,placement:PREVIEW_SURFACES.includes(saved.placement)?saved.placement:'left-bottom',pinned:Array.isArray(saved.pinned)?saved.pinned.filter(t=>typeof t.path==='string'&&typeof t.id==='string'&&typeof t.name==='string'):[]};}if(externalWindows)settings.windows=false;else if(Number.isFinite(settings.windowWidth))right.style.setProperty('--file-capability-width',Math.min(win.innerWidth-192,Math.max(128,settings.windowWidth))+'px');slices?.setSettings(settings.windowSlices);renderTabs();schedule();if(saved)commit();}
-  const slices=externalWindows?null:installCoordinatedWindowSlices({document,host,root:windows,pagePanels:{files:{element:left},preview},onStatus:setStatus,
+  const slices=externalWindows?null:installCoordinatedWindowSlices({document,host,root:windows,pagePanels:{files:{element:left},preview},resolvePreviewDrag,onStatus:setStatus,
     onSettings:value=>{settings.windowSlices=value;commit();},
     onPreviews:value=>{settings.pinned=value;commit();},
     onActive:()=>{pinnedId=null;pinned.element.hidden=true;renderTabs();lastGeometry='';schedule();},

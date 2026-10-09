@@ -848,3 +848,10 @@ body:has(.native-chrome-layout) .workspace.file-capability-docked.file-capabilit
 .pane-window-tabs.detach-ready { background:#8a272b; box-shadow:inset 0 0 0 2px #e16468; }
 
 .file-capability-header:has(.pane-window-tabs) .file-capability-provider-status { display:none; }
+
+/* The filename yields space to actions at every pane width. */
+.file-capability-panel.expanded.compact-file-preview > .file-capability-header{left:0;right:0;min-width:0;max-width:100%;}
+.file-capability-panel.compact-file-preview{grid-template-columns:minmax(0,1fr);}
+.file-capability-header > :is(.file-capability-path-row,.file-capability-directory-strip){flex:1 1 0;min-width:0;overflow:hidden;}
+.file-capability-header > button{flex-shrink:0;}
+.file-capability-header .file-capability-path{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
