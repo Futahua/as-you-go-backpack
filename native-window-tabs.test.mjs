@@ -211,3 +211,11 @@ test('toolbar lens preserves screen click and clipboard right-click activation',
  button.listeners.click(event);await settle();button.listeners.contextmenu(event);await settle();
  assert.deepEqual(sources,['screen','clipboard']);assert.equal(button.disabled,false);
 });
+
+for(const action of ['select','move'])test(`foreign in-use picker ${action} requires explicit host ownership action`,async()=>{
+ const inUse={transferId:'ticket',samePage:false,label:'Other page · window 2'};
+ let choose;const f=fixture({windowCandidates:async()=>({outcome:'success',candidates:[{id:'candidate',title:'Writer',inUse}]}),windowCandidatePicker:()=>new Promise(resolve=>choose=resolve),windowCandidatePickerUpdate:async()=>{choose({action,candidateId:'candidate'});return {outcome:'success',delivery:'applied'};}});
+ f.strip.children[0].listeners.click();await settle();
+ assert.equal(f.calls.some(c=>c.operation==='pane-window-attach'),false);
+ assert.equal(f.calls.at(-1).operation,action==='move'?'pane-window-transfer':'pane-window-reveal');f.api.destroy();
+});

@@ -9,7 +9,7 @@ export function paneWindowPickerRows(candidates, tabs) {
   });
   for (const candidate of candidates) {
     if (tabs.some(tab => tab.windowInstanceId && tab.windowInstanceId === candidate.windowInstanceId)) continue;
-    rows.push({ id: candidate.id, title: candidate.title, icon: candidate.icon ?? null, current: false });
+    rows.push({ id: candidate.id, title: candidate.title, icon: candidate.icon ?? null, current: false, ...(candidate.inUse?{inUse:candidate.inUse}:{}) });
   }
   return rows.slice(0, 64);
 }

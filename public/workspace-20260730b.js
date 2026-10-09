@@ -1,3 +1,4 @@
+import {readPagePaneSettings,writePagePaneSettings} from './app/page-pane-settings.js';
 import { bootstrapWindowLayoutWidget as bootstrapCompactWindowLayoutWidget } from './app/window-layout-widget-surface.js';
 import { createWindowLayoutRecordingLifecycle } from './app/window-layout-recording-lifecycle.js';
 import { createWindowLayoutTrackingLifecycle } from './app/window-layout-tracking-lifecycle.js';
@@ -5077,8 +5078,8 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
   workspaceNavigator.render();
   paneLayout = installWorkspacePaneLayout({externalWindows:EMBEDDED_SURFACE==='proxima',document,host,navigator:workspaceNavigator,windows:fileCapabilityPanel,setStatus,
     isReady:()=>workspaceLoad.ok,
-    getSettings:()=>store.getSnapshot().view?.preferences?.paneLayouts?.[SCOPE_ROOT_ID || ROOT_ID],
-    saveSettings:settings=>commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,paneLayouts:{...current.view.preferences.paneLayouts,[SCOPE_ROOT_ID || ROOT_ID]:settings}}}};},{requireDurable:true,preserveSelection:true}),
+    getSettings:()=>readPagePaneSettings(store.getSnapshot().view?.preferences?.paneLayouts||{},PROJECT_SURFACE_KEY,SCOPE_ROOT_ID||ROOT_ID,new URLSearchParams(window.location.search).get('papers-pane-legacy')==='1'),
+    saveSettings:settings=>commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,paneLayouts:writePagePaneSettings(current.view.preferences.paneLayouts||{},PROJECT_SURFACE_KEY,SCOPE_ROOT_ID||ROOT_ID,settings,new URLSearchParams(window.location.search).get('papers-pane-legacy')==='1')}}};},{requireDurable:true,preserveSelection:true}),
   });
   window.addEventListener('pagehide',()=>paneLayout?.destroy(),{once:true});
   syncFileCapabilitySelection();

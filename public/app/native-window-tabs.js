@@ -1,4 +1,5 @@
 export const NATIVE_TAB_MIME='application/x-papers-native-pane-tab';
+export const PANE_TRANSFER_MIME='application/x-papers-pane-transfer';
 export const PREVIEW_TAB_MIME='application/x-papers-preview-tab';
 import { isValidThumbnailSuccess } from './window-layout-preview.js';
 import { openWindowLayoutPickerSession } from './window-layout-picker-session.js';
@@ -15,7 +16,7 @@ export function createLensButton(document,lens,status=()=>{}) {
 }
 
 /** Retained window membership belongs to the native host, including restart recovery. */
-export function installNativeWindowTabs({ document, header, host, bounds, prepare, overlay, status, lens, sliceId='main', sliceDocking=false, groupHandle=null }) {
+export function installNativeWindowTabs({ document, header, host, bounds, prepare, overlay, status, lens, sliceId='main', sliceDocking=false, groupHandle=null, layoutBinding=()=>null }) {
   const strip = document.createElement('div');
   strip.className = 'pane-window-tabs file-capability-browser-tabs';
   strip.addEventListener('wheel', event => { if (strip.scrollWidth > strip.clientWidth) { event.preventDefault(); strip.scrollLeft += event.deltaY || event.deltaX; } }, { passive: false });
@@ -100,6 +101,10 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
         await request('pane-window-detach', { tabId: retained.id });
         return;
       }
+      if (pickedCandidate?.inUse && ['select','move'].includes(picked?.action)) {
+        await request(picked.action==='move'?'pane-window-transfer':'pane-window-reveal',{transferId:pickedCandidate.inUse.transferId,groupId:sliceId});
+        return;
+      }
       if (picked?.action !== 'select') {
         if (picked?.action) throw new Error('Choose a window from the list to add it here');
         return;
@@ -126,7 +131,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       const icon = document.createElement(tab.icon ? 'img' : 'span');
       icon.className = 'file-capability-browser-tab-favicon';
       if (tab.icon) icon.src = tab.icon; else icon.textContent = '▣';
-      const label = document.createElement('span'); label.className = 'file-capability-browser-tab-text'; label.textContent = tab.title;
+      const label = document.createElement('span'); label.className = 'file-capability-browser-tab-text'; label.textContent = tab.title + (tab.kind==='dormant'?' · unavailable':'');
       button.append(icon, label);
       button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', String(tab.active && !documentTabs.some(t=>t.active)));
       button.addEventListener('pointerenter', () => previewTab(tab, button));
@@ -148,7 +153,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       release.addEventListener('click', () => { if (!disposed) void request('pane-window-detach', { tabId: tab.id }).catch(report); });
       group.addEventListener('click', event => { if (event.target === group) button.click?.(); });
       group.setAttribute('data-pane-tab-id', tab.id);
-      if(sliceDocking){group.draggable=true;group.addEventListener('dragstart',event=>{stopHover();event.dataTransfer.setData(NATIVE_TAB_MIME,JSON.stringify({id:tab.id,sliceId}));event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});group.addEventListener('dragend',()=>{void overlay(documentTabs.some(t=>t.active)).catch(report);});}
+      if(sliceDocking){group.draggable=true;group.addEventListener('dragstart',event=>{stopHover();event.dataTransfer.setData(NATIVE_TAB_MIME,JSON.stringify({id:tab.id,sliceId}));if(tab.transferId)event.dataTransfer.setData(PANE_TRANSFER_MIME,JSON.stringify({transferId:tab.transferId,binding:layoutBinding(),kind:'tab'}));event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});group.addEventListener('dragend',()=>{void overlay(documentTabs.some(t=>t.active)).catch(report);});}
       group.addEventListener('pointerdown', event => {
         if(sliceDocking)return;
         if (event.button !== 0 || event.target === release) return;
@@ -202,7 +207,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       button.addEventListener('click', event => { event.stopPropagation(); if(suppressClick){suppressClick=false;return;} stopHover(); tab.onSelect(); });
       const close = document.createElement('button'); close.type='button'; close.className='file-capability-browser-tab-close'; close.textContent='×'; close.setAttribute('aria-label','Unpin '+tab.title); close.addEventListener('click',event=>{event.stopPropagation();tab.onClose();});
       group.draggable=true;group.setAttribute('data-preview-tab-id',tab.id);
-      group.addEventListener('dragstart',event=>{documentDragId=tab.id;stopHover();event.dataTransfer.setData(PREVIEW_TAB_MIME,tab.id);event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});
+      group.addEventListener('dragstart',event=>{documentDragId=tab.id;stopHover();event.dataTransfer.setData(PREVIEW_TAB_MIME,tab.id);if(tab.transferId)event.dataTransfer.setData(PANE_TRANSFER_MIME,JSON.stringify({transferId:tab.transferId,binding:layoutBinding(),kind:'tab'}));event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});
       group.addEventListener('dragend',()=>{documentDragId=null;for(const child of strip.children)child.classList?.remove('reorder-before','reorder-after');void overlay(documentTabs.some(t=>t.active)).catch(report);});
       group.append(button,close);
       const nativeGroups=Array.from(strip.children).filter(node=>node.getAttribute?.('data-pane-tab-id'));
