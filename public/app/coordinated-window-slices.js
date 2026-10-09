@@ -12,7 +12,7 @@ export const paneSnapshotIsNewer=(previous,next)=>Boolean(next&&Array.isArray(ne
 /** Presentation only: snapshots own all native geometry, membership and selection.
  * No per-leaf rectangle, inferred minimum, resize ratio or automatic fallback is
  * sent back. Only a root viewport and explicit creator commands cross the bridge. */
-export function installCoordinatedWindowSlices({document,host,root,onSettings=()=>{},onPreviews=()=>{},onStatus=()=>{},onOuterEdge=()=>{},onActive=()=>{}}){
+export function installCoordinatedWindowSlices({document,host,root,pagePanels=null,onSettings=()=>{},onPreviews=()=>{},onStatus=()=>{},onOuterEdge=()=>{},onActive=()=>{}}){
   // This element supplies native geometry, including the first retained-window
   // mount. Legacy collapsed/expanded width animation exposes intermediate
   // widths that can fail native minimum sizes and must not drive this owner.
@@ -20,6 +20,9 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
   const icons=new Map();
   function previewIcon(tab){if(!tab)return null;if(!icons.has(tab.path)){icons.set(tab.path,null);void host.fileCapability("icon",{path:tab.path}).then(reply=>{if(disposed)return;if(reply?.ok&&reply.icon){icons.set(tab.path,reply.icon);schedule();}}).catch(()=>{});}return icons.get(tab.path)||tab.previewIcon||tab.icon||null;}
   const win=document.defaultView,views=new Map();let snapshot=null,previews=[],disposed=false,mounted=false,mounting=null,frame=0,geometry='',overlay=false,dragging=false,savedSettings='',queue=Promise.resolve(),groupDragId=null,lensGroup=null,dragHeartbeat=0,dragYield=Promise.resolve();
+  const retainedPreviews=new Map();
+  const protectedTabs=pagePanels?[{id:'workspace-files',name:'Files',panel:pagePanels.files},{id:'workspace-preview',name:'Preview',panel:pagePanels.preview}]:[];
+  for(const tab of protectedTabs)tab.panel.element.classList.add('slice-page-panel');
   const region=document.createElement('div');region.className='window-slices-region';region.hidden=true;document.body.append(region);
   const cue=document.createElement('div');cue.className='preview-split-cue is-armed window-slice-drop';cue.hidden=true;document.body.append(cue);
   const outer=()=>{const b=root.element.getBoundingClientRect();return {x:Math.round(b.left),y:Math.round(b.top),width:Math.round(b.width),height:Math.round(b.height),rightInset:Math.max(0,win.innerWidth-b.right),bottomInset:Math.max(0,win.innerHeight-b.bottom)};};
@@ -57,6 +60,10 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
     const finish=()=>{pointer=null;point=null;};handle.addEventListener('pointerup',finish);handle.addEventListener('pointercancel',finish);handle.addEventListener('lostpointercapture',finish);
     view.preview.element.append(handle);
   }}
+  function documentEdgesOnce(view,groupId){if(view.preview.element.dataset.edgeGroup===groupId)return;
+    for(const handle of view.preview.element.querySelectorAll('.slice-document-edge'))handle.remove();
+    view.preview.element.dataset.edgeGroup=groupId;documentEdges(view,groupId);
+  }
   function toolsButton(tools,label,text,action){const b=document.createElement('button');b.type='button';b.title=label;b.setAttribute('aria-label',label);b.textContent=text;b.addEventListener('click',()=>{void action().catch(()=>{});});tools.append(b);return b;}
   function createView(group){
     const element=document.createElement('section');element.className='window-slice';element.dataset.sliceId=group.id;
@@ -105,7 +112,10 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
   function render(){frame=0;if(disposed||!mounted||!snapshot)return;
     const hidden=root.element.hidden,maximum=snapshot.groups.find(g=>g.presentation==='maximized')?.id;
     region.hidden=hidden;region.classList.toggle('slice-page-maximized',Boolean(maximum));
-    for(const [id,view] of views)if(!snapshot.groups.some(g=>g.id===id)){view.native.destroy();view.preview?.destroy();view.element.remove();views.delete(id);}
+    for(const [id,view] of views)if(!snapshot.groups.some(g=>g.id===id)){view.native.destroy();view.element.remove();views.delete(id);}
+    const visibleDocuments=new Set(snapshot.groups.filter(g=>!hidden&&!overlay&&g.presentation!=='minimized'&&(!maximum||maximum===g.id)).map(g=>g.selected));
+    for(const [id,panel] of retainedPreviews){if(!snapshot.groups.some(g=>g.tabs.some(t=>t.id===ref(id)))){panel.destroy();retainedPreviews.delete(id);}else if(!visibleDocuments.has(ref(id))){panel.setPreviewSuspended(true);panel.element.hidden=true;}}
+    for(const tab of protectedTabs)if(!visibleDocuments.has(ref(tab.id))){tab.panel.element.hidden=true;tab.panel.setPreviewSuspended?.(true);}
     for(const [index,group] of snapshot.groups.entries()){
       const view=views.get(group.id)||createView(group),box=group.slot;
       view.element.hidden=hidden||Boolean(maximum&&maximum!==group.id);
@@ -116,22 +126,23 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
         const source=tab.icon||previewIcon(previews.find(p=>ref(p.id)===tab.id));if(source){const icon=document.createElement('img');icon.src=source;icon.alt='';button.append(icon);}else button.textContent='▣';
         button.addEventListener('click',()=>{void (async()=>{await command('presentation',{groupId:group.id,mode:'normal'});await command('select',{groupId:group.id,tabId:tab.id});if(tab.kind==='dormant'&&tab.canOpen){const reply=await host.fileCapability('pane-window-resume',{tabId:tab.id});if(reply.snapshot)accept(reply.snapshot);if(!reply.ok)throw Error(reply.error||'Application could not reopen');}})().catch(error=>onStatus(error.message));});view.rail.append(button);}
       view.resume.hidden=!group.tabs.some(t=>t.kind==='dormant'&&t.canOpen);
-      view.close.hidden=snapshot.groups.length<2;view.handle.disabled=false;
+      view.close.hidden=snapshot.groups.length<2||group.tabs.some(t=>protectedTabs.some(p=>ref(p.id)===t.id));view.handle.disabled=false;
       view.min.textContent=group.presentation==='minimized'?'↗':'−';view.max.textContent=group.presentation==='maximized'?'❐':'□';
-      const docs=group.tabs.filter(t=>t.kind==='document').map(t=>{const tab=previews.find(p=>ref(p.id)===t.id);if(!tab)return null;
+      const docs=group.tabs.filter(t=>t.kind==='document').map(t=>{const tab=protectedTabs.find(p=>ref(p.id)===t.id)||previews.find(p=>ref(p.id)===t.id);if(!tab)return null;
         return {id:tab.id,transferId:t.transferId,title:tab.name,icon:previewIcon(tab),active:t.active,nativeIndex:group.tabs.slice(0,group.tabs.indexOf(t)).filter(p=>p.kind==='native').length,
-          onSelect:()=>{void selectPreview(tab).catch(()=>{});},onClose:()=>{void command('document-remove',{tabId:t.id}).then(()=>{previews=previews.filter(p=>p.id!==tab.id);onPreviews(previews);schedule();}).catch(()=>{});},
+          protected:Boolean(tab.panel),onSelect:()=>{void (tab.panel?command('select',{groupId:group.id,tabId:t.id}):selectPreview(tab)).catch(()=>{});},onClose:()=>{void command('document-remove',{tabId:t.id}).then(()=>{previews=previews.filter(p=>p.id!==tab.id);onPreviews(previews);schedule();}).catch(()=>{});},
           onReorder:(beforeId,position)=>{const before=beforeId?ref(beforeId):group.tabs.filter(p=>p.kind==='native')[position?.nativeIndex]?.id||'';void command('reorder',{groupId:group.id,tabId:t.id,beforeId:before}).catch(()=>{});}};
       }).filter(Boolean);
       view.native.setDocumentTabs(docs);for(const cb of view.listeners)cb(group.tabs.filter(t=>t.kind==='native'||t.kind==='dormant'));
-      const active=previews.find(tab=>ref(tab.id)===group.selected),shown=active&&!hidden&&!overlay&&group.presentation!=='minimized'&&(!maximum||maximum===group.id);
+      const active=protectedTabs.find(tab=>ref(tab.id)===group.selected)||previews.find(tab=>ref(tab.id)===group.selected),shown=active&&!hidden&&!overlay&&group.presentation!=='minimized'&&(!maximum||maximum===group.id);
+      view.preview=active?.panel||retainedPreviews.get(active?.id)||null;
       if(shown&&!view.preview){
-        const previewHost={...host,fileCapability:(operation,data={})=>host.fileCapability(operation,operation==='preview-pdf-open'?{...data,surfaceId:'pane:'+group.id}:data)};
-        view.preview=createFileCapabilityPanel({document,host:previewHost,previewOnly:true,setStatus:onStatus});view.preview.element.classList.add('slice-file-preview');documentEdges(view,group.id);}
-      if(view.preview){view.preview.setPreviewSuspended?.(Boolean(active&&!shown&&group.presentation!=='minimized'));view.preview.element.hidden=!shown;view.preview.setExpanded(Boolean(active&&group.presentation!=='minimized'));
+        const previewHost={...host,fileCapability:(operation,data={})=>host.fileCapability(operation,['preview-pdf-open','preview-html-open','preview-native-open'].includes(operation)?{...data,surfaceId:'tab:'+active.id}:data)};
+        view.preview=createFileCapabilityPanel({document,host:previewHost,previewOnly:true,setStatus:onStatus});view.preview.element.classList.add('slice-file-preview');retainedPreviews.set(active.id,view.preview);view.preview.setExpanded(true);void view.preview.previewPath(active.path,active.name);}
+      if(view.preview){documentEdgesOnce(view,group.id);view.preview.setPreviewSuspended?.(!shown);view.preview.element.hidden=!shown;
         for(const handle of view.preview.element.querySelectorAll('.slice-document-edge')){const edge=handle.className.split('slice-document-').at(-1);handle.hidden=group.presentation!=='normal'||edge==='right'&&group.slot.x+group.slot.width>=snapshot.viewport.x+snapshot.viewport.width-1||edge==='top'&&group.slot.y<=snapshot.viewport.y+1||edge==='bottom'&&group.slot.y+group.slot.height>=snapshot.viewport.y+snapshot.viewport.height-1;}
         if(shown){const r=group.content;Object.assign(view.preview.element.style,{left:r.x+'px',top:r.y+'px',width:r.width+'px',height:r.height+'px',right:'auto',bottom:'auto'});
-          if(view.previewId!==active.id){view.previewId=active.id;void view.preview.previewPath(active.path,active.name);}view.preview.refreshPreviewGeometry();}}
+          view.preview.refreshPreviewGeometry?.();}}
     }
     const rect=outer(),next=JSON.stringify(rect);if(next!==geometry){geometry=next;void host.fileCapability('pane-layout-viewport',{rect}).then(reply=>{if(reply?.snapshot)accept(reply.snapshot);if(reply?.ok===false)onStatus(reply.error||reply.message||'Window layout could not resize');}).catch(error=>onStatus(error.message));}
   }
@@ -167,7 +178,7 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
       const source=event.dataTransfer.getData(GROUP_DRAG_MIME)||groupDragId;if(source){await command('relocate-group',{groupId:source,destination:target.group.id,side:target.side});return;}
       const preview=event.dataTransfer.getData(PREVIEW_TAB_MIME);let native;try{native=JSON.parse(event.dataTransfer.getData(NATIVE_TAB_MIME)||'null');}catch{}
       let id=preview?ref(preview):native?.id;
-      if(preview){const tab=previews.find(p=>p.id===preview);if(!tab)return;await ensureDocument(tab);}
+      if(preview){const tab=protectedTabs.find(p=>p.id===preview)||previews.find(p=>p.id===preview);if(!tab)return;if(!tab.panel)await ensureDocument(tab);}
       if(!id){const instance=windowTabTransfer(event.dataTransfer.getData(WINDOW_TAB_MIME));if(!instance)return;
         id=snapshot.groups.flatMap(g=>g.tabs).find(t=>t.windowInstanceId===instance)?.id;
         if(!id){const listed=await host.windowCandidates({includeNativeIcons:false}),candidate=listed.candidates?.find(t=>t.windowInstanceId===instance);if(!candidate)return;
@@ -195,7 +206,7 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
     const opened=await host.fileCapability('pane-layout-open',{groupId,source:'lens:'+win.crypto.randomUUID(),url:result.url});if(opened.snapshot)accept(opened.snapshot);if(!opened.ok)throw new Error(opened.error||'Lens could not open');
   }
   return {searchLens,active:()=>mounted,setSettings(){},setPreviews(next){previews=next;schedule();if(mounted)void (async()=>{for(const tab of previews)await ensureDocument(tab);
-    for(const tab of snapshot.groups.flatMap(g=>g.tabs).filter(t=>t.kind==='document'))if(!previews.some(p=>ref(p.id)===tab.id))await command('document-remove',{tabId:tab.id});})().catch(()=>{});},
+    for(const tab of snapshot.groups.flatMap(g=>g.tabs).filter(t=>t.kind==='document'))if(!protectedTabs.some(p=>ref(p.id)===tab.id)&&!previews.some(p=>ref(p.id)===tab.id))await command('document-remove',{tabId:tab.id});})().catch(()=>{});},
     selectPreview:tab=>{void selectPreview(tab).catch(()=>{});},nativeSelected(){},setOverlay:value=>{void setOverlay(value).catch(()=>{});},refresh:schedule,isMaximized:()=>Boolean(snapshot?.groups.some(g=>g.presentation==='maximized')),ownsNativeEdge:()=>false,
     splitPreview:async(id,side)=>{const tab=previews.find(p=>p.id===id);if(!tab)return;const key=await ensureDocument(tab);await command('split',{tabId:key,groupId:snapshot.groups[0].id,newGroupId:'slice-'+win.crypto.randomUUID(),side});},
     async suspend(){if(mounted)await command('present',{visible:false});},
@@ -205,8 +216,10 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
       let rect=outer();while(!disposed&&(rect.width<240||rect.height<192)){await new Promise(resolve=>win.setTimeout(resolve,50));rect=outer();}if(disposed)return;
       const reply=await host.fileCapability('pane-layout-mount',{rect,headerHeight:32});
       if(!reply.ok){if(reply.code==='OPERATION_UNKNOWN'||reply.message==='Native window layouts are unavailable.'){await root.restoreWindows();return;}throw new Error(reply.error||reply.message||'Window layout could not mount');}
-      mounted=true;root.replaceNativeTabs();root.element.classList.add('window-slices-root');accept(reply.snapshot);onOuterEdge(snapshot.viewport);onActive();schedule();})();
+      mounted=true;root.replaceNativeTabs();root.element.classList.add('window-slices-root');accept(reply.snapshot);
+      for(const tab of protectedTabs)if(!groupFor(ref(tab.id))){const target=snapshot.groups[0].id;await command('document-add',{tabId:ref(tab.id),groupId:target});await command('split',{tabId:ref(tab.id),groupId:target,newGroupId:'system-'+tab.id,side:win.innerHeight>win.innerWidth?'top':'left'});}
+      onOuterEdge(snapshot.viewport);onActive();schedule();})();
       try{await mounting;}finally{mounting=null;}},
-    destroy(){clear();disposed=true;release?.();observer.disconnect();if(frame)win.cancelAnimationFrame(frame);win.removeEventListener('resize',schedule);document.removeEventListener('dragstart',startDrag,true);document.removeEventListener('dragover',dragOver,true);document.removeEventListener('drop',drop,true);document.removeEventListener('dragend',clear,true);win.removeEventListener('blur',blur);for(const view of views.values()){view.native.destroy();view.preview?.destroy();}region.remove();cue.remove();}
+    destroy(){clear();disposed=true;release?.();observer.disconnect();if(frame)win.cancelAnimationFrame(frame);win.removeEventListener('resize',schedule);document.removeEventListener('dragstart',startDrag,true);document.removeEventListener('dragover',dragOver,true);document.removeEventListener('drop',drop,true);document.removeEventListener('dragend',clear,true);win.removeEventListener('blur',blur);for(const view of views.values())view.native.destroy();for(const panel of retainedPreviews.values())panel.destroy();region.remove();cue.remove();}
   };
 }

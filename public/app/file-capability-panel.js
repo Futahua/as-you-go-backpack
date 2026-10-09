@@ -1623,7 +1623,7 @@ export function createFileCapabilityPanel(options) {
     const sessionId = opened.sessionId;
     state.nativeGeometry = createPreviewGeometryScheduler({
       schedule:callback=>documentRef.defaultView.requestAnimationFrame(callback),
-      send:rect=>host.fileCapability('preview-native-move',{sessionId,rect}),
+      send:rect=>host.fileCapability('preview-native-move',{sessionId,rect,visible:!state.previewSuspended}),
     });
     const move = () => {
       if (!state.nativePreviewSessionId || !state.expanded) return;
@@ -2446,9 +2446,13 @@ export function createFileCapabilityPanel(options) {
     const surface = preview.querySelector('.file-capability-native-preview');
     if (!surface) return;
     const rect = nativePreviewRect(surface);
-    if (state.officeSessionId) state.officeGeometry?.update(rect);
+    if (state.officeSessionId) {
+      void host.fileCapability('office-editor-visible', {sessionId:state.officeSessionId,visible:!state.previewSuspended}).catch(()=>{});
+      if (!state.previewSuspended) state.officeGeometry?.update(rect);
+    }
     if (state.nativePreviewSessionId) {
-      state.nativeGeometry?.update(rect);
+      state.nativeGeometry?.update(state.previewSuspended && state.previewLastRect ? state.previewLastRect : rect);
+      if (!state.previewSuspended) state.previewLastRect=rect;
     }
     if (state.pdfPreviewSessionId) {
       void host.fileCapability('preview-pdf-move', {
@@ -2542,7 +2546,7 @@ export function createFileCapabilityPanel(options) {
       setExpandedWithPreviewLifecycle(true);
     },
     setExpanded: setExpandedWithPreviewLifecycle,
-    setPreviewSuspended(value) {state.previewSuspended=Boolean(value);refreshPreviewGeometry();},
+    setPreviewSuspended(value) {const suspended=Boolean(value);if(suspended===state.previewSuspended)return;state.previewSuspended=suspended;refreshPreviewGeometry();},
     setWidth:setPanelWidth,
     refreshPreviewGeometry,
     setTransientOverlay(active) {

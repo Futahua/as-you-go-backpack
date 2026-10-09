@@ -64,6 +64,8 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .pinned-tab-drop-cue { position:fixed;z-index:100001;pointer-events:none; }
 
 .window-slices-root > .file-capability-header,.window-slices-root > .file-capability-body { visibility:hidden;pointer-events:none; }
+.workspace-unified-panes .slice-page-panel { position:fixed;z-index:951;box-sizing:border-box;max-width:none;max-height:none;margin:0;transform:none;transition:none; }
+.workspace-unified-panes .slice-page-panel .preview-dock-handle,.workspace-unified-panes .slice-page-panel .preview-resize-edge { display:none; }
 /* Keep the legacy edge beneath native content, outside picker chrome. Mounted
    layouts resize through native borders or their document-edge handles. */
 .window-slices-root > .file-capability-resizer { left:2px;top:32px;width:6px;pointer-events:none; }

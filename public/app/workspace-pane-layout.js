@@ -66,6 +66,15 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
   const previewShare=placement=>{const value=settings.previewSizes?.[placement];return Number.isFinite(value)?value:placement==='middle'?.3:.5;};
   function layout(){
     frame=0;if(disposed)return;
+    if(!externalWindows){
+      settings.windows=true;document.documentElement.classList.add('workspace-unified-panes');
+      Object.assign(right.style,{left:'8px',top:'8px',width:(win.innerWidth-16)+'px',height:(win.innerHeight-16)+'px',bottom:'auto',right:'auto'});right.hidden=false;
+      previewToggle.hidden=true;if(windowsToggle)windowsToggle.hidden=true;
+      if(!slices?.active()){left.hidden=true;preview.element.hidden=true;}
+      pinned.element.hidden=true;
+      if(loaded&&!restoredWindows){restoredWindows=true;void slices.restore().catch(error=>{restoredWindows=false;setStatus(error?.message||String(error));});}
+      slices?.refresh();pin.disabled=!lastSelection?.item?.path;return;
+    }
     const workspace=document.querySelector('.workspace'),top=baseTop,bottom=win.innerHeight-8;
     const rb=right.getBoundingClientRect();if(rb.width>0)lastSeam=rb.left;const rightX=Math.max(184,Math.min(win.innerWidth-184,lastSeam));
     const regions=paneRegions({left:8,right:rightX,top,bottom,preview:settings.preview,placement:settings.placement,windows:settings.windows,viewportWidth:win.innerWidth,previewShare:previewShare(settings.placement)});
@@ -95,11 +104,11 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
   win.addEventListener('resize',schedule);
   navigator.setCollapsed(false);windows.setExpanded(true);
   function syncSettings(){if(loaded||!isReady())return;loaded=true;const saved=getSettings();if(saved){settings={...settings,...saved,placement:PREVIEW_SURFACES.includes(saved.placement)?saved.placement:'left-bottom',pinned:Array.isArray(saved.pinned)?saved.pinned.filter(t=>typeof t.path==='string'&&typeof t.id==='string'&&typeof t.name==='string'):[]};}if(externalWindows)settings.windows=false;else if(Number.isFinite(settings.windowWidth))right.style.setProperty('--file-capability-width',Math.min(win.innerWidth-192,Math.max(128,settings.windowWidth))+'px');slices?.setSettings(settings.windowSlices);renderTabs();schedule();if(saved)commit();}
-  const slices=externalWindows?null:installCoordinatedWindowSlices({document,host,root:windows,onStatus:setStatus,
+  const slices=externalWindows?null:installCoordinatedWindowSlices({document,host,root:windows,pagePanels:{files:{element:left},preview},onStatus:setStatus,
     onSettings:value=>{settings.windowSlices=value;commit();},
     onPreviews:value=>{settings.pinned=value;commit();},
     onActive:()=>{pinnedId=null;pinned.element.hidden=true;renderTabs();lastGeometry='';schedule();},
-    onOuterEdge:rect=>{if(!Number.isFinite(rect?.x))return;const width=win.innerWidth-8-rect.x;if(width>0){lastSeam=rect.x;right.style.setProperty('--file-capability-width',width+'px');if(settings.windowWidth!==width){settings.windowWidth=width;commit();}schedule();}},
+    onOuterEdge:()=>schedule(),
   });
   const resizing=installPreviewResizing({document,panel:preview.element,
     getState:()=>({placement:settings.placement,share:previewShare(settings.placement),span:settings.placement==='middle'?(settings.windows?lastSeam-8:win.innerWidth):win.innerHeight-8-baseTop}),

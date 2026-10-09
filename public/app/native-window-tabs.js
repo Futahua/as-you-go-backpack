@@ -209,7 +209,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       group.draggable=true;group.setAttribute('data-preview-tab-id',tab.id);
       group.addEventListener('dragstart',event=>{documentDragId=tab.id;stopHover();event.dataTransfer.setData(PREVIEW_TAB_MIME,tab.id);if(tab.transferId)event.dataTransfer.setData(PANE_TRANSFER_MIME,JSON.stringify({transferId:tab.transferId,binding:layoutBinding(),kind:'tab'}));event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});
       group.addEventListener('dragend',()=>{documentDragId=null;for(const child of strip.children)child.classList?.remove('reorder-before','reorder-after');void overlay(documentTabs.some(t=>t.active)).catch(report);});
-      group.append(button,close);
+      group.append(button);if(!tab.protected)group.append(close);
       const nativeGroups=Array.from(strip.children).filter(node=>node.getAttribute?.('data-pane-tab-id'));
       const anchor=Number.isInteger(tab.nativeIndex)?nativeGroups[Math.max(0,tab.nativeIndex)]:null;
       if(anchor&&strip.insertBefore)strip.insertBefore(group,anchor);else strip.append(group);
