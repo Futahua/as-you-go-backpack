@@ -64,10 +64,13 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .pinned-tab-drop-cue { position:fixed;z-index:100001;pointer-events:none; }
 
 .window-slices-root > .file-capability-header,.window-slices-root > .file-capability-body { visibility:hidden;pointer-events:none; }
+/* Keep the legacy edge beneath native content, outside picker chrome. Mounted
+   layouts resize through native borders or their document-edge handles. */
+.window-slices-root > .file-capability-resizer { left:2px;top:32px;width:6px;pointer-events:none; }
 .window-slices-region { position:fixed;inset:0;pointer-events:none;z-index:950; }
-.window-slice { position:absolute;box-sizing:border-box;display:flex;flex-direction:column;background:var(--surface-raised);border:1px solid var(--border-strong);overflow:hidden;pointer-events:auto; }
+.window-slice { position:absolute;box-sizing:border-box;display:flex;flex-direction:column;background:var(--surface-raised);outline:1px solid var(--border-strong);overflow:hidden;pointer-events:auto; }
 .window-slice[hidden] { display:none!important; }
-.window-slice-header { display:flex;align-items:center;gap:3px;min-height:32px;height:32px;flex:0 0 32px;background:var(--surface-soft);border-bottom:1px solid var(--border-subtle);padding:0 3px; }
+.window-slice-header { box-sizing:border-box;display:flex;align-items:center;gap:3px;min-height:32px;height:32px;flex:0 0 32px;background:var(--surface-soft);border-bottom:1px solid var(--border-subtle);padding:0 3px; }
 .window-slice-header .pane-window-tabs { min-width:0;flex:1; }
 .window-slice-number { flex:0 0 18px;text-align:center;font-size:11px;color:var(--text-muted); }
 .window-slice-controls { display:flex;flex:0 0 auto;gap:2px; }
@@ -78,6 +81,14 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .window-slice-drop { position:fixed;z-index:100002;pointer-events:none; }
 .slice-file-preview { position:fixed!important;min-width:0!important;max-width:none!important;min-height:0;z-index:1101!important;transition:none!important;box-shadow:none; }
 .slice-file-preview[hidden] { display:none!important; }
+.file-capability-panel.slice-file-preview.expanded { grid-template-rows:32px minmax(0,1fr); }
+.file-capability-panel.slice-file-preview.expanded > .file-capability-header { position:static;width:auto;height:32px;justify-content:flex-start;padding:0 5px;border-bottom:1px solid var(--border-subtle); }
+.file-capability-panel.slice-file-preview.expanded > .file-capability-body { grid-row:2;min-height:0; }
+.slice-document-edge{position:absolute;z-index:40;touch-action:none}
+.slice-document-left,.slice-document-right{top:0;bottom:0;width:6px;cursor:ew-resize}
+.slice-document-left{left:0}.slice-document-right{right:0}
+.slice-document-top,.slice-document-bottom{left:0;right:0;height:6px;cursor:ns-resize}
+.slice-document-top{top:0}.slice-document-bottom{bottom:0}
 
 .compact-file-preview .preview-pane-label,.compact-file-preview .file-capability-item-title,.compact-file-preview .file-capability-item-meta{display:none}
 .compact-file-preview .file-capability-header{display:flex;align-items:center;gap:6px;position:relative;height:32px;padding:2px 6px}

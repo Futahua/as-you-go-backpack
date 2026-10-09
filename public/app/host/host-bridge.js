@@ -31,6 +31,7 @@ export function createHostBridge(window) {
   const pickListeners = new Set();
   const chromeLayoutListeners = new Set();
   const paneTabsListeners = new Set();
+  const paneLayoutListeners = new Set();
   const detachListeners = new Set();
   // The launcher overlay's invocation (the creator's "Alt+Shift+A anywhere", host side). A push, like the detach
   // lifecycle, so it is fanned out here rather than listened for by the page: every host-to-project message
@@ -72,6 +73,7 @@ export function createHostBridge(window) {
 
   window.addEventListener('message', (event) => {
     if (event.source !== window.parent) return;
+    if (event.data?.type === 'papers:project:pane-layout' && event.data.snapshot) { for (const listener of paneLayoutListeners) listener(event.data.snapshot); return; }
     if (event.data?.type === 'papers:project:pane-tabs' && Array.isArray(event.data.tabs)) {
       for (const listener of paneTabsListeners) listener(event.data.tabs);
       return;
@@ -328,8 +330,10 @@ export function createHostBridge(window) {
         { operation, params },
         operation === 'native-drag'
           ? null
-          : operation === 'preview'
+          : operation === 'preview' || operation === 'pane-layout-mount'
             ? FILE_PREVIEW_REQUEST_TIMEOUT_MS
+            : operation.startsWith('pane-layout-')
+              ? FILE_MUTATION_REQUEST_TIMEOUT_MS
             // Office may initialize its profile and retire a prior unsaved
             // editor first. The native owner bounds those operations at 90s;
             // let its result arrive rather than rejecting with quick RPCs.
@@ -419,6 +423,7 @@ export function createHostBridge(window) {
       pickListeners.add(callback);
       return () => pickListeners.delete(callback);
     },
+    onPaneLayout: callback => { paneLayoutListeners.add(callback); return () => paneLayoutListeners.delete(callback); },
     onPaneTabs: callback => { paneTabsListeners.add(callback); return () => paneTabsListeners.delete(callback); },
     onChromeLayout: (callback) => {
       chromeLayoutListeners.add(callback);

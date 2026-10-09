@@ -199,7 +199,10 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       group.draggable=true;group.setAttribute('data-preview-tab-id',tab.id);
       group.addEventListener('dragstart',event=>{documentDragId=tab.id;stopHover();event.dataTransfer.setData(PREVIEW_TAB_MIME,tab.id);event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});
       group.addEventListener('dragend',()=>{documentDragId=null;for(const child of strip.children)child.classList?.remove('reorder-before','reorder-after');void overlay(documentTabs.some(t=>t.active)).catch(report);});
-      group.append(button,close); strip.append(group);
+      group.append(button,close);
+      const nativeGroups=Array.from(strip.children).filter(node=>node.getAttribute?.('data-pane-tab-id'));
+      const anchor=Number.isInteger(tab.nativeIndex)?nativeGroups[Math.max(0,tab.nativeIndex)]:null;
+      if(anchor&&strip.insertBefore)strip.insertBefore(group,anchor);else strip.append(group);
     }
   }
   const unsubscribe = host.onPaneTabs((next) => {
@@ -223,7 +226,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
     if(documentDragId&&Array.from(event.dataTransfer?.types??[]).includes(PREVIEW_TAB_MIME)){
       event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect='move';
       for(const child of strip.children)child.classList?.remove('reorder-before','reorder-after');
-      const target=event.target?.closest?.('[data-preview-tab-id]');if(target&&target.getAttribute('data-preview-tab-id')!==documentDragId){const box=target.getBoundingClientRect();target.classList?.add(event.clientX>(box.left+box.right)/2?'reorder-after':'reorder-before');}return;
+      const target=event.target?.closest?.('[data-preview-tab-id],[data-pane-tab-id]');if(target&&target.getAttribute('data-preview-tab-id')!==documentDragId){const box=target.getBoundingClientRect();target.classList?.add(event.clientX>(box.left+box.right)/2?'reorder-after':'reorder-before');}return;
     }
     if (disposed || !Array.from(event.dataTransfer?.types ?? []).includes(WINDOW_TAB_MIME)) return;
     event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
@@ -234,9 +237,14 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
     if(previewId){
       const source=documentTabs.find(t=>t.id===previewId);if(!source)return;
       event.preventDefault();event.stopPropagation();
-      const target=event.target?.closest?.('[data-preview-tab-id]');let beforeId='';
-      if(target){const id=target.getAttribute('data-preview-tab-id'),box=target.getBoundingClientRect();beforeId=event.clientX>(box.left+box.right)/2?(documentTabs[documentTabs.findIndex(t=>t.id===id)+1]?.id||''):id;}
-      if(beforeId!==previewId)source.onReorder?.(beforeId);
+      const target=event.target?.closest?.('[data-preview-tab-id],[data-pane-tab-id]');
+      if(target?.getAttribute('data-preview-tab-id')===previewId)return;
+      const ordered=Array.from(strip.children).filter(node=>node.getAttribute?.('data-pane-tab-id')||node.getAttribute?.('data-preview-tab-id')).filter(node=>node.getAttribute('data-preview-tab-id')!==previewId);
+      const box=target?.getBoundingClientRect();let at=ordered.indexOf(target);
+      if(at<0)at=ordered.length;else if(event.clientX>(box.left+box.right)/2)at++;
+      const beforeId=ordered.slice(at).find(node=>node.getAttribute('data-preview-tab-id'))?.getAttribute('data-preview-tab-id')||'';
+      const nativeIndex=ordered.slice(0,at).filter(node=>node.getAttribute('data-pane-tab-id')).length;
+      source.onReorder?.(beforeId,{nativeIndex});
       return;
     }
     const instance = windowTabTransfer(event.dataTransfer?.getData(WINDOW_TAB_MIME));
@@ -262,7 +270,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   });
   void request('pane-window-tabs', { rect: bounds() }).catch(() => {});
   return {
-    setDocumentTabs(next) { const key=tabs=>JSON.stringify(tabs.map(({id,title,active})=>({id,title,active})));const changed=key(next)!==key(documentTabs);documentTabs = next; if (!disposed && changed) render(); },
+    setDocumentTabs(next) { const key=tabs=>JSON.stringify(tabs.map(({id,title,active,nativeIndex})=>({id,title,active,nativeIndex})));const changed=key(next)!==key(documentTabs);documentTabs = next; if (!disposed && changed) render(); },
     hasWindows() { return !disposed && tabs.length > 0; },
     async restoreCurrent() {
       if (disposed || await prepare() === false) return;

@@ -181,3 +181,16 @@ test('pinned preview drag carries a local preview identity and reorders without 
  assert.equal(f.calls.some(c=>['pane-window-reorder','pane-window-drop','pane-window-detach'].includes(c.operation)),false);
  one.listeners.dragend();f.api.destroy();
 });
+
+
+test('preview tabs reorder among application tabs without mutating native membership',async()=>{
+ const f=fixture();f.strip.insertBefore=(child,anchor)=>f.strip.children.splice(f.strip.children.indexOf(anchor),0,child);
+ f.push([{id:'cad',title:'CAD',active:true},{id:'chrome',title:'Chrome',active:false}]);
+ const reordered=[];f.api.setDocumentTabs([{id:'doc',title:'Preview',nativeIndex:1,onReorder:(before,position)=>reordered.push({before,position})}]);
+ assert.deepEqual(f.strip.children.slice(1).map(node=>node.getAttribute('data-pane-tab-id')||node.getAttribute('data-preview-tab-id')),['cad','doc','chrome']);
+ const cad=f.strip.children[1],doc=f.strip.children[2],data=new Map();cad.getBoundingClientRect=()=>({left:100,right:200});cad.closest=()=>cad;
+ const transfer={types:[PREVIEW_TAB_MIME],setData:(k,v)=>data.set(k,v),getData:k=>data.get(k)||''};doc.listeners.dragstart({dataTransfer:transfer});
+ await f.strip.listeners.drop({target:cad,clientX:110,dataTransfer:transfer,preventDefault(){},stopPropagation(){}});
+ assert.deepEqual(reordered,[{before:'',position:{nativeIndex:0}}]);
+ assert.equal(f.calls.some(call=>['pane-window-reorder','pane-window-detach'].includes(call.operation)),false);doc.listeners.dragend();f.api.destroy();
+});
