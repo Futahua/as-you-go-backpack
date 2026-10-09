@@ -193,7 +193,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
     strip.prepend(addButton);
     for (const tab of documentTabs) {
       const group = document.createElement('span'); group.className = 'pane-window-tab file-capability-browser-tab' + (tab.active ? ' active' : '');
-      const button = document.createElement('button'); button.type = 'button'; button.className = 'file-capability-browser-tab-label'; button.textContent = '▧ ' + tab.title; button.title = tab.title; button.setAttribute('role','tab'); button.setAttribute('aria-selected',String(Boolean(tab.active)));
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'file-capability-browser-tab-label'; const icon=document.createElement(tab.icon?'img':'span');icon.className='file-capability-browser-tab-favicon';if(tab.icon){icon.src=tab.icon;icon.alt='';}else icon.textContent='▧';const label=document.createElement('span');label.className='file-capability-browser-tab-text';label.textContent=tab.title;button.append(icon,label); button.title = tab.title; button.setAttribute('role','tab'); button.setAttribute('aria-selected',String(Boolean(tab.active)));
       button.addEventListener('click', event => { event.stopPropagation(); if(suppressClick){suppressClick=false;return;} stopHover(); tab.onSelect(); });
       const close = document.createElement('button'); close.type='button'; close.className='file-capability-browser-tab-close'; close.textContent='×'; close.setAttribute('aria-label','Unpin '+tab.title); close.addEventListener('click',event=>{event.stopPropagation();tab.onClose();});
       group.draggable=true;group.setAttribute('data-preview-tab-id',tab.id);
@@ -270,7 +270,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   });
   void request('pane-window-tabs', { rect: bounds() }).catch(() => {});
   return {
-    setDocumentTabs(next) { const key=tabs=>JSON.stringify(tabs.map(({id,title,active,nativeIndex})=>({id,title,active,nativeIndex})));const changed=key(next)!==key(documentTabs);documentTabs = next; if (!disposed && changed) render(); },
+    setDocumentTabs(next) { const key=tabs=>JSON.stringify(tabs.map(({id,title,icon,active,nativeIndex})=>({id,title,icon,active,nativeIndex})));const changed=key(next)!==key(documentTabs);documentTabs = next; if (!disposed && changed) render(); },
     hasWindows() { return !disposed && tabs.length > 0; },
     async restoreCurrent() {
       if (disposed || await prepare() === false) return;

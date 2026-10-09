@@ -194,3 +194,13 @@ test('preview tabs reorder among application tabs without mutating native member
  assert.deepEqual(reordered,[{before:'',position:{nativeIndex:0}}]);
  assert.equal(f.calls.some(call=>['pane-window-reorder','pane-window-detach'].includes(call.operation)),false);doc.listeners.dragend();f.api.destroy();
 });
+
+test('preview tabs reuse supplied file icons and refresh when icon resolves',()=>{
+ const f=fixture();const tab={id:'doc',title:'Drawing',onSelect(){},onClose(){}};
+ f.api.setDocumentTabs([tab]);
+ f.api.setDocumentTabs([{...tab,icon:'data:image/png;base64,file-icon'}]);
+ const button=f.strip.children[1].children[0];
+ assert.equal(button.children[0].src,'data:image/png;base64,file-icon');
+ assert.equal(button.children[1].textContent,'Drawing');
+ f.api.destroy();
+});

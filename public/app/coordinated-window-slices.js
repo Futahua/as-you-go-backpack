@@ -16,6 +16,8 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
   // mount. Legacy collapsed/expanded width animation exposes intermediate
   // widths that can fail native minimum sizes and must not drive this owner.
   root.element.style.transition='none';
+  const icons=new Map();
+  function previewIcon(tab){if(!tab)return null;if(!icons.has(tab.path)){icons.set(tab.path,null);void host.fileCapability("icon",{path:tab.path}).then(reply=>{if(disposed)return;if(reply?.ok&&reply.icon){icons.set(tab.path,reply.icon);schedule();}}).catch(()=>{});}return icons.get(tab.path)||tab.previewIcon||tab.icon||null;}
   const win=document.defaultView,views=new Map();let snapshot=null,previews=[],disposed=false,mounted=false,mounting=null,frame=0,geometry='',overlay=false,dragging=false,savedSettings='',queue=Promise.resolve();
   const region=document.createElement('div');region.className='window-slices-region';region.hidden=true;document.body.append(region);
   const cue=document.createElement('div');cue.className='preview-split-cue is-armed window-slice-drop';cue.hidden=true;document.body.append(cue);
@@ -83,12 +85,12 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
       const vertical=group.presentation==='minimized'&&box.width===32;
       view.element.classList.toggle('slice-vertical-minimized',vertical);view.rail.hidden=!vertical;view.rail.replaceChildren();
       if(vertical)for(const tab of group.tabs){const button=document.createElement('button');button.type='button';button.title=tab.title;button.setAttribute('aria-label','Restore '+tab.title);
-        if(tab.icon){const icon=document.createElement('img');icon.src=tab.icon;icon.alt='';button.append(icon);}else button.textContent='▣';
+        const source=tab.icon||previewIcon(previews.find(p=>ref(p.id)===tab.id));if(source){const icon=document.createElement('img');icon.src=source;icon.alt='';button.append(icon);}else button.textContent='▣';
         button.addEventListener('click',()=>{void (async()=>{await command('presentation',{groupId:group.id,mode:'normal'});await command('select',{groupId:group.id,tabId:tab.id});})().catch(error=>onStatus(error.message));});view.rail.append(button);}
       view.number.textContent=String(index+1);view.number.title='Group '+(index+1);view.close.hidden=snapshot.groups.length<2;
       view.min.textContent=group.presentation==='minimized'?'↗':'−';view.max.textContent=group.presentation==='maximized'?'❐':'□';
       const docs=group.tabs.filter(t=>t.kind==='document').map(t=>{const tab=previews.find(p=>ref(p.id)===t.id);if(!tab)return null;
-        return {id:tab.id,title:tab.name,active:t.active,nativeIndex:group.tabs.slice(0,group.tabs.indexOf(t)).filter(p=>p.kind==='native').length,
+        return {id:tab.id,title:tab.name,icon:previewIcon(tab),active:t.active,nativeIndex:group.tabs.slice(0,group.tabs.indexOf(t)).filter(p=>p.kind==='native').length,
           onSelect:()=>{void selectPreview(tab).catch(()=>{});},onClose:()=>{void command('document-remove',{tabId:t.id}).then(()=>{previews=previews.filter(p=>p.id!==tab.id);onPreviews(previews);schedule();}).catch(()=>{});},
           onReorder:(beforeId,position)=>{const before=beforeId?ref(beforeId):group.tabs.filter(p=>p.kind==='native')[position?.nativeIndex]?.id||'';void command('reorder',{groupId:group.id,tabId:t.id,beforeId:before}).catch(()=>{});}};
       }).filter(Boolean);
