@@ -65,6 +65,7 @@ window.addEventListener('message', (event) => {
   if (event.source !== window.parent) return;
   if (expectedParentOrigin !== '*' && event.origin !== expectedParentOrigin) return;
   if(disposed)return;
+  if(event.data?.type==='papers:proxima-lens-request'){void slices.searchLens(event.data.source==='clipboard'?'clipboard':'screen').catch(()=>{});return;}
   if(event.data?.type==='papers:proxima-document-tabs'){documents=Array.isArray(event.data.tabs)?event.data.tabs:[];if(activeDocument&&!documents.some(t=>t.id===activeDocument)){activeDocument=null;pinned.element.hidden=true;panel.setTransientOverlay(false);}renderDocuments();void slices.restore().catch(()=>{});return;}
   if(event.data?.type==='papers:proxima-pinned-preview'){if(event.data.tab)selectDocument(event.data.tab);return;}
   if(event.data?.type==='papers:proxima-preview-slice-drop'){if(slices.active())void slices.splitPreview(event.data.id,event.data.side);return;}

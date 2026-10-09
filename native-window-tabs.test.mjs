@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PREVIEW_TAB_MIME, installNativeWindowTabs } from './public/app/native-window-tabs.js';
+import { PREVIEW_TAB_MIME, createLensButton, installNativeWindowTabs } from './public/app/native-window-tabs.js';
 import { WINDOW_TAB_MIME, paneWindowPickerRows } from './public/app/window-tab-transfer.js';
 
 class Element {
@@ -203,4 +203,11 @@ test('preview tabs reuse supplied file icons and refresh when icon resolves',()=
  assert.equal(button.children[0].src,'data:image/png;base64,file-icon');
  assert.equal(button.children[1].textContent,'Drawing');
  f.api.destroy();
+});
+
+test('toolbar lens preserves screen click and clipboard right-click activation',async()=>{
+ const sources=[];const button=createLensButton({createElement:()=>new Element()},async source=>sources.push(source));
+ const event={preventDefault(){},stopPropagation(){}};
+ button.listeners.click(event);await settle();button.listeners.contextmenu(event);await settle();
+ assert.deepEqual(sources,['screen','clipboard']);assert.equal(button.disabled,false);
 });

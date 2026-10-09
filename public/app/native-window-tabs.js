@@ -5,8 +5,17 @@ import { openWindowLayoutPickerSession } from './window-layout-picker-session.js
 import { windowLayoutControlGlyphMarkup } from './window-layout-control-icons.js';
 import { WINDOW_TAB_MIME, windowTabTransfer, paneWindowPickerRows } from './window-tab-transfer.js';
 
+export function createLensButton(document,lens,status=()=>{}) {
+  let lensButton;
+    lensButton = document.createElement('button'); lensButton.type = 'button'; lensButton.className = 'file-capability-browser-nav native-window-lens'; lensButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6l1.5-2h5L16 6h4a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="4"/><path d="M18 9h.01"/></svg>'; lensButton.title = 'Google Lens — click: screen region · right-click: copied image'; lensButton.setAttribute('aria-label','Google Lens screen region search');
+    const runLens = async (event, source) => { event.preventDefault(); event.stopPropagation(); if (lensButton.disabled) return; lensButton.disabled=true; try { await lens(source); } catch(error) { status(error?.message || String(error)); } finally { lensButton.disabled=false; } };
+    lensButton.addEventListener('click', event => { void runLens(event, 'screen'); });
+    lensButton.addEventListener('contextmenu', event => { void runLens(event, 'clipboard'); });
+  return lensButton;
+}
+
 /** Retained window membership belongs to the native host, including restart recovery. */
-export function installNativeWindowTabs({ document, header, host, bounds, prepare, overlay, status, lens, sliceId='main', sliceDocking=false }) {
+export function installNativeWindowTabs({ document, header, host, bounds, prepare, overlay, status, lens, sliceId='main', sliceDocking=false, groupHandle=null }) {
   const strip = document.createElement('div');
   strip.className = 'pane-window-tabs file-capability-browser-tabs';
   strip.addEventListener('wheel', event => { if (strip.scrollWidth > strip.clientWidth) { event.preventDefault(); strip.scrollLeft += event.deltaY || event.deltaX; } }, { passive: false });
@@ -14,12 +23,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   strip.setAttribute('aria-label', 'Application windows');
   header.prepend(strip);
   let lensButton = null;
-  if (lens) {
-    lensButton = document.createElement('button'); lensButton.type = 'button'; lensButton.className = 'file-capability-browser-nav native-window-lens'; lensButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6l1.5-2h5L16 6h4a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="4"/><path d="M18 9h.01"/></svg>'; lensButton.title = 'Google Lens — click: screen region · right-click: copied image'; lensButton.setAttribute('aria-label','Google Lens screen region search');
-    const runLens = async (event, source) => { event.preventDefault(); event.stopPropagation(); if (lensButton.disabled) return; lensButton.disabled=true; try { await lens(source); } catch(error) { status(error?.message || String(error)); } finally { lensButton.disabled=false; } };
-    lensButton.addEventListener('click', event => { void runLens(event, 'screen'); });
-    lensButton.addEventListener('contextmenu', event => { void runLens(event, 'clipboard'); });
-  }
+  if (lens) lensButton=createLensButton(document,lens,status);
   let disposed = false;
   let busy = false;
   let selectionGeneration = 0;
@@ -190,6 +194,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
     addButton.addEventListener('mouseleave', () => { clearTimeout(dwell); dwell = null; });
     addButton.disabled = busy; addButton.addEventListener('click', add);
     if (lensButton) strip.prepend(lensButton);
+    if (groupHandle) strip.prepend(groupHandle);
     strip.prepend(addButton);
     for (const tab of documentTabs) {
       const group = document.createElement('span'); group.className = 'pane-window-tab file-capability-browser-tab' + (tab.active ? ' active' : '');

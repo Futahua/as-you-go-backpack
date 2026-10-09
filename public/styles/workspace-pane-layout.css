@@ -104,3 +104,9 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .slice-vertical-restore[hidden] { display:none; }
 .slice-vertical-restore button { flex:0 0 26px;width:26px;height:26px;padding:4px;background:var(--surface-soft);color:inherit;border:1px solid var(--border-subtle);border-radius:4px;cursor:pointer; }
 .slice-vertical-restore img { width:16px;height:16px;object-fit:contain; }
+
+.slice-group-handle { cursor:grab;flex:0 0 28px;width:28px;height:28px;padding:0;font-size:20px;line-height:1; }
+.slice-group-handle:active { cursor:grabbing; }
+.window-slice-drop.is-group-drop { display:grid;place-items:center;color:var(--text-primary);font-weight:600;background:rgb(120 155 160 / 22%); }
+.workspace-left-actions > .native-window-lens { width:28px;height:28px;padding:5px;flex:0 0 28px; }
+.workspace-left-actions > .native-window-lens svg { width:18px;height:18px; }

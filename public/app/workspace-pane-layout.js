@@ -1,5 +1,5 @@
 
-import { PREVIEW_TAB_MIME } from './native-window-tabs.js';
+import { PREVIEW_TAB_MIME,createLensButton } from './native-window-tabs.js';
 import { previewDropSurface } from './preview-docking.js';
 import { installPreviewResizing } from './preview-resizing.js';
 import { installPreviewDocking } from './preview-docking.js';
@@ -56,7 +56,8 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
     action.classList.remove('toolbar-float');
     actions.append(action);
   }
-  leftHeader.append(actions,controls);
+  const lens=createLensButton(document,source=>{if(externalWindows){win.parent.postMessage({type:'papers:proxima-lens-request',source},'*');return;}return slices.searchLens(source);},setStatus);
+  actions.append(lens);leftHeader.append(actions,controls);
   function selectPinned(tab){if(slices?.active()){settings.windows=true;slices.selectPreview(tab);schedule();return;}pinnedId=tab.id;if(externalWindows){win.parent.postMessage({type:'papers:proxima-pinned-preview',tab},'*');renderTabs();return;}settings.windows=true;void pinned.previewPath(tab.path,tab.name);renderTabs();schedule();}
   function reorderPinned(id,beforeId,position){const tab=settings.pinned.find(t=>t.id===id);if(!tab||id===beforeId)return;const next=settings.pinned.filter(t=>t.id!==id),index=next.findIndex(t=>t.id===beforeId);if(Number.isInteger(position?.nativeIndex))tab.nativeIndex=position.nativeIndex;next.splice(index<0?next.length:index,0,tab);settings.pinned=next;commit();renderTabs();}
   function unpinToSurface(id,placement){const tab=settings.pinned.find(t=>t.id===id);if(!tab)return;settings.pinned=settings.pinned.filter(t=>t.id!==id);if(pinnedId===id)pinnedId=null;settings.preview=true;settings.placement=placement;lastSelection={mode:'single',item:{path:tab.path,name:tab.name}};void preview.previewPath(tab.path,tab.name);commit();renderTabs();lastGeometry='';schedule();}

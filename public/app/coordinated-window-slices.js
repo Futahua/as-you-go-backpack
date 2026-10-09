@@ -3,6 +3,7 @@ import {createFileCapabilityPanel} from './file-capability-panel.js';
 import {sliceDropSide} from './window-slices.js';
 import {WINDOW_TAB_MIME,windowTabTransfer} from './window-tab-transfer.js';
 
+export const GROUP_DRAG_MIME='application/x-papers-pane-group';
 const ref=id=>'preview:'+id;
 const docId=id=>id?.startsWith('preview:')?id.slice(8):null;
 export const paneSnapshotIsNewer=(previous,next)=>Boolean(next&&Array.isArray(next.groups)&&Number.isSafeInteger(next.stateRevision)&&
@@ -18,7 +19,7 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
   root.element.style.transition='none';
   const icons=new Map();
   function previewIcon(tab){if(!tab)return null;if(!icons.has(tab.path)){icons.set(tab.path,null);void host.fileCapability("icon",{path:tab.path}).then(reply=>{if(disposed)return;if(reply?.ok&&reply.icon){icons.set(tab.path,reply.icon);schedule();}}).catch(()=>{});}return icons.get(tab.path)||tab.previewIcon||tab.icon||null;}
-  const win=document.defaultView,views=new Map();let snapshot=null,previews=[],disposed=false,mounted=false,mounting=null,frame=0,geometry='',overlay=false,dragging=false,savedSettings='',queue=Promise.resolve();
+  const win=document.defaultView,views=new Map();let snapshot=null,previews=[],disposed=false,mounted=false,mounting=null,frame=0,geometry='',overlay=false,dragging=false,savedSettings='',queue=Promise.resolve(),groupDragId=null,lensGroup=null;
   const region=document.createElement('div');region.className='window-slices-region';region.hidden=true;document.body.append(region);
   const cue=document.createElement('div');cue.className='preview-split-cue is-armed window-slice-drop';cue.hidden=true;document.body.append(cue);
   const outer=()=>{const b=root.element.getBoundingClientRect();return {x:Math.round(b.left),y:Math.round(b.top),width:Math.round(b.width),height:Math.round(b.height),rightInset:Math.max(0,win.innerWidth-b.right),bottomInset:Math.max(0,win.innerHeight-b.bottom)};};
@@ -51,10 +52,13 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
   function toolsButton(tools,label,text,action){const b=document.createElement('button');b.type='button';b.title=label;b.setAttribute('aria-label',label);b.textContent=text;b.addEventListener('click',()=>{void action().catch(()=>{});});tools.append(b);return b;}
   function createView(group){
     const element=document.createElement('section');element.className='window-slice';element.dataset.sliceId=group.id;
-    const header=document.createElement('header');header.className='window-slice-header';const number=document.createElement('span');number.className='window-slice-number';header.append(number);element.append(header);region.append(element);
+    const header=document.createElement('header');header.className='window-slice-header';element.append(header);region.append(element);
+    const handle=document.createElement('button');handle.type='button';handle.className='slice-group-handle';handle.draggable=true;handle.textContent='⠿';handle.title='Move group — center swaps; edge resplits';handle.setAttribute('aria-label','Move entire group');handle.dataset.groupId=group.id;
+    handle.addEventListener('dragstart',event=>{groupDragId=group.id;event.dataTransfer.setData(GROUP_DRAG_MIME,group.id);event.dataTransfer.effectAllowed='move';void setOverlay(true).catch(()=>{});});
+    element.addEventListener('pointerdown',()=>{lensGroup=group.id;},true);
     const listeners=new Set(),tools=document.createElement('span');tools.className='window-slice-controls';
     const rail=document.createElement("div");rail.className="slice-vertical-restore";element.append(rail);
-    const view={element,header,number,listeners,rail,preview:null,previewId:null};
+    const view={element,header,handle,listeners,rail,preview:null,previewId:null};
     const bounds=()=>snapshot.groups.find(g=>g.id===group.id)?.content||outer();
     const scopedHost={...host,onPaneTabs:cb=>{listeners.add(cb);return()=>listeners.delete(cb);},fileCapability:async(operation,data={})=>{
       if(operation==='pane-window-tabs')return {ok:true};
@@ -66,8 +70,7 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
       return host.fileCapability(operation,data);
     }};
     view.native=installNativeWindowTabs({document,header,host:scopedHost,bounds,prepare:async()=>true,overlay:async value=>setOverlay(value&&dragging),status:onStatus,sliceId:group.id,sliceDocking:true,
-      lens:async(source='screen')=>{const result=await host.fileCapability('browser-lens-screen',{nativeChrome:true,source});if(result.cancelled)return;if(!result.ok)throw new Error(result.message||'Lens could not start');
-        const opened=await host.fileCapability('pane-layout-open',{groupId:group.id,source:'lens:'+win.crypto.randomUUID(),url:result.url});if(opened.snapshot)accept(opened.snapshot);if(!opened.ok)throw new Error(opened.error||'Lens could not open');}
+      groupHandle:handle
     });
     view.min=toolsButton(tools,'Minimize group','−',()=>command('presentation',{groupId:group.id,mode:snapshot.groups.find(g=>g.id===group.id)?.presentation==='minimized'?'normal':'minimized'}));
     view.max=toolsButton(tools,'Maximize group','□',()=>command('presentation',{groupId:group.id,mode:snapshot.groups.find(g=>g.id===group.id)?.presentation==='maximized'?'normal':'maximized'}));
@@ -87,7 +90,7 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
       if(vertical)for(const tab of group.tabs){const button=document.createElement('button');button.type='button';button.title=tab.title;button.setAttribute('aria-label','Restore '+tab.title);
         const source=tab.icon||previewIcon(previews.find(p=>ref(p.id)===tab.id));if(source){const icon=document.createElement('img');icon.src=source;icon.alt='';button.append(icon);}else button.textContent='▣';
         button.addEventListener('click',()=>{void (async()=>{await command('presentation',{groupId:group.id,mode:'normal'});await command('select',{groupId:group.id,tabId:tab.id});})().catch(error=>onStatus(error.message));});view.rail.append(button);}
-      view.number.textContent=String(index+1);view.number.title='Group '+(index+1);view.close.hidden=snapshot.groups.length<2;
+      view.close.hidden=snapshot.groups.length<2;view.handle.disabled=snapshot.groups.length<2;
       view.min.textContent=group.presentation==='minimized'?'↗':'−';view.max.textContent=group.presentation==='maximized'?'❐':'□';
       const docs=group.tabs.filter(t=>t.kind==='document').map(t=>{const tab=previews.find(p=>ref(p.id)===t.id);if(!tab)return null;
         return {id:tab.id,title:tab.name,icon:previewIcon(tab),active:t.active,nativeIndex:group.tabs.slice(0,group.tabs.indexOf(t)).filter(p=>p.kind==='native').length,
@@ -107,18 +110,20 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
     const rect=outer(),next=JSON.stringify(rect);if(next!==geometry){geometry=next;void host.fileCapability('pane-layout-viewport',{rect}).then(reply=>{if(reply?.snapshot)accept(reply.snapshot);if(reply?.ok===false)onStatus(reply.error||reply.message||'Window layout could not resize');}).catch(error=>onStatus(error.message));}
   }
   async function setOverlay(value){if(overlay===value)return;overlay=value;schedule();if(mounted)await command('present',{visible:!value&&!root.element.hidden});}
-  const relevant=event=>Array.from(event.dataTransfer?.types||[]).some(t=>[PREVIEW_TAB_MIME,NATIVE_TAB_MIME,WINDOW_TAB_MIME].includes(t));
-  function destination(event){for(const group of snapshot?.groups||[]){const view=views.get(group.id);if(view?.element.hidden)continue;const side=sliceDropSide(event.clientX,event.clientY,group.slot);if(side)return {group,side:event.target?.closest?.('.pane-window-tabs')?'center':side};}return null;}
+  const relevant=event=>Array.from(event.dataTransfer?.types||[]).some(t=>[PREVIEW_TAB_MIME,NATIVE_TAB_MIME,WINDOW_TAB_MIME,GROUP_DRAG_MIME].includes(t));
+  function destination(event){for(const group of snapshot?.groups||[]){const view=views.get(group.id);if(view?.element.hidden||groupDragId===group.id)continue;const side=sliceDropSide(event.clientX,event.clientY,group.slot);if(side)return {group,side:!groupDragId&&event.target?.closest?.('.pane-window-tabs')?'center':side};}return null;}
   const startDrag=()=>{dragging=true;};
-  const clear=()=>{dragging=false;cue.hidden=true;for(const node of region.querySelectorAll('.reorder-before'))node.classList.remove('reorder-before');void setOverlay(false).catch(()=>{});};
-  const dragOver=event=>{if(!mounted||!relevant(event))return;const target=destination(event);if(!target)return;event.preventDefault();event.dataTransfer.dropEffect='move';
+  const clear=()=>{dragging=false;groupDragId=null;cue.hidden=true;for(const node of region.querySelectorAll('.reorder-before'))node.classList.remove('reorder-before');void setOverlay(false).catch(()=>{});};
+  const dragOver=event=>{if(!mounted||!relevant(event))return;const target=destination(event);if(!target){cue.hidden=true;return;}event.preventDefault();event.dataTransfer.dropEffect='move';
     let box={...target.group.slot};const side=target.side;
-    if(side==='center'){cue.hidden=true;event.target?.closest?.('[data-pane-tab-id],[data-preview-tab-id]')?.classList.add('reorder-before');return;}
-    if(side==='left'||side==='right'){box.width/=2;if(side==='right')box.x+=box.width;}else{box.height/=2;if(side==='bottom')box.y+=box.height;}
+    if(side==='center'&&!groupDragId){cue.hidden=true;event.target?.closest?.('[data-pane-tab-id],[data-preview-tab-id]')?.classList.add('reorder-before');return;}
+    cue.textContent=groupDragId?(side==='center'?'Swap groups':'Move group '+side):'';cue.classList.toggle('is-group-drop',Boolean(groupDragId));
+    if(side==='left'||side==='right'){box.width/=2;if(side==='right')box.x+=box.width;}else if(side==='top'||side==='bottom'){box.height/=2;if(side==='bottom')box.y+=box.height;}
     cue.hidden=false;Object.assign(cue.style,{left:box.x+'px',top:box.y+'px',width:box.width+'px',height:box.height+'px'});
   };
   const drop=async event=>{if(!mounted||!relevant(event))return;const target=destination(event);if(!target)return;event.preventDefault();event.stopPropagation();cue.hidden=true;
     try{
+      const source=event.dataTransfer.getData(GROUP_DRAG_MIME)||groupDragId;if(source){await command('relocate-group',{groupId:source,destination:target.group.id,side:target.side});return;}
       const preview=event.dataTransfer.getData(PREVIEW_TAB_MIME);let native;try{native=JSON.parse(event.dataTransfer.getData(NATIVE_TAB_MIME)||'null');}catch{}
       let id=preview?ref(preview):native?.id;
       if(preview){const tab=previews.find(p=>p.id===preview);if(!tab)return;await ensureDocument(tab);}
@@ -141,7 +146,13 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
   };
   document.addEventListener('dragstart',startDrag,true);document.addEventListener('dragover',dragOver,true);document.addEventListener('drop',drop,true);document.addEventListener('dragend',clear,true);win.addEventListener('blur',clear);
   const observer=new win.ResizeObserver(schedule);observer.observe(root.element);win.addEventListener('resize',schedule);
-  return {active:()=>mounted,setSettings(){},setPreviews(next){previews=next;schedule();if(mounted)void (async()=>{for(const tab of previews)await ensureDocument(tab);
+  async function searchLens(source='screen'){
+    const result=await host.fileCapability('browser-lens-screen',{nativeChrome:true,source});if(result.cancelled)return;if(!result.ok)throw new Error(result.message||'Lens could not start');
+    const groupId=snapshot?.groups.find(g=>g.id===lensGroup&&g.presentation!=='minimized')?.id||snapshot?.groups.find(g=>g.presentation!=='minimized')?.id||snapshot?.groups[0]?.id;
+    if(!groupId)throw new Error('Window layout is not ready.');
+    const opened=await host.fileCapability('pane-layout-open',{groupId,source:'lens:'+win.crypto.randomUUID(),url:result.url});if(opened.snapshot)accept(opened.snapshot);if(!opened.ok)throw new Error(opened.error||'Lens could not open');
+  }
+  return {searchLens,active:()=>mounted,setSettings(){},setPreviews(next){previews=next;schedule();if(mounted)void (async()=>{for(const tab of previews)await ensureDocument(tab);
     for(const tab of snapshot.groups.flatMap(g=>g.tabs).filter(t=>t.kind==='document'))if(!previews.some(p=>ref(p.id)===tab.id))await command('document-remove',{tabId:tab.id});})().catch(()=>{});},
     selectPreview:tab=>{void selectPreview(tab).catch(()=>{});},nativeSelected(){},setOverlay:value=>{void setOverlay(value).catch(()=>{});},refresh:schedule,isMaximized:()=>Boolean(snapshot?.groups.some(g=>g.presentation==='maximized')),ownsNativeEdge:()=>false,
     splitPreview:async(id,side)=>{const tab=previews.find(p=>p.id===id);if(!tab)return;const key=await ensureDocument(tab);await command('split',{tabId:key,groupId:snapshot.groups[0].id,newGroupId:'slice-'+win.crypto.randomUUID(),side});},
