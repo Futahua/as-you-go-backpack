@@ -105,6 +105,7 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .slice-vertical-restore { display:flex;flex-direction:column;align-items:center;gap:4px;width:32px;height:100%;overflow:auto;box-sizing:border-box;padding:4px 0; }
 .slice-vertical-restore[hidden] { display:none; }
 .slice-vertical-restore button { flex:0 0 26px;width:26px;height:26px;padding:4px;background:var(--surface-soft);color:inherit;border:1px solid var(--border-subtle);border-radius:4px;cursor:pointer; }
+.slice-vertical-controls { display:flex;flex-direction:column;align-items:center;gap:4px;flex:0 0 auto; }
 .slice-vertical-restore img { width:16px;height:16px;object-fit:contain; }
 
 .slice-group-handle { cursor:grab;flex:0 0 28px;width:28px;height:28px;padding:0;font-size:20px;line-height:1; }

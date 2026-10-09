@@ -73,7 +73,8 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
     element.addEventListener('pointerdown',()=>{lensGroup=group.id;},true);
     const listeners=new Set(),tools=document.createElement('span');tools.className='window-slice-controls';
     const rail=document.createElement("div");rail.className="slice-vertical-restore";element.append(rail);
-    const view={element,header,handle,listeners,rail,preview:null,previewId:null};
+    const railControls=document.createElement('div');railControls.className='slice-vertical-controls';rail.append(railControls);
+    const view={element,header,handle,listeners,rail,railControls,preview:null,previewId:null};
     const bounds=()=>snapshot.groups.find(g=>g.id===group.id)?.content||outer();
     const scopedHost={...host,onPaneTabs:cb=>{listeners.add(cb);return()=>listeners.delete(cb);},fileCapability:async(operation,data={})=>{
       if(operation==='pane-window-tabs')return {ok:true};
@@ -107,6 +108,11 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
     view.min=toolsButton(tools,'Minimize group','−',()=>command('presentation',{groupId:group.id,mode:snapshot.groups.find(g=>g.id===group.id)?.presentation==='minimized'?'normal':'minimized'}));
     view.max=toolsButton(tools,'Maximize group','□',()=>command('presentation',{groupId:group.id,mode:snapshot.groups.find(g=>g.id===group.id)?.presentation==='maximized'?'normal':'maximized'}));
     view.close=toolsButton(tools,'Remove window group','×',()=>command('close-group',{groupId:group.id,destination:snapshot.groups.find(g=>g.id!==group.id).id}));
+    // A vertical minimized group can be empty. Its header is hidden, and a
+    // tab-icon-only restore rail would otherwise leave it impossible to reopen.
+    view.railRestore=toolsButton(railControls,'Restore group','↗',()=>command('presentation',{groupId:group.id,mode:'normal'}));
+    view.railMax=toolsButton(railControls,'Maximize group','□',()=>command('presentation',{groupId:group.id,mode:'maximized'}));
+    view.railClose=toolsButton(railControls,'Remove window group','×',()=>command('close-group',{groupId:group.id,destination:snapshot.groups.find(g=>g.id!==group.id).id}));
     header.append(tools);views.set(group.id,view);return view;
   }
   function render(){frame=0;if(disposed||!mounted||!snapshot)return;
@@ -121,12 +127,13 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
       view.element.hidden=hidden||Boolean(maximum&&maximum!==group.id);
       Object.assign(view.element.style,{left:box.x+'px',top:box.y+'px',width:box.width+'px',height:box.height+'px'});
       const vertical=group.presentation==='minimized'&&box.width===32;
-      view.element.classList.toggle('slice-vertical-minimized',vertical);view.rail.hidden=!vertical;view.rail.replaceChildren();
+      view.element.classList.toggle('slice-vertical-minimized',vertical);view.rail.hidden=!vertical;view.rail.replaceChildren(view.railControls);
       if(vertical)for(const tab of group.tabs){const button=document.createElement('button');button.type='button';button.title=tab.title;button.setAttribute('aria-label','Restore '+tab.title);
         const source=tab.icon||previewIcon(previews.find(p=>ref(p.id)===tab.id));if(source){const icon=document.createElement('img');icon.src=source;icon.alt='';button.append(icon);}else button.textContent='▣';
         button.addEventListener('click',()=>{void (async()=>{await command('presentation',{groupId:group.id,mode:'normal'});await command('select',{groupId:group.id,tabId:tab.id});if(tab.kind==='dormant'&&tab.canOpen){const reply=await host.fileCapability('pane-window-resume',{tabId:tab.id});if(reply.snapshot)accept(reply.snapshot);if(!reply.ok)throw Error(reply.error||'Application could not reopen');}})().catch(error=>onStatus(error.message));});view.rail.append(button);}
       view.resume.hidden=!group.tabs.some(t=>t.kind==='dormant'&&t.canOpen);
       view.close.hidden=snapshot.groups.length<2||group.tabs.some(t=>protectedTabs.some(p=>ref(p.id)===t.id));view.handle.disabled=false;
+      view.railClose.hidden=view.close.hidden;
       view.min.textContent=group.presentation==='minimized'?'↗':'−';view.max.textContent=group.presentation==='maximized'?'❐':'□';
       const docs=group.tabs.filter(t=>t.kind==='document').map(t=>{const tab=protectedTabs.find(p=>ref(p.id)===t.id)||previews.find(p=>ref(p.id)===t.id);if(!tab)return null;
         return {id:tab.id,transferId:t.transferId,title:tab.name,icon:previewIcon(tab),active:t.active,nativeIndex:group.tabs.slice(0,group.tabs.indexOf(t)).filter(p=>p.kind==='native').length,
