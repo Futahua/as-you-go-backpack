@@ -51,7 +51,8 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
     const element=document.createElement('section');element.className='window-slice';element.dataset.sliceId=group.id;
     const header=document.createElement('header');header.className='window-slice-header';const number=document.createElement('span');number.className='window-slice-number';header.append(number);element.append(header);region.append(element);
     const listeners=new Set(),tools=document.createElement('span');tools.className='window-slice-controls';
-    const view={element,header,number,listeners,preview:null,previewId:null};
+    const rail=document.createElement("div");rail.className="slice-vertical-restore";element.append(rail);
+    const view={element,header,number,listeners,rail,preview:null,previewId:null};
     const bounds=()=>snapshot.groups.find(g=>g.id===group.id)?.content||outer();
     const scopedHost={...host,onPaneTabs:cb=>{listeners.add(cb);return()=>listeners.delete(cb);},fileCapability:async(operation,data={})=>{
       if(operation==='pane-window-tabs')return {ok:true};
@@ -78,7 +79,12 @@ export function installCoordinatedWindowSlices({document,host,root,onSettings=()
     for(const [index,group] of snapshot.groups.entries()){
       const view=views.get(group.id)||createView(group),box=group.slot;
       view.element.hidden=hidden||Boolean(maximum&&maximum!==group.id);
-      Object.assign(view.element.style,{left:box.x+'px',top:box.y+'px',width:box.width+'px',height:group.presentation==='minimized'?'32px':box.height+'px'});
+      Object.assign(view.element.style,{left:box.x+'px',top:box.y+'px',width:box.width+'px',height:box.height+'px'});
+      const vertical=group.presentation==='minimized'&&box.width===32;
+      view.element.classList.toggle('slice-vertical-minimized',vertical);view.rail.hidden=!vertical;view.rail.replaceChildren();
+      if(vertical)for(const tab of group.tabs){const button=document.createElement('button');button.type='button';button.title=tab.title;button.setAttribute('aria-label','Restore '+tab.title);
+        if(tab.icon){const icon=document.createElement('img');icon.src=tab.icon;icon.alt='';button.append(icon);}else button.textContent='▣';
+        button.addEventListener('click',()=>{void (async()=>{await command('presentation',{groupId:group.id,mode:'normal'});await command('select',{groupId:group.id,tabId:tab.id});})().catch(error=>onStatus(error.message));});view.rail.append(button);}
       view.number.textContent=String(index+1);view.number.title='Group '+(index+1);view.close.hidden=snapshot.groups.length<2;
       view.min.textContent=group.presentation==='minimized'?'↗':'−';view.max.textContent=group.presentation==='maximized'?'❐':'□';
       const docs=group.tabs.filter(t=>t.kind==='document').map(t=>{const tab=previews.find(p=>ref(p.id)===t.id);if(!tab)return null;

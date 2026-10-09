@@ -98,3 +98,9 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .compact-file-preview .file-capability-inspector{padding:0;gap:0}
 .compact-file-preview .file-capability-image-shell{grid-template-rows:minmax(0,1fr)}
 .preview-pin{width:28px;height:26px;padding:4px;flex:none}.preview-pin svg{width:18px;height:18px}
+
+.slice-vertical-minimized .window-slice-header { display:none; }
+.slice-vertical-restore { display:flex;flex-direction:column;align-items:center;gap:4px;width:32px;height:100%;overflow:auto;box-sizing:border-box;padding:4px 0; }
+.slice-vertical-restore[hidden] { display:none; }
+.slice-vertical-restore button { flex:0 0 26px;width:26px;height:26px;padding:4px;background:var(--surface-soft);color:inherit;border:1px solid var(--border-subtle);border-radius:4px;cursor:pointer; }
+.slice-vertical-restore img { width:16px;height:16px;object-fit:contain; }
