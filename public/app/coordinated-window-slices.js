@@ -221,8 +221,19 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
       let rect=outer();while(!disposed&&(rect.width<240||rect.height<192)){await new Promise(resolve=>win.setTimeout(resolve,50));rect=outer();}if(disposed)return;
       const reply=await host.fileCapability('pane-layout-mount',{rect,headerHeight:32});
       if(!reply.ok){if(reply.code==='OPERATION_UNKNOWN'||reply.message==='Native window layouts are unavailable.'){await root.restoreWindows();return;}throw new Error(reply.error||reply.message||'Window layout could not mount');}
-      mounted=true;root.replaceNativeTabs();root.element.classList.add('window-slices-root');accept(reply.snapshot);
-      for(const tab of protectedTabs)if(!groupFor(ref(tab.id))){const target=snapshot.groups[0].id;await command('document-add',{tabId:ref(tab.id),groupId:target});await command('split',{tabId:ref(tab.id),groupId:target,newGroupId:'system-'+tab.id,side:win.innerHeight>win.innerWidth?'top':'left'});}
+      // Both page-owned panels must be migrated at once. Add-then-split left
+      // documents behind unrelated tabs when dense native layouts rejected a
+      // split. Do not claim a mounted UI if the migration fails.
+      let ready=reply;
+      if(protectedTabs.length){
+        ready=await host.fileCapability('pane-layout-command',{command:'ensure-panels',revision:reply.snapshot.stateRevision});
+        if(!ready?.ok)throw new Error(ready?.error||ready?.message||'Files and Preview could not be restored');
+        const groups=ready.snapshot?.groups||[];
+        for(const tab of protectedTabs){const matches=groups.filter(g=>g.tabs.some(t=>t.id===ref(tab.id)));
+          if(matches.length!==1||matches[0].selected!==ref(tab.id)||matches[0].presentation!=='normal'||matches[0].tabs.length!==1)
+            throw new Error('Files and Preview must each own a visible native group.');}
+      }
+      mounted=true;root.replaceNativeTabs();root.element.classList.add('window-slices-root');accept(ready.snapshot);
       onOuterEdge(snapshot.viewport);onActive();schedule();})();
       try{await mounting;}finally{mounting=null;}},
     destroy(){clear();disposed=true;release?.();observer.disconnect();if(frame)win.cancelAnimationFrame(frame);win.removeEventListener('resize',schedule);document.removeEventListener('dragstart',startDrag,true);document.removeEventListener('dragover',dragOver,true);document.removeEventListener('drop',drop,true);document.removeEventListener('dragend',clear,true);win.removeEventListener('blur',blur);for(const view of views.values())view.native.destroy();for(const panel of retainedPreviews.values())panel.destroy();region.remove();cue.remove();}
