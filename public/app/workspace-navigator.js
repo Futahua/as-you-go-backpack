@@ -796,6 +796,9 @@ export function createWorkspaceNavigator(o) {
       if (ownNativePaths.length > 0) {
         row.draggable = true;
         row.addEventListener('dragstart', (event) => {
+          // Normal dragging moves the AYG link. Alt explicitly exports the
+          // underlying file to Windows, whose native loop cancels HTML drag.
+          if (!event.altKey) return;
           const dragPayload = navigatorAyGDragPayload({
             itemId:id,
             selectedIds:o.getSession().selected,
@@ -813,6 +816,7 @@ export function createWorkspaceNavigator(o) {
             host: o.host,
           });
         });
+        row.title = 'Drag to move in As you Go; Alt-drag to drag the file into another application';
       }
       if (x.kind === 'group') {
         const t = d.createElement('button'); t.type='button'; t.className='navigator-tree-toggle'; t.textContent=s.expanded.has(x.id)?'':'>';

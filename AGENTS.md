@@ -1,5 +1,7 @@
 # As you Go — governing document
 
+Relocation repair, 2026-10-10: normal Files-pane AYG drags move exact link placements or folders through the existing durable store. Alt-drag exports a local file through Windows' native drag loop; do not cancel ordinary internal drags for that export. Navigator folder drops use the tree's exact placement identity and model cycle checks, independently of the canvas's ancestor/shared-link policy. Cross-page pane drops explicitly finish their transfer overlay by ticket, even if moving the source removes its dragend event. Native group acquisition selects the intended member first and then restores the original tab order.
+
 Read this first and completely before working in this repository.
 
 ## Product north star

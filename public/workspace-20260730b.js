@@ -4946,6 +4946,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
       itemIds,
       placementIds:new Map(placementIds||[]),
       folderId,
+      navigator:true,
     }),
     canMoveAyGItems: (ids,parentId) => {
       try {moveSelection(store.getSnapshot(),ids,parentId);return true;} catch {return false;}

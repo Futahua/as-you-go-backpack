@@ -193,6 +193,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
     cue.hidden=false;Object.assign(cue.style,{left:box.x+'px',top:box.y+'px',width:box.width+'px',height:box.height+'px'});
   };
   const drop=async event=>{if(!mounted||!relevant(event))return;const target=destination(event);if(!target)return;event.preventDefault();event.stopPropagation();cue.hidden=true;const localSource=dragging?dragSource:null;completingDrop=true;
+    let completedTransfer;try{completedTransfer=JSON.parse(event.dataTransfer.getData(PANE_TRANSFER_MIME)||'null')?.transferId;}catch{}
     try{
       const pageId=event.dataTransfer.getData(PAGE_TAB_MIME);if(pageId){const result=await host.fileCapability('pane-page-attach',{pageId,groupId:target.group.id,side:target.side});if(result.snapshot)accept(result.snapshot);if(!result.ok)throw Error(result.error||'Page could not move here');return;}
       let transfer;try{transfer=JSON.parse(event.dataTransfer.getData(PANE_TRANSFER_MIME)||'null');}catch{}
@@ -221,7 +222,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
       // A rapid X/merge may finish while this drag continuation is awaiting
       // another command. Resolve the tab's current group at dispatch time.
       await command('select',()=>({groupId:groupFor(id),tabId:id}));
-    }catch(error){showMoveRefusal(document,localSource);onStatus(error.message);}finally{completingDrop=false;clear();}
+    }catch(error){showMoveRefusal(document,localSource);onStatus(error.message);}finally{if(completedTransfer)await host.fileCapability('pane-transfer-overlay',{active:false,transferId:completedTransfer}).catch(()=>{});completingDrop=false;clear();}
   };
   const leave=event=>{if(event.clientX<=0||event.clientY<=0||event.clientX>=win.innerWidth||event.clientY>=win.innerHeight){clearStrip();cueRevision++;cueTarget='';cue.hidden=true;}};
   const cancel=event=>{if(event.key==='Escape')clear(true);};

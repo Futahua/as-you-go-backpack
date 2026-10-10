@@ -19,12 +19,12 @@ test('folder drop commits the real placement reparenting and both graph cleanups
   assert.equal(h.store.getSnapshot().shortcuts[0].placements[0].parentId,'dest');
 });
 
-function createHarness({ groups = [], shortcuts = [], model = {} } = {}) {
+function createHarness({ groups = [], shortcuts = [], model = {}, persist = async () => ({ok:true}) } = {}) {
   let state = { groups, shortcuts, view: { currentGroupId: 'root' } };
   const store = createWorkspaceStore({
     getState: () => state,
     setState: (next) => { state = next; },
-    persist: async () => {},
+    persist,
     normalizeState: (s) => s,
     setStatus: () => {},
   });
@@ -815,6 +815,24 @@ test('dragDropToFolder with only ancestor ids moves nothing and reports', async 
   await h.commands.dragDropToFolder({ itemIds: ['anc-f1'], placementIds: new Map(), folderId: 'dest' });
   assert.deepEqual(h.effects.status.at(-1), 'The path to this folder cannot be moved into another folder.');
   assert.deepEqual(h.store.getSnapshot().moved, undefined, 'nothing was moved');
+});
+
+test('navigator folder drops move the exact placement and permit moving a browsed ancestor safely', async () => {
+  const h=createHarness({groups:[{id:'ancestor',parentId:'root',name:'Ancestor'},{id:'dest',parentId:'root',name:'Destination'}],
+    shortcuts:[{id:'s',name:'File',target:'D:\\file.epub',placements:[{id:'here',parentId:'ancestor',order:0},{id:'elsewhere',parentId:'root',order:1}]}],
+    model:{moveSelection,removeGraphPositions,removeGraphRestPositions,isAncestorItem:()=>true,visibleParentCountFor:()=>2}});
+  assert.equal(await h.commands.dragDropToFolder({itemIds:['s'],placementIds:new Map([['s','here']]),folderId:'dest',navigator:true}),true);
+  assert.deepEqual(h.store.getSnapshot().shortcuts[0].placements.map(p=>p.parentId),['dest','root']);
+  assert.equal(await h.commands.dragDropToFolder({itemIds:['ancestor'],placementIds:new Map(),folderId:'dest',navigator:true}),true);
+  assert.equal(h.store.getSnapshot().groups.find(g=>g.id==='ancestor').parentId,'dest');
+  assert.equal(await h.commands.dragDropToFolder({itemIds:['dest'],placementIds:new Map(),folderId:'ancestor',navigator:true}),false);
+  assert.equal(h.store.getSnapshot().groups.find(g=>g.id==='dest').parentId,'root');
+});
+
+test('a folder move reports failure when persistence drops the mutation', async () => {
+  const h=createHarness({persist:async()=>({ok:true,dropped:true})});
+  assert.equal(await h.commands.dragDropToFolder({itemIds:['s'],placementIds:new Map([['s','here']]),folderId:'dest',navigator:true}),false);
+  assert.equal(h.effects.status.at(-1),'Move could not be committed.');
 });
 
 test('dragDropToFolder with mixed ids moves only the non-ancestor ids', async () => {

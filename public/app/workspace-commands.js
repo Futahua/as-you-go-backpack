@@ -681,12 +681,12 @@ export function createWorkspaceCommands({
    * placements, collapses whole linked shortcuts, and clears positions.
    * An ancestor cannot be moved either — dropping it into another folder
    * would restructure the real tree under the current view. */
-  async function dragDropToFolder({ itemIds, placementIds, folderId }) {
+  async function dragDropToFolder({ itemIds, placementIds, folderId, navigator = false }) {
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
     const destination = scopedDestination(folderId);
     if (!scopeAllowsSelection(itemIds) || !scopeAllowsDestination(destination)) return false;
-    const movable = itemIds.filter((draggedId) => !isAncestorItem(draggedId));
+    const movable = itemIds.filter((draggedId) => navigator || !isAncestorItem(draggedId));
     if (movable.length === 0) {
       setStatus('The path to this folder cannot be moved into another folder.');
       return false;
@@ -695,9 +695,9 @@ export function createWorkspaceCommands({
       const groupIds = movable.filter((draggedId) =>
         group(draggedId) || windowLayout(draggedId));
       const wholeShortcutIds = movable.filter((draggedId) =>
-        !group(draggedId) && !windowLayout(draggedId) && visibleParentCountFor(draggedId) > 1);
+        !group(draggedId) && !windowLayout(draggedId) && !navigator && visibleParentCountFor(draggedId) > 1);
       const singlePlacementIds = movable
-        .filter((draggedId) => !group(draggedId) && !windowLayout(draggedId) && visibleParentCountFor(draggedId) <= 1)
+        .filter((draggedId) => !group(draggedId) && !windowLayout(draggedId) && (navigator || visibleParentCountFor(draggedId) <= 1))
         .map((shortcutId) => placementIds.get(shortcutId) ?? anyActivePlacementId(shortcutId))
         .filter(Boolean);
       let next = store.getSnapshot();
@@ -707,7 +707,7 @@ export function createWorkspaceCommands({
       for (const shortcutId of wholeShortcutIds) {
         next = collapsePlacements(next, shortcutId, destination);
       }
-      const committed = await store.commit(removeGraphRestPositions(removeGraphPositions(next, ctxId, movable), ctxId, movable));
+      const committed = await store.commit(removeGraphRestPositions(removeGraphPositions(next, ctxId, movable), ctxId, movable), { requireDurable: true });
       if (committed !== true) {
         setStatus('Move could not be committed.');
         return false;

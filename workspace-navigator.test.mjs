@@ -112,6 +112,22 @@ test('navigator native drag fails closed without a usable DataTransfer or path',
   }), false);
 });
 
+test('a local-file row keeps normal internal dragging alive and exports only on Alt-drag', async () => {
+  const source=await readFile(new URL('./public/app/workspace-navigator.js',import.meta.url),'utf8');
+  const start=source.indexOf("row.addEventListener('dragstart', (event) => {",source.indexOf('const ownNativePaths'));
+  const end=source.indexOf('\n        });',start);
+  const calls=[];let remembered=0,prevented=0;
+  const listener=vm.runInNewContext('('+source.slice(start+"row.addEventListener('dragstart', ".length,end)+ '\n})',{
+    id:'placement',o:{getSession:()=>({selected:new Set()}),resolveAyGDragIdentity:()=>({itemId:'file',placementId:'placement'}),
+      nativeDragPaths:()=>['D:\\file.epub'],host:{fileCapability:(...args)=>calls.push(args)}},
+    navigatorAyGDragPayload,aygNavigatorNativePaths,beginNavigatorNativeDrag,rememberNativeDrag:()=>remembered++,
+  });
+  listener({dataTransfer:{},preventDefault:()=>prevented++});
+  assert.equal(prevented,0);assert.equal(remembered,0);assert.deepEqual(calls,[]);
+  listener({altKey:true,dataTransfer:{},preventDefault:()=>prevented++});
+  assert.equal(prevented,1);assert.equal(remembered,1);assert.deepEqual(calls,[['native-drag',{paths:['D:\\file.epub']}]]);
+});
+
 test('AYG navigator drags the whole current selection only when the dragged row is selected', () => {
   const calls = [];
   const resolvePaths = (ids) => {
