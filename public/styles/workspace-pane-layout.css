@@ -115,3 +115,22 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .workspace-left-actions > .native-window-lens svg { width:18px;height:18px; }
 
 .window-slice-drop.is-group-insertion { border-radius:3px;background:var(--accent,#7c9ca0);box-shadow:0 0 8px rgb(124 156 160 / 40%); }
+
+.window-slice-drop.is-rejected{border-color:#d08484;background:rgb(180 80 80 / 25%);color:var(--text-primary)}
+
+.window-slice-header.is-tab-drop-target { background:linear-gradient(rgb(120 155 160 / 18%),rgb(120 155 160 / 18%)),var(--surface-soft);box-shadow:inset 0 0 0 1px rgb(124 156 160 / 45%); }
+.move-refusal-feedback { position:fixed;box-sizing:border-box;z-index:2147483647;pointer-events:none;border:2px solid #ef7373;border-radius:5px;animation:move-refusal 400ms linear forwards; }
+@keyframes move-refusal { 0%{transform:translateX(0);opacity:1} 8%{transform:translateX(-5px)} 16%{transform:translateX(5px)} 25%{transform:translateX(-4px)} 36%{transform:translateX(3px);opacity:.9} 50%{transform:translateX(-2px)} 68%{transform:translateX(1px);opacity:.5} 100%{transform:translateX(0);opacity:0} }
+@media(prefers-reduced-motion:reduce){.move-refusal-feedback{animation-name:move-refusal-fade}}
+@keyframes move-refusal-fade { from{opacity:1}to{opacity:0} }
+
+.pane-window-tab[data-preview-tab-id="workspace-files"] { background:rgb(182 157 77 / 18%);border-color:rgb(182 157 77 / 35%); }
+.pane-window-tab[data-preview-tab-id="workspace-files"].active { background:rgb(182 157 77 / 30%);border-color:rgb(182 157 77 / 65%); }
+.pane-window-tab[data-preview-tab-id="workspace-preview"] { background:rgb(157 125 193 / 18%);border-color:rgb(157 125 193 / 35%); }
+.pane-window-tab[data-preview-tab-id="workspace-preview"].active { background:rgb(157 125 193 / 30%);border-color:rgb(157 125 193 / 65%); }
+
+.pane-window-tab.is-proxima-page { background:#344252;border-color:#485a6b;border-radius:10px 10px 0 0; }
+.pane-window-tab.is-proxima-page .file-capability-browser-tab-text { font-weight:700;color:#fff; }
+.pane-window-tab.is-proxima-page.active { background:#41566d; }
+
+.window-slice-header.is-tab-drop-refused { background:linear-gradient(rgb(180 80 80 / 22%),rgb(180 80 80 / 22%)),var(--surface-soft);box-shadow:inset 0 0 0 1px #d08484; }
