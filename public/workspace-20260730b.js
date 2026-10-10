@@ -5198,6 +5198,10 @@ graph._setOnRestPositions((positions) => {
 // coordinates are recoverable on the next real renderer.
 window.addEventListener('pagehide', () => graph._saveRestPositionsNow());
 window.__papersFlushBeforeClose = async () => {
+  // The launcher is a read-only auxiliary surface. Its owning workspace
+  // supplies the document flush; capturing launcher state would queue an
+  // unauthorized save and poison this surface's close barrier.
+  if (commandSurfaceMode === 'overlay') return { ok: true, skipped: 'command-surface' };
   graph._saveRestPositionsNow();
   if (PROJECT_SURFACE_KEY && !detachSaveGate.isReadOnly()) {
     state = store.replace(captureWorkspaceView());
