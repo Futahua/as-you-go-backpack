@@ -355,6 +355,13 @@ test('scoped Bin protects only the project root and normalizes boundary drops', 
   assert.equal(h.effects.status.at(-1), 'The project folder cannot be moved to the Bin.');
 });
 
+test('former Proxima folders can be binned when they are not the active scope root', async () => {
+  const h = createHarness({ groups: [{ id: 'group-proxima-old', parentId: 'root', name: 'Test' }] });
+  h.store.setSelection(['group-proxima-old']);
+  await h.commands.moveSelectionToBin();
+  assert.deepEqual(h.store.getSnapshot().binned, ['group-proxima-old']);
+});
+
 test('selectedPasteDestinations uses selected folders or the current folder', () => {
   const h = createHarness({ groups: [{ id: 'g1', parentId: 'root', name: 'G' }] });
   h.store.setSelection(['g1', 's1']);

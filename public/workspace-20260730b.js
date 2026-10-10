@@ -5734,8 +5734,10 @@ if (WIDGET_SURFACE) {
     // and until the coordinator's reservation is wired into that handshake,
     // giving a detached surface a lock to wait on could deadlock against a
     // workspace that never releases. That integration is deliberately separate.
-    if (!DETACHED_SURFACE) startSurfaceCoordination();
-    if (!DETACHED_SURFACE && !SCOPE_ROOT_ID) void ensureStartupWindowLayoutWidget();
+    // A read-only launcher cannot save document mutations from other pages.
+    // Keep it out of writer election so it cannot hold the shared editing lock.
+    if (!DETACHED_SURFACE && commandSurfaceMode !== 'overlay') startSurfaceCoordination();
+    if (!DETACHED_SURFACE && commandSurfaceMode !== 'overlay' && !SCOPE_ROOT_ID) void ensureStartupWindowLayoutWidget();
     // 019G/021: after durable state loads, broadcast a real snapshot for every
     // layout so an already-open widget is never stuck on `unknown-layout` /
     // the empty default card (cold-open readiness race).

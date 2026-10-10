@@ -608,7 +608,7 @@ export function createWorkspaceCommands({
     const selected = [...store.getSession().selected]
       // Bound project roots anchor scoped views (and the Bin pill counts as a
       // move out of the top level for them): neither binning path may take one.
-      .filter((id) => id !== scopeRootId && !(typeof id === 'string' && id.startsWith('group-proxima-')));
+      .filter((id) => id !== scopeRootId);
     if (selected.length === 0) {
       setStatus('The project folder cannot be moved to the Bin.');
       return;
@@ -651,12 +651,11 @@ export function createWorkspaceCommands({
     const session = store.getSession();
     const ctxId = graphContextId(session.currentId, session.binMode);
     const deletable = itemIds
-      .filter((id) => id !== scopeRootId && !(typeof id === 'string' && id.startsWith('group-proxima-')))
+      .filter((id) => id !== scopeRootId)
       .filter((id) => !isAncestorItem(id));
     if (!scopeAllowsSelection(deletable)) return;
     if (deletable.length === 0) {
-      const blockedRoot = itemIds.some((id) => id === scopeRootId
-        || (typeof id === 'string' && id.startsWith('group-proxima-')));
+      const blockedRoot = itemIds.some((id) => id === scopeRootId);
       setStatus(blockedRoot
         ? 'The project folder cannot be moved to the Bin.'
         : 'The path to this folder cannot be deleted.');

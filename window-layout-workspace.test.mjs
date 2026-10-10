@@ -1220,7 +1220,7 @@ test('startup opens non-docked layouts by default without creating implicit trac
     'startup ensures every other durable layout widget without stealing focus and retries transient host failures');
   assert.doesNotMatch(startup, /hasDocumentWriteAuthority\(\)/,
     'opening an existing widget is presentation-only and must not wait for document-writer authority');
-  assert.match(source, /if \(!DETACHED_SURFACE && !SCOPE_ROOT_ID\) void ensureStartupWindowLayoutWidget\(\);/,
+  assert.match(source, /if \(!DETACHED_SURFACE && commandSurfaceMode !== 'overlay' && !SCOPE_ROOT_ID\) void ensureStartupWindowLayoutWidget\(\);/,
     'an ordinary AYG surface ensures its widgets immediately after durable state loads');
   assert.doesNotMatch(startup, /tracking\?\.enabled === true/,
     'automatic widget startup no longer depends on tracking being enabled');

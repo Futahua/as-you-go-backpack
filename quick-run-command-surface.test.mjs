@@ -24,6 +24,19 @@ import {
 
 const OVERLAY_URL = `papers-backpack://bp-1/_papers-open/abc/public/workspace-20260730b.html?${COMMAND_SURFACE_PARAM}=${COMMAND_SURFACE_MODE}`;
 
+test('a launcher opened first cannot enter the workspace writer election', async () => {
+  const entry = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  const statement = entry.split('\n').find(line => line.includes(') startSurfaceCoordination();'));
+  assert.ok(statement, 'exercise the actual startup election gate');
+  const run = new Function('DETACHED_SURFACE', 'commandSurfaceMode', 'startSurfaceCoordination', statement);
+  const elected = [];
+  for (const mode of ['overlay', 'workspace']) {
+    run(false, mode, () => elected.push(mode));
+  }
+  run(true, 'workspace', () => elected.push('detached'));
+  assert.deepEqual(elected, ['workspace']);
+});
+
 test('the mode marker is read from the URL, and only the exact marker counts', () => {
   assert.equal(COMMAND_SURFACE_PARAM, 'papers-surface', 'the param name the host sets');
   assert.equal(COMMAND_SURFACE_MODE, 'command-surface', 'and the value it sets');
