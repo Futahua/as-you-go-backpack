@@ -420,7 +420,7 @@ test('windowLayoutWidgetParseCommand bounds the exact vocabulary', () => {
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'member-toggle', memberId: 'm1' }), { kind: 'member-toggle', memberId: 'm1' });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'toggle-tracking' }), { kind: 'toggle-tracking' });
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'dock-widget-to-pill' }), { kind: 'dock-widget-to-pill' });
-  assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'delete-layout' }), { kind: 'delete-layout' });
+  assert.equal(windowLayoutWidgetParseCommand({ kind: 'delete-layout' }), null);
   assert.deepEqual(windowLayoutWidgetParseCommand({ kind: 'clear-layout' }), { kind: 'clear-layout' });
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'clear-layout', extra: true }), null);
   assert.equal(windowLayoutWidgetParseCommand({ kind: 'delete-layout', extra: true }), null);

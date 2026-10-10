@@ -104,12 +104,7 @@ test('layout delete turns red on the first pointer click, deletes only on the se
   assert.match(deleteRule, /background:\s*rgba\(255, 85, 85, 0\.14\)/);
 
   const source = await readFile(new URL('./public/app/window-layout-widget-surface.js', import.meta.url), 'utf8') + '\n' + await readFile(new URL('./public/app/window-layout-view.js', import.meta.url), 'utf8');
-  assert.match(source, /Click twice to delete this layout/);
-  assert.match(source, /handleWidgetDeleteActivation\(event, deleteButton, widgetDeleteGuard,[\s\S]*?sendCommand\(\{ kind: 'delete-layout' \}\)/);
-  assert.match(source, /pointerout[\s\S]*?resetWidgetDeleteArm\(\)/);
-  assert.match(source, /window\.addEventListener\('blur', resetWidgetDeleteArm\)/);
-  assert.match(source, /resetWidgetClearArm\(\);\s*resetWidgetDeleteArm\(\);/,
-    'a card rerender cannot preserve an invisible armed delete');
+  assert.doesNotMatch(source, /data-wl-delete|sendCommand\(\{ kind: 'delete-layout'/);
 });
 
 test('warning copy is hidden from window-layout cards', async () => {

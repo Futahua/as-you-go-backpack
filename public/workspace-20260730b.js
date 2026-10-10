@@ -142,7 +142,7 @@ import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
 import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
-import { HOTKEY_CATALOG, HOTKEY_SCOPE_WORKSPACE, effectiveBindings, getBackdropOpacity, getBreadcrumbMiddleScale, getBreadcrumbRootScale, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTrailOpacity, getTransparentBackground, setBackdropOpacity } from './app/hotkeys-model.js';
+import { HOTKEY_CATALOG, HOTKEY_SCOPE_WORKSPACE, effectiveBindings, getBackdropOpacity, getBreadcrumbMiddleScale, getBreadcrumbRootScale, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTrailOpacity, getTransparentBackground } from './app/hotkeys-model.js';
 import { collectIncludedPrompts, formatCopyConfirmation, resolveCopierAction } from './prompt-library-model.js';
 import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
 import { createContextMenu } from './app/components/context-menu.js';
@@ -2165,23 +2165,8 @@ const windowLayoutWidgetChannelWorkspace = createWindowLayoutWidgetChannelWorksp
         return { ok: false, error: activated?.message || 'that window could not be brought forward' };
       }
       return { ok: true, activated: true };
-    }    if (command.kind === 'delete-layout') {
-      const wasActive = isActiveRecordingContext(layoutId);
-      const next = deleteWindowLayout(state, layoutId);
-      if (next === state || !(await store.commit(next))) return { ok: false, error: 'delete persistence failed' };
-      const prefix = `${layoutId}\u0000`;
-      for (const key of [...windowLayoutRuntime.capabilities.keys()]) {
-        if (key.startsWith(prefix)) windowLayoutRuntime.capabilities.delete(key);
-      }
-      for (const cache of [windowLayoutRuntime.icons, windowLayoutWidgetPreviewCapabilities]) {
-        for (const key of [...cache.keys()]) if (key.startsWith(prefix)) cache.delete(key);
-      }
-      windowLayoutSelection.clear(layoutId, true);
-      detachedWidgets.delete(layoutId);
-      if (wasActive) await windowLayoutRuntimeController.reconcileActive();
-      await host.widgetClose(layoutId).catch(() => undefined);
-      return { ok: true, deleted: true };
     }
+    if (command.kind === 'delete-layout') return { ok:false,error:'The widget can only be hidden.' };
     if (command.kind === 'clear-layout') {
       const layout = windowLayoutFromState(layoutId);
       if (!layout) return { ok: false, error: 'unknown layout' };
@@ -2400,7 +2385,19 @@ window.addEventListener('pagehide', () => {
 
 function handleWindowLayoutUnlink(...args) { return windowLayoutRecordingLifecycle.unlink(...args); }
 
+let widgetLayoutCreation = null;
+async function ensureWidgetLayout() {
+  if (!hasDocumentWriteAuthority() || windowLayoutDetachment.getState().mode === 'detached' || WIDGET_SURFACE || SCOPE_ROOT_ID) return;
+  if ((state.windowLayouts ?? []).some(layout => !layout.binned && !layout.bin)) return;
+  if (widgetLayoutCreation) return widgetLayoutCreation;
+  widgetLayoutCreation = (async () => {
+    const next = createWindowLayout(state, { name:'Window layout' });
+    await commit(next, { requireDurable:true });
+  })();
+  try { await widgetLayoutCreation; } finally { widgetLayoutCreation = null; }
+}
 const windowLayoutWidgetLifecycle = createWindowLayoutWidgetLifecycle({
+  ensureLayout: ensureWidgetLayout,
   widgetOpen: host.widgetOpen,
   getState: () => state,
   detachmentMode: () => windowLayoutDetachment.getState().mode,
@@ -3994,11 +3991,6 @@ function applyBackdropOpacity(preferences) {
     '--workspace-backdrop-opacity-percent',
     `${Math.round(opacity * 10000) / 100}%`,
   );
-  const slider = elements.backdropOpacitySlider;
-  if (slider && document.activeElement !== slider) slider.value = String(opacity);
-  if (elements.backdropOpacityValue) {
-    elements.backdropOpacityValue.textContent = `${Math.round(opacity * 100)}%`;
-  }
 }
 
 function render() {
@@ -4690,31 +4682,6 @@ function confirmPickupCopy(message) {
   }, PICKUP_COPY_FLASH_MS);
 }
 
-// Background-opacity pill. `input` repaints live while dragging so the panel
-// tracks the thumb; `change` is what persists, so a drag writes state once on
-// release instead of on every frame.
-elements.backdropOpacitySlider.addEventListener('input', () => {
-  const opacity = Number(elements.backdropOpacitySlider.value);
-  document.documentElement.style.setProperty('--workspace-backdrop-opacity', String(opacity));
-  document.documentElement.style.setProperty(
-    '--workspace-backdrop-opacity-percent',
-    `${Math.round(opacity * 10000) / 100}%`,
-  );
-  elements.backdropOpacityValue.textContent = `${Math.round(opacity * 100)}%`;
-});
-
-elements.backdropOpacitySlider.addEventListener('change', async () => {
-  const preferences = setBackdropOpacity(
-    state.view?.preferences,
-    Number(elements.backdropOpacitySlider.value),
-  );
-  const nextState = { ...state, view: { ...state.view, preferences } };
-  try {
-    await commit(nextState);
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error));
-  }
-});
 
 document.querySelector('#copy-prompt').addEventListener('click', async () => {
   try {
@@ -4986,6 +4953,12 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     setAyGSelection: ids => { store.setSelection(ids); syncSelection({syncNavigator:false,syncPreview:false}); },
     finishAyGMarquee: () => syncFileCapabilitySelection(),
     savedStatesReady: () => workspaceLoad.ok,
+    saveNavigatorGraphMode: async navigatorGraphMode => {
+      const saved=await commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,navigatorGraphMode}}};},{requireDurable:true});
+      if(!saved)setStatus('Could not save the Files view mode.');
+      workspaceNavigator?.render();
+      return saved===true;
+    },
     saveNavigatorSavedStates: async pills => {
       const selected=[...store.getSession().selected];
       const saved=await commitWhenWorkspaceReady(()=>{

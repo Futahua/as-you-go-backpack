@@ -96,29 +96,10 @@
 .icon-button .bin-count { position: static; }
 
 .toolbar-float[data-toolbar-key="breadcrumbs"] { top: 12px; left: 28px; }
-.toolbar-float[data-toolbar-key="backdrop-slider"] { top: 12px; right: 268px; }
 .toolbar-float[data-toolbar-key="copy-prompt"] { top: 12px; right: 148px; }
 .toolbar-float[data-toolbar-key="bin-button"] { top: 12px; right: 28px; }
 .toolbar-float[data-toolbar-key="delete-all-bin"] { top: 12px; right: 88px; }
 .toolbar-float[data-toolbar-key="restore-all-bin"] { top: 12px; right: 208px; }
-/* Background-opacity slider: the bare track, no chrome. The padded strip
- * around it is the drag surface — the toolbar controller ignores pointerdown
- * on an <input>, so the range itself moves the thumb and the margin drags. */
-.backdrop-slider {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  /* No pill behind the track, so the shared float shadow would cast a
-   * rectangle over open canvas. */
-  box-shadow: none;
-}
-.backdrop-slider.toolbar-dragging { box-shadow: none; }
-.backdrop-slider input[type="range"] {
-  width: 96px;
-  cursor: pointer;
-  accent-color: var(--green);
-}
-
 #delete-all-bin.selective {
   background: var(--toolbar-danger-surface);
   border-color: var(--toolbar-danger-text);

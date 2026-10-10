@@ -54,10 +54,15 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
   const resolvePreviewDrag=installPreviewPinDrag({pin,getItem:()=>lastSelection?.mode==='single'?lastSelection.item:null,createId:()=>win.crypto.randomUUID()});
   const leftHeader=left.querySelector('.workspace-navigator-header');
   const actions=document.createElement('div');actions.className='workspace-left-actions';
+  const graphActions=document.createElement('div');graphActions.className='workspace-graph-actions';
+  const graphSurface=left.querySelector('.navigator-graph-surface');
   for(const action of document.querySelectorAll('.navigation .toolbar-shell')) {
     action.classList.remove('toolbar-float');
-    actions.append(action);
+    graphActions.append(action);
   }
+  const parentGraphToggle=document.querySelector('#parent-graph-toggle');
+  if(parentGraphToggle)graphActions.append(parentGraphToggle);
+  graphSurface?.prepend(graphActions);
   const lens=createLensButton(document,source=>{if(externalWindows){win.parent.postMessage({type:'papers:proxima-lens-request',source},'*');return;}return slices.searchLens(source);},setStatus);
   actions.append(lens);leftHeader.append(actions,controls);
   function selectPinned(tab){if(slices?.active()){settings.windows=true;slices.selectPreview(tab);schedule();return;}pinnedId=tab.id;if(externalWindows){win.parent.postMessage({type:'papers:proxima-pinned-preview',tab},'*');renderTabs();return;}settings.windows=true;void pinned.previewPath(tab.path,tab.name);renderTabs();schedule();}

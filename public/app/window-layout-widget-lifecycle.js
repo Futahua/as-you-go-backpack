@@ -1,6 +1,6 @@
 /** Native widget presentation only; no writer/store/recording authority. */
 export function createWindowLayoutWidgetLifecycle({
-  widgetOpen, getState, detachmentMode, isReadOnly, itemsIn,
+  widgetOpen, getState, detachmentMode, isReadOnly, itemsIn, ensureLayout = async () => {},
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
   function windowLayoutWidgetOpenSucceeded(result) {
@@ -28,6 +28,7 @@ export function createWindowLayoutWidgetLifecycle({
   async function ensureStartupWindowLayoutWidget() {
     if (detachmentMode() === 'detached'
       || isReadOnly()) return;
+    await ensureLayout();
     // Every layout is a native widget by default. Only layouts explicitly
     // middle-clicked into the AYG pill tray stay docked across startup.
     const docked = new Set(getState().windowLayoutPillIds ?? []);

@@ -71,13 +71,17 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
   function createView(group){
     const element=document.createElement('section');element.className='window-slice';element.dataset.sliceId=group.id;
     const header=document.createElement('header');header.className='window-slice-header';element.append(header);region.append(element);
+    const contour=document.createElementNS('http://www.w3.org/2000/svg','svg');contour.classList.add('slice-tab-contour');contour.setAttribute('aria-hidden','true');
+    const contourPath=document.createElementNS(contour.namespaceURI,'path');contour.append(contourPath);header.append(contour);
+    const paintContour=()=>{if(!header.isConnected)return;const box=header.getBoundingClientRect(),tab=header.querySelector('.pane-window-tab.active');const w=box.width,h=box.height,y=h-1;contour.setAttribute('viewBox',`0 0 ${w} ${h}`);if(!tab){contourPath.setAttribute('d',`M0 ${y}H${w}`);return;}const r=tab.getBoundingClientRect(),a=Math.max(8,r.left-box.left),b=Math.min(w-8,r.right-box.left),top=Math.max(1,r.top-box.top);contourPath.setAttribute('d',`M0 ${y}H${a-7}Q${a} ${y} ${a} ${y-7}V${top+7}Q${a} ${top} ${a+7} ${top}H${b-7}Q${b} ${top} ${b} ${top+7}V${y-7}Q${b} ${y} ${b+7} ${y}H${w}`);};
+    header.addEventListener('scroll',paintContour,true);
     const handle=document.createElement('button');handle.type='button';handle.className='slice-group-handle';handle.draggable=true;handle.textContent='⠿';handle.title='Move group — center swaps; edge resplits';handle.setAttribute('aria-label','Move entire group');handle.dataset.groupId=group.id;
-    handle.addEventListener('dragstart',event=>{groupDragId=group.id;event.dataTransfer.setData(GROUP_DRAG_MIME,group.id);const current=snapshot.groups.find(g=>g.id===group.id);if(current?.transferId)event.dataTransfer.setData(PANE_TRANSFER_MIME,JSON.stringify({transferId:current.transferId,binding:snapshot.binding,kind:'group'}));event.dataTransfer.effectAllowed='move';void setOverlay(true).catch(()=>{});});
+    handle.addEventListener('dragstart',event=>{groupDragId=group.id;event.dataTransfer.setData(GROUP_DRAG_MIME,group.id);const current=snapshot.groups.find(g=>g.id===group.id);if(current?.transferId)event.dataTransfer.setData(PANE_TRANSFER_MIME,JSON.stringify({transferId:current.transferId,binding:snapshot.binding,kind:'group'}));event.dataTransfer.effectAllowed='move';});
     element.addEventListener('pointerdown',()=>{lensGroup=group.id;},true);
     const listeners=new Set(),tools=document.createElement('span');tools.className='window-slice-controls';
     const rail=document.createElement("div");rail.className="slice-vertical-restore";element.append(rail);
     const railControls=document.createElement('div');railControls.className='slice-vertical-controls';rail.append(railControls);
-    const view={element,header,handle,listeners,rail,railControls,preview:null,previewId:null};
+    const view={element,header,handle,listeners,rail,railControls,paintContour,preview:null,previewId:null};
     const bounds=()=>snapshot.groups.find(g=>g.id===group.id)?.content||outer();
     const scopedHost={...host,onPaneTabs:cb=>{listeners.add(cb);return()=>listeners.delete(cb);},fileCapability:async(operation,data={})=>{
       if(operation==='pane-window-tabs')return {ok:true};
@@ -122,7 +126,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
     const hidden=root.element.hidden,maximum=snapshot.groups.find(g=>g.presentation==='maximized')?.id;
     region.hidden=hidden;region.classList.toggle('slice-page-maximized',Boolean(maximum));
     for(const [id,view] of views)if(!snapshot.groups.some(g=>g.id===id)){view.native.destroy();view.element.remove();views.delete(id);}
-    const visibleDocuments=new Set(snapshot.groups.filter(g=>!hidden&&!overlay&&g.presentation!=='minimized'&&(!maximum||maximum===g.id)).map(g=>g.selected));
+    const visibleDocuments=new Set(snapshot.groups.filter(g=>!hidden&&!overlay&&snapshot.presented!==false&&g.presentation!=='minimized'&&(!maximum||maximum===g.id)).map(g=>g.selected));
     for(const [id,panel] of retainedPreviews){if(!snapshot.groups.some(g=>g.tabs.some(t=>t.id===ref(id)))){panel.destroy();retainedPreviews.delete(id);}else if(!visibleDocuments.has(ref(id))){panel.setPreviewSuspended(true);panel.element.hidden=true;}}
     for(const tab of protectedTabs)if(!visibleDocuments.has(ref(tab.id))){tab.panel.element.hidden=true;tab.panel.setPreviewSuspended?.(true);}
     for(const [index,group] of snapshot.groups.entries()){
@@ -143,8 +147,8 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
           protected:Boolean(tab.panel),tabStyle:tab.tabStyle,onSelect:()=>{void (tab.panel||tab.pageKey?command('select',{groupId:group.id,tabId:t.id}):selectPreview(tab)).catch(()=>{});},onClose:()=>{void command('document-remove',{tabId:t.id}).then(()=>{previews=previews.filter(p=>p.id!==tab.id);onPreviews(previews);schedule();}).catch(()=>{});},
           onReorder:(beforeId,position)=>{const before=beforeId?ref(beforeId):group.tabs.filter(p=>p.kind==='native')[position?.nativeIndex]?.id||'';void command('reorder',{groupId:group.id,tabId:t.id,beforeId:before}).catch(()=>{});}};
       }).filter(Boolean);
-      view.native.setDocumentTabs(docs);for(const cb of view.listeners)cb(group.tabs.filter(t=>t.kind==='native'||t.kind==='dormant'));
-      const active=protectedTabs.find(tab=>ref(tab.id)===group.selected)||previews.find(tab=>ref(tab.id)===group.selected),shown=active&&!hidden&&!overlay&&group.presentation!=='minimized'&&(!maximum||maximum===group.id);
+      view.native.setDocumentTabs(docs);for(const cb of view.listeners)cb(group.tabs.filter(t=>t.kind==='native'||t.kind==='dormant'));win.requestAnimationFrame(view.paintContour);
+      const active=protectedTabs.find(tab=>ref(tab.id)===group.selected)||previews.find(tab=>ref(tab.id)===group.selected),shown=active&&!hidden&&!overlay&&snapshot.presented!==false&&group.presentation!=='minimized'&&(!maximum||maximum===group.id);
       view.preview=active?.panel||retainedPreviews.get(active?.id)||null;
       if(shown&&!view.preview){
         const previewHost={...host,fileCapability:(operation,data={})=>host.fileCapability(operation,['preview-pdf-open','preview-html-open','preview-native-open'].includes(operation)?{...data,surfaceId:'tab:'+active.id}:data)};

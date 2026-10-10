@@ -4,7 +4,7 @@ import { createWindowLayoutSelection } from './window-layout-selection.js';
 import { createWindowLayoutWidgetPicker } from './window-layout-widget-picker.js';
 import { createClickTwiceGuard } from './click-twice-guard.js';
 import { createWidgetHoverPolicy, createWidgetHoverPolicyDiagnostics } from './widget-hover-policy.js';
-import { handleWidgetClearActivation, handleWidgetDeleteActivation } from './widget-clear-activation.js';
+import { handleWidgetClearActivation } from './widget-clear-activation.js';
 import { createWindowLayoutMemberDrag } from './window-layout-detached.js';
 import { createWindowLayoutWidgetChannelClient as defaultChannelClient,
   createBoundedRetry as defaultBoundedRetry, windowLayoutWidgetRenderIdentity,
@@ -85,7 +85,6 @@ export function bootstrapWindowLayoutWidget({
     hoverPolicyReceived: false,
   };
   const widgetClearGuard = createClickTwiceGuard();
-  const widgetDeleteGuard = createClickTwiceGuard();
   const widgetHoverPolicyDiagnostics = createWidgetHoverPolicyDiagnostics();
   const widgetHoverPolicy = createWidgetHoverPolicy({
     publish: (enabled, blockedBindings) => host.setWidgetHoverPolicy(enabled, blockedBindings),
@@ -260,7 +259,6 @@ export function bootstrapWindowLayoutWidget({
     // The previous button node is about to be replaced; discard any armed
     // confirmation so its invisible state cannot survive without a red cue.
     resetWidgetClearArm();
-    resetWidgetDeleteArm();
     // A capability identifies a WINDOW. A member going normal -> minimized does
     // not change which window it is, yet member state is part of the widget's
     // render identity, so the old blanket clear threw away every warm
@@ -560,15 +558,6 @@ export function bootstrapWindowLayoutWidget({
 
   function handleWidgetCardClick(event, fromPointerDown = false) {
     event.stopPropagation();
-    const deleteButton = event.target.closest('[data-wl-delete]');
-    if (deleteButton) {
-      const outcome = handleWidgetDeleteActivation(event, deleteButton, widgetDeleteGuard, () => {
-        resetWidgetDeleteArm();
-        client.sendCommand({ kind: 'delete-layout' });
-      });
-      if (outcome === 'armed' || outcome === 'deleted') event.stopPropagation();
-      return;
-    }
     const clearButton = event.target.closest('[data-wl-clear]');
     if (clearButton) {
       const outcome = handleWidgetClearActivation(event, clearButton, widgetClearGuard, () => {
@@ -656,19 +645,11 @@ export function bootstrapWindowLayoutWidget({
     elements.grid.querySelector('.window-layout-card [data-wl-clear]')?.classList.remove('is-clear-armed');
   }
 
-  function resetWidgetDeleteArm() {
-    widgetDeleteGuard.reset();
-    elements.grid.querySelector('.window-layout-card [data-wl-delete]')?.classList.remove('is-delete-armed');
-  }
-
   elements.grid.addEventListener('pointerout', (event) => {
     if (event.target.closest('[data-wl-clear]')
       && !event.relatedTarget?.closest?.('[data-wl-clear]')) resetWidgetClearArm();
-    if (event.target.closest('[data-wl-delete]')
-      && !event.relatedTarget?.closest?.('[data-wl-delete]')) resetWidgetDeleteArm();
   });
   window.addEventListener('blur', resetWidgetClearArm);
-  window.addEventListener('blur', resetWidgetDeleteArm);
 
   function handleWidgetCardAuxClick(event) {
     if (event.button !== 1) return;

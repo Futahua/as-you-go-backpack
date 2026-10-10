@@ -305,7 +305,8 @@ export function createWorkspaceNavigator(o) {
   const back = button(d,'Back',['M12.5 4.5 7 10l5.5 5.5']), fwd = button(d,'Forward',['M7.5 4.5 13 10l-5.5 5.5']);
   const up = button(d,'Up',['M5 11l5-5 5 5','M10 6v9']), refresh = button(d,'Refresh',['M15.5 7A6 6 0 1 0 16 12','M15.5 7V3.5','M15.5 7H12']), copy = button(d,'Copy',['M7 7h9v9H7z','M4 13H3.5A1.5 1.5 0 0 1 2 11.5v-8A1.5 1.5 0 0 1 3.5 2h8A1.5 1.5 0 0 1 13 3.5V4']);
   const move = button(d,'Cut',['M7 13L16 3','M7 7l9 10','M7 6a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0','M7 14a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0']), paste = button(d,'Paste',['M6 5h8v12H6z','M8 5V3h4v2']);
-  const rename = button(d,'Rename',['M4 15h4l8-8-4-4-8 8z','M11 4l4 4']), del = button(d,'Delete',['M4 6h12','M7 6v10h6V6','M8 4h4']);
+  const rename = button(d,'Rename',['M4 15h4l8-8-4-4-8 8z','M11 4l4 4']), del = button(d,'Delete',['M4 6h12','M5 6l1 11h8l1-11','M8 6V4h4v2','M8 10l1-2 2 1','M12 11l1 2-2 1','M9 14H7l.5-2']);
+  del.classList.add('navigator-recycle-button');
   const newFolder = button(d,'New folder',['M10 4v12','M4 10h12']);
   const reveal = button(d,'Reveal',['M3 6h5l1.5 2H17v8H3z','M3 9h14']); tools.append(back,fwd,up,refresh,newFolder,copy,move,paste,rename,del,reveal);
   const collapseAll = button(d,'Collapse all folders',['M5 9l5-4 5 4','M5 15l5-4 5 4']);
@@ -335,11 +336,11 @@ export function createWorkspaceNavigator(o) {
   if (graphSlot) {
     graphSlot.className = 'navigator-graph-surface'; graphSlot.append(o.graphContent);
     const graphToggle = button(d,'Switch list / graph',['M3 4h4v4H3z','M13 12h4v4h-4z','M7 6l8 8']);
-    let graphMode = false;
+    let graphMode = false, graphModeSaving = false;
     try { graphMode = d.defaultView.localStorage.getItem('papers:ayg:left-graph:'+o.rootId) === '1'; } catch {}
-    const apply = () => { const visible=graphMode&&s.mode==='ayg'&&!s.searchQuery;s.graphViewActive=visible;panel.classList.toggle('graph-mode',visible);graphSlot.hidden = !visible; body.hidden = visible; graphToggle.setAttribute('aria-pressed',String(graphMode)); };
+    const apply = () => { const saved=o.getState().view?.preferences?.navigatorGraphMode;if(!graphModeSaving&&typeof saved==='boolean')graphMode=saved; const visible=graphMode&&s.mode==='ayg'&&!s.searchQuery;s.graphViewActive=visible;panel.classList.toggle('graph-mode',visible);graphSlot.hidden = !visible; body.hidden = visible; graphToggle.setAttribute('aria-pressed',String(graphMode)); };
     refreshGraphVisibility=apply;
-    graphToggle.addEventListener('click',()=>{graphMode=!graphMode;persistUi('papers:ayg:left-graph:'+o.rootId,graphMode?'1':'0');apply();});
+    graphToggle.addEventListener('click',()=>{graphMode=!graphMode;persistUi('papers:ayg:left-graph:'+o.rootId,graphMode?'1':'0');graphModeSaving=true;apply();Promise.resolve(o.saveNavigatorGraphMode?.(graphMode)).finally(()=>{graphModeSaving=false;apply();});});
     tools.append(graphToggle); apply();
   }
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
@@ -477,7 +478,7 @@ export function createWorkspaceNavigator(o) {
     if (!nav) back.disabled = fwd.disabled = up.disabled = true;
     reveal.hidden = false;
     paste.hidden = false;
-    reveal.disabled = s.mode !== 'machine';
+    reveal.disabled = !revealPath();
     paste.disabled = false;
   }
   function setMode(mode) {
@@ -833,7 +834,7 @@ export function createWorkspaceNavigator(o) {
       if(x.id.startsWith('group-proxima-'))label.classList.add('navigator-proxima-label');
       if(x.kind==='group'&&s.expanded.has(x.id)){const h=d.createElement('span');h.className='navigator-tree-folder-heading';h.append(art,label);row.append(h);row.classList.add('navigator-tree-expanded');}else row.append(art,label);
       row.tabIndex=-1;
-      row.addEventListener('click',(e)=>{row.focus({preventScroll:true});if(e.shiftKey&&!e.ctrlKey){e.preventDefault();void enterAyG(x);return;}o.selectAyG(id,visibleIds(),{ctrlKey:e.ctrlKey});body.querySelectorAll('.workspace-navigator-row[data-id]').forEach(candidate=>candidate.classList.toggle('selected',o.getSession().selected.has(candidate.dataset.id)));body.tabIndex=-1;body.focus({preventScroll:true});});
+      row.addEventListener('click',(e)=>{row.focus({preventScroll:true});if(e.shiftKey&&!e.ctrlKey){e.preventDefault();void enterAyG(x);return;}o.selectAyG(id,visibleIds(),{ctrlKey:e.ctrlKey});syncChrome();body.querySelectorAll('.workspace-navigator-row[data-id]').forEach(candidate=>candidate.classList.toggle('selected',o.getSession().selected.has(candidate.dataset.id)));body.tabIndex=-1;body.focus({preventScroll:true});});
       row.addEventListener('dblclick',(e)=>{
         if(e.button!==0)return;
         e.preventDefault();e.stopPropagation();void enterAyG(x);
@@ -1395,7 +1396,8 @@ export function createWorkspaceNavigator(o) {
     if(!r.ok){o.setStatus(r.message||'Delete failed.');return;}
     s.selected=null;s.machineListings.clear();render();
   });
-  reveal.addEventListener('click',()=>{const p=s.selected?.path||s.path;if(p)void o.host.fileCapability('reveal',{path:p});});
+  function revealPath(){return s.mode==='machine'?(s.selected?.path||s.path):(o.nativeDragPaths?.([...o.getSession().selected])||[])[0];}
+  reveal.addEventListener('click',()=>{const path=revealPath();if(path)void o.host.fileCapability('reveal',{path}).then(result=>{if(!result?.ok)o.setStatus(result?.message||'Could not reveal that file.');}).catch(error=>o.setStatus(error.message||'Could not reveal that file.'));});
   async function copySelectionPaths(){
     const paths=navigatorSelectedPaths({
       mode:s.mode,

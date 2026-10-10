@@ -42,3 +42,9 @@ test('one exhausted widget does not prevent opening the next layout', async () =
   const calls = []; const lifecycle = makeLifecycle({ getState: () => ({windowLayouts:[{id:'bad'},{id:'good'}]}), widgetOpen: async (id) => { calls.push(id); return {ok:id === 'good'}; } });
   await lifecycle.ensureStartup(); assert.deepEqual(calls, ['bad','bad','bad','good']);
 });
+
+test('empty startup asks the checked workspace owner for a layout before opening', async () => {
+ const state={windowLayouts:[]};let created=0;const opened=[];
+ const lifecycle=makeLifecycle({getState:()=>state,ensureLayout:async()=>{created++;state.windowLayouts.push({id:'original',parentId:'root'});},widgetOpen:async(id)=>{opened.push(id);return {ok:true};}});
+ await lifecycle.ensureStartup();assert.equal(created,1);assert.deepEqual(opened,['original']);
+});

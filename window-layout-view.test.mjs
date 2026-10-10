@@ -27,3 +27,9 @@ for(const entry of cases) test(`shared card HTML remains byte-identical: ${entry
 test('picker rows and empty fallback remain byte-identical',()=>{
  const view=viewFor(cases[0]);assert.equal(view.picker(layout.id,[{id:'candidate',title:member.descriptor.title,state:'normal',icon:'data:image/png;base64,abc'}]),fixtures.picker);assert.equal(view.picker(layout.id,[]),fixtures.emptyPicker);
 });
+
+test('the original widget retains its controls without offering deletion',()=>{
+ const markup=viewFor(cases[1]).card(layout,{widgetSurface:true});
+ assert.doesNotMatch(markup,/data-wl-delete/);
+ for(const control of ['data-wl-list','data-wl-min-all','data-wl-restore-all','data-wl-track','data-wl-clear'])assert.ok(markup.includes(control));
+});
