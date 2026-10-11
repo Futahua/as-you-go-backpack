@@ -1,6 +1,7 @@
 import {installNativeWindowTabs,PREVIEW_TAB_MIME,NATIVE_TAB_MIME,PANE_TRANSFER_MIME} from './native-window-tabs.js';
 import {createFileCapabilityPanel} from './file-capability-panel.js';
 import {sliceDropSide} from './window-slices.js';
+import {paneColumnDrop} from './pane-column-drop.js';
 import {showMoveRefusal} from './move-feedback.js';
 import {WINDOW_TAB_MIME,windowTabTransfer} from './window-tab-transfer.js';
 
@@ -167,7 +168,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
   }
   async function setOverlay(value){if(overlay===value)return;overlay=value;schedule();if(mounted)await command('present',{visible:!value&&!root.element.hidden});}
   const relevant=event=>Array.from(event.dataTransfer?.types||[]).some(t=>[PREVIEW_TAB_MIME,NATIVE_TAB_MIME,WINDOW_TAB_MIME,GROUP_DRAG_MIME,PAGE_TAB_MIME].includes(t));
-  function destination(event){for(const group of snapshot?.groups||[]){const view=views.get(group.id);if(view?.element.hidden||groupDragId===group.id)continue;const side=sliceDropSide(event.clientX,event.clientY,group.slot);if(side){const foreignGroup=!groupDragId&&Array.from(event.dataTransfer.types||[]).includes(GROUP_DRAG_MIME);return {group,side:!foreignGroup&&!groupDragId&&event.target?.closest?.('.pane-window-tabs')?'center':side};}}return null;}
+  function destination(event){if(groupDragId){const column=paneColumnDrop(event.clientX,event.clientY,snapshot?.groups||[],groupDragId);if(column)return column;}for(const group of snapshot?.groups||[]){const view=views.get(group.id);if(view?.element.hidden||groupDragId===group.id)continue;const side=sliceDropSide(event.clientX,event.clientY,group.slot);if(side){const foreignGroup=!groupDragId&&Array.from(event.dataTransfer.types||[]).includes(GROUP_DRAG_MIME);return {group,side:!foreignGroup&&!groupDragId&&event.target?.closest?.('.pane-window-tabs')?'center':side};}}return null;}
   let dragSource=null;
   const startDrag=event=>{dragSource=event.target?.closest?.('[data-pane-tab-id],[data-preview-tab-id],.preview-pin,.slice-group-handle');if(dragSource?.classList.contains('slice-group-handle'))dragSource=dragSource.closest('.window-slice');let transfer;try{transfer=JSON.parse(event.dataTransfer.getData(PANE_TRANSFER_MIME)||'null');}catch{}const isRelevant=relevant(event);dragging=true;dragYield=Promise.resolve().then(()=>{if(dragging&&isRelevant)return host.fileCapability('pane-transfer-overlay',{active:true,...(transfer?.transferId?{transferId:transfer.transferId}:{})});}).then(reply=>{if(reply?.snapshot)accept(reply.snapshot);}).catch(()=>{});};
   let completingDrop=false;
@@ -176,13 +177,13 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
   const clear=(cancelled=false)=>{clearStrip();cueRevision++;cueTarget='';cueError='';cue.hidden=true;if(completingDrop)return;if(dragging)void host.fileCapability('pane-transfer-overlay',{active:false,cancelled:cancelled===true}).catch(()=>{});dragging=false;groupDragId=null;for(const node of region.querySelectorAll('.reorder-before'))node.classList.remove('reorder-before');void setOverlay(false).catch(()=>{});};
   const dragOver=event=>{clearStrip();if(!mounted||!relevant(event))return;if(dragging&&Date.now()-dragHeartbeat>1000){dragHeartbeat=Date.now();void host.fileCapability('pane-transfer-overlay',{active:true}).catch(()=>{});}const target=destination(event);if(!target){cueRevision++;cueTarget='';cue.hidden=true;return;}event.preventDefault();event.dataTransfer.dropEffect='move';
     const groupMove=Boolean(groupDragId||Array.from(event.dataTransfer.types).includes(GROUP_DRAG_MIME));
-    let box={...target.group.slot};const side=target.side;
+    let box={...(target.box||target.group.slot)};const side=target.side;
     const pageMove=Array.from(event.dataTransfer.types).includes(PAGE_TAB_MIME);
     if(pageMove){const identity='page:'+target.group.id+':'+side;if(identity!==cueTarget){cueTarget=identity;const rev=++cueRevision;cueError='';void host.fileCapability('pane-page-check',{pageId:event.dataTransfer.getData(PAGE_TAB_MIME)||undefined,groupId:target.group.id,side}).then(result=>{if(rev!==cueRevision)return;cueError=result.ok?'':result.error||'This page cannot fit here';views.get(target.group.id)?.header.classList.toggle('is-tab-drop-refused',!result.ok);if(!result.ok){cue.classList.add('is-rejected');cue.textContent=cueError;}}).catch(()=>{});}event.dataTransfer.dropEffect=cueError?'none':'move';}
     if(side==='center'&&!groupMove){if(!pageMove){cueRevision++;cueTarget='';}cue.hidden=true;views.get(target.group.id)?.header.classList.add('is-tab-drop-target');views.get(target.group.id)?.header.classList.toggle('is-tab-drop-refused',Boolean(cueError));event.target?.closest?.('[data-pane-tab-id],[data-preview-tab-id]')?.classList.add('reorder-before');return;}
     cue.textContent=groupMove?(side==='center'?'Swap this group':'Move group '+side):'';cue.classList.toggle('is-group-drop',groupMove);
     cue.classList.toggle('is-group-insertion',Boolean(groupMove&&side!=='center'));
-    if(groupMove&&side!=='center'){
+    if(side==='column-l'||side==='column-r'){box.width/=2;if(side==='column-r')box.x+=box.width;cue.textContent='New column';cue.setAttribute('aria-label','Create a full-height column');}else if(groupMove&&side!=='center'){
       const thickness=6;
       if(side==='left'||side==='right'){if(side==='right')box.x+=box.width-thickness;box.width=thickness;}
       else{if(side==='bottom')box.y+=box.height-thickness;box.height=thickness;}
