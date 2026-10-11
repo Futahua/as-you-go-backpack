@@ -79,6 +79,9 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .window-slice.slice-minimized .pane-window-tabs { visibility:hidden; }
 .window-slices-region.slice-page-maximized { z-index:1100; }
 .window-slice-drop { position:fixed;z-index:100002;pointer-events:none; }
+.pane-span-handles { position:fixed;inset:0;z-index:100003;pointer-events:none; }
+.pane-span-handle { position:absolute;width:8px;height:8px;transform:translate(-50%,-50%);border:1px solid #b9cfab;border-radius:50%;background:rgb(45 51 41 / 85%);box-shadow:0 0 3px #20231c; }
+.pane-span-handle.is-active { width:12px;height:12px;background:#b9cfab;box-shadow:0 0 8px #b9cfab; }
 .slice-file-preview { position:fixed!important;min-width:0!important;max-width:none!important;min-height:0;z-index:1101!important;transition:none!important;box-shadow:none; }
 .slice-file-preview[hidden] { display:none!important; }
 .file-capability-panel.slice-file-preview.expanded { grid-template-rows:32px minmax(0,1fr); }
