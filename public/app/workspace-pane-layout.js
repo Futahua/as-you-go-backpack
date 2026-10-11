@@ -44,6 +44,7 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
   const previewToggle=toggle('Preview',()=>{settings.preview=!settings.preview;commit();schedule();});
   const windowsToggle=externalWindows?null:toggle('Windows',()=>{settings.windows=!settings.windows;commit();schedule();});
   const pin=toggle('Pin preview',()=>{
+    if(lastSelection?.mode==='web'){openNativeLink(lastSelection);return;}
     const item=lastSelection?.mode==='single'?lastSelection.item:null;
     if(!item?.path)return;
     let tab=settings.pinned.find(t=>t.path===item.path);
@@ -65,6 +66,7 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
   graphSurface?.prepend(graphActions);
   const lens=createLensButton(document,source=>{if(externalWindows){win.parent.postMessage({type:'papers:proxima-lens-request',source},'*');return;}return slices.searchLens(source);},setStatus);
   actions.append(lens);leftHeader.append(actions,controls);
+  function openNativeLink(selection){if(externalWindows){win.parent.postMessage({type:'papers:proxima-preview-selection',selection},'*');return;}settings.windows=true;schedule();void windows.syncSelection(selection);}
   function selectPinned(tab){if(slices?.active()){settings.windows=true;slices.selectPreview(tab);schedule();return;}pinnedId=tab.id;if(externalWindows){win.parent.postMessage({type:'papers:proxima-pinned-preview',tab},'*');renderTabs();return;}settings.windows=true;void pinned.previewPath(tab.path,tab.name);renderTabs();schedule();}
   function reorderPinned(id,beforeId,position){const tab=settings.pinned.find(t=>t.id===id);if(!tab||id===beforeId)return;const next=settings.pinned.filter(t=>t.id!==id),index=next.findIndex(t=>t.id===beforeId);if(Number.isInteger(position?.nativeIndex))tab.nativeIndex=position.nativeIndex;next.splice(index<0?next.length:index,0,tab);settings.pinned=next;commit();renderTabs();}
   function unpinToSurface(id,placement){const tab=settings.pinned.find(t=>t.id===id);if(!tab)return;settings.pinned=settings.pinned.filter(t=>t.id!==id);if(pinnedId===id)pinnedId=null;settings.preview=true;settings.placement=placement;lastSelection={mode:'single',item:{path:tab.path,name:tab.name}};void preview.previewPath(tab.path,tab.name);commit();renderTabs();lastGeometry='';schedule();}
@@ -80,7 +82,7 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
       if(!slices?.active()){left.hidden=true;preview.element.hidden=true;}
       pinned.element.hidden=true;
       if(loaded&&!restoredWindows){restoredWindows=true;void slices.restore().catch(error=>{restoredWindows=false;setStatus(error?.message||String(error));});}
-      slices?.refresh();pin.disabled=!lastSelection?.item?.path;return;
+      slices?.refresh();pin.disabled=!(lastSelection?.item?.path||lastSelection?.mode==='web');return;
     }
     const workspace=document.querySelector('.workspace'),top=baseTop,bottom=win.innerHeight-8;
     const rb=right.getBoundingClientRect();if(rb.width>0)lastSeam=rb.left;const rightX=Math.max(184,Math.min(win.innerWidth-184,lastSeam));
@@ -104,7 +106,7 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
       if(!slices?.active()&&settings.windows&&!activePinned){const b=right.getBoundingClientRect(),h=header.getBoundingClientRect();void host.fileCapability('chrome-pane-move',{rect:{x:Math.round(b.left+1),y:Math.round(h.bottom+1),width:Math.round(b.width-2),height:Math.max(1,Math.round(b.bottom-h.bottom-2)),rightInset:Math.max(0,win.innerWidth-b.right+1),bottomInset:Math.max(0,win.innerHeight-b.bottom+1)}}).catch(()=>{});}
     }
     if(loaded&&settings.windows&&!restoredWindows){restoredWindows=true;void (slices?slices.restore():windows.restoreWindows()).catch(error=>{restoredWindows=false;setStatus(error?.message||String(error));});}
-    previewToggle.setAttribute('aria-pressed',String(settings.preview));windowsToggle?.setAttribute('aria-pressed',String(settings.windows));pin.disabled=!lastSelection?.item?.path;
+    previewToggle.setAttribute('aria-pressed',String(settings.preview));windowsToggle?.setAttribute('aria-pressed',String(settings.windows));pin.disabled=!(lastSelection?.item?.path||lastSelection?.mode==='web');
   }
   function schedule(){if(!frame&&!disposed)frame=win.requestAnimationFrame(layout);}
   const observer=new win.ResizeObserver(schedule);observer.observe(left);observer.observe(right);
@@ -159,5 +161,5 @@ export function installWorkspacePaneLayout({externalWindows=false,document,host,
   document.addEventListener('dragover',dragOverPinned);document.addEventListener('drop',dropPinned);document.addEventListener('dragend',clearDrop);document.addEventListener('dragleave',leaveDrop);win.addEventListener('blur',clearDrop);
   win.addEventListener('message',receiveExternal);
   syncSettings();schedule();
-  return {syncSettings,toggleSurfaces(){const show=!settings.preview&&!settings.windows;settings.preview=show;settings.windows=externalWindows?false:show;commit();schedule();},selectNative(){slices?.nativeSelected();pinnedId=null;renderTabs();schedule();},syncSelection(selection){lastSelection=selection;pin.disabled=!selection?.item?.path;if(selection?.mode==='web'){preview.syncSelection(selection);pinnedId=null;if(externalWindows){win.parent.postMessage({type:'papers:proxima-preview-selection',selection},'*');renderTabs();return;}settings.windows=true;renderTabs();schedule();windows.syncSelection(selection);}else preview.syncSelection(selection);},previewPath(path,name){lastSelection={mode:'single',item:{path,name}};pin.disabled=false;return preview.previewPath(path,name);},destroy(){slices?.destroy();document.removeEventListener('dragover',dragOverPinned);document.removeEventListener('drop',dropPinned);document.removeEventListener('dragend',clearDrop);document.removeEventListener('dragleave',leaveDrop);win.removeEventListener('blur',clearDrop);dropCue.remove();win.removeEventListener('message',receiveExternal);resizing.destroy();docking.destroy();disposed=true;observer.disconnect();release?.();win.removeEventListener('resize',schedule);if(frame)win.cancelAnimationFrame(frame);preview.destroy();pinned.destroy();controls.remove();}};
+  return {syncSettings,toggleSurfaces(){const show=!settings.preview&&!settings.windows;settings.preview=show;settings.windows=externalWindows?false:show;commit();schedule();},selectNative(){slices?.nativeSelected();pinnedId=null;renderTabs();schedule();},syncSelection(selection){lastSelection=selection;pin.disabled=!(selection?.item?.path||selection?.mode==='web');preview.syncSelection(selection);},previewPath(path,name){lastSelection={mode:'single',item:{path,name}};pin.disabled=false;return preview.previewPath(path,name);},destroy(){slices?.destroy();document.removeEventListener('dragover',dragOverPinned);document.removeEventListener('drop',dropPinned);document.removeEventListener('dragend',clearDrop);document.removeEventListener('dragleave',leaveDrop);win.removeEventListener('blur',clearDrop);dropCue.remove();win.removeEventListener('message',receiveExternal);resizing.destroy();docking.destroy();disposed=true;observer.disconnect();release?.();win.removeEventListener('resize',schedule);if(frame)win.cancelAnimationFrame(frame);preview.destroy();pinned.destroy();controls.remove();}};
 }

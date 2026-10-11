@@ -1387,12 +1387,12 @@ export function createFileCapabilityPanel(options) {
     actions.hidden = true;
     state.browserDownloadsOpen = false;
     // Chrome owns tabs and session persistence; do not recreate legacy tab records.
-    clearPreview();
+    clearPreview({ preserveBrowser: previewOnly });
     renderBrowserWorkspace();
   }
 
   function renderWebLinkPreview() {
-    clearPreview();
+    clearPreview({ preserveBrowser: true });
     panel.classList.remove('browser-mode', 'native-chrome-layout');
     inspector.classList.remove('browser-mode');
     const url = state.inspectedUrl;
