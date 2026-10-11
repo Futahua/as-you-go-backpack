@@ -316,6 +316,11 @@ body:has(.native-chrome-layout) .workspace.file-capability-docked.file-capabilit
   scrollbar-color: var(--border-strong) transparent;
 }
 
+.independent-file-preview .file-capability-browser-preview {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .file-capability-preview::-webkit-scrollbar,
 .file-capability-text-scroller::-webkit-scrollbar,
 .file-capability-image-viewport::-webkit-scrollbar {

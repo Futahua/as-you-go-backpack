@@ -4,6 +4,8 @@ Relocation repair, 2026-10-10: normal Files-pane AYG drags move exact link place
 
 Read this first and completely before working in this repository.
 
+Web-link preview acceptance, 2026-10-11: the independent follow Preview receives web selections alongside the existing native Chrome route. It uses Papers' ephemeral browser-open/move/close owner and existing persist:papers-web-browser profile; no durable legacy browser tabs or new profile are created. Collapse, transient overlays, suspension, selection replacement and disposal release the preview view while retaining profile storage. Serialized preview loads discard stale results before opening the latest selection. Native Chrome keeps its personal profile and opening behavior.
+
 ## Product north star
 
 Papers is the creator's **personal programmable environment on an actual machine,

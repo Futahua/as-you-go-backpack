@@ -1,4 +1,5 @@
 import { createPaneSelectionPolicy } from './pane-selection-policy.js';
+import { createWebLinkPreview } from './web-link-preview.js';
 import { browserTabClosePlan } from './browser-pane-actions.js';
 import { installBrowserTabDrag, insertBrowserTab } from './browser-tab-drag.js';
 import { installChromeFocusPolicy } from './chrome-focus-policy.js';
@@ -650,12 +651,13 @@ export function createFileCapabilityPanel(options) {
     if (sessionId) void host.fileCapability('preview-html-close', { sessionId }).catch(() => {});
   }
 
+  const webLinkPreview = createWebLinkPreview({ host, onSession: id => { state.browserSessionId = id; } });
+
   function closeBrowserPreview() {
     state.browserObserver?.disconnect();
     state.browserObserver = null;
-    const sessionId = state.browserSessionId;
     state.browserSessionId = null;
-    if (sessionId) void host.fileCapability('browser-close', { sessionId }).catch(() => {});
+    void webLinkPreview.close();
   }
 
   function stopBrowserTabPolling() {
@@ -1116,6 +1118,7 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderBrowserWorkspace() {
+    if (previewOnly) { renderWebLinkPreview(); return; }
     const source = state.chromePaneSource;
     stopChromeLayout();
     panel.classList.add('browser-mode', 'native-chrome-layout');
@@ -1376,7 +1379,7 @@ export function createFileCapabilityPanel(options) {
     disarmDelete();
     renameRow.hidden = true;
     itemTitle.textContent = source.name || url;
-    itemMeta.textContent = 'Web browser';
+    itemMeta.textContent = previewOnly ? 'Web preview' : 'Web browser';
     pathText.textContent = url;
     copyPathButton.hidden = false;
     revealButton.hidden = true;
@@ -1386,6 +1389,32 @@ export function createFileCapabilityPanel(options) {
     // Chrome owns tabs and session persistence; do not recreate legacy tab records.
     clearPreview();
     renderBrowserWorkspace();
+  }
+
+  function renderWebLinkPreview() {
+    clearPreview();
+    panel.classList.remove('browser-mode', 'native-chrome-layout');
+    inspector.classList.remove('browser-mode');
+    const url = state.inspectedUrl;
+    if (!safeBrowserUrl(url) || !state.expanded || state.previewSuspended || state.transientOverlay) return;
+    const generation = state.inspectGeneration;
+    const surface = documentRef.createElement('div');
+    surface.className = 'file-capability-native-preview file-capability-browser-preview';
+    surface.textContent = 'Loading link preview…';
+    preview.append(surface);
+    const current = () => surface.isConnected && state.expanded && !state.previewSuspended
+      && !state.transientOverlay && generation === state.inspectGeneration && state.inspectedUrl === url;
+    void nextLayoutTick().then(async () => {
+      if (!current()) return;
+      const result = await webLinkPreview.open(url, nativePreviewRect(surface), current);
+      if (!current() || !result) return;
+      surface.textContent = result.ok ? '' : result.message || result.error || 'Link preview could not load.';
+      if (result.ok && typeof ResizeObserver === 'function') {
+        state.browserObserver = new ResizeObserver(() => refreshPreviewGeometry());
+        state.browserObserver.observe(surface);
+      }
+      refreshPreviewGeometry();
+    }).catch(error => { if (current()) surface.textContent = error.message || 'Link preview could not load.'; });
   }
 
   function renderImagePreview(source) {
@@ -2167,6 +2196,7 @@ export function createFileCapabilityPanel(options) {
     setExpanded(next);
     if (state.inspectedUrl) {
       if (next) { if (state.inspectedUrl === 'native-window') nativeWindowTabs.showCurrent(); else renderBrowserWorkspace(); }
+      else if (previewOnly) closeBrowserPreview();
       else stopChromeLayout();
       return;
     }
@@ -2377,7 +2407,6 @@ export function createFileCapabilityPanel(options) {
   const paneSelectionPolicy = createPaneSelectionPolicy();
   async function syncSelection(selection) {
     if (options.windowsOnly && selection?.mode !== 'web') return;
-    if (previewOnly && selection?.mode === 'web') return;
     if (!paneSelectionPolicy.observe(selection)) return;
     if (state.fullPage) return;
     const sourcePath = selection?.mode === 'single' ? selection.item?.path : selection?.path;
@@ -2530,11 +2559,12 @@ export function createFileCapabilityPanel(options) {
       setExpandedWithPreviewLifecycle(true);
     },
     setExpanded: setExpandedWithPreviewLifecycle,
-    setPreviewSuspended(value) {const suspended=Boolean(value);if(suspended===state.previewSuspended)return;state.previewSuspended=suspended;refreshPreviewGeometry();},
+    setPreviewSuspended(value) {const suspended=Boolean(value);if(suspended===state.previewSuspended)return;state.previewSuspended=suspended;if(previewOnly&&safeBrowserUrl(state.inspectedUrl)){if(suspended)closeBrowserPreview();else renderWebLinkPreview();}refreshPreviewGeometry();},
     setWidth:setPanelWidth,
     refreshPreviewGeometry,
     setTransientOverlay(active) {
       state.transientOverlay = active === true;
+      if(previewOnly&&safeBrowserUrl(state.inspectedUrl)){if(state.transientOverlay)closeBrowserPreview();else renderWebLinkPreview();}
       if(state.chromeLayout) void host.fileCapability('chrome-pane-visible', { visible: !state.transientOverlay && state.expanded }).catch(() => {});
       if(state.browserSurface?.isConnected) void host.fileCapability('browser-tabs-visible', {visible:!state.transientOverlay && state.expanded}).catch(()=>{});
       refreshPreviewGeometry();
