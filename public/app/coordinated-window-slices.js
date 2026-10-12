@@ -13,6 +13,12 @@ const docId=id=>id?.startsWith('preview:')?id.slice(8):null;
 export const paneSnapshotIsNewer=(previous,next)=>Boolean(next&&Array.isArray(next.groups)&&Number.isSafeInteger(next.stateRevision)&&
   (!previous||next.binding!==previous.binding&&next.bindingGeneration>previous.bindingGeneration||next.binding===previous.binding&&next.bindingGeneration>=previous.bindingGeneration&&next.stateRevision>=previous.stateRevision&&next.geometryRevision>=previous.geometryRevision));
 
+export function dormantWindowDropTarget(group,event){
+  if(!event.shiftKey)return null;
+  const node=event.target?.closest?.('[data-pane-tab-id]'),id=node?.getAttribute('data-pane-tab-id')||group.selected;
+  return group.tabs.find(tab=>tab.id===id&&tab.kind==='dormant')||null;
+}
+
 /** Presentation only: snapshots own all native geometry, membership and selection.
  * No per-leaf rectangle, inferred minimum, resize ratio or automatic fallback is
  * sent back. Only a root viewport and explicit creator commands cross the bridge. */
@@ -112,6 +118,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
         const current=snapshot.groups.find(g=>g.id===group.id),selected=current?.tabs.find(t=>t.id===current.selected&&t.kind==='dormant');
         if(selected){const result=await host.fileCapability('pane-window-replace',{bindingId:data.bindingId,tabId:selected.id});if(result.snapshot)accept(result.snapshot);return result;}
       }
+      if(operation==='pane-window-replace'){const result=await host.fileCapability(operation,data);if(result.snapshot)accept(result.snapshot);return result;}
       if(operation==='pane-window-attach'||operation==='pane-window-transfer'){const result=await host.fileCapability(operation,{...data,groupId:group.id});if(result.snapshot)accept(result.snapshot);return result;}
       if(operation==='chrome-pane-visible')return {ok:true};
       return host.fileCapability(operation,data);
@@ -189,7 +196,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
   const dragOver=event=>{clearStrip();if(!mounted||!relevant(event))return;if(groupDragId)spanHover={clientX:event.clientX,clientY:event.clientY,target:event.target,dataTransfer:{types:[...event.dataTransfer.types],dropEffect:'move',getData:()=>''},preventDefault(){}};if(dragging&&Date.now()-dragHeartbeat>1000){dragHeartbeat=Date.now();void host.fileCapability('pane-transfer-overlay',{active:true}).catch(()=>{});}const target=destination(event);if(!target){cueRevision++;cueTarget='';cue.hidden=true;return;}event.preventDefault();event.dataTransfer.dropEffect='move';
     const groupMove=Boolean(groupDragId||Array.from(event.dataTransfer.types).includes(GROUP_DRAG_MIME));
     let box={...(target.box||target.group.slot)};const side=target.side;const span=side.startsWith('span-');for(const marker of spanHandles.children)marker.classList.toggle('is-active',marker.dataset.spanSide===side);
-    const pageMove=Array.from(event.dataTransfer.types).includes(PAGE_TAB_MIME);
+    const pageMove=Array.from(event.dataTransfer.types).includes(PAGE_TAB_MIME);const replacement=!groupMove&&!pageMove&&dormantWindowDropTarget(target.group,event);if(replacement){cue.hidden=false;cue.textContent='Replace '+(replacement.title||replacement.name||'dead window');cue.classList.remove('is-rejected');Object.assign(cue.style,{left:target.group.slot.x+'px',top:target.group.slot.y+'px',width:target.group.slot.width+'px',height:target.group.slot.height+'px'});views.get(target.group.id)?.header.classList.add('is-tab-drop-target');return;}
     if(pageMove){const identity='page:'+target.group.id+':'+side;if(identity!==cueTarget){cueTarget=identity;const rev=++cueRevision;cueError='';void host.fileCapability('pane-page-check',{pageId:event.dataTransfer.getData(PAGE_TAB_MIME)||undefined,groupId:target.group.id,side}).then(result=>{if(rev!==cueRevision)return;cueError=result.ok?'':result.error||'This page cannot fit here';views.get(target.group.id)?.header.classList.toggle('is-tab-drop-refused',!result.ok);if(!result.ok){cue.classList.add('is-rejected');cue.textContent=cueError;}}).catch(()=>{});}event.dataTransfer.dropEffect=cueError?'none':'move';}
     if(side==='center'&&!groupMove){if(!pageMove){cueRevision++;cueTarget='';}cue.hidden=true;views.get(target.group.id)?.header.classList.add('is-tab-drop-target');views.get(target.group.id)?.header.classList.toggle('is-tab-drop-refused',Boolean(cueError));event.target?.closest?.('[data-pane-tab-id],[data-preview-tab-id]')?.classList.add('reorder-before');return;}
     cue.textContent=groupMove?(side==='center'?'Swap this group':'Move group '+side):'';cue.classList.toggle('is-group-drop',groupMove);
@@ -204,7 +211,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
     if((groupMove||pageMove)&&cueError){cue.textContent=cueError;cue.setAttribute('aria-label',cueError);event.dataTransfer.dropEffect='none';}
     cue.hidden=Boolean(span&&!spanPreview&&!cueError);Object.assign(cue.style,{left:box.x+'px',top:box.y+'px',width:box.width+'px',height:box.height+'px'});
   };
-  const drop=async event=>{if(!mounted||!relevant(event))return;const target=destination(event);if(!target)return;event.preventDefault();event.stopPropagation();if(target.side.startsWith('span-')&&(!spanPreview||cueError||cueTarget!==targetIdentity(target))){clear(true);return;}cue.hidden=true;const localSource=dragging?dragSource:null;completingDrop=true;
+  const drop=async event=>{if(!mounted||!relevant(event))return;const target=destination(event);if(!target)return;event.preventDefault();event.stopPropagation();if(target.side.startsWith('span-')&&(!spanPreview||cueError||cueTarget!==targetIdentity(target))){clear(true);return;}cue.hidden=true;const localSource=dragging?dragSource:null;const replacement=!groupDragId&&!event.dataTransfer.getData(GROUP_DRAG_MIME)&&!event.dataTransfer.getData(PAGE_TAB_MIME)&&!event.dataTransfer.getData(PREVIEW_TAB_MIME)?dormantWindowDropTarget(target.group,event):null;if(replacement)target.side='center';completingDrop=true;
     let completedTransfer;try{completedTransfer=JSON.parse(event.dataTransfer.getData(PANE_TRANSFER_MIME)||'null')?.transferId;}catch{}
     try{
       const pageId=event.dataTransfer.getData(PAGE_TAB_MIME);if(pageId){const result=await host.fileCapability('pane-page-attach',{pageId,groupId:target.group.id,side:target.side});if(result.snapshot)accept(result.snapshot);if(!result.ok)throw Error(result.error||'Page could not move here');return;}
@@ -212,7 +219,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
       if(transfer?.transferId&&transfer.binding!==snapshot.binding){
         const result=await host.fileCapability('pane-window-transfer',{transferId:transfer.transferId,groupId:target.group.id,side:target.side});
         if(result.snapshot)accept(result.snapshot);if(!result.ok)throw Error(result.error||'Group could not move here');
-        if(transfer.kind==='tab'&&target.side==='center'&&result.tabId){const node=event.target?.closest?.('[data-pane-tab-id],[data-preview-tab-id]');const beforeId=node?.dataset.paneTabId||(node?.dataset.previewTabId?ref(node.dataset.previewTabId):'');if(beforeId!==result.tabId)await command('reorder',()=>({groupId:groupFor(result.tabId),tabId:result.tabId,beforeId}));}
+        if(replacement&&transfer.kind==='tab'&&result.tabId){await command('reorder',()=>({groupId:groupFor(result.tabId),tabId:result.tabId,beforeId:replacement.id}));await command('detach',{tabId:replacement.id});await command('select',()=>({groupId:groupFor(result.tabId),tabId:result.tabId}));return;}if(transfer.kind==='tab'&&target.side==='center'&&result.tabId){const node=event.target?.closest?.('[data-pane-tab-id],[data-preview-tab-id]');const beforeId=node?.dataset.paneTabId||(node?.dataset.previewTabId?ref(node.dataset.previewTabId):'');if(beforeId!==result.tabId)await command('reorder',()=>({groupId:groupFor(result.tabId),tabId:result.tabId,beforeId}));}
         return;
       }
       const source=event.dataTransfer.getData(GROUP_DRAG_MIME)||groupDragId;if(source){await command('relocate-group',{groupId:source,destination:target.group.id,side:target.side});return;}
@@ -223,14 +230,14 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
         id=snapshot.groups.flatMap(g=>g.tabs).find(t=>t.windowInstanceId===instance)?.id;
         if(!id){const listed=await host.windowCandidates({includeNativeIcons:false}),candidate=listed.candidates?.find(t=>t.windowInstanceId===instance);if(!candidate)return;
           const bound=await host.bindWindowCandidate(candidate.id);if(bound?.outcome!=='success')return;
-          const result=await host.fileCapability('pane-window-attach',{bindingId:bound.capability.bindingId,groupId:target.group.id,rect:target.group.content});if(result.snapshot)accept(result.snapshot);if(!result.ok)throw new Error(result.error||'Window could not attach');id=result.tabId;}}
+          const result=await host.fileCapability(replacement?'pane-window-replace':'pane-window-attach',replacement?{bindingId:bound.capability.bindingId,tabId:replacement.id}:{bindingId:bound.capability.bindingId,groupId:target.group.id,rect:target.group.content});if(result.snapshot)accept(result.snapshot);if(!result.ok)throw new Error(result.error||'Window could not attach');id=result.tabId;}}
       if(!groupFor(id))return;
       let group=target.group.id;
       if(target.side!=='center'){const next='slice-'+win.crypto.randomUUID();await command('split',{tabId:id,groupId:group,newGroupId:next,side:target.side});group=next;}
       else if(groupFor(id)!==group)await command('move',{tabId:id,groupId:group});
       const tabNode=event.target?.closest?.('[data-pane-tab-id],[data-preview-tab-id]');
       const before=tabNode?.getAttribute('data-pane-tab-id')||(tabNode?.getAttribute('data-preview-tab-id')?ref(tabNode.getAttribute('data-preview-tab-id')):'');
-      if(target.side==='center'&&before!==id)await command('reorder',{groupId:group,tabId:id,beforeId:before});
+      if(replacement&&id!==replacement.id){await command('reorder',{groupId:group,tabId:id,beforeId:replacement.id});await command('detach',{tabId:replacement.id});}else if(target.side==='center'&&before!==id)await command('reorder',{groupId:group,tabId:id,beforeId:before});
       // A rapid X/merge may finish while this drag continuation is awaiting
       // another command. Resolve the tab's current group at dispatch time.
       await command('select',()=>({groupId:groupFor(id),tabId:id}));

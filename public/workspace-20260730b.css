@@ -12,3 +12,23 @@
 @import url('./styles/utilities.css');
 @import url('./styles/responsive.css');
 @import url('./styles/workspace-pane-layout.css');
+
+/* Reuse the existing settings owner within the Files pane. */
+#prompt-layer.prompt-settings-inline { position:absolute; inset:0; z-index:30; border-radius:inherit; }
+.prompt-settings-inline .prompt-library { padding:12px; }
+.prompt-settings-inline .prompt-library-header { flex-shrink:0; }
+.prompt-settings-inline .prompt-page { min-height:0; overflow:auto; }
+
+.navigator-graph-folder-editor { position:absolute; top:42px; left:12px; right:12px; z-index:20; padding:8px; border:1px solid var(--line); border-radius:6px; background:var(--surface-raised); }
+.navigator-graph-folder-editor input { width:100%; }
+
+#confirm-layer.confirm-inline { position:absolute; inset:0; z-index:40; padding:12px; border-radius:inherit; }
+.confirm-inline .confirm-card { width:100%; max-width:570px; padding:16px; }
+
+.workspace-navigator.icon-drop-ready { box-shadow:inset 0 0 0 2px var(--accent); }
+.pane-entry-editor { position:absolute; inset:0; z-index:40; padding:12px; overflow:auto; }
+.pane-entry-editor .editor,.pane-entry-editor .confirm-card { width:100%; padding:16px; }
+
+.navigator-graph-rename-editor { position:absolute; top:42px; left:12px; width:220px; max-width:calc(100% - 24px); z-index:20; display:block; padding:6px; box-sizing:border-box; border:1px solid var(--line); border-radius:6px; background:var(--surface-raised); }
+.navigator-graph-rename-editor .workspace-navigator-label { display:block; width:100%; overflow:visible; }
+.navigator-graph-rename-editor input { width:100%; font-size:12px; }

@@ -2106,7 +2106,12 @@ export function createFileCapabilityPanel(options) {
       && result?.preview?.kind === 'text'
       && /\.(?:md|markdown)$/i.test(target)
     ) {
-      const obsidian = await host.fileCapability('preview-markdown-obsidian', { path: target }).catch(() => null);
+      let obsidian = await host.fileCapability('preview-markdown-obsidian', { path: target }).catch(() => null);
+      if(!obsidian?.ok && ['OBSIDIAN_BRIDGE_UNAVAILABLE','OBSIDIAN_RENDER_FAILED'].includes(obsidian?.code) && generation===state.inspectGeneration){
+        await new Promise(resolve=>setTimeout(resolve,800));
+        if(generation!==state.inspectGeneration)return false;
+        obsidian=await host.fileCapability('preview-markdown-obsidian',{path:target}).catch(()=>null);
+      }
       if (generation !== state.inspectGeneration || state.inspectedPath !== target) return false;
       if (obsidian?.ok && typeof obsidian.html === 'string') {
         renderObsidianMarkdown(obsidian);

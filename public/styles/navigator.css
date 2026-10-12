@@ -115,3 +115,5 @@
 .workspace-navigator-body:focus,.workspace-navigator-row:focus{outline:none;}
 
 .workspace-navigator-search input{background:#29353d;border-color:#465965;}
+
+.workspace-navigator-transfer-notice {padding:5px 8px;font-size:11px;line-height:1.4;color:var(--text);background:#d5bd5c14;border:1px solid #d5bd5c35;border-radius:4px;margin-top:4px;}

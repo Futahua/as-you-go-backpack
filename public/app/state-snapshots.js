@@ -4,6 +4,7 @@ export function snapshotDate(date = new Date()) {
 }
 
 export async function createStateSnapshot(state, name = snapshotDate(), date = new Date()) {
+  if(iconAssetNames(state).length)throw new Error('Icon assets require a file snapshot so their files are preserved.');
   const copy = structuredClone(state);
   if(copy.view?.preferences)delete copy.view.preferences.stateSnapshots;
   const compressed = await new Response(new Blob([JSON.stringify(copy)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
@@ -22,6 +23,22 @@ async function readSnapshotFile(path,fileCapability){
     offset=result.nextOffset;
   }
 }
+function iconAssetNames(state){
+  const names=new Set();
+  function visit(v){if(typeof v==='string'){const m=/^\.\/icons\/([a-f0-9]{64}\.(?:png|jpg|webp|gif|svg|ico))$/.exec(v);if(m)names.add(m[1]);}else if(v&&typeof v==='object')Object.values(v).forEach(visit);}
+  visit(state);return [...names];
+}
+async function verifyAssets(state,directory,fileCapability){
+  for(const filename of iconAssetNames(state)){
+    let valid=false;
+    for(let attempt=0;attempt<40;attempt++){
+      const result=await fileCapability('verify-image-asset',{directory,filename});
+      if(result?.ok){valid=true;break;}
+      if(attempt<39)await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    if(!valid)throw new Error('Snapshot icon assets are incomplete or damaged.');
+  }
+}
 async function snapshotHash(text){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(byte=>byte.toString(16).padStart(2,'0')).join('');}
 
 export async function createFileStateSnapshot(storage,name,fileCapability){
@@ -32,13 +49,21 @@ export async function createFileStateSnapshot(storage,name,fileCapability){
   const copied=await fileCapability('copy',{paths:[storage.statePath],destination:directory});
   if(!copied?.ok)throw new Error(copied?.message||'Snapshot file could not be copied.');
   const path=`${directory}\\state.json`;
+  let text,state;
   for(let attempt=0;attempt<40;attempt++){
     try{
-      const text=await readSnapshotFile(path,fileCapability),state=JSON.parse(text);
+      text=await readSnapshotFile(path,fileCapability);state=JSON.parse(text);
       if(state.schemaVersion!==1||!Array.isArray(state.groups)||!Array.isArray(state.shortcuts))throw new Error('Snapshot file is incomplete.');
-      return {id,name:name.trim()||snapshotDate(date),createdAt:date.toISOString(),format:'file-json',path,hash:await snapshotHash(text)};
+      break;
     }catch(error){if(attempt===39)throw error;await new Promise(resolve=>setTimeout(resolve,100));}
   }
+  const assetRoot=storage.statePath.replace(/[\\/][^\\/]+$/, '')+'/public';
+  if(iconAssetNames(state).length){
+    const copiedAssets=await fileCapability('copy',{paths:[assetRoot+'/icons'],destination:directory});
+    if(!copiedAssets?.ok)throw new Error('Snapshot icon assets could not be copied.');
+    await verifyAssets(state,directory+'/icons',fileCapability);
+  }
+  return {id,name:name.trim()||snapshotDate(date),createdAt:date.toISOString(),format:'file-json',path,hash:await snapshotHash(text),...(iconAssetNames(state).length?{assetDirectory:directory+'/icons',assetRoot}: {})};
 }
 
 export async function readStateSnapshot(snapshot,fileCapability) {
@@ -47,6 +72,19 @@ export async function readStateSnapshot(snapshot,fileCapability) {
     if(snapshot.hash&&await snapshotHash(text)!==snapshot.hash)throw new Error('This snapshot file changed after it was saved. Restore was stopped.');
     const state=JSON.parse(text);
     if(state.schemaVersion!==1||!Array.isArray(state.groups)||!Array.isArray(state.shortcuts))throw new Error('This snapshot does not contain a workspace.');
+    if(iconAssetNames(state).length){
+      if(!snapshot.assetDirectory||!snapshot.assetRoot)throw new Error('Snapshot icon assets are unavailable.');
+      await verifyAssets(state,snapshot.assetDirectory,fileCapability);
+      // Restore only missing immutable assets, leaving newer workspace assets intact.
+      for(const filename of iconAssetNames(state)){
+        const existing=await fileCapability('verify-image-asset',{directory:snapshot.assetRoot+'/icons',filename});
+        if(!existing?.ok){
+          const copied=await fileCapability('copy',{paths:[snapshot.assetDirectory+'/'+filename],destination:snapshot.assetRoot+'/icons'});
+          if(!copied?.ok)throw new Error('Snapshot icon could not be restored.');
+        }
+      }
+      await verifyAssets(state,snapshot.assetRoot+'/icons',fileCapability);
+    }
     return state;
   }
   if(snapshot.format!=='gzip-base64')throw new Error('This snapshot format is not supported.');

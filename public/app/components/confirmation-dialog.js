@@ -11,6 +11,7 @@ export function createConfirmationDialog({
   permanentlyDelete,
   restoreSelection,
   commit,
+  present = () => {},
 }) {
   let pendingPermanentIds = [];
   let pendingRestoreIds = [];
@@ -45,6 +46,7 @@ export function createConfirmationDialog({
     elements.confirmDelete.textContent = confirmLabel;
     elements.confirmDelete.hidden = false;
     elements.confirmRestore.hidden = true;
+    present(elements.confirmLayer);
     elements.confirmLayer.hidden = false;
     return new Promise((resolve) => { pendingConfirm = resolve; });
   }
@@ -62,6 +64,7 @@ export function createConfirmationDialog({
         : `Delete these ${targetIds.length} items permanently? This cannot be undone.`;
     elements.confirmDelete.hidden = false;
     elements.confirmRestore.hidden = true;
+    present(elements.confirmLayer);
     elements.confirmLayer.hidden = false;
   }
 
@@ -78,6 +81,7 @@ export function createConfirmationDialog({
         : `Restore these ${targetIds.length} items?`;
     elements.confirmDelete.hidden = true;
     elements.confirmRestore.hidden = false;
+    present(elements.confirmLayer);
     elements.confirmLayer.hidden = false;
   }
 

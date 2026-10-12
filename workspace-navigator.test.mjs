@@ -379,3 +379,29 @@ test('Everything IPC connection failures retry briefly but stale and unrelated f
   let current=true;
   assert.equal(await searchNavigatorFiles({query:'old',isCurrent:()=>current,wait:async()=>{current=false;},search:async()=>({ok:false,error:'Everything IPC query failed (2)'})}),null);
 });
+test('graph rename uses selected graph record and Escape cancels without a write',async()=>{
+ const source=await readFile(new URL('./public/app/workspace-navigator.js',import.meta.url),'utf8');
+ const start=source.indexOf("  rename.addEventListener('click',()=>{");
+ const end=source.indexOf("  del.addEventListener",start);
+ let callback,input,writes=0;
+ const node=()=>({dataset:{},textContent:'',className:'',listeners:{},append(x){this.child=x;},prepend(x){this.child=x;},querySelector(){return null;},replaceChildren(x){this.child=x;input=x;},setAttribute(){},addEventListener(t,f){this.listeners[t]=f;},focus(){},select(){},remove(){this.removed=true;}});
+ const graphSlot=node();graphSlot.querySelectorAll=()=>[];
+ const context={rename:{addEventListener(t,f){callback=f}},body:{querySelector(){return null}},s:{mode:'ayg',graphViewActive:true},graphSlot,d:{createElement:node},o:{getSession:()=>({selected:new Set(['g'])}),getState:()=>({groups:[{id:'g',name:'Original'}]}),rootId:'root',itemsIn:()=>[],setStatus:assert.fail,renameAyG:()=>{writes++}},render(){},queueMicrotask};
+ vm.runInNewContext(source.slice(start,end),context);callback();
+ assert.equal(input.value,'Original');assert.equal(graphSlot.child.dataset.rename,'true');
+ input.listeners.keydown({key:'Escape',stopPropagation(){},preventDefault(){}});await Promise.resolve();
+ assert.equal(writes,0);assert.equal(graphSlot.child.removed,true);
+});
+test('Opus native folder drops create navigable folder pills from captured pane paths',async()=>{
+ const source=await readFile(new URL('./public/app/workspace-navigator.js',import.meta.url),'utf8');
+ const start=source.indexOf('    fromDrop:async data=>{'),end=source.indexOf('    snapshot:()=>{',start);
+ const context={s:{internalDragSource:{mode:'machine',paths:['D:\\Folder']},nativeDragSource:null,machineRows:new Map([['D:\\Folder',{kind:'folder',name:'Folder'}]])},navigatorCapturedDropPaths:()=>[],navigatorSavedStateForItem:()=>null,navigatorFolderPill:()=>null,o:{getState:()=>({groups:[],shortcuts:[]}),host:{fileCapability:()=>assert.fail('Known row should not need stat')}},result:null};
+ vm.runInNewContext('result=({'+source.slice(start,end)+'}).fromDrop',context);
+ const result=await context.result({files:[],getData:()=>''});
+ assert.deepEqual(JSON.parse(JSON.stringify(result)),[{mode:'machine',path:'D:\\Folder',machineRoot:'D:\\Folder',view:'nav',name:'Folder'}]);
+});
+test('existing linked folder pills navigate Files rather than previewing a directory',async()=>{
+ const opened=[];
+ const result=await activateNavigatorFilePill({mode:'action',itemId:'linked',art:{target:'D:\\LapSlop brotherhood'}},{},{isAbsoluteWindowsPath:()=>true,host:{fileCapability:async()=>({ok:true,entry:{kind:'folder'}})},openMachineFolder:async path=>opened.push(path),previewMachinePath:()=>assert.fail('Folders must navigate, not preview')});
+ assert.equal(result,true);assert.deepEqual(opened,['D:\\LapSlop brotherhood']);
+});

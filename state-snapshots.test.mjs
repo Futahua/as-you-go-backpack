@@ -60,3 +60,13 @@ test('file snapshots use existing file capabilities, read every chunk and reject
   content=raw+' ';
   await assert.rejects(readStateSnapshot(snapshot,capability),/changed after/);
 });
+
+ test('file snapshots carry verified icon assets and restore missing immutable icons',async()=>{
+  const {createFileStateSnapshot}=await import('./public/app/state-snapshots.js');
+  const filename='a'.repeat(64)+'.png';const text=JSON.stringify({schemaVersion:1,groups:[{id:'g',icon:'./icons/'+filename}],shortcuts:[]});const calls=[];
+  const capability=async(op,params)=>{calls.push({op,params});if(op==='create-folder')return {ok:true,entry:{path:'D:/backup/id'}};if(op==='preview-text-chunk')return {ok:true,text,eof:true};return {ok:true};};
+  const record=await createFileStateSnapshot({statePath:'D:/project/state.json',directory:'D:/backup'},'assets',capability);
+  assert.equal(record.assetDirectory,'D:/backup/id/icons');assert.ok(calls.some(c=>c.op==='copy'&&c.params.paths[0]==='D:/project/public/icons'));assert.ok(calls.some(c=>c.op==='verify-image-asset'));
+  let missing=true;const restore=async(op,params)=>{if(op==='preview-text-chunk')return {ok:true,text,eof:true};if(op==='verify-image-asset'&&params.directory==='D:/project/public/icons'&&missing)return {ok:false};if(op==='copy'){missing=false;calls.push({op,params});}return {ok:true};};
+  assert.deepEqual((await readStateSnapshot(record,restore)).groups,[{id:'g',icon:'./icons/'+filename}]);assert.ok(calls.some(c=>c.op==='copy'&&c.params.paths[0]==='D:/backup/id/icons/'+filename));
+ });

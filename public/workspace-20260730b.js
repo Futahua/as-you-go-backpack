@@ -1,3 +1,5 @@
+import { bindSelectedIconDrop, replaceSelectedIcons } from './app/selected-icon-drop.js?build=instant-icon-drop-20261011';
+import { createIconAssets } from './app/icon-assets.js?build=icon-assets-v3-20261011';
 import {readPagePaneSettings,writePagePaneSettings} from './app/page-pane-settings.js';
 import { bootstrapWindowLayoutWidget as bootstrapCompactWindowLayoutWidget } from './app/window-layout-widget-surface.js';
 import { createWindowLayoutRecordingLifecycle } from './app/window-layout-recording-lifecycle.js';
@@ -105,9 +107,9 @@ import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
-import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-capability-panel.js';
+import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-capability-panel.js?build=linked-folder-pill-20261011';
 import { installWorkspacePaneLayout } from './app/workspace-pane-layout.js';
-import { createWorkspaceNavigator } from './app/workspace-navigator.js';
+import { createWorkspaceNavigator } from './app/workspace-navigator.js?build=linked-folder-pill-20261011';
 import { createWindowLayoutRecordingWiring, windowLayoutMemberKey, resolveWindowLayoutDescriptorWithFallback } from './app/window-layout-runtime.js';
 import { endExactWindowCandidateProcess } from './app/window-layout-process-end.js';
 import { createDetachSaveGate, createDetachReadOnlyInputGuards, toggleWindowLayoutMemberVisibility, createReadOnlyStatusSink, windowLayoutPresentationMode, windowLayoutContentSignature, DETACH_ACTIVATE_CANCELLED } from './app/window-layout-detached.js';
@@ -137,20 +139,20 @@ import {
   windowLayoutIconCacheEntry,
   windowLayoutIconFromCache,
 } from './app/window-layout-icon-hydration.js';
-import { compressIconFile } from './app/utilities/image-compression.js';
+import { compressIconFile } from './app/utilities/image-compression.js?build=pane-icon-drop-20261011';
 import { getWorkspaceElements } from './app/dom.js';
 import { createToolbarController } from './app/components/toolbar-controller.js';
 import { createStatusToast } from './app/components/status-toast.js';
 import { createPromptLibraryDialog } from './app/components/prompt-library-dialog.js';
 import { HOTKEY_CATALOG, HOTKEY_SCOPE_WORKSPACE, effectiveBindings, getBackdropOpacity, getBreadcrumbMiddleScale, getBreadcrumbRootScale, getEdgeOpacity, getOutlineOpacity, getRegionOpacity, getTheme, getTrailOpacity, getTransparentBackground } from './app/hotkeys-model.js';
 import { collectIncludedPrompts, formatCopyConfirmation, resolveCopierAction } from './prompt-library-model.js';
-import { createConfirmationDialog } from './app/components/confirmation-dialog.js';
+import { createConfirmationDialog } from './app/components/confirmation-dialog.js?build=inline-confirm-20261011';
 import { createContextMenu } from './app/components/context-menu.js';
-import { createEditorDialog } from './app/components/editor-dialog.js';
+import { createEditorDialog } from './app/components/editor-dialog.js?build=pane-icon-drop-20261011';
 import { createBinControls } from './app/components/bin-controls.js';
 import { createSetMembershipMode } from './app/components/set-membership-mode.js';
 import { bootstrapWorkspace } from './app/bootstrap.js';
-import { bindStateSnapshots } from './app/state-snapshots.js';
+import { bindStateSnapshots } from './app/state-snapshots.js?build=icon-assets-20261011';
 import { createVisualObservability, hydrationSummaryDisagrees, semanticKeyForItem } from './app/visual-observability.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
@@ -187,6 +189,7 @@ import {
 } from './workspace-scope.js';
 
 const host = createHostBridge(window);
+const iconAssets = createIconAssets(host);
 const PROJECT_SURFACE_KEY = (() => {
   const value = new URLSearchParams(window.location.search).get('papers-surface-key');
   return value && value.length <= 128 ? value : null;
@@ -324,7 +327,7 @@ const store = createWorkspaceStore({
     }
   },
   onSaveGenerationInvalidated: (generation, latestLocal) => surfaceCoordinator?.retirePendingGeneration(generation, latestLocal),
-  persist: (snapshot, metadata) => {
+  persist: async (snapshot, metadata) => {
     // 018X1/018X8: every save funnels through the store's persist callback.
     // Persistence is blocked while read-only UNLESS the metadata carries the
     // gate's exact current flush permit (an older queued save has no token and
@@ -333,7 +336,7 @@ const store = createWorkspaceStore({
     // 0B: the coordinator owns the revision and the compare-and-set, and
     // broadcasts the exact bytes that landed. The snapshot is already
     // serialized here, and is passed through untouched.
-    if (surfaceCoordinator) return surfaceCoordinator.saveSerialized(snapshot, metadata);
+    if (surfaceCoordinator) return surfaceCoordinator.saveSerialized(await iconAssets.encode(snapshot), await iconAssets.metadata(metadata));
     return Promise.reject(new Error('Shared document coordination is unavailable; durable editing is disabled.'));
   },
   setStatus: workspaceStoreStatus,
@@ -4683,28 +4686,8 @@ function confirmPickupCopy(message) {
 }
 
 
-document.querySelector('#copy-prompt').addEventListener('click', async () => {
-  try {
-    const selectedCandidates = [...session.selected]
-      .map((selectedId) => shortcutByRecordOrPlacementId(selectedId))
-      .filter(Boolean);
-    const promptNodes = promptLibrary.getSnapshotLibrary();
-    const selectedTargets = selectedCandidates.map((candidate) => candidate.target);
-    const outcome = resolveCopierAction(selectedTargets, promptNodes);
-    if (outcome.kind === 'open') {
-      promptLibrary.open({ message: 'Select at least one prompt for batch copying.' });
-      return;
-    }
-    await host.copyText(outcome.text);
-    const copiedNames = outcome.copied === 'paths'
-      ? selectedCandidates.map((candidate) => candidate.name ?? candidate.target)
-      : collectIncludedPrompts(promptNodes)
-        .filter((node) => typeof node.text === 'string' && node.text.trim() !== '')
-        .map((node) => node.title);
-    confirmPickupCopy(formatCopyConfirmation(outcome, copiedNames));
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error));
-  }
+document.querySelector('#copy-prompt').addEventListener('click', () => {
+  promptLibrary.open({ page:'hotkeys', container:document.querySelector('#workspace-navigator') });
 });
 
 // The launcher overlay, and the three entrances to one surface.
@@ -4794,6 +4777,10 @@ const toolbar = createToolbarController({
 
 const confirmDialog = createConfirmationDialog({
   elements,
+  present: layer => {
+    const pane=document.querySelector('#workspace-navigator');
+    if(pane&&!pane.hidden){pane.append(layer);layer.classList.add('confirm-inline');}
+  },
   getState: () => state,
   getSelectedIds: () => [...session.selected],
   binItemName,
@@ -5244,6 +5231,18 @@ const editorDialog = createEditorDialog({
   updateShortcut,
   createShortcut,
 });
+bindSelectedIconDrop({
+  element:document.querySelector('#workspace-navigator'),
+  getSelection:()=>workspaceNavigator?.isMachineMode?.()?[]:[...session.selected].map(id=>{
+    const group=state.groups.find(x=>x.id===id);if(group)return {kind:'group',item:group};
+    const item=shortcutByRecordOrPlacementId(id);return item?{kind:isWebLink(item)?'web':'shortcut',item}:null;
+  }).filter(Boolean),
+  apply:async(selection,file)=>{
+    const icon=await compressIconFile(file);
+    return commitWhenWorkspaceReady(()=>replaceSelectedIcons(store.getSnapshot(),selection,icon),{requireDurable:true,preserveSelection:true});
+  },setStatus,
+});
+
 const showEditor = (...args) => editorDialog.showEditor(...args);
 
 const binControls = createBinControls({
@@ -5657,6 +5656,9 @@ if (WIDGET_SURFACE) {
       coordinationState = 'ready';
       void surfaceCoordinator.start().then(async () => {
         coordinationFailureShown = false;
+        if(surfaceCoordinator.role===SURFACE_ROLE.WRITER&&JSON.stringify(store.getSnapshot()).includes('data:image/')){
+          try{await store.save(store.getSnapshot(),{iconAssetMigration:true});await surfaceCoordinator.refreshFromHost();}catch(error){console.warn('[AsYouGo] icon asset migration deferred',error);}
+        }
         // Writer election is the durable-editing gate. Tracking/widget refresh
         // is an optional window capability and must not be allowed to turn a
         // successfully elected writer into a read-only workspace when its

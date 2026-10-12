@@ -6,26 +6,27 @@ export function navigatorFileMoveAllowed(paths,destination) {
 }
 
 /** File operations stay in the existing host; AYG links follow verified moves. */
-export async function moveNavigatorFiles({host,paths,destination,retarget,sleep=ms=>new Promise(r=>setTimeout(r,ms))}) {
+export async function moveNavigatorFiles({host,paths,destination,retarget,onProgress,sleep=ms=>new Promise(r=>setTimeout(r,ms))}) {
  if(!navigatorFileMoveAllowed(paths,destination))return {ok:false,message:'A folder cannot be moved into itself or its contents.'};
  const result=await host.fileCapability('move',{paths,destination});
- if(!result?.ok || typeof retarget !== 'function')return result;
+ if(!result?.ok)return result;
  const pending=new Map(paths.map(oldPath=>[oldPath,destination.replace(/[\\/]$/,'')+'\\'+oldPath.split(/[\\/]/).pop()]));
  const verified=[];
- for(let attempt=0;attempt<30&&pending.size;attempt++){
+ for(let attempt=0;attempt<600&&pending.size;attempt++){
   for(const [oldPath,newPath] of pending){
    if(oldPath.toLowerCase()===newPath.toLowerCase()){pending.delete(oldPath);continue;}
    const [oldStat,newStat]=await Promise.all([host.fileCapability('stat',{path:oldPath}),host.fileCapability('stat',{path:newPath})]);
    if(oldStat?.ok===false&&oldStat.code==='ENOENT'&&newStat?.ok===true){verified.push({oldPath,newPath});pending.delete(oldPath);}
   }
-  if(pending.size)await sleep(200);
+  onProgress?.({completed:paths.length-pending.size,total:paths.length,pending:pending.size});
+  if(pending.size)await sleep(500);
  }
- if(verified.length){
+ if(verified.length&&typeof retarget==='function'){
   let saved=false;
   try{saved=await retarget?.(verified)===true;}catch{}
   if(!saved)return {ok:false,unlinkedMoves:verified,message:'Files moved, but AYG links could not be saved. Refresh to retry the links without moving the files again.'};
  }
- return pending.size?{ok:false,message:'Move is not confirmed yet. AYG links were preserved for unconfirmed files.'}:{ok:true};
+ return pending.size?{ok:false,pending:true,message:'Move is still pending in Directory Opus. Check its progress or confirmation dialog.'}:{ok:true};
 }
 
 /** Retry only a verified link update, never the completed filesystem move. */

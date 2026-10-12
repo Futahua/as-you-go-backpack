@@ -219,3 +219,6 @@ for(const action of ['select','move'])test(`foreign in-use picker ${action} requ
  assert.equal(f.calls.some(c=>c.operation==='pane-window-attach'),false);
  assert.equal(f.calls.at(-1).operation,action==='move'?'pane-window-transfer':'pane-window-reveal');f.api.destroy();
 });
+
+test('replacement refreshes a dormant label when the native identity and title stay the same',()=>{const f=fixture();f.push([{id:'same',title:'Phone',kind:'dormant',active:true}]);assert.match(f.strip.children[1].children[0].children[1].textContent,/unavailable/);f.push([{id:'same',title:'Phone',kind:'native',active:true}]);assert.equal(f.strip.children[1].children[0].children[1].textContent,'Phone');f.api.destroy();});
+test('picker replaces the selected dormant tab through a fresh binding',async()=>{const f=fixture();f.push([{id:'dead',title:'Old',kind:'dormant',active:true}]);f.strip.children[0].listeners.click();await settle();assert.deepEqual(f.calls.at(-1),{operation:'pane-window-replace',data:{bindingId:'trusted-binding',tabId:'dead'}});f.api.destroy();});

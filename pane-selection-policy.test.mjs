@@ -39,3 +39,12 @@ test('repeated empty or multiple notifications never reassert the fallback', () 
   assert.equal(policy.observe(empty),true);
   assert.equal(policy.observe(empty),false);
 });
+
+import { dormantWindowDropTarget } from './public/app/coordinated-window-slices.js';
+test('Shift window drops replace the dead target without targeting a live tab',()=>{
+ const group={selected:'dead',tabs:[{id:'dead',kind:'dormant'},{id:'live',kind:'native'}]};
+ assert.equal(dormantWindowDropTarget(group,{shiftKey:true}).id,'dead');
+ assert.equal(dormantWindowDropTarget(group,{shiftKey:false}),null);
+ assert.equal(dormantWindowDropTarget(group,{shiftKey:true,target:{closest:()=>({getAttribute:()=> 'live'})}}),null);
+ group.selected='live';assert.equal(dormantWindowDropTarget(group,{shiftKey:true,target:{closest:()=>({getAttribute:()=> 'dead'})}}).id,'dead');
+});

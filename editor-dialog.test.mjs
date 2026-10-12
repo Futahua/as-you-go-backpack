@@ -37,7 +37,7 @@ function fakeNode() {
   };
 }
 
-function createHarness({ host = {} } = {}) {
+function createHarness({ host = {}, overrides = {} } = {}) {
   const nodes = {};
   for (const key of [
     'editorTitle', 'name', 'description', 'descriptionLabel', 'target',
@@ -103,6 +103,7 @@ function createHarness({ host = {} } = {}) {
     commit: async (next, message) => { committed.push({ next, message }); return true; },
     render: () => { rendered.push(true); },
     ...model,
+    ...overrides,
   });
 
   return {

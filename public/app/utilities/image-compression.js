@@ -20,7 +20,8 @@ export async function compressIconFile(file) {
   const bitmap = await createImageBitmap(file);
   try {
     if (
-      file.size <= targetBytes
+      /^image\/(png|jpeg|webp|gif|svg\+xml|x-icon|vnd\.microsoft\.icon)$/i.test(file.type)
+      && file.size <= targetBytes
       && bitmap.width <= maximumDimension
       && bitmap.height <= maximumDimension
     ) {

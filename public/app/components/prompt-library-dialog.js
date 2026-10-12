@@ -1589,7 +1589,11 @@ export function createPromptLibraryDialog({
 
   // ------------------------------------------------------------------ open
 
+  const originalLayerParent=layer.parentElement;
   function open(options = {}) {
+    const container=options.container || originalLayerParent;
+    container?.append(layer);
+    layer.classList.toggle('prompt-settings-inline',!!options.container);
     history = createPromptLibraryHistory(snapshotLibrary().map(cloneNode));
     draftLibrary = history.present;
     expandedFolderIds = new Set();
@@ -1603,7 +1607,7 @@ export function createPromptLibraryDialog({
     cutIds.clear();
     activeEditSession = null;
     activeDestination = { type: 'root', nodeId: null };
-    setActivePage('prompts');
+    setActivePage(options.page || 'prompts');
     contextMenu.close();
     controller.setSelection(createTreeSelection());
     refreshCopySelected();
@@ -1613,7 +1617,7 @@ export function createPromptLibraryDialog({
     layer.hidden = false;
     // Never leave focus on document.body: with nothing selected, root is the
     // active destination and owns the keyboard.
-    controller.focusRoot();
+    if(activePage==='hotkeys')hotkeysTab?.focus();else controller.focusRoot();
   }
 
   function close() {
@@ -1626,6 +1630,7 @@ export function createPromptLibraryDialog({
     setActivePage('prompts');
     statusMessage('');
     layer.hidden = true;
+    originalLayerParent?.append(layer);layer.classList.remove('prompt-settings-inline');
     error.textContent = '';
   }
 

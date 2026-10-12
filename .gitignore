@@ -7,3 +7,8 @@
 /probes/**/*.out
 /probes/**/*.err
 
+
+# Creator state and local investigation outputs stay on this machine.
+/state.json.backup
+/work/
+/public/icons/

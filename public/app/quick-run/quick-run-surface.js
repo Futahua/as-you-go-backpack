@@ -93,7 +93,7 @@ function setLayerCardSize(layer, size) {
  */
 function usableIconSource(value) {
   if (typeof value !== 'string') return null;
-  if (!/^data:image\//i.test(value.trim())) return null;
+  if (!/^data:image\//i.test(value.trim()) && !/^\.\/icons\/[a-f0-9]{64}\.(png|jpg|webp|gif|svg|ico)$/.test(value)) return null;
   return value;
 }
 

@@ -113,7 +113,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       if (disposed) return;
       if (binding?.outcome !== 'success' || !binding.capability?.bindingId) throw new Error('This window is no longer available');
       if (await prepare() === false || disposed) return;
-      await request('pane-window-attach', { bindingId: binding.capability.bindingId, rect: bounds() });
+      const dead=tabs.find(tab=>tab.kind==='dormant'&&tab.active);await request(dead?'pane-window-replace':'pane-window-attach',dead?{bindingId:binding.capability.bindingId,tabId:dead.id}:{bindingId:binding.capability.bindingId,rect:bounds()});
     } catch (error) { report(error); }
     finally {
       busy = false;
@@ -219,7 +219,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   const unsubscribe = host.onPaneTabs((next) => {
     if (disposed) return;
     const updated = next.filter(tab => typeof tab.id === 'string' && typeof tab.title === 'string');
-    const presentation = list => JSON.stringify(list.map(tab => [tab.id, tab.title, tab.icon || '']));
+    const presentation = list => JSON.stringify(list.map(tab => [tab.id, tab.title, tab.icon || '',tab.kind||'native',!!tab.canOpen]));
     const sameStrip = presentation(tabs) === presentation(updated);
     tabs = updated;
     if (sameStrip && !pointerDrag) {

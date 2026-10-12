@@ -35,7 +35,7 @@
  * window-layout helpers, because nothing here needs them - which is also what makes the false-success path
  * unreachable rather than merely unused.
  */
-import { mountQuickRun } from './quick-run-surface.js';
+import { mountQuickRun } from './quick-run-surface.js?build=icon-assets-20261011';
 import {
   planQuickRunActivation,
   planQuickRunCopyPath,

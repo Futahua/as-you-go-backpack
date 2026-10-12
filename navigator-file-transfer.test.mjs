@@ -47,8 +47,9 @@ test('real folders reject self and descendant destinations before calling the ho
 });
 
 
-test('Opus moves call only the filesystem move, with no AYG verification or link update',async()=>{
-  const calls=[];
-  const result=await moveNavigatorFiles({host:{fileCapability:async(operation)=>{calls.push(operation);return {ok:true};}},paths:['D:/old/a.txt'],destination:'D:/new'});
-  assert.equal(result.ok,true);assert.deepEqual(calls,['move']);
+test('Opus moves refresh pending progress and verify completion without touching AYG links',async()=>{
+ const calls=[],progress=[];let checks=0;
+ const host={fileCapability:async(operation,args)=>{calls.push(operation);if(operation==='move')return {ok:true};if(args.path==='D:/old/a.txt'){checks++;return checks<3?{ok:true}:{ok:false,code:'ENOENT'};}return {ok:true};}};
+ const result=await moveNavigatorFiles({host,paths:['D:/old/a.txt'],destination:'D:/new',sleep:async()=>{},onProgress:value=>progress.push(value)});
+ assert.equal(result.ok,true);assert.equal(calls.filter(x=>x==='move').length,1);assert.equal(checks,3);assert.deepEqual(progress.map(x=>x.completed),[0,0,1]);
 });
