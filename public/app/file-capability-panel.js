@@ -8,6 +8,7 @@ import { createPreviewGeometryScheduler } from './preview-geometry-scheduler.js'
 import { createEditorLoadingProgress } from './editor-loading-progress.js';
 import { installNativeWindowTabs } from './native-window-tabs.js';
 import { chromeLayoutBounds, trackChromeLayout } from './chrome-layout.js';
+import { REMOTE_ROOT, displayPath } from './remote-paths.js';
 
 const SEARCH_DEBOUNCE_MS = 120;
 const VERIFY_ATTEMPTS = 40;
@@ -2077,9 +2078,9 @@ export function createFileCapabilityPanel(options) {
     state.officeEligible = false;
     updateOfficeButtons();
     itemMeta.textContent = 'Loading…';
-    pathText.textContent = target;
+    pathText.textContent = displayPath(target);
     copyPathButton.hidden = false;
-    revealButton.hidden = false;
+    revealButton.hidden = REMOTE_ROOT.test(target);
     openTabButton.hidden = state.fullPage || !state.expanded;
     state.lastPreviewResult = null;
     actions.hidden = false;

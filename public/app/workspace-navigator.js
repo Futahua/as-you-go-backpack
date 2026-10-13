@@ -1,5 +1,6 @@
 import { bindNavigatorRowInteractions } from './navigator-row-interactions.js';
 import { createRemoteFileView } from './remote-file-view.js';
+import { REMOTE_ROOT, remoteDeviceNames } from './remote-paths.js';
 import { moveNavigatorFiles as runNavigatorFileMove, retryNavigatorFileLinks, navigatorFileMoveAllowed } from './navigator-file-transfer.js';
 const svg = (paths) => `<svg viewBox="0 0 20 20" aria-hidden="true">${paths.map((d) => `<path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</svg>`;
 import { createBreadcrumbPopup } from './navigator-breadcrumb-popup.js';
@@ -32,6 +33,8 @@ function button(doc, title, paths) {
 }
 const parentPath = (value) => {
   const p = String(value || '').replace(/\//g, '\\').replace(/\\+$/, '');
+  const remote = p.match(REMOTE_ROOT);
+  if (remote) { const i = p.lastIndexOf('\\'); return i < remote[0].length ? remote[0] : p.slice(0, i); }
   const unc = p.match(/^\\\\([^\\]+)\\([^\\]+)(?:\\.*)?$/);
   if (unc) {
     const shareRoot = `\\\\${unc[1]}\\${unc[2]}`;
@@ -352,7 +355,7 @@ export function createWorkspaceNavigator(o) {
   panel.replaceChildren(head,search,loc,body,resizer);
   const remoteFiles = createRemoteFileView({ document: d, container: panel, call: params => o.host.fileCapability('remote-files', params) });
   const devices = button(d, 'Files on another device', ['M2 3h10v8H2z', 'M6 11v3', 'M3 14h6', 'M14 7h4v10h-4z']);
-  devices.addEventListener('click', () => { void remoteFiles.show(); });
+  devices.addEventListener('click', () => { void breadcrumbPopup.show(devices, { devices: true }); });
   tools.append(devices);
   if (graphSlot) { panel.insertBefore(graphSlot,resizer); panel.classList.add('has-graph-surface'); }
   installNavigatorDropTarget(body,()=>s.mode==='machine'?{path:s.view==='tree'?s.machineRoot:s.path}:{item:{id:s.view==='tree'?o.rootId:currentAyG()}});
@@ -467,10 +470,17 @@ export function createWorkspaceNavigator(o) {
       }
     }, { root: body, rootMargin: '96px 0px' });
   }
+  async function remoteDevices() {
+    const status = await o.host.fileCapability('remote-files', { operation: 'status' }).catch(() => null);
+    const devices = status?.ok ? status.result?.devices || [] : [];
+    for (const device of devices) remoteDeviceNames.set(`\\\\papers~${device.id}`.toLowerCase(), device.name);
+    return devices.map(device => ({ path: `\\\\papers~${device.id}`, name: device.name, kind: 'folder' }));
+  }
   function syncChrome() {
     panel.dataset.mode = s.mode;
     panel.dataset.view = s.view;
-    provider.textContent = s.mode === 'machine' ? 'Opus' : 'As you Go';
+    const remoteRoot = s.mode === 'machine' && String(s.path || '').match(REMOTE_ROOT);
+    provider.textContent = remoteRoot ? remoteDeviceNames.get(remoteRoot[0].toLowerCase()) || 'Device' : s.mode === 'machine' ? 'Opus' : 'As you Go';
     provider.title = s.mode === 'machine' ? 'Switch to As you Go' : 'Switch to Opus';
     provider.setAttribute('aria-label', provider.title);
     panel.classList.toggle('collapsed', s.collapsed);
@@ -1135,6 +1145,13 @@ export function createWorkspaceNavigator(o) {
  async function renderMachineTree(){const generation=++s.renderGen,root=s.machineRoot;if(!root)return;setLocation([{key:root.toLowerCase(),label:root,title:root,path:root}]);const tree={index:1,branches:[]},fragment=d.createDocumentFragment(),row=machineRow({path:root,name:root,kind:'folder'});fragment.append(row);if(s.machineExpanded.has(root)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left','14px');children.append(await machineTree(root,1,generation,tree));installNavigatorDropTarget(children,{path:root});fragment.append(children);tree.branches.push({id:`machine:${root.toLowerCase()}`,depth:0,start:0,end:tree.index-1,row,children});}if(generation===s.renderGen&&s.mode==='machine'&&s.view==='tree'){body.replaceChildren(fragment);paintTreeBranches(tree.branches);}}
   function machinePathCrumbs(path) {
     const normalized=String(path||'').replace(/\//g,'\\').replace(/\\+$/,'');
+    const remote=normalized.match(REMOTE_ROOT);
+    if(remote){
+      let cursor=remote[0];
+      const entries=[{path:cursor,name:remoteDeviceNames.get(cursor.toLowerCase())||'Device'}];
+      for(const part of normalized.slice(cursor.length).split('\\').filter(Boolean)){cursor+='\\'+part;entries.push({path:cursor,name:part});}
+      return entries;
+    }
     const unc=normalized.match(/^\\\\([^\\]+)\\([^\\]+)(?:\\(.*))?$/);
     if(unc){
       let cursor=`\\\\${unc[1]}\\${unc[2]}`;
@@ -1194,6 +1211,7 @@ export function createWorkspaceNavigator(o) {
     }else body.innerHTML='<p class="workspace-navigator-empty">This folder is empty.</p>';
   }
   async function enterMachine(path, fromGesture = false) {
+    if (REMOTE_ROOT.test(path) && !remoteDeviceNames.has(path.match(REMOTE_ROOT)[0].toLowerCase())) await remoteDevices();
     const changed = !s.path || !s.machineRoot || s.machineRoot.toLocaleLowerCase() !== path.toLocaleLowerCase();
     if (changed) {
       s.machineRoot = path; s.path = path; s.selected = null;s.machineSelected.clear();
@@ -1464,7 +1482,7 @@ export function createWorkspaceNavigator(o) {
   const breadcrumbPopup = createBreadcrumbPopup({
     paintBranches:paintTreeBranches,
     document:d,
-    children:async parent=>parent.path ? (await machineList(parent.path))?.items || []
+    children:async parent=>parent.devices ? await remoteDevices() : parent.path ? (await machineList(parent.path))?.items || []
       : o.itemsIn(o.getState(),parent.id).filter(item=>item.kind!=='window-layout'),
     art:(element,item)=>{element.innerHTML=icon(item);if(item.path)loadMachineArt(element,item);else hydrateArt(element,item);},
     activate:async item=>{if(item.path){if(item.kind==='folder'){s.machineExpanded.clear();setView('nav',false);await enterMachine(item.path,false);}else await o.host.fileCapability('open',{path:item.path});}else await enterAyG(item);},
