@@ -192,6 +192,9 @@ import {
 
 // A tab opened for another device shows that device's As you Go through the same page.
 const REMOTE_DEVICE = remoteDeviceFromUrl(window.location);
+// On the phone the navigator fills the screen and a tapped file's preview slides over it.
+const PHONE = new URL(window.location.href).searchParams.has('papers-phone');
+if (PHONE) document.documentElement.classList.add('papers-phone');
 if (REMOTE_DEVICE) { try { scopeLocalStorage(REMOTE_DEVICE); } catch { /* storage is optional */ } }
 const host = REMOTE_DEVICE ? createRemoteWorkspaceHost(createHostBridge(window), REMOTE_DEVICE) : createHostBridge(window);
 const iconAssets = createIconAssets(host);
@@ -5050,6 +5053,24 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     saveSettings:settings=>commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,paneLayouts:writePagePaneSettings(current.view.preferences.paneLayouts||{},PROJECT_SURFACE_KEY,SCOPE_ROOT_ID||ROOT_ID,settings,new URLSearchParams(window.location.search).get('papers-pane-legacy')==='1')}}};},{requireDurable:true,preserveSelection:true}),
   });
   window.addEventListener('pagehide',()=>paneLayout?.destroy(),{once:true});
+  if (PHONE && paneLayout) {
+    // Only a tap on a file row opens the preview; folders keep single-select / double-tap-to-open.
+    let tappedFileAt = 0;
+    document.querySelector('#workspace-navigator')?.addEventListener('click', (event) => {
+      const row = event.target.closest?.('.workspace-navigator-row,.machine-row');
+      tappedFileAt = row?.dataset.id && row.dataset.reorderFolder !== 'true' ? Date.now() : 0;
+    }, true);
+    const openPreview = () => { if (Date.now() - tappedFileAt < 800) { tappedFileAt = 0; document.documentElement.classList.add('phone-preview-open'); } };
+    for (const name of ['previewPath', 'syncSelection']) {
+      const original = paneLayout[name].bind(paneLayout);
+      paneLayout[name] = (...args) => { const result = original(...args); openPreview(); return result; };
+    }
+    window.papersPhoneBack = () => {
+      if (!document.documentElement.classList.contains('phone-preview-open')) return false;
+      document.documentElement.classList.remove('phone-preview-open');
+      return true;
+    };
+  }
   syncFileCapabilitySelection();
 } else {
   document.querySelector('#workspace-navigator')?.setAttribute('hidden', '');
