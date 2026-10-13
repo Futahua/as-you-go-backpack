@@ -69,16 +69,42 @@ export function createRemoteWorkspaceHost(base, ownerId) {
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, toDevice(item)]));
     return value;
   };
+  // Icons are files in the device's own As you Go folder (./icons/<sha256>.<ext>). They are shown
+  // inline here and put back as the same references on save, so the device's document never changes for it.
+  const ICON = /^\.\/icons\/([a-f0-9]{64}\.[a-z]{2,4})$/;
+  const iconData = new Map(), iconRefs = new Map();
+  const mapStrings = (value, map) => {
+    if (typeof value === 'string') return map(value);
+    if (Array.isArray(value)) return value.map((item) => mapStrings(item, map));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapStrings(item, map)]));
+    return value;
+  };
+  const inlineIcons = async (state) => {
+    const names = new Set();
+    mapStrings(state, (text) => { const m = ICON.exec(text); if (m && !iconData.has(m[1])) names.add(m[1]); return text; });
+    const id = await workspace();
+    await Promise.all([...names].map(async (name) => {
+      const data = await call({ operation: 'workspace-icon', workspaceId: id, name }).catch(() => null);
+      if (data) { iconData.set(name, data); iconRefs.set(data, `./icons/${name}`); }
+    }));
+    return mapStrings(state, (text) => { const m = ICON.exec(text); return m && iconData.has(m[1]) ? iconData.get(m[1]) : text; });
+  };
+  const restoreIcons = (state) => mapStrings(state, (text) => iconRefs.get(text) ?? text);
   const loadVersioned = async () => {
     const loaded = await call({ operation: 'workspace-load', workspaceId: await workspace() });
     const decoded = decodeWorkspaceState(JSON.stringify(loaded.state));
-    return { state: typeof decoded === 'string' ? JSON.parse(decoded) : decoded, revision: loaded.revision };
+    const state = typeof decoded === 'string' ? JSON.parse(decoded) : decoded;
+    return { state: await inlineIcons(state), revision: loaded.revision };
   };
   const overrides = {
     deviceId: ownerId,
     loadWorkspaceVersioned: loadVersioned,
     loadWorkspace: async () => (await loadVersioned()).state,
-    saveWorkspaceChecked: async (state, revision) => call({ operation: 'workspace-save', workspaceId: await workspace(), state: encodeWorkspaceState(state), revision }),
+    saveWorkspaceChecked: async (state, revision) => {
+      const plain = typeof state === 'string' ? JSON.stringify(restoreIcons(JSON.parse(state))) : restoreIcons(state);
+      const encoded = encodeWorkspaceState(plain);
+      return call({ operation: 'workspace-save', workspaceId: await workspace(), state: typeof encoded === 'string' ? encoded : JSON.stringify(encoded), revision });
+    },
     saveWorkspace: async () => { throw new Error('Saves to another device are always checked.'); },
     // The device's own copy decides between writers; this tab never holds this computer's lease.
     acquireWorkspaceWriterLease: async () => null,
