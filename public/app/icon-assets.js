@@ -5,7 +5,9 @@ export function createIconAssets(host) {
     if(typeof serialized!=='string'||!serialized.includes('data:image/'))return serialized;
     const state=JSON.parse(serialized);
     const statePath=state.view?.preferences?.snapshotStorage?.statePath;
-    if(typeof statePath!=='string')throw new Error('The workspace asset destination is unavailable.');
+    // Without a configured snapshot folder there is nowhere to externalize icons. Keep them
+    // embedded, as before icon assets existed: refusing here blocked every save of the workspace.
+    if(typeof statePath!=='string')return serialized;
     const directory=statePath.replace(/[\\/][^\\/]+$/, '')+'/public/icons';
     async function visit(value) {
       if(typeof value==='string'&&/^data:image\//i.test(value)) {
