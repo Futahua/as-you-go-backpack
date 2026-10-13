@@ -5070,17 +5070,45 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
   });
   window.addEventListener('pagehide',()=>paneLayout?.destroy(),{once:true});
   if (PHONE && paneLayout) {
-    // Only a tap on a file row opens the preview; folders keep single-select / double-tap-to-open.
-    let tappedFileAt = 0;
+    // A tap selects (and loads the preview out of sight); a second tap on the same file within
+    // 450 ms - a double tap, or a mouse-mode double click - slides the preview in. Folders keep
+    // single-select / double-tap-to-open.
+    let lastTap = null;
     document.querySelector('#workspace-navigator')?.addEventListener('click', (event) => {
       const row = event.target.closest?.('.workspace-navigator-row,.machine-row');
-      tappedFileAt = row?.dataset.id && row.dataset.reorderFolder !== 'true' ? Date.now() : 0;
+      const file = row?.dataset.id && row.dataset.reorderFolder !== 'true' ? row.dataset.id : null;
+      if (file && lastTap?.id === file && Date.now() - lastTap.at < 450) { lastTap = null; document.documentElement.classList.add('phone-preview-open'); return; }
+      lastTap = file ? { id: file, at: Date.now() } : null;
     }, true);
-    const openPreview = () => { if (Date.now() - tappedFileAt < 800) { tappedFileAt = 0; document.documentElement.classList.add('phone-preview-open'); } };
-    for (const name of ['previewPath', 'syncSelection']) {
-      const original = paneLayout[name].bind(paneLayout);
-      paneLayout[name] = (...args) => { const result = original(...args); openPreview(); return result; };
-    }
+    // Pinch zooms the preview: an image through its own wheel zoom (anchored between the fingers),
+    // text by scaling it.
+    let previewPinch = null;
+    const spread = ([a, b]) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    document.addEventListener('touchstart', (event) => {
+      if (event.touches.length !== 2) { previewPinch = null; return; }
+      const target = event.target.closest?.('.file-capability-image-viewport,.file-capability-text-scroller');
+      previewPinch = target ? { target, distance: spread(event.touches), steps: 0 } : null;
+    }, { capture: true, passive: true });
+    document.addEventListener('touchmove', (event) => {
+      if (!previewPinch || event.touches.length !== 2) return;
+      event.preventDefault();
+      const distance = spread(event.touches), ratio = distance / Math.max(1, previewPinch.distance);
+      previewPinch.distance = distance;
+      const [a, b] = event.touches, x = (a.clientX + b.clientX) / 2, y = (a.clientY + b.clientY) / 2;
+      if (previewPinch.target.classList.contains('file-capability-image-viewport')) {
+        const step = Math.log(1.12);
+        previewPinch.steps += Math.log(ratio);
+        while (Math.abs(previewPinch.steps) >= step) {
+          const zoomIn = previewPinch.steps > 0;
+          previewPinch.steps += zoomIn ? -step : step;
+          previewPinch.target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: x, clientY: y, deltaY: zoomIn ? -100 : 100 }));
+        }
+      } else {
+        const text = previewPinch.target.querySelector('pre') || previewPinch.target;
+        text.style.zoom = String(Math.max(0.5, Math.min(4, (Number(text.style.zoom) || 1) * ratio)));
+      }
+    }, { capture: true, passive: false });
+    document.addEventListener('touchend', (event) => { if (event.touches.length < 2) previewPinch = null; }, { capture: true, passive: true });
     // A clock after the camera (toolbar's second row) switches to Proxima (the phone shows other machines' Proxima).
     const toolbar = document.querySelector('.workspace-left-actions') || document.querySelector('.workspace-navigator-toolbar');
     if (toolbar) {
