@@ -4908,6 +4908,8 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     openPinnedUrl:(url,name)=>{fileCapabilityPanel.syncSelection({mode:'web',item:{url,name}});fileCapabilityPanel.setExpanded(true);},
     rootId: SCOPE_ROOT_ID || ROOT_ID,
     remoteDevice: REMOTE_DEVICE,
+    // A computer switches this same tab to the device's As you Go (no new Papers tab); the phone keeps its layer.
+    openDeviceInline: (url) => { if (PHONE) return false; window.location.assign(url); return true; },
     // "This device": the phone closes the device's layer; a computer turns this tab back into its own As you Go.
     leaveDevice: () => {
       if (PHONE) { window.parent.postMessage({ type: 'papers:phone:this-device' }, window.location.origin); return; }

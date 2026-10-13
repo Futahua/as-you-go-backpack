@@ -578,6 +578,8 @@ export function createWorkspaceNavigator(o) {
       const next = new URL(d.defaultView.location.href);
       for (const key of ['papers-surface', 'as-you-go-folder']) next.searchParams.delete(key);
       next.searchParams.set('papers-device', device[0].slice(9).toLowerCase());
+      // Inline where the page can navigate itself (a computer's tab); the phone opens it as a layer.
+      if (o.openDeviceInline?.(next.toString())) return;
       try { await o.host.openNewSurface(next.toString()); }
       catch (error) { o.setStatus(error instanceof Error ? error.message : String(error)); }
       return;
