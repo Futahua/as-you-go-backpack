@@ -84,6 +84,7 @@ export function createRemoteFileView({ document: d, container, call, close = () 
         for (const copy of copies) {
           const element = row(copy.name), label = d.createElement('span');
           label.textContent = { editing: 'Local edits — not saved to owner', saving: 'Save snapshot retained — ready to resume', saved: 'Saved to owner; local copy retained', conflict: 'Owner changed — both versions retained', uncertain: 'Save unconfirmed — retained snapshot can be checked again' }[copy.phase] || 'Retained locally';
+          if (copy.phase === 'saved' && copy.newerLocalEdits) label.textContent = 'Earlier snapshot saved; newer local edits are not saved to owner';
           element.append(label, button('Open local editor', () => request({ operation: 'edit-open', editId: copy.id })));
           if (!['saved', 'conflict'].includes(copy.phase)) {
             const save = button(copy.phase === 'editing' ? 'Save back' : 'Resume / check save', async () => {
