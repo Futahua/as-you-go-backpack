@@ -5065,6 +5065,18 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
       const original = paneLayout[name].bind(paneLayout);
       paneLayout[name] = (...args) => { const result = original(...args); openPreview(); return result; };
     }
+    // A clock in the pill pane switches to Proxima (the phone shows other machines' Proxima).
+    const pills = document.querySelector('.navigator-saved-pills');
+    if (pills) {
+      const clock = document.createElement('button');
+      clock.type = 'button'; clock.className = 'navigator-proxima-clock'; clock.title = 'Proxima'; clock.setAttribute('aria-label', 'Proxima');
+      const tick = () => { const now = new Date(); clock.textContent = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'); };
+      tick(); setInterval(tick, 1000);
+      clock.addEventListener('click', (event) => { event.stopPropagation(); window.parent.postMessage({ type: 'papers:phone:proxima' }, window.location.origin); });
+      // The pill pane rebuilds its children; keep the clock in it.
+      pills.append(clock);
+      new MutationObserver(() => { if (clock.parentElement !== pills) pills.append(clock); }).observe(pills, { childList: true });
+    }
     window.papersPhoneBack = () => {
       if (!document.documentElement.classList.contains('phone-preview-open')) return false;
       document.documentElement.classList.remove('phone-preview-open');
