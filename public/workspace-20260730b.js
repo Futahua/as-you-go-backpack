@@ -5054,6 +5054,14 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     render();
   });
   document.querySelector('.workspace-navigator-toolbar')?.append(parentGraphToggle);
+  // Undo / redo as toolbar buttons on every device (the same history as the keyboard shortcuts).
+  for (const [label, run, flip] of [['Undo', () => commands.undo(), false], ['Redo', () => commands.redo(), true]]) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'navigator-icon-button'; button.title = label; button.setAttribute('aria-label', label);
+    button.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"${flip ? ' style="transform:scaleX(-1)"' : ''}><path d="M7.5 11.5 3.5 7.5l4-4M3.5 7.5h8.5a4.5 4.5 0 0 1 0 9H9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    button.addEventListener('click', (event) => { event.stopPropagation(); void run(); });
+    document.querySelector('.workspace-navigator-toolbar')?.append(button);
+  }
   workspaceNavigator.render();
   paneLayout = installWorkspacePaneLayout({externalWindows:EMBEDDED_SURFACE==='proxima',document,host,navigator:workspaceNavigator,windows:fileCapabilityPanel,setStatus,
     isReady:()=>workspaceLoad.ok,
