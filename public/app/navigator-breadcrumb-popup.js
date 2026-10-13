@@ -8,7 +8,7 @@ export function createBreadcrumbPopup({ document, children, art, activate, paint
   }
   function outside(event) { if (!popup?.contains(event.target)) close(); }
   function escape(event) { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } }
-  async function show(anchor, parent) {
+  async function show(anchor, parent, decorate = null) {
     close(); const current = generation;
     popup = document.createElement('div'); popup.className = 'navigator-breadcrumb-popup';
     popup.setAttribute('aria-label', 'Same level items');
@@ -71,6 +71,7 @@ export function createBreadcrumbPopup({ document, children, art, activate, paint
         row.addEventListener('click', () => { close(); void activate(item); });
       }
     }
+    decorate?.(popup, { close, isOpen: () => current === generation && Boolean(popup) });
     await appendRows(popup, parent, 0);
   }
   return { show, close };

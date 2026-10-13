@@ -355,7 +355,7 @@ export function createWorkspaceNavigator(o) {
   panel.replaceChildren(head,search,loc,body,resizer);
   const remoteFiles = createRemoteFileView({ document: d, container: panel, call: params => o.host.fileCapability('remote-files', params) });
   const devices = button(d, 'Files on another device', ['M2 3h10v8H2z', 'M6 11v3', 'M3 14h6', 'M14 7h4v10h-4z']);
-  devices.addEventListener('click', () => { void breadcrumbPopup.show(devices, { devices: true }); });
+  devices.addEventListener('click', () => { void breadcrumbPopup.show(devices, { devices: true }, addDeviceSettings); });
   tools.append(devices);
   if (graphSlot) { panel.insertBefore(graphSlot,resizer); panel.classList.add('has-graph-surface'); }
   installNavigatorDropTarget(body,()=>s.mode==='machine'?{path:s.view==='tree'?s.machineRoot:s.path}:{item:{id:s.view==='tree'?o.rootId:currentAyG()}});
@@ -469,6 +469,34 @@ export function createWorkspaceNavigator(o) {
         if (item) loadMachineArt(entry.target, item);
       }
     }, { root: body, rootMargin: '96px 0px' });
+  }
+  // Gear in the devices popup: each device's inbox, where files dropped into its As you Go land.
+  function addDeviceSettings(popup, { isOpen }) {
+    const gear = button(d, 'Device settings', ['M10 7.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z', 'M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M4.3 15.7l1.8-1.8M13.9 6.1l1.8-1.8']);
+    gear.classList.add('navigator-device-settings-button');
+    gear.addEventListener('click', async event => {
+      event.stopPropagation();
+      const devicesList = await remoteDevices();
+      if (!isOpen()) return;
+      popup.replaceChildren(gear);
+      for (const device of devicesList) {
+        const id = device.path.slice(9);
+        const row = d.createElement('label'); row.className = 'navigator-device-inbox';
+        const name = d.createElement('span'); name.className = 'navigator-device-inbox-name'; name.textContent = device.name + ' inbox';
+        const input = d.createElement('input'); input.type = 'text'; input.spellcheck = false; input.placeholder = 'Loading…'; input.setAttribute('aria-label', device.name + ' inbox folder');
+        const note = d.createElement('span'); note.className = 'navigator-device-inbox-note'; note.setAttribute('role', 'status');
+        row.append(name, input, note); popup.append(row);
+        const show = result => { if (result?.ok) { input.value = result.result.parts.join('\\'); input.placeholder = ''; note.textContent = result.result.chosen ? '' : 'Default'; } else note.textContent = result?.message || 'That device is unavailable.'; };
+        void o.host.fileCapability('remote-files', { operation: 'inbox', ownerId: id }).then(show);
+        input.addEventListener('keydown', async keyEvent => {
+          if (keyEvent.key !== 'Enter') return;
+          keyEvent.preventDefault(); note.textContent = 'Saving…';
+          const result = await o.host.fileCapability('remote-files', { operation: 'inbox-set', ownerId: id, path: input.value.trim() || null });
+          show(result); if (result?.ok) note.textContent = result.result.chosen ? 'Saved' : 'Default';
+        });
+      }
+    });
+    popup.append(gear);
   }
   async function remoteDevices() {
     const status = await o.host.fileCapability('remote-files', { operation: 'status' }).catch(() => null);
@@ -1273,7 +1301,7 @@ export function createWorkspaceNavigator(o) {
     const generation=++s.searchGeneration;
     if(!normalized){render();return;}
     renderSearch();
-    const result=await searchNavigatorFiles({query:normalized,search:query=>o.host.fileCapability('search',{query,limit:1000}),isCurrent:()=>generation===s.searchGeneration&&s.searchQuery===normalized});
+    const result=await searchNavigatorFiles({query:normalized,search:query=>o.host.fileCapability('search',{query,limit:1000,...(s.mode==='machine'&&REMOTE_ROOT.test(s.path||'')?{path:s.path.match(REMOTE_ROOT)[0]}:{})}),isCurrent:()=>generation===s.searchGeneration&&s.searchQuery===normalized});
     if(generation!==s.searchGeneration||s.searchQuery!==normalized)return;
     s.searchResult=result;
     renderSearch();
