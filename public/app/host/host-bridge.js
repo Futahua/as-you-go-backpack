@@ -221,6 +221,11 @@ export function createHostBridge(window) {
       task.resolve(event.data.fileCapability);
       return;
     }
+    // The phone's file chooser: the chosen phone files, each { target, name, size }.
+    if (task.type === 'papers:phone:pick-files') {
+      task.resolve({ picked: Array.isArray(event.data.picked) ? event.data.picked : [] });
+      return;
+    }
     if ('candidates' in event.data) {
       task.resolve({
         outcome: event.data.outcome,
