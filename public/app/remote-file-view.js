@@ -11,13 +11,15 @@ export function createRemoteFileView({ document: d, container, call, close = () 
   const location = d.createElement('nav'); location.setAttribute('aria-label', 'Remote location');
   const body = d.createElement('div'); body.style.cssText = 'display:flex;flex-direction:column;gap:6px';
   const progress = d.createElement('div'); progress.setAttribute('aria-live', 'polite');
+  const edits = d.createElement('div'); edits.setAttribute('aria-label', 'Local working copies');
+  let editMode = false, editBusy = false, editClientAvailable = false;
   function button(label, action) {
     const element = d.createElement('button'); element.type = 'button'; element.className = 'quiet-button'; element.textContent = label;
     element.addEventListener('click', () => { void Promise.resolve().then(action).catch(error => { message.textContent = error.message || String(error); }); });
     return element;
   }
   const back = button('Back', async () => {
-    if (offlineMode) { offlineMode = false; await render(); }
+    if (offlineMode || editMode) { offlineMode = false; editMode = false; await render(); }
     else if (history.length) { history.pop(); await render(); }
     else { owner = null; await render(); }
   });
@@ -29,9 +31,12 @@ export function createRemoteFileView({ document: d, container, call, close = () 
     await request({ operation:'change',ownerId:owner.id,command:transfer.command });
     transfer = null; paste.disabled = true; await poll();
   });
-  toolbar.append(button(localLabel, () => hide()), heading, back, button('Refresh', () => render()), button('Offline copies', () => { if (!owner) return; offlineMode = true; return render(); }));
+  toolbar.append(button(localLabel, () => hide()), heading, back, button('Refresh', () => render()), button('Offline copies', () => { if (!owner) return; offlineMode = true; editMode = false; return render(); }));
   toolbar.append(newFolder,paste); newFolder.disabled = true; paste.disabled = true;
-  root.append(toolbar, location, message, body, progress); root.hidden = true; container.append(root);
+  const workingCopies = button('Working copies', () => { if (!owner) return; editMode = true; offlineMode = false; return render(); });
+  workingCopies.hidden = true;
+  toolbar.append(workingCopies);
+  root.append(toolbar, location, message, body, edits, progress); root.hidden = true; container.append(root);
   const request = async params => {
     const result = await call(params);
     if (result?.ok === false) throw new Error(result.message || result.code || 'Remote files are unavailable.');
@@ -54,14 +59,42 @@ export function createRemoteFileView({ document: d, container, call, close = () 
     try {
       const snapshot = await request({ operation: 'status' });
       if (current !== generation || !active) return;
-      body.replaceChildren(); location.replaceChildren();
+      body.replaceChildren(); location.replaceChildren(); edits.replaceChildren(); workingCopies.disabled = !owner;
+      editClientAvailable = snapshot.capabilities?.edits === true;
+      workingCopies.hidden = !editClientAvailable;
+      if (!editClientAvailable) editMode = false;
       heading.textContent = owner?.name || 'Devices'; back.disabled = !owner;
       if (!owner) {
         message.textContent = snapshot.devices.length ? 'Choose a computer.' : 'Connect a computer in Papers Settings → Devices.';
-        for (const device of snapshot.devices) { const element = row(device.name); element.append(button('Browse', () => { owner = device; history = []; offlineMode = false; return render(); })); body.append(element); }
+        for (const device of snapshot.devices) { const element = row(device.name); element.append(button('Browse', () => { owner = device; history = []; offlineMode = false; editMode = false; return render(); })); body.append(element); }
         return;
       }
       location.textContent = [owner.name, ...history.map(item => item.name)].join(' › ');
+      if (editMode) {
+        const copies = await request({ operation: 'edit-list', ownerId: owner.id });
+        if (current !== generation || !active) return;
+        message.textContent = copies.length ? 'Local working copies are retained here. Save back checks the owner’s original before changing it.' : 'No local working copies yet. Choose Edit local copy beside an online file.';
+        for (const copy of copies) {
+          const element = row(copy.name), label = d.createElement('span');
+          label.textContent = { editing: 'Local edits — not saved to owner', saving: 'Save snapshot retained — ready to resume', saved: 'Saved to owner; local copy retained', conflict: 'Owner changed — both versions retained', uncertain: 'Save unconfirmed — retained snapshot can be checked again' }[copy.phase] || 'Retained locally';
+          element.append(label, button('Open local editor', () => request({ operation: 'edit-open', editId: copy.id })));
+          if (!['saved', 'conflict'].includes(copy.phase)) {
+            const save = button(copy.phase === 'editing' ? 'Save back' : 'Resume / check save', async () => {
+              if (editBusy) return;
+              editBusy = true; save.disabled = true;
+              message.textContent = 'Saving retained edited bytes to the owner…';
+              try { await request({ operation: 'edit-save', editId: copy.id }); }
+              finally { editBusy = false; await render(); }
+            });
+            save.disabled = editBusy; element.append(save);
+          }
+          if (copy.phase === 'conflict') {
+            const recovery = d.createElement('span'); recovery.textContent = 'Keep this local copy. Browse the owner’s current file to begin a new edit session.'; element.append(recovery);
+          }
+          body.append(element);
+        }
+        return;
+      }
       if (offlineMode) {
         const copies = await request({ operation: 'offline', ownerId: owner.id });
         if (current !== generation || !active) return;
@@ -84,6 +117,20 @@ export function createRemoteFileView({ document: d, container, call, close = () 
           else {
             const keep = button('Keep offline', async () => { await request({ operation: 'download', ownerId: owner.id, entry }); await poll(); });
             keep.disabled = !listing.online; element.append(keep);
+            if (editClientAvailable && listing.online && listing.capabilities?.edits === true) {
+              const edit = button('Edit local copy', async () => {
+                if (editBusy) return;
+                editBusy = true; edit.disabled = true; message.textContent = 'Preparing a verified local working copy…';
+                const clickedOwner = owner.id, clickedGeneration = generation;
+                try {
+                  const copy = await request({ operation: 'edit-begin', ownerId: clickedOwner, entry });
+                  if (!active || generation !== clickedGeneration || owner?.id !== clickedOwner) return;
+                  await request({ operation: 'edit-open', editId: copy.id });
+                  editMode = true;
+                } finally { editBusy = false; await render(); }
+              });
+              edit.disabled = editBusy; element.append(edit);
+            }
           }
           if(changesAllowed&&folder){
             element.append(button('Rename',()=>editName(entry)));
