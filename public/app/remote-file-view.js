@@ -12,7 +12,7 @@ export function createRemoteFileView({ document: d, container, call, close = () 
   const body = d.createElement('div'); body.style.cssText = 'display:flex;flex-direction:column;gap:6px';
   const progress = d.createElement('div'); progress.setAttribute('aria-live', 'polite');
   const edits = d.createElement('div'); edits.setAttribute('aria-label', 'Local working copies');
-  let editMode = false, editBusy = false, editClientAvailable = false;
+  let editMode = false, editBusy = false, editClientAvailable = false, editRecoveryAvailable = false;
   function button(label, action) {
     const element = d.createElement('button'); element.type = 'button'; element.className = 'quiet-button'; element.textContent = label;
     element.addEventListener('click', () => { void Promise.resolve().then(action).catch(error => { message.textContent = error.message || String(error); }); });
@@ -61,6 +61,7 @@ export function createRemoteFileView({ document: d, container, call, close = () 
       if (current !== generation || !active) return;
       body.replaceChildren(); location.replaceChildren(); edits.replaceChildren(); workingCopies.disabled = !owner;
       editClientAvailable = snapshot.capabilities?.edits === true;
+      editRecoveryAvailable = snapshot.capabilities?.editRecovery === true;
       workingCopies.hidden = !editClientAvailable;
       if (!editClientAvailable) editMode = false;
       heading.textContent = owner?.name || 'Devices'; back.disabled = !owner;
@@ -72,8 +73,14 @@ export function createRemoteFileView({ document: d, container, call, close = () 
       location.textContent = [owner.name, ...history.map(item => item.name)].join(' › ');
       if (editMode) {
         const copies = await request({ operation: 'edit-list', ownerId: owner.id });
+        const recovery = editRecoveryAvailable ? await request({ operation: 'edit-recovery', ownerId: owner.id }) : [];
         if (current !== generation || !active) return;
         message.textContent = copies.length ? 'Local working copies are retained here. Save back checks the owner’s original before changing it.' : 'No local working copies yet. Choose Edit local copy beside an online file.';
+        if (recovery.length) message.textContent = 'Some local edits need recovery. Their files were retained here; other working copies remain available.';
+        for (const item of recovery) {
+          const element = row(item.name || 'Retained editing files'), label = d.createElement('span'); label.textContent = item.message;
+          element.append(label, button('Open retained files', () => request({ operation: 'edit-recovery-open', editId: item.id }))); body.append(element);
+        }
         for (const copy of copies) {
           const element = row(copy.name), label = d.createElement('span');
           label.textContent = { editing: 'Local edits — not saved to owner', saving: 'Save snapshot retained — ready to resume', saved: 'Saved to owner; local copy retained', conflict: 'Owner changed — both versions retained', uncertain: 'Save unconfirmed — retained snapshot can be checked again' }[copy.phase] || 'Retained locally';
