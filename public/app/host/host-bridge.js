@@ -324,6 +324,8 @@ export function createHostBridge(window) {
     resolveDroppedTargets: (files) =>
       request('papers:project:resolve-dropped-targets', { files }),
     copyText: (text) => request('papers:project:copy-text', { text }),
+    // The phone app's file chooser; waits as long as the person is choosing.
+    pickPhoneFiles: () => request('papers:phone:pick-files', {}, null).then((payload) => payload.picked || []),
     fileCapability: (operation, params = {}) =>
       request(
         'papers:project:file-capability',

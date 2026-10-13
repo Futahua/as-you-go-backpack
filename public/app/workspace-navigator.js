@@ -470,8 +470,27 @@ export function createWorkspaceNavigator(o) {
       }
     }, { root: body, rootMargin: '96px 0px' });
   }
+  // The provider pill names the device whose As you Go this is (this one, or the device opened here).
+  let deviceLabel = null;
+  void (async () => {
+    if (o.remoteDevice) { await remoteDevices(); deviceLabel = remoteDeviceNames.get(`\\\\papers~${o.remoteDevice}`.toLowerCase()) || null; }
+    else { const status = await o.host.fileCapability('remote-files', { operation: 'status' }).catch(() => null); deviceLabel = status?.ok ? status.result?.owner?.name || null : null; }
+    syncChrome();
+  })();
+  // "This device" heads the devices popup: back to this device's own As you Go from another device's.
+  function returnToThisDevice() {
+    if (o.remoteDevice) { o.leaveDevice?.(); return; }
+    if (s.mode === 'machine' && REMOTE_ROOT.test(String(s.path || ''))) { clearSearch({ renderNow: false }); setMode('ayg'); }
+  }
   // Gear in the devices popup: each device's inbox, where files dropped into its As you Go land.
-  function addDeviceSettings(popup, { isOpen }) {
+  function addDeviceSettings(popup, { isOpen, close }) {
+    const here = d.createElement('div'); here.className = 'workspace-navigator-row navigator-this-device';
+    const spacer = d.createElement('span'); spacer.className = 'navigator-tree-spacer';
+    const art = d.createElement('span'); art.className = 'workspace-navigator-art'; art.innerHTML = svg(['M3 4.5h14v9H3z', 'M7.5 16.5h5M10 13.5v3']);
+    const label = d.createElement('span'); label.className = 'workspace-navigator-label'; label.textContent = 'This device';
+    here.append(spacer, art, label);
+    here.addEventListener('click', () => { close(); returnToThisDevice(); });
+    popup.append(here);
     const gear = button(d, 'Device settings', ['M10 7.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z', 'M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M4.3 15.7l1.8-1.8M13.9 6.1l1.8-1.8']);
     gear.classList.add('navigator-device-settings-button');
     gear.addEventListener('click', async event => {
@@ -508,7 +527,7 @@ export function createWorkspaceNavigator(o) {
     panel.dataset.mode = s.mode;
     panel.dataset.view = s.view;
     const remoteRoot = s.mode === 'machine' && String(s.path || '').match(REMOTE_ROOT);
-    provider.textContent = remoteRoot ? remoteDeviceNames.get(remoteRoot[0].toLowerCase()) || 'Device' : s.mode === 'machine' ? 'Opus' : 'As you Go';
+    provider.textContent = remoteRoot ? remoteDeviceNames.get(remoteRoot[0].toLowerCase()) || 'Device' : s.mode === 'machine' ? 'Opus' : deviceLabel || 'As you Go';
     provider.title = s.mode === 'machine' ? 'Switch to As you Go' : 'Switch to Opus';
     provider.setAttribute('aria-label', provider.title);
     panel.classList.toggle('collapsed', s.collapsed);
@@ -1643,6 +1662,7 @@ export function createWorkspaceNavigator(o) {
     syncCanvasSelection,
     copySelectionPaths,
     isMachineMode: () => s.mode === 'machine',
+    currentFolder: () => s.mode === 'ayg' && s.view !== 'tree' ? currentAyG() : o.rootId,
     isCollapsed: () => s.collapsed,
     setCollapsed,
     pinDroppedItems(ids,x,y){

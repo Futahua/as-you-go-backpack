@@ -4907,6 +4907,12 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     pinnedQuickRunPath:key=>quickRun.filePathForKey(key),
     openPinnedUrl:(url,name)=>{fileCapabilityPanel.syncSelection({mode:'web',item:{url,name}});fileCapabilityPanel.setExpanded(true);},
     rootId: SCOPE_ROOT_ID || ROOT_ID,
+    remoteDevice: REMOTE_DEVICE,
+    // "This device": the phone closes the device's layer; a computer turns this tab back into its own As you Go.
+    leaveDevice: () => {
+      if (PHONE) { window.parent.postMessage({ type: 'papers:phone:this-device' }, window.location.origin); return; }
+      const next = new URL(window.location.href); next.searchParams.delete('papers-device'); window.location.replace(next.toString());
+    },
     getState: () => state,
     getSession: () => session,
     itemsIn,
@@ -5065,17 +5071,47 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
       const original = paneLayout[name].bind(paneLayout);
       paneLayout[name] = (...args) => { const result = original(...args); openPreview(); return result; };
     }
-    // A clock in the pill pane switches to Proxima (the phone shows other machines' Proxima).
-    const pills = document.querySelector('.navigator-saved-pills');
-    if (pills) {
+    // A clock after the camera (toolbar's second row) switches to Proxima (the phone shows other machines' Proxima).
+    const toolbar = document.querySelector('.workspace-left-actions') || document.querySelector('.workspace-navigator-toolbar');
+    if (toolbar) {
       const clock = document.createElement('button');
       clock.type = 'button'; clock.className = 'navigator-proxima-clock'; clock.title = 'Proxima'; clock.setAttribute('aria-label', 'Proxima');
       const tick = () => { const now = new Date(); clock.textContent = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'); };
       tick(); setInterval(tick, 1000);
       clock.addEventListener('click', (event) => { event.stopPropagation(); window.parent.postMessage({ type: 'papers:phone:proxima' }, window.location.origin); });
-      // The pill pane rebuilds its children; keep the clock in it.
-      pills.append(clock);
-      new MutationObserver(() => { if (clock.parentElement !== pills) pills.append(clock); }).observe(pills, { childList: true });
+      toolbar.append(clock);
+    }
+    // The paperclip pill (phone's own As you Go only): a tap adds files chosen on the phone, a swipe up adds a link.
+    if (!REMOTE_DEVICE) {
+      const attach = document.createElement('button');
+      attach.type = 'button'; attach.className = 'phone-attach'; attach.title = 'Add files (swipe up: add a link)'; attach.setAttribute('aria-label', attach.title);
+      attach.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 7.5 8.7 14.3a2 2 0 0 0 2.8 2.8l7.1-7.1a4 4 0 0 0-5.7-5.7l-7.4 7.4a6 6 0 0 0 8.5 8.5l4.6-4.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 15v6M16 18h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+      const folder = () => workspaceNavigator?.currentFolder?.() || SCOPE_ROOT_ID || ROOT_ID;
+      const addFiles = async () => {
+        try {
+          const picked = await host.pickPhoneFiles();
+          if (picked.length) await commands.dropResolvedTargets(picked.map((file) => ({ target: file.target, path: file.target, name: file.name, kind: 'file' })), folder());
+        } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
+      };
+      const linkBar = document.createElement('form'); linkBar.className = 'phone-attach-link'; linkBar.hidden = true;
+      const linkInput = document.createElement('input'); linkInput.type = 'url'; linkInput.placeholder = 'Paste or type a link'; linkInput.setAttribute('aria-label', 'Link'); linkInput.autocomplete = 'off';
+      linkBar.append(linkInput);
+      const closeLink = () => { linkBar.hidden = true; linkInput.value = ''; linkInput.blur(); };
+      linkBar.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const url = linkInput.value.trim(); closeLink();
+        if (url) void commands.dropUrl(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : 'https://' + url, folder());
+      });
+      linkInput.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== linkInput) closeLink(); }, 150));
+      let press = null;
+      attach.addEventListener('pointerdown', (event) => { press = { y: event.clientY, id: event.pointerId }; try { attach.setPointerCapture(event.pointerId); } catch {} });
+      attach.addEventListener('pointerup', (event) => {
+        if (!press || press.id !== event.pointerId) return;
+        const swipedUp = press.y - event.clientY > 36; press = null;
+        if (swipedUp) { linkBar.hidden = false; linkInput.focus(); } else void addFiles();
+      });
+      attach.addEventListener('pointercancel', () => { press = null; });
+      document.body.append(linkBar, attach);
     }
     window.papersPhoneBack = () => {
       if (!document.documentElement.classList.contains('phone-preview-open')) return false;
