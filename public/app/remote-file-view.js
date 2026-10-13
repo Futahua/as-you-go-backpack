@@ -12,7 +12,7 @@ export function createRemoteFileView({ document: d, container, call, close = () 
   const body = d.createElement('div'); body.style.cssText = 'display:flex;flex-direction:column;gap:6px';
   const progress = d.createElement('div'); progress.setAttribute('aria-live', 'polite');
   const edits = d.createElement('div'); edits.setAttribute('aria-label', 'Local working copies');
-  let editMode = false, editBusy = false, editClientAvailable = false, editRecoveryAvailable = false, editContinueAvailable = false;
+  let editMode = false, editBusy = false, editClientAvailable = false, editRecoveryAvailable = false, editContinueAvailable = false, editImportAvailable = false;
   function button(label, action) {
     const element = d.createElement('button'); element.type = 'button'; element.className = 'quiet-button'; element.textContent = label;
     element.addEventListener('click', () => { void Promise.resolve().then(action).catch(error => { message.textContent = error.message || String(error); }); });
@@ -63,6 +63,7 @@ export function createRemoteFileView({ document: d, container, call, close = () 
       editClientAvailable = snapshot.capabilities?.edits === true;
       editRecoveryAvailable = snapshot.capabilities?.editRecovery === true;
       editContinueAvailable = snapshot.capabilities?.editContinue === true;
+      editImportAvailable = snapshot.capabilities?.editImport === true;
       workingCopies.hidden = !editClientAvailable;
       if (!editClientAvailable) editMode = false;
       heading.textContent = owner?.name || 'Devices'; back.disabled = !owner;
@@ -86,9 +87,10 @@ export function createRemoteFileView({ document: d, container, call, close = () 
           const element = row(copy.name), label = d.createElement('span');
           label.textContent = { editing: 'Local edits — not saved to owner', saving: 'Save snapshot retained — ready to resume', saved: 'Saved to owner; local copy retained', conflict: 'Owner changed — both versions retained', uncertain: 'Save unconfirmed — retained snapshot can be checked again' }[copy.phase] || 'Retained locally';
           if (copy.phase === 'saved' && copy.newerLocalEdits) label.textContent = 'Earlier snapshot saved; newer local edits are not saved to owner';
+          if (copy.importedCopyId) label.textContent = 'Previous working copy retained; use the imported edited copy';
           element.append(label, button('Open local editor', () => request({ operation: 'edit-open', editId: copy.id })));
-          if (copy.phase === 'saved' && copy.newerLocalEdits && editContinueAvailable) {
-            const resume = button('Continue newer edits', async () => {
+          if (copy.phase === 'saved' && editContinueAvailable) {
+            const resume = button(copy.newerLocalEdits ? 'Continue newer edits' : 'Edit again', async () => {
               if (editBusy) return;
               editBusy = true; resume.disabled = true; message.textContent = 'Checking the owner’s saved file before continuing…';
               try {
@@ -98,7 +100,16 @@ export function createRemoteFileView({ document: d, container, call, close = () 
             });
             resume.disabled = editBusy; element.append(resume);
           }
-          if (!['saved', 'conflict'].includes(copy.phase)) {
+          if (copy.phase === 'editing' && !copy.importedCopyId && editImportAvailable) {
+            const pick = button('Import edited copy', async () => {
+              if (editBusy) return;
+              editBusy = true; pick.disabled = true;
+              message.textContent = 'Choose the file saved by your editor. Your existing working copy will be retained.';
+              try { await request({ operation: 'edit-import', editId: copy.id }); }
+              finally { editBusy = false; await render(); }
+            }); pick.disabled = editBusy; element.append(pick);
+          }
+          if (!copy.importedCopyId && !['saved', 'conflict', 'preparing'].includes(copy.phase)) {
             const save = button(copy.phase === 'editing' ? 'Save back' : 'Resume / check save', async () => {
               if (editBusy) return;
               editBusy = true; save.disabled = true;
