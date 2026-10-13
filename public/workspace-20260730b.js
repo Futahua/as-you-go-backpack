@@ -107,6 +107,8 @@ import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
+import { createRemoteWorkspaceHost, remoteDeviceFromUrl, scopeLocalStorage } from './app/remote-workspace-host.js';
+import { remoteDeviceNames } from './app/remote-paths.js';
 import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-capability-panel.js?build=linked-folder-pill-20261011';
 import { installWorkspacePaneLayout } from './app/workspace-pane-layout.js';
 import { createWorkspaceNavigator } from './app/workspace-navigator.js?build=linked-folder-pill-20261011';
@@ -188,7 +190,10 @@ import {
   destinationInScope,
 } from './workspace-scope.js';
 
-const host = createHostBridge(window);
+// A tab opened for another device shows that device's As you Go through the same page.
+const REMOTE_DEVICE = remoteDeviceFromUrl(window.location);
+if (REMOTE_DEVICE) { try { scopeLocalStorage(REMOTE_DEVICE); } catch { /* storage is optional */ } }
+const host = REMOTE_DEVICE ? createRemoteWorkspaceHost(createHostBridge(window), REMOTE_DEVICE) : createHostBridge(window);
 const iconAssets = createIconAssets(host);
 const PROJECT_SURFACE_KEY = (() => {
   const value = new URLSearchParams(window.location.search).get('papers-surface-key');
@@ -629,6 +634,7 @@ function syncWorkspaceTabIdentity() {
     title = current?.name || scopedRoot?.name || 'Workspace';
     icon = current?.icon || scopedRoot?.icon || generatedWorkspaceTabIcon(current ? 'folder' : 'root');
   }
+  if (REMOTE_DEVICE) title = `${remoteDeviceNames.get(`\\\\papers~${REMOTE_DEVICE}`) || 'Device'} · ${title}`;
   if (document.title !== title) document.title = title;
   let favicon = document.head.querySelector('link[data-papers-tab-icon]');
   if (!favicon) {
@@ -1932,8 +1938,9 @@ const windowLayoutTrackingLifecycle = createWindowLayoutTrackingLifecycle({
   setWindowLayoutStatus, windowLayoutMemberPreview, windowLayoutFromState,
   windowLayoutStatusForOutcome,
 });
-const reconcileTrackingBaseline = windowLayoutTrackingLifecycle.baseline;
-const scheduleClosedWindowReconcile = windowLayoutTrackingLifecycle.schedule;
+// A device's tab never reconciles that device's window layouts against this computer's windows.
+const reconcileTrackingBaseline = REMOTE_DEVICE ? async () => {} : windowLayoutTrackingLifecycle.baseline;
+const scheduleClosedWindowReconcile = REMOTE_DEVICE ? () => {} : windowLayoutTrackingLifecycle.schedule;
 const stopClosedWindowReconcile = windowLayoutTrackingLifecycle.stop;
 const handleWindowLayoutTrackingToggle = windowLayoutTrackingLifecycle.toggle;
 
@@ -2408,7 +2415,7 @@ const windowLayoutWidgetLifecycle = createWindowLayoutWidgetLifecycle({
   itemsIn,
 });
 const openWindowLayoutWidgetWithRetry = windowLayoutWidgetLifecycle.open;
-const ensureStartupWindowLayoutWidget = windowLayoutWidgetLifecycle.ensureStartup;
+const ensureStartupWindowLayoutWidget = REMOTE_DEVICE ? async () => {} : windowLayoutWidgetLifecycle.ensureStartup;
 const windowLayoutWidgetOpenSucceeded = windowLayoutWidgetLifecycle.succeeded;
 const graph = createGraphController();
 
@@ -5527,7 +5534,7 @@ if (WIDGET_SURFACE) {
     const lock = chooseWorkspaceWriterLock({ embedded: EMBEDDED_SURFACE === 'proxima',
       rendererLock, hostLock, fallback: localCasWriterLock });
     let channel;
-    const coordinationNamespace = SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '';
+    const coordinationNamespace = (SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '') + (REMOTE_DEVICE ? `:device:${REMOTE_DEVICE}` : '');
     if (typeof BroadcastChannel === 'function') {
       try {
         channel = new BroadcastChannel(`${SURFACE_DOCUMENT_CHANNEL}${coordinationNamespace}`);

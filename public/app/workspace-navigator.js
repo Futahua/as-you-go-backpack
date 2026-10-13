@@ -553,6 +553,16 @@ export function createWorkspaceNavigator(o) {
     if (renderNow) render();
   }
   async function switchProvider() {
+    const device = s.mode === 'machine' && String(s.path || '').match(REMOTE_ROOT);
+    if (device) {
+      // Inside a device's drives, the provider switch opens that device's own As you Go.
+      const next = new URL(d.defaultView.location.href);
+      for (const key of ['papers-surface', 'as-you-go-folder']) next.searchParams.delete(key);
+      next.searchParams.set('papers-device', device[0].slice(9).toLowerCase());
+      try { await o.host.openNewSurface(next.toString()); }
+      catch (error) { o.setStatus(error instanceof Error ? error.message : String(error)); }
+      return;
+    }
     if (s.mode === 'machine') {
       clearSearch({ renderNow: false });
       setMode('ayg');
