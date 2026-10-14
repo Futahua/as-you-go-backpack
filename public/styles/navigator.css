@@ -118,3 +118,5 @@
 
 .workspace-navigator-transfer-notice {padding:5px 8px;font-size:11px;line-height:1.4;color:var(--text);background:#d5bd5c14;border:1px solid #d5bd5c35;border-radius:4px;margin-top:4px;}
 .navigator-device-settings-button{float:right;margin:-1px -1px 2px 4px}.navigator-device-inbox{display:grid;gap:3px;clear:both;padding:6px 4px}.navigator-device-inbox-name{font-weight:600}.navigator-device-inbox input{width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font:inherit}.navigator-device-inbox-note{min-height:13px;color:var(--text-muted,inherit);opacity:.75}
+/* Shift held: the selection drags as real files into other apps. */
+.workspace-navigator.shift-export .workspace-navigator-row.selected,.workspace-navigator.shift-export .workspace-navigator-row.navigator-filesystem-link.selected{background:color-mix(in srgb,#3b82f6 55%,var(--accent-selection))}

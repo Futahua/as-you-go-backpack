@@ -112,7 +112,7 @@ test('navigator native drag fails closed without a usable DataTransfer or path',
   }), false);
 });
 
-test('a local-file row keeps normal internal dragging alive and exports only on Alt-drag', async () => {
+test('a local-file row keeps normal internal dragging alive and exports only on Shift-drag', async () => {
   const source=await readFile(new URL('./public/app/workspace-navigator.js',import.meta.url),'utf8');
   const start=source.indexOf("row.addEventListener('dragstart', (event) => {",source.indexOf('const ownNativePaths'));
   const end=source.indexOf('\n        });',start);
@@ -124,7 +124,8 @@ test('a local-file row keeps normal internal dragging alive and exports only on 
   });
   listener({dataTransfer:{},preventDefault:()=>prevented++});
   assert.equal(prevented,0);assert.equal(remembered,0);assert.deepEqual(calls,[]);
-  listener({altKey:true,dataTransfer:{},preventDefault:()=>prevented++});
+  listener({altKey:true,dataTransfer:{},preventDefault:()=>prevented++});assert.equal(prevented,0);
+  listener({shiftKey:true,dataTransfer:{},preventDefault:()=>prevented++});
   assert.equal(prevented,1);assert.equal(remembered,1);assert.deepEqual(calls,[['native-drag',{paths:['D:\\file.epub']}]]);
 });
 
