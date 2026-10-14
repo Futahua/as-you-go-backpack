@@ -76,10 +76,17 @@ export function createWorkspaceCommands({
     }
   }
 
-  function rememberClipboardAtInternalCopy(sharedId = null) {
+  // Copied files also go on the Windows clipboard (as Explorer does), so other apps can paste them; the
+  // Windows clipboard's fingerprint after that write marks this copy as the newest one.
+  function rememberClipboardAtInternalCopy(sharedId = null, windowsPaths = [], cut = false) {
     internalClipboardFingerprintPending = true;
-    void readClipboardSnapshot()
-      .then((snapshot) => { internalClipboardFingerprint = snapshot?.fingerprint ?? null; if (sharedId) sharedClipboard?.setFingerprint(sharedId, internalClipboardFingerprint); })
+    const files = windowsPaths.filter((target) => typeof target === 'string' && !/^\\\\papers~/i.test(target));
+    const written = files.length
+      ? Promise.resolve(host.fileCapability?.('clipboard-write-files', { paths: files, cut })).then((result) => result?.ok === true ? result.fingerprint : null).catch(() => null)
+      : Promise.resolve(null);
+    void written
+      .then((fingerprint) => fingerprint ?? readClipboardSnapshot().then((snapshot) => snapshot?.fingerprint ?? null))
+      .then((fingerprint) => { internalClipboardFingerprint = fingerprint; if (sharedId) sharedClipboard?.setFingerprint(sharedId, fingerprint); })
       .finally(() => { internalClipboardFingerprintPending = false; });
   }
 
@@ -465,12 +472,14 @@ export function createWorkspaceCommands({
       collapseWhole,
       placementIds,
     });
+    const copiedPaths = sharedPathsFor([...session.selected]);
     const sharedId = sharedClipboard?.write({
       cut: mode === 'cut',
-      paths: sharedPathsFor([...session.selected]),
+      paths: copiedPaths,
       ayg: { ids: [...session.selected], collapseWhole: [...collapseWhole], placementIds: [...placementIds] },
     }) ?? null;
-    rememberClipboardAtInternalCopy(sharedId);
+    // As you Go links point at files; cutting a link does not move its file, so Windows gets a copy.
+    rememberClipboardAtInternalCopy(sharedId, copiedPaths, false);
 
     setStatus('');
     closeMenu();
