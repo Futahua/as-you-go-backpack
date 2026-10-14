@@ -12,6 +12,8 @@ export function createDropController({
   const INLINE_NATIVE_ITEMS = 'application/x-papers-native-items';
   // Rows dragged from a device's Files tab (\papers~<id>\...), which Windows cannot read.
   const MACHINE_ITEMS = 'application/x-papers-machine-navigator-items';
+  // As you Go rows from another device's view: {page, paths}.
+  const DEVICE_FILES = 'application/x-papers-device-files';
   let abortController = null;
 
   function clearHoverClasses() {
@@ -53,7 +55,7 @@ export function createDropController({
       event.preventDefault();
       clearHoverClasses();
       const types = event.dataTransfer.types;
-      if (types.includes('Files') || types.includes('text/plain') || types.includes('text/uri-list') || types.includes(INLINE_NATIVE_ITEMS) || types.includes(MACHINE_ITEMS)) {
+      if (types.includes('Files') || types.includes('text/plain') || types.includes('text/uri-list') || types.includes(INLINE_NATIVE_ITEMS) || types.includes(MACHINE_ITEMS) || types.includes(DEVICE_FILES)) {
         const tile = event.target.closest('.icon-item');
         const shell = tile?.closest('.graph-node-shell');
         if (tile?.dataset.kind === 'group' && shell) {
@@ -77,6 +79,7 @@ export function createDropController({
       const inlineNative = event.dataTransfer.getData(INLINE_NATIVE_ITEMS);
       let machinePaths = [];
       try { const parsed = JSON.parse(event.dataTransfer.getData(MACHINE_ITEMS) || '[]'); if (Array.isArray(parsed)) machinePaths = parsed.filter((path) => typeof path === 'string'); } catch { /* not a navigator drag */ }
+      try { const parsed = JSON.parse(event.dataTransfer.getData(DEVICE_FILES) || 'null'); if (Array.isArray(parsed?.paths)) machinePaths = [...new Set([...machinePaths, ...parsed.paths.filter((path) => typeof path === 'string')])]; } catch { /* not a device drag */ }
       if (machinePaths.length) {
         event.preventDefault();
         try {
