@@ -59,6 +59,10 @@ export function createWorkspaceCommands({
   closeMenu,
   render,
   setStatus,
+  // The computer-wide clipboard (shared-clipboard.js) and the paste of a record another pane wrote.
+  sharedClipboard = null,
+  sharedPathsFor = () => [],
+  foreignPaste = async () => false,
 }) {
   let internalClipboardFingerprint = null;
   let internalClipboardFingerprintPending = false;
@@ -72,10 +76,10 @@ export function createWorkspaceCommands({
     }
   }
 
-  function rememberClipboardAtInternalCopy() {
+  function rememberClipboardAtInternalCopy(sharedId = null) {
     internalClipboardFingerprintPending = true;
     void readClipboardSnapshot()
-      .then((snapshot) => { internalClipboardFingerprint = snapshot?.fingerprint ?? null; })
+      .then((snapshot) => { internalClipboardFingerprint = snapshot?.fingerprint ?? null; if (sharedId) sharedClipboard?.setFingerprint(sharedId, internalClipboardFingerprint); })
       .finally(() => { internalClipboardFingerprintPending = false; });
   }
 
@@ -461,7 +465,12 @@ export function createWorkspaceCommands({
       collapseWhole,
       placementIds,
     });
-    rememberClipboardAtInternalCopy();
+    const sharedId = sharedClipboard?.write({
+      cut: mode === 'cut',
+      paths: sharedPathsFor([...session.selected]),
+      ayg: { ids: [...session.selected], collapseWhole: [...collapseWhole], placementIds: [...placementIds] },
+    }) ?? null;
+    rememberClipboardAtInternalCopy(sharedId);
 
     setStatus('');
     closeMenu();
@@ -563,6 +572,14 @@ export function createWorkspaceCommands({
   async function pasteClipboard({ files = [], text = '' } = {}, parentIds) {
     const internal = store.getSession().clipboard;
     const snapshot = await readClipboardSnapshot();
+    // Another pane's copy is newer than this page's own: paste that one.
+    const shared = sharedClipboard?.current(snapshot?.fingerprint ?? null);
+    // With a fingerprint, Windows' clipboard is unchanged since that copy, so the event's files/text are stale.
+    if (shared && shared.page !== sharedClipboard.page && (shared.fingerprint || (!files.length && !String(text ?? '').trim()))) {
+      const destinations = (Array.isArray(parentIds) ? parentIds : [parentIds]).map(scopedDestination).filter(Boolean);
+      if (!destinations.length || destinations.includes('bin') || !destinations.every((destinationId) => scopeAllowsDestination(destinationId))) return false;
+      return foreignPaste(shared, destinations);
+    }
     const sameAsInternalCopy = Boolean(
       internal
       && (internalClipboardFingerprintPending
