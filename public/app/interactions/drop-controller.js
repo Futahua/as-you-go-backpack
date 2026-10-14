@@ -79,11 +79,13 @@ export function createDropController({
       const inlineNative = event.dataTransfer.getData(INLINE_NATIVE_ITEMS);
       let machinePaths = [];
       try { const parsed = JSON.parse(event.dataTransfer.getData(MACHINE_ITEMS) || '[]'); if (Array.isArray(parsed)) machinePaths = parsed.filter((path) => typeof path === 'string'); } catch { /* not a navigator drag */ }
-      try { const parsed = JSON.parse(event.dataTransfer.getData(DEVICE_FILES) || 'null'); if (Array.isArray(parsed?.paths)) machinePaths = [...new Set([...machinePaths, ...parsed.paths.filter((path) => typeof path === 'string')])]; } catch { /* not a device drag */ }
-      if (machinePaths.length) {
+      let localPaths = [];
+      // A drag that started in this page keeps its normal handling.
+      try { const parsed = JSON.parse(event.dataTransfer.getData(DEVICE_FILES) || 'null'); if (parsed && parsed.page !== globalThis.__papersDragPage) { if (Array.isArray(parsed.paths)) machinePaths = [...new Set([...machinePaths, ...parsed.paths.filter((path) => typeof path === 'string')])]; if (Array.isArray(parsed.local)) localPaths = parsed.local.filter((path) => typeof path === 'string'); } } catch { /* not a device drag */ }
+      if (machinePaths.length || localPaths.length) {
         event.preventDefault();
         try {
-          if (await importDevicePaths(machinePaths, destination)) return;
+          if (await importDevicePaths(machinePaths, destination, localPaths)) return;
         } finally {
           clearHoverClasses();
         }

@@ -15,8 +15,34 @@ export function createDeviceFileImport({ document: d, host, link }) {
   file.className = 'device-import-file'; detail.className = 'device-import-detail'; destination.className = 'device-import-destination'; actions.className = 'device-import-actions'; pause.type = 'button'; actions.append(pause);
   panel.append(top, file, progress, detail, destination, actions); d.body.append(panel);
   const style = d.createElement('style');
-  style.textContent = '.device-import-panel{position:fixed;right:12px;bottom:12px;width:min(400px,calc(100vw - 24px));box-sizing:border-box;z-index:5000;padding:14px;background:var(--panel,#30332e);color:var(--text,#eee);border:1px solid #ffffff24;border-radius:10px;box-shadow:0 8px 28px #0006;font:13px system-ui}.device-import-panel[hidden]{display:none}.device-import-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.device-import-heading button{border:0;background:transparent;color:inherit;font-size:20px;padding:0 4px;cursor:pointer}.device-import-file{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:10px 0 8px}.device-import-panel progress{width:100%;height:5px;accent-color:var(--accent,#b6c4af)}.device-import-detail{font-variant-numeric:tabular-nums;margin-top:8px}.device-import-destination{opacity:.65;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.device-import-actions{display:flex;justify-content:flex-end;margin-top:10px}.device-import-actions button{font:inherit;border:1px solid #ffffff30;border-radius:5px;padding:6px 12px;background:transparent;color:inherit;cursor:pointer}';
+  // Compact and sized to its pane: it sits under the download button and never spans the whole tab.
+  style.textContent = '.device-import-panel{position:fixed;top:48px;left:8px;width:min(300px,calc(100vw - 16px));box-sizing:border-box;z-index:5000;padding:7px 10px 8px;background:var(--panel,#30332e);color:var(--text,#eee);border:1px solid #ffffff1f;border-radius:7px;box-shadow:0 4px 14px #0005;font:11.5px system-ui;line-height:1.35}.device-import-panel[hidden]{display:none}.device-import-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.device-import-heading strong{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.device-import-heading button{border:0;background:transparent;color:inherit;opacity:.7;font-size:15px;line-height:1;padding:0 2px;cursor:pointer}.device-import-file{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:3px 0 5px;opacity:.9}.device-import-panel progress{display:block;width:100%;height:3px;accent-color:var(--accent,#b6c4af)}.device-import-detail{font-variant-numeric:tabular-nums;margin-top:4px;opacity:.8}.device-import-detail:empty{display:none}.device-import-destination{opacity:.55;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.device-import-destination:empty{display:none}.device-import-actions{display:flex;justify-content:flex-end;margin-top:5px}.device-import-actions[hidden]{display:none}.device-import-button.is-running{color:var(--accent,#b6c4af)}.device-import-actions button{font:inherit;border:1px solid #ffffff2a;border-radius:4px;padding:2px 9px;background:transparent;color:inherit;cursor:pointer}';
   d.head.append(style);
+  // Like the phone: a download button after the camera opens this panel, lit while a download runs.
+  let button = null;
+  const mountButton = () => {
+    if (button?.isConnected) return true;
+    const lens = d.querySelector('.workspace-left-actions .native-window-lens');
+    if (!lens) return false;
+    button = d.createElement('button'); button.type = 'button'; button.className = lens.className; button.classList.remove('native-window-lens'); button.classList.add('device-import-button');
+    button.title = 'Downloads'; button.setAttribute('aria-label', 'Downloads');
+    button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg>';
+    button.addEventListener('click', () => { if (!panel.hidden) { panel.hidden = true; return; } panel.hidden = false; if (!shown) { heading.textContent = 'No downloads yet'; file.textContent = 'Drop files from another device into As you Go.'; progress.hidden = true; detail.textContent = ''; destination.textContent = ''; actions.hidden = true; } else void poll(true); });
+    lens.after(button); return true;
+  };
+  const place = () => {
+    if (panel.hidden) return;
+    // The page spans the window; the visible tab is the navigator pane, so size and clamp to it.
+    const view = d.defaultView, anchor = button?.isConnected ? button.getBoundingClientRect() : null;
+    const pane = button?.closest('.workspace-navigator')?.getBoundingClientRect() || { left: 0, right: view.innerWidth, width: view.innerWidth };
+    const width = Math.max(180, Math.min(300, pane.width - 16));
+    panel.style.width = width + 'px';
+    panel.style.top = (anchor ? anchor.bottom + 6 : 48) + 'px';
+    panel.style.left = Math.max(pane.left + 8, Math.min(anchor ? anchor.left - 8 : pane.left + 8, pane.right - width - 8)) + 'px';
+  };
+  new MutationObserver(place).observe(panel, { attributes: true, attributeFilter: ['hidden'] });
+  d.defaultView.addEventListener('resize', place);
+  if (!mountButton()) { const observer = new MutationObserver(() => { if (mountButton()) observer.disconnect(); }); observer.observe(d.body, { childList: true, subtree: true }); setTimeout(() => observer.disconnect(), 60000); }
 
   const storage = (() => { try { return d.defaultView.localStorage; } catch { return null; } })();
   const readPending = () => { try { const value = JSON.parse(storage?.getItem(PENDING) || '[]'); return Array.isArray(value) ? value.filter(item => typeof item?.jobId === 'string') : []; } catch { return []; } };
@@ -51,7 +77,7 @@ export function createDeviceFileImport({ document: d, host, link }) {
     try { await link(job.results.map(item => ({ target: ownPath(item.target), name: item.name, kind: item.kind })), entry.destination); job.linked = true; }
     catch (error) { job.linked = false; job.error = 'Saved in the inbox, but the link failed: ' + (error?.message || error); }
   }
-  async function poll() {
+  async function poll(force = false) {
     if (polling || disposed) return; polling = true;
     try {
       const status = await call({ operation: 'status' });
@@ -63,7 +89,9 @@ export function createDeviceFileImport({ document: d, host, link }) {
         else if (job.phase === 'failed') { /* stays pending so Resume can still link it */ }
         if (id === shown) draw(job);
       }
-      if (shown && !pending.has(shown) && !jobs.has(shown)) shown = null;
+      if (force && shown && !pending.has(shown) && jobs.has(shown)) draw(jobs.get(shown));
+      if (!shown) { const latest = [...jobs.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0]; if (latest) { shown = latest.id; if (force) draw(latest); } }
+      button?.classList.toggle('is-running', [...jobs.values()].some(job => ['preparing', 'downloading', 'verifying', 'publishing'].includes(job.phase)));
     } catch { /* the next poll retries; the job itself runs in Papers */ }
     finally { polling = false; if (!pending.size && timer) { clearInterval(timer); timer = null; } }
   }
@@ -77,9 +105,24 @@ export function createDeviceFileImport({ document: d, host, link }) {
   });
   close.addEventListener('click', () => { panel.hidden = true; });
 
-  async function importPaths(paths, destinationId) {
+  // This computer's files dropped into another device's As you Go: copied into that device's inbox, then linked there.
+  async function sendLocal(local, destinationId) {
+    const name = local.length === 1 ? local[0].split('\\').pop() : local.length + ' items';
+    if (!host.deviceId) { await link(local.map(path => ({ target: path, name: path.split('\\').pop() })), destinationId); return; }
+    shown = null; panel.hidden = false; heading.textContent = 'Sending…'; file.textContent = name; file.title = name; progress.hidden = false; progress.removeAttribute('value'); detail.textContent = ''; destination.textContent = ''; actions.hidden = true;
+    try {
+      const sent = await call({ operation: 'send-to-inbox', ownerId: host.deviceId, paths: local });
+      if (!Array.isArray(sent) || sent.length !== local.length) throw Error('The device did not confirm the copy.');
+      await link(sent.map((target, index) => ({ target: ownPath(target), name: String(target).split('\\').pop() || local[index].split('\\').pop() })), destinationId);
+      heading.textContent = 'Sent and linked'; file.textContent = sent.map(target => String(target).split('\\').pop()).join(', '); progress.max = 1; progress.value = 1;
+      destination.textContent = 'To ' + String(sent[0]).replace(/^\\\\papers~[^\\]+\\/i, '').replace(/\\[^\\]*$/, '');
+    } catch (error) { showError('Not sent', error); }
+  }
+
+  async function importPaths(paths, destinationId, local = []) {
+    if (local.length) await sendLocal([...new Set(local)], destinationId);
     const devicePaths = [...new Set(paths.filter(isDevicePath))];
-    if (!devicePaths.length) return false;
+    if (!devicePaths.length) return local.length > 0;
     // Files already on the device this As you Go belongs to need no download.
     const here = host.deviceId ? devicePaths.filter(path => ownPath(path) !== path) : [];
     if (here.length) await link(here.map(path => ({ target: ownPath(path), name: path.split('\\').pop() })), destinationId);
@@ -95,7 +138,7 @@ export function createDeviceFileImport({ document: d, host, link }) {
     return true;
   }
 
-  if (pending.size) { shown = [...pending.keys()].pop(); panel.hidden = false; heading.textContent = 'Downloading'; file.textContent = ''; watch(); void poll(); }
+  if (pending.size) { shown = [...pending.keys()].pop(); panel.hidden = false; heading.textContent = 'Downloading'; file.textContent = ''; watch(); void poll(); } else void poll();
   d.defaultView.addEventListener('pagehide', () => { disposed = true; if (timer) clearInterval(timer); }, { once: true });
   return { importPaths };
 }
