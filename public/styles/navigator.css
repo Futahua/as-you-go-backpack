@@ -140,4 +140,9 @@
 .workspace-navigator.thumbs-mode .navigator-tree-toggle{position:absolute;top:3px;left:3px;z-index:2;width:22px;height:22px;padding:0;border:0;background:none;color:#4ea1ff;font-weight:700;font-size:13px;line-height:22px;visibility:visible!important;transition:transform .12s}
 .workspace-navigator.thumbs-mode .navigator-tree-toggle.is-expanded{transform:rotate(90deg)}
 .workspace-navigator.thumbs-mode .navigator-tree-branch{display:contents}
-.workspace-navigator.thumbs-mode .navigator-tree-branch .workspace-navigator-row:not(.selected){background:color-mix(in srgb,#4ea1ff 9%,transparent)}
+/* As in the list: the expanded folder is boxed in its branch colour, and the contents it spilled into
+   the grid get the branch line, here running horizontally under their names and across the gaps
+   between tiles (the list's vertical line is hidden). */
+.workspace-navigator.thumbs-mode .navigator-tree-branch::before{display:none}
+.workspace-navigator.thumbs-mode .workspace-navigator-row:has(> .navigator-tree-toggle.is-expanded){outline:1px solid var(--branch-color,#4ea1ff);outline-offset:-1px}
+.workspace-navigator.thumbs-mode .navigator-tree-branch .workspace-navigator-row::after{content:'';position:absolute;left:-3px;right:-3px;bottom:1px;height:2px;background:var(--branch-color,#4ea1ff);pointer-events:none}
