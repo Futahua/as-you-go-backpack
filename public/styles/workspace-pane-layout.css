@@ -189,3 +189,16 @@ html.papers-phone .phone-pill-transfer-clear{right:80px;font-size:22px}
 html.papers-phone .phone-paste-icon{right:84px;bottom:20px;width:44px;height:44px}
 html.papers-phone .phone-paste-icon svg{width:23px;height:23px}
 .shortcut-fallback svg{width:100%;height:100%}
+
+html.papers-phone .phone-pill-remove{right:22px;bottom:148px;width:36px;height:36px;font-size:25px;background:var(--surface-soft,#30332e);box-shadow:0 3px 10px #0003}
+html.papers-phone .item-icon .shortcut-fallback:has(svg){background:transparent;border-radius:0;color:var(--text-secondary);width:84%;height:84%}
+
+html.papers-phone .phone-pill-remove{background:#703534;color:#ffd0cc;border-color:#a95752}
+html.papers-phone .phone-cut-item{opacity:.4!important}
+html.papers-phone .phone-pill-transfer,html.papers-phone .phone-attach,html.papers-phone .phone-mouse-button{zoom:var(--phone-floating-scale,1)}
+html.papers-phone .workspace-navigator-header{zoom:var(--phone-toolbar-scale,1)}
+
+html.papers-phone .phone-resize-lock{position:absolute;right:3px;bottom:3px;z-index:5;width:24px;height:24px;padding:3px;border:0;border-radius:5px;background:var(--surface-raised);color:var(--text-muted);opacity:.65}
+html.papers-phone .phone-resize-lock[aria-pressed="true"]{color:#dfc28a;opacity:1}html.papers-phone .phone-resize-lock svg{width:18px;height:18px;pointer-events:none}
+.phone-resize-lock[hidden]{display:none}.navigator-quick-run-close{position:absolute;right:5px;top:5px;width:30px;height:30px;border:0;background:transparent;color:var(--text-secondary);font:24px system-ui;z-index:2}.navigator-quick-run .quick-run-input{padding-right:36px}
+.phone-rename-dialog{width:min(330px,calc(100vw - 32px));box-sizing:border-box;background:var(--surface-raised);color:var(--text);border:1px solid var(--border-strong);border-radius:12px;padding:16px}.phone-rename-dialog::backdrop{background:#0008}.phone-rename-dialog form{display:grid;gap:12px}.phone-rename-dialog input{box-sizing:border-box;width:100%;padding:10px;border:1px solid var(--border-strong);border-radius:6px;background:var(--surface-soft);color:var(--text);font:16px system-ui}.phone-rename-dialog p{margin:0;color:#df9993}.phone-rename-dialog form>div{display:flex;justify-content:flex-end;gap:8px}.phone-rename-dialog button{padding:7px 13px;background:var(--surface-soft);color:inherit;border:1px solid var(--border-strong);border-radius:6px}

@@ -36,7 +36,7 @@
 .navigator-saved-pills::-webkit-scrollbar{display:none}
 .navigator-saved-track{display:grid;grid-auto-flow:column;grid-template-rows:repeat(var(--pill-rows,3),24px);grid-auto-columns:max-content;align-content:start;justify-content:start;gap:2px 4px;width:max-content;min-width:100%;height:100%}
 .navigator-saved-pill{max-width:240px;height:24px;box-sizing:border-box}
-.navigator-pills-height-grip{height:6px;width:100%;cursor:row-resize;touch-action:none;background:transparent}
+.navigator-pills-height-grip{height:20px;min-height:20px;flex:0 0 20px;margin-top:-7px;margin-bottom:-7px;position:relative;z-index:4;width:100%;cursor:row-resize;touch-action:none;background:transparent}
 .navigator-saved-pills{position:relative}
 .navigator-saved-clear{position:sticky;z-index:3;top:2px;left:calc(100% - 24px);float:right;width:22px;height:22px;display:grid;place-items:center;margin-bottom:-22px;padding:0;border:1px solid transparent;border-radius:6px;background:var(--surface-raised);color:var(--text-muted);opacity:0;pointer-events:none;transition:opacity .12s ease,color .12s ease,border-color .12s ease,background .12s ease}
 .navigator-saved-pills:hover .navigator-saved-clear,.navigator-saved-clear:focus-visible{opacity:1;pointer-events:auto}
@@ -149,3 +149,17 @@
 /* The view button's drop-down: the other views (list, graph, thumbnails) as icon buttons. */
 .navigator-view-menu{position:fixed;z-index:3000;display:flex;flex-direction:column;gap:2px;padding:3px;border:1px solid var(--line,#414d5b);border-radius:8px;background:var(--surface,#232a31);box-shadow:0 8px 24px #0008}
 .navigator-view-menu .navigator-icon-button{display:grid;place-items:center}
+
+.navigator-view-options{position:fixed;z-index:1600;width:min(304px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:10px;background:var(--surface-raised);color:var(--text);box-shadow:0 10px 30px #0006;display:grid;grid-template-columns:1fr 1fr;gap:9px;font:12px system-ui}
+.navigator-view-options>strong,.navigator-view-options>p,.navigator-view-options>div{grid-column:1/-1}.navigator-view-options label{display:grid;gap:4px;min-width:0}.navigator-view-options input,.navigator-view-options select{width:100%;box-sizing:border-box;min-width:0;background:var(--surface-soft);color:var(--text);border:1px solid var(--border-subtle);border-radius:5px;padding:6px;font:inherit}.navigator-view-options>div{display:flex;justify-content:flex-end;gap:8px}.navigator-view-options button{background:var(--surface-soft);color:var(--text);border:1px solid var(--border-strong);border-radius:5px;padding:6px 10px;font:inherit}.navigator-view-options p{margin:0;color:#dc9290}.navigator-filter-hidden{display:none!important}
+
+.navigator-icon-button.is-filtered{color:var(--accent);background:var(--surface-soft);outline:1px solid var(--border-strong)}
+
+/* Selection painting owns touches only after hold-selection mode is active. */
+html.papers-phone .phone-selection-mode .workspace-navigator-row,
+html.papers-phone .phone-selection-mode .icon-item{touch-action:none;user-select:none;-webkit-user-select:none}
+.workspace-navigator .navigator-recycle-button{color:#df8e89}
+.workspace-navigator .navigator-view-toggle{color:#86b5df}
+.workspace-navigator .navigator-devices-button,.workspace-navigator .workspace-navigator-provider{color:#91bd99}
+
+html:not(.papers-phone) .workspace-navigator-header{zoom:var(--navigator-toolbar-scale,1)}

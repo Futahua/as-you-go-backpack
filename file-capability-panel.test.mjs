@@ -93,8 +93,8 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigator, /machineSort: \{ key:'name', direction:1 \}/);
   assert.match(navigator, /function machineColumnHeader\(\)/);
   assert.match(navigator, /\['name','Name'\],\['type','Type'\],\['size','Size'\],\['modified','Date Modified'\]/);
-  assert.match(navigator, /function sortedMachineItems\(items\)/);
-  assert.match(navigator, /a\.kind === 'folder' && b\.kind !== 'folder'/);
+  assert.match(navigator, /projectRows\(orderedMachineItems\(result.items/);
+  assert.match(navigator, /projectNavigatorItems\(items,options,viewMetadata\)/);
   assert.match(navigator, /function machinePathCrumbs\(path\)/);
   assert.match(navigator, /const driveRoot = `\$\{drive\[0\]\}\\\\`/);
   assert.match(navigator, /const shareRoot = `\\\\\\\\\$\{unc\[1\]\}\\\\\$\{unc\[2\]\}`/);

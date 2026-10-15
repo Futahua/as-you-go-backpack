@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "pretest": "node --test file-type-icons.test.mjs visual-observability.test.mjs visual-fixture.test.mjs",
+    "pretest": "node --test navigator-view-options.test.mjs phone-control-scale.test.mjs file-type-icons.test.mjs visual-observability.test.mjs visual-fixture.test.mjs",
     "test:visual:acceptance": "node --test visual-acceptance.test.mjs",
     "test:graph:settling": "node --test graph-settling-acceptance.test.mjs",
     "test:quick-run:integrated-perf": "node quick-run-integrated-perf.mjs",

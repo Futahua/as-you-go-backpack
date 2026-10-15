@@ -1,4 +1,5 @@
-import {fileTypeIcon} from './app/file-type-icons.js';
+import {isPhoneResizeLocked} from './app/phone-control-scale.js';
+import {fileFallbackIcon,phoneGraphFallback} from './app/file-type-icons.js';
 import {isDeviceFilesPane,installDeviceFilesPane} from './app/device-files-pane.js';
 import { bindSelectedIconDrop, bindSelectedIconPaste, replaceSelectedIcons } from './app/selected-icon-drop.js?build=icon-paste-20261014';
 import { createIconAssets } from './app/icon-assets.js?build=icon-assets-v3-20261011';
@@ -713,7 +714,7 @@ function iconMarkup(candidate) {
   if (isWebLink(candidate)) {
     return `<img data-web-icon="${escapeHtml(candidate.target)}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
   }
-  return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">${fileTypeIcon(candidate.target)||'↗'}</span>`;
+  return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">${fileFallbackIcon(candidate)}</span>`;
 }
 
 function linkMarkup(candidate) {
@@ -2550,6 +2551,7 @@ function createGraphController() {
         .scaleExtent([0.35, 3])
         .filter((event) => {
           if (event.type === 'mousedown' && event.button === 0) return false;
+          if (PHONE&&isPhoneResizeLocked(window)&&event.type==='touchstart'&&event.touches?.length>1)return false;
           if (event.type === 'dblclick') return false;
           // A finger that starts on a tile drags the tile, not the camera.
           if (event.type === 'touchstart' && event.touches?.length === 1 && event.target?.closest?.('.icon-item')) return false;
@@ -4187,11 +4189,16 @@ function syncSelection({ syncNavigator = true, syncPreview = true } = {}) {
   if (syncNavigator) void workspaceNavigator?.syncCanvasSelection(selectedFileCapabilityContext());
 }
 
+function shortcutIconForSurface(detail){
+  if(!PHONE)return host.shortcutIcon(detail);
+  const item=shortcutByRecordOrPlacementId(detail.actionId);
+  return item?phoneGraphFallback(item,path=>host.fileCapability('stat',{path})):null;
+}
 async function hydrateIcons() {
   await hydrateIconsScoped(
     document,
     iconCache,
-    (detail) => host.shortcutIcon(detail),
+    (detail) => shortcutIconForSurface(detail),
     (url) => host.resolveWebIcon(url),
   );
 }
@@ -4201,7 +4208,7 @@ function hydrateNodeIcons(shell) {
   hydrateIconsScoped(
     shell,
     iconCache,
-    (detail) => host.shortcutIcon(detail),
+    (detail) => shortcutIconForSurface(detail),
     (url) => host.resolveWebIcon(url),
   );
 }
@@ -4945,7 +4952,8 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     openPaneQuickRun:panel=>{
       const layer=elements.quickRunLayer;panel.append(layer);layer.classList.add('navigator-quick-run');const pills=panel.querySelector('.navigator-saved-pills');
       const position=()=>layer.style.setProperty('--navigator-run-top',(pills.getBoundingClientRect().bottom-panel.getBoundingClientRect().top+4)+'px');
-      layer.navigatorPillsObserver?.disconnect();layer.navigatorPillsObserver=new ResizeObserver(position);layer.navigatorPillsObserver.observe(pills);position();quickRun.open();
+      layer.navigatorPillsObserver?.disconnect();layer.navigatorPillsObserver=new ResizeObserver(position);layer.navigatorPillsObserver.observe(pills);position();
+      if(!layer.querySelector('.navigator-quick-run-close')){const close=document.createElement('button');close.type='button';close.className='navigator-quick-run-close';close.textContent='×';close.setAttribute('aria-label','Close Quick Search');close.addEventListener('click',()=>{elements.quickRunInput?.blur();quickRun.close();layer.navigatorPillsObserver?.disconnect();});layer.append(close);}quickRun.open();
     },
     runPinnedQuickRun:key=>quickRun.activateKey(key),
     pinnedQuickRunPath:key=>quickRun.filePathForKey(key),

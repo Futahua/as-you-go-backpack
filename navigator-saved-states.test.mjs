@@ -13,7 +13,7 @@ function pillFixture(options={}) {
   Object.assign(document.defaultView,options.window||{});document.addEventListener=()=>{};
   const container=element();
   const saved=createNavigatorSavedStates({document,container,art(){},restore(){},...options});
-  return {saved,container,names:()=>container.children[1].children.map(pill=>pill.children[1].textContent)};
+  return {saved,container,names:()=>container.children.at(-1).children.map(pill=>pill.children[1].textContent)};
 }
 
 test('older durable acknowledgements cannot erase additions while saves are queued',async()=>{
@@ -133,13 +133,13 @@ test('saved pills survive a new browser session through durable preferences, inc
   await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(disk.view.preferences.navigatorSavedStates,[pill]);
   const rebooted=mount();
-  assert.equal(rebooted.container.children[1].children.length,1);
-  assert.equal(rebooted.container.children[1].children[0].children[1].textContent,'My document');
+  assert.equal(rebooted.container.children.at(-1).children.length,1);
+  assert.equal(rebooted.container.children.at(-1).children[0].children[1].textContent,'My document');
   const clear=rebooted.container.children[0];
   clear.dispatchEvent(new Event('click',{cancelable:true}));clear.dispatchEvent(new Event('click',{cancelable:true}));
   await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(disk.view.preferences.navigatorSavedStates,[]);
-  assert.equal(mount().container.children[1].children.length,0);
+  assert.equal(mount().container.children.at(-1).children.length,0);
 });
 
 
@@ -219,8 +219,16 @@ test('move-and-clear removes the retargeted pill after a verified filesystem mov
 test('phone pill selection survives durable hydration with reordered fields',()=>{
  let fire,disk=[{mode:'action',path:'D:/a.txt',name:'A'}];
  const f=pillFixture({window:{location:{href:'https://papers.local/ayg/?papers-phone=1'},setTimeout:fn=>{fire=fn;return 1;},clearTimeout(){}},loadSavedStates:()=>disk});
- const event=new Event('pointerdown');Object.assign(event,{pointerType:'touch',clientX:10,clientY:10});f.container.children[1].children[0].dispatchEvent(event);fire();assert.equal(f.saved.selected().length,1);
- f.container.children[1].children[0].dispatchEvent(new Event('click',{cancelable:true}));assert.equal(f.saved.selected().length,1,'lifting the held finger must not deselect the pill');
+ const event=new Event('pointerdown');Object.assign(event,{pointerType:'touch',clientX:10,clientY:10});f.container.children.at(-1).children[0].dispatchEvent(event);fire();assert.equal(f.saved.selected().length,1);
+ f.container.children.at(-1).children[0].dispatchEvent(new Event('click',{cancelable:true}));assert.equal(f.saved.selected().length,1,'lifting the held finger must not deselect the pill');
  disk=[{name:'A',path:'D:/a.txt',mode:'action',icon:null}];f.saved.syncDurable();assert.equal(f.saved.selected().length,1);assert.equal(f.saved.selected()[0].name,'A');
  f.saved.finishSelection();assert.equal(f.saved.selected().length,0);
+});
+
+test('remove selected pills is one durable batch and never changes their targets',async()=>{
+ let fire,fail=true,disk=[{mode:'action',path:'D:/a.txt',name:'A'},{mode:'action',path:'D:/b.txt',name:'B'}];const original=structuredClone(disk);
+ const f=pillFixture({window:{location:{href:'https://papers.local/ayg/?papers-phone=1'},setTimeout:fn=>{fire=fn;return 1;},clearTimeout(){}},loadSavedStates:()=>disk,saveSavedStates:async next=>{if(fail)return false;disk=next;return true;}});
+ const event=new Event('pointerdown');Object.assign(event,{pointerType:'touch',clientX:10,clientY:10});f.container.children.at(-1).children[0].dispatchEvent(event);fire();f.container.children.at(-1).children[0].dispatchEvent(new Event('click'));
+ await assert.rejects(f.saved.removeSelected(),/could not be removed/);assert.equal(f.saved.selected().length,1);assert.deepEqual(disk,original);
+ fail=false;await f.saved.removeSelected();f.saved.finishSelection();assert.deepEqual(f.names(),['B']);assert.deepEqual(disk,[original[1]]);
 });

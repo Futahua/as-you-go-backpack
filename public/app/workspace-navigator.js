@@ -1,4 +1,6 @@
-import {fileTypeIcon} from './file-type-icons.js';
+import {defaultViewOptions,validateViewOptions,projectNavigatorItems} from './navigator-view-options.js';
+import {bindPhoneControlScale,bindDesktopControlScale} from './phone-control-scale.js';
+import {fileFallbackIcon} from './file-type-icons.js';
 import { bindPhoneFileGestures } from './phone-file-gestures.js';
 import {deviceFilesUrl} from './device-files-pane.js';
 import { bindNavigatorRowInteractions } from './navigator-row-interactions.js';
@@ -387,6 +389,7 @@ export function createWorkspaceNavigator(o) {
   {
     if (graphSlot) { graphSlot.className = 'navigator-graph-surface'; graphSlot.append(o.graphContent); }
     const viewToggle = button(d,'View: list, graph or thumbnails',VIEW_ICONS.list);
+    viewToggle.classList.add('navigator-view-toggle');
     let viewMode = 'list', viewModeSaving = false;
     try { const stored = d.defaultView.localStorage.getItem('papers:ayg:left-graph:'+o.rootId); viewMode = stored === '1' ? 'graph' : VIEW_MODES.includes(stored) ? stored : 'list'; } catch {}
     const saved = () => { const p=o.getState().view?.preferences||{}; return VIEW_MODES.includes(p.navigatorViewMode) ? p.navigatorViewMode : typeof p.navigatorGraphMode==='boolean' ? (p.navigatorGraphMode ? 'graph' : 'list') : null; };
@@ -426,10 +429,37 @@ export function createWorkspaceNavigator(o) {
     });
     tools.append(viewToggle); apply();
   }
+  const viewOptions={ayg:defaultViewOptions(),machine:{...defaultViewOptions(),key:'name'}},viewMetadata=new Map(),metadataPending=new Set(),metadataQueue=[];let metadataRunning=0;let metadataTimer=0,optionsPanel=null;
+  for(const mode of ['ayg','machine'])try{Object.assign(viewOptions[mode],JSON.parse(d.defaultView.localStorage.getItem('papers:ayg:view-options:'+o.rootId+':'+(o.host.deviceId||'local')+':'+mode)||'null'));validateViewOptions(viewOptions[mode]);}catch{viewOptions[mode]=mode==='machine'?{...defaultViewOptions(),key:'name'}:defaultViewOptions();}
+  const saveViewOptions=()=>{try{d.defaultView.localStorage.setItem('papers:ayg:view-options:'+o.rootId+':'+(o.host.deviceId||'local')+':'+s.mode,JSON.stringify(viewOptions[s.mode]));}catch{}};
+  const pumpMetadata=()=>{while(metadataRunning<4&&metadataQueue.length){const path=metadataQueue.shift();metadataRunning++;Promise.resolve(o.host.fileCapability('stat',{path})).then(result=>viewMetadata.set(path,result?.ok?result.entry:{})).catch(()=>viewMetadata.set(path,{})).finally(()=>{metadataPending.delete(path);metadataRunning--;clearTimeout(metadataTimer);metadataTimer=setTimeout(()=>render(),70);pumpMetadata();});}};
+  s.machineSort={key:viewOptions.machine.key,direction:viewOptions.machine.direction};
+  refresh.addEventListener('click',()=>viewMetadata.clear());
+  const projectRows=items=>{
+    const options=viewOptions[s.mode];
+    if(s.mode==='ayg'&&(options.key==='size'||options.key==='modified'||options.minSize||options.maxSize||options.after||options.before||/folder/.test(options.type))){
+      for(const item of items){const path=item.target;if(!path||item.kind==='group'||viewMetadata.has(path)||metadataPending.has(path))continue;metadataPending.add(path);metadataQueue.push(path);}
+    }
+    pumpMetadata();return projectNavigatorItems(items,options,viewMetadata);
+  };
+  const optionsButton=button(d,'Sort and filter this folder',['M3 4h14l-5.5 6v6l-3-1v-5z']);tools.append(optionsButton);
+  optionsButton.addEventListener('click',event=>{
+    event.stopPropagation();if(optionsPanel){optionsPanel.remove();optionsPanel=null;return;}
+    const mode=s.mode,current={...viewOptions[mode]},form=d.createElement('form');form.dataset.mode=mode;optionsPanel=form;form.className='navigator-view-options';form.setAttribute('aria-label','Sort and filter this folder');const title=d.createElement('strong');title.textContent='Sort & filter';form.append(title);
+    const fields={};
+    const field=(key,label,type='text',choices=null)=>{const wrap=d.createElement('label');wrap.textContent=label;const input=d.createElement(choices?'select':'input');if(choices)for(const [value,text]of choices){const option=d.createElement('option');option.value=value;option.textContent=text;input.append(option);}else input.type=type;input.name=key;input.setAttribute('aria-label',label);input.value=String(current[key]??'');wrap.append(input);form.append(wrap);fields[key]=input;};
+    if(!s.graphViewActive){field('key','Sort by','text',[['manual','Manual order'],['name','Name'],['type','Type'],['size','Size'],['modified','Modified date'],...(s.searchQuery?[['path','Path']]:[])]);field('direction','Order','text',[['1','Ascending'],['-1','Descending']]);}
+    field('name','Name contains');field('type','Type / extension');fields.type.placeholder='pdf, jpg, folders, images…';field('minSize','Minimum size');fields.minSize.placeholder='500 KB';field('maxSize','Maximum size');fields.maxSize.placeholder='10 MB';field('after','Modified from','date');field('before','Modified through','date');
+    const message=d.createElement('p');message.setAttribute('role','status');form.append(message);const actions=d.createElement('div');for(const [label,action]of [['Reset','reset'],['Cancel','button'],['Apply','submit']]){const b=d.createElement('button');b.type=action;b.textContent=label;if(label==='Cancel')b.addEventListener('click',()=>{form.remove();optionsPanel=null;});actions.append(b);}form.append(actions);
+    form.addEventListener('reset',event=>{event.preventDefault();Object.assign(viewOptions[mode],defaultViewOptions());if(mode==='machine')s.machineSort={key:'manual',direction:1};s.searchSort={key:null,direction:1};saveViewOptions();form.remove();optionsPanel=null;render();});
+    form.addEventListener('submit',event=>{event.preventDefault();try{const next={...current};for(const [key,input]of Object.entries(fields))next[key]=key==='direction'?Number(input.value):input.value;validateViewOptions(next);viewOptions[mode]=next;saveViewOptions();if(mode==='machine')s.machineSort={key:next.key,direction:next.direction};if(s.searchQuery)s.searchSort={key:next.key==='manual'?null:next.key,direction:next.direction};form.remove();optionsPanel=null;render();}catch(error){message.textContent=error.message;}});
+    const rect=optionsButton.getBoundingClientRect();form.style.left=Math.max(8,Math.min(rect.left,d.defaultView.innerWidth-320))+'px';form.style.top=Math.min(rect.bottom+6,Math.max(8,d.defaultView.innerHeight-440))+'px';d.body.append(form);fields.name.focus();
+  });
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
   panel.replaceChildren(head,search,loc,body,resizer);
   const remoteFiles = createRemoteFileView({ document: d, container: panel, call: params => o.host.fileCapability('remote-files', params) });
   const devices = button(d, 'Files on another device', ['M2 3h10v8H2z', 'M6 11v3', 'M3 14h6', 'M14 7h4v10h-4z']);
+  devices.classList.add('navigator-devices-button');
   devices.addEventListener('click', () => { void breadcrumbPopup.show(devices, { devices: true }, addDeviceSettings); });
   // On computers the device name pill opens this menu on right-click; the phone keeps the button.
   if (new URL(d.defaultView.location.href).searchParams.has('papers-phone')) tools.append(devices);
@@ -469,6 +499,7 @@ export function createWorkspaceNavigator(o) {
       body.querySelectorAll('.workspace-navigator-row[data-id]').forEach(row=>row.classList.toggle('selected',selected.has(row.dataset.id)));
     },
     reorder: async plan => {
+      viewOptions[s.mode].key='manual';saveViewOptions();
       if(s.mode==='ayg') {
         const saved=await o.reorderAyGItems?.(plan.moving,plan.parent,plan.beforeId);
         if(saved!==true){o.setStatus('The item order could not be saved.');render();return;}
@@ -497,7 +528,7 @@ export function createWorkspaceNavigator(o) {
   const icon = (x) => x.icon ? `<img src="${x.icon}" alt="">` : (x.kind === 'group' || x.kind === 'folder')
     ? svg(['M2.5 6h5l1.5 2h8.5v8.5h-15z']) : o.isWebLink(x)
       ? svg(['M3 10a7 7 0 1 0 14 0 7 7 0 1 0-14 0','M3.5 10h13','M10 3c2 2 2 12 0 14','M10 3c-2 2-2 12 0 14'])
-      : fileTypeIcon(x.target||x.path||x.name)||svg(['M5 2.5h7l3 3v12H5z','M12 2.5v4h4']);
+      : fileFallbackIcon(x);
   function hydrateArt(art, item) {
     if (item.kind !== 'shortcut' || item.icon) return;
     const web = o.isWebLink(item);
@@ -953,7 +984,7 @@ export function createWorkspaceNavigator(o) {
   function paintTreeBranches(branches=treeBranches){navigatorBranchHues(branches,branchColors);for(const b of branches){const color=b.id.startsWith('group-proxima-')?'oklch(68% 0.18 145deg)':`oklch(68% 0.18 ${branchColors.get(b.id)}deg)`;b.row.style.setProperty('--branch-color',color);b.children.style.setProperty('--branch-color',color);}}
   function aygChildren(parent, depth = 0) {
     const f = d.createDocumentFragment();
-    for (const x of o.itemsIn(o.getState(), parent).filter((v) => v.kind !== 'window-layout')) {
+    for (const x of projectRows(o.itemsIn(o.getState(), parent).filter((v) => v.kind !== 'window-layout'))) {
       const id = x.id, row = d.createElement('div');const start=treeRowIndex++;
       row.draggable=true;
       row.addEventListener('dragstart',event=>{
@@ -1126,7 +1157,7 @@ export function createWorkspaceNavigator(o) {
     return value>=parsed.bytes;
   }
   function filteredSearchResults() {
-    const source=[...(s.searchResult?.results||[])], filters=s.searchFilters;
+    const source=projectRows([...(s.searchResult?.results||[])]), filters=s.searchFilters;
     const contains=(value,needle)=>!needle||String(value||'').toLocaleLowerCase().includes(String(needle).toLocaleLowerCase());
     const filtered=source.filter((item)=>{
       const parent=parentPath(item.path);
@@ -1138,39 +1169,7 @@ export function createWorkspaceNavigator(o) {
         && matchesSizeFilter(item.size,filters.size)
         && contains(modified,filters.modified);
     });
-    const {key,direction}=s.searchSort;
-    if(!key)return filtered;
-    const value=(item)=>{
-      if(key==='path')return parentPath(item.path).toLocaleLowerCase();
-      if(key==='type')return searchTypeLabel(item).toLocaleLowerCase();
-      if(key==='size')return Number.isFinite(item.size)?item.size:-1;
-      if(key==='modified')return Number.isFinite(item.modifiedAt)?item.modifiedAt:-1;
-      return String(item.name||'').toLocaleLowerCase();
-    };
-    filtered.sort((a,b)=>{
-      const av=value(a),bv=value(b);
-      return (typeof av==='number'&&typeof bv==='number' ? av-bv : String(av).localeCompare(String(bv))) * direction;
-    });
     return filtered;
-  }
-  function machineSortValue(item, key) {
-    if (key === 'type') return searchTypeLabel(item).toLocaleLowerCase();
-    if (key === 'size') return Number.isFinite(item.size) ? item.size : -1;
-    if (key === 'modified') return Number.isFinite(item.modifiedAt) ? item.modifiedAt : -1;
-    return String(item.name || '').toLocaleLowerCase();
-  }
-  function sortedMachineItems(items) {
-    const { key, direction } = s.machineSort;
-    return [...(items || [])].sort((a, b) => {
-      if (a.kind === 'folder' && b.kind !== 'folder') return -1;
-      if (a.kind !== 'folder' && b.kind === 'folder') return 1;
-      const av = machineSortValue(a, key), bv = machineSortValue(b, key);
-      const compared = typeof av === 'number' && typeof bv === 'number'
-        ? av - bv
-        : String(av).localeCompare(String(bv));
-      if (compared) return compared * direction;
-      return String(a.name || '').localeCompare(String(b.name || ''));
-    });
   }
   function machineColumnHeader() {
     const header=d.createElement('div'); header.className='workspace-navigator-machine-columns';
@@ -1183,7 +1182,7 @@ export function createWorkspaceNavigator(o) {
       sort.addEventListener('click',()=>{
         if(s.machineSort.key===key)s.machineSort.direction*=-1;
         else s.machineSort={key,direction:1};
-        s.machineOrders.delete(s.path);
+        viewOptions.machine.key=key;viewOptions.machine.direction=s.machineSort.direction;saveViewOptions();s.machineOrders.delete(s.path);
         if(s.path)void loadMachine(s.path,false);
       });
       header.append(sort);
@@ -1209,12 +1208,12 @@ export function createWorkspaceNavigator(o) {
       sort.addEventListener('click',()=>{
         if(s.searchSort.key===key)s.searchSort.direction*=-1;
         else s.searchSort={key,direction:1};
-        renderSearch();
+        viewOptions[s.mode].key=key;viewOptions[s.mode].direction=s.searchSort.direction;saveViewOptions();renderSearch();
       });
       const input=d.createElement('input'); input.type='search'; input.value=s.searchFilters[key]||''; input.placeholder=placeholder; input.autocomplete='off'; input.spellcheck=false;
       input.setAttribute('aria-label',`Filter ${label}`);
       input.addEventListener('input',()=>{s.searchFilters[key]=input.value;renderSearch({preserveFocus:key});});
-      column.append(sort,input); header.append(column);
+      column.append(sort);if(key==='path')column.append(input);header.append(column);
     }
     return header;
   }
@@ -1312,7 +1311,7 @@ export function createWorkspaceNavigator(o) {
   }
   async function machineTree(path,depth,generation,tree){
  const fragment=d.createDocumentFragment(),result=await machineList(path);if(generation!==s.renderGen||s.mode!=='machine'||!result?.ok)return fragment;
- for(const x of orderedMachineItems(result.items||[],path)){const start=tree.index++,row=machineRow(x,depth);fragment.append(row);if(x.kind==='folder'&&s.machineExpanded.has(x.path)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left',`${14+depth*13}px`);children.append(await machineTree(x.path,depth+1,generation,tree));installNavigatorDropTarget(children,{path:x.path});fragment.append(children);tree.branches.push({id:`machine:${x.path.toLowerCase()}`,depth,start,end:tree.index-1,row,children});}}return fragment;
+ for(const x of projectRows(orderedMachineItems(result.items||[],path))){const start=tree.index++,row=machineRow(x,depth);fragment.append(row);if(x.kind==='folder'&&s.machineExpanded.has(x.path)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left',`${14+depth*13}px`);children.append(await machineTree(x.path,depth+1,generation,tree));installNavigatorDropTarget(children,{path:x.path});fragment.append(children);tree.branches.push({id:`machine:${x.path.toLowerCase()}`,depth,start,end:tree.index-1,row,children});}}return fragment;
  }
  async function renderMachineTree(){const generation=++s.renderGen,root=s.machineRoot;if(!root)return;setLocation([{key:root.toLowerCase(),label:root,title:root,path:root}]);const tree={index:1,branches:[]},fragment=d.createDocumentFragment(),row=machineRow({path:root,name:root,kind:'folder'});fragment.append(row);if(s.machineExpanded.has(root)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left','14px');children.append(await machineTree(root,1,generation,tree));installNavigatorDropTarget(children,{path:root});fragment.append(children);tree.branches.push({id:`machine:${root.toLowerCase()}`,depth:0,start:0,end:tree.index-1,row,children});}if(generation===s.renderGen&&s.mode==='machine'&&s.view==='tree'){body.replaceChildren(fragment);paintTreeBranches(tree.branches);}}
   function machinePathCrumbs(path) {
@@ -1370,7 +1369,7 @@ export function createWorkspaceNavigator(o) {
     if (!result?.ok) { body.innerHTML = `<p class="workspace-navigator-empty">${result?.message || 'Could not list this folder.'}</p>`; return; }
     back.disabled=s.hi<=0; fwd.disabled=s.hi>=s.history.length-1; up.disabled=parentPath(path).toLowerCase()===path.toLowerCase();
     body.replaceChildren();
-    const items=orderedMachineItems(sortedMachineItems(result.items || []),path);
+    const items=projectRows(orderedMachineItems(result.items || [],path));
     if(items.length){
       if(!s.thumbsActive)body.append(machineColumnHeader());
       const rows=d.createElement('div'); rows.className='workspace-navigator-machine-rows';
@@ -1561,11 +1560,14 @@ export function createWorkspaceNavigator(o) {
     input.addEventListener('blur',()=>{queueMicrotask(()=>{if(!busy&&d.activeElement!==input)row.remove();});});input.focus();input.select();
   });
   let machineClipboard=null;
+  function finishPhoneClipboard(){if(!phoneMode)return;phoneGestures?.finish();if(savedStates?.isSelecting())savedStates.finishSelection();paintPhoneCut();}
+  function paintPhoneCut(){if(!phoneMode)return;const record=o.sharedClipboard?.current(null),ids=new Set(record?.cut?record.ayg?.ids||[]:[]),paths=new Set(record?.cut?(record.paths||[]).map(x=>x.toLowerCase()):[]);for(const root of [body,graphSlot].filter(Boolean))for(const row of root.querySelectorAll('[data-id]')){const id=row.dataset.id,identity=o.resolveAyGDragIdentity?.(id)?.itemId;const cut=ids.has(id)||ids.has(identity)||paths.has(id.toLowerCase());if(row.classList.contains('phone-cut-item')!==cut)row.classList.toggle('phone-cut-item',cut);}}
+
   function copyNavigator(cut=false){
-    if(s.mode==='ayg'){machineClipboard=null;return cut?o.cutAyG():o.copyAyG();}
+    if(s.mode==='ayg'){machineClipboard=null;const result=cut?o.cutAyG():o.copyAyG();finishPhoneClipboard();return result;}
     if(!s.machineSelected.size)return;
     const paths=[...s.machineSelected],sharedId=o.sharedClipboard?.write({cut,paths})??null;
-    machineClipboard={paths,cut,base:o.getSession().clipboard,sharedId};
+    machineClipboard={paths,cut,base:o.getSession().clipboard,sharedId};finishPhoneClipboard();
     // Also on the Windows clipboard, as Explorer does (Cut included), so other apps can paste them.
     const local=paths.filter(path=>!REMOTE_ROOT.test(path));
     const written=local.length?Promise.resolve(o.host.fileCapability('clipboard-write-files',{paths:local,cut})).then(value=>value?.ok===true?value.fingerprint:null).catch(()=>null):Promise.resolve(null);
@@ -1623,6 +1625,12 @@ export function createWorkspaceNavigator(o) {
   },true);
   rename.addEventListener('click',()=>{
     if(s.mode==='ayg'&&o.getSession().selected.size!==1){o.setStatus('Select one item to rename.');return;}
+    if(phoneMode){
+      const id=[...o.getSession().selected][0],identity=o.resolveAyGDragIdentity?.(id)?.itemId||id;const item=s.mode==='machine'?s.selected:(o.getState().groups||[]).find(x=>x.id===identity)||(o.getState().shortcuts||[]).find(x=>x.id===identity);
+      if(!item){transferStatus('Select one entry to rename.',true);return;}
+      if(d.querySelector('.phone-rename-dialog'))return;const dialog=d.createElement('dialog');dialog.className='phone-rename-dialog';dialog.setAttribute('aria-label','Rename');const form=d.createElement('form'),title=d.createElement('strong'),input=d.createElement('input'),message=d.createElement('p'),actions=d.createElement('div'),cancel=d.createElement('button'),save=d.createElement('button');title.textContent='Rename';input.value=item.name||'';input.setAttribute('aria-label','New name');cancel.type='button';cancel.textContent='Cancel';save.type='submit';save.textContent='Save';actions.append(cancel,save);form.append(title,input,message,actions);dialog.append(form);d.body.append(dialog);const close=()=>{input.blur();dialog.close();dialog.remove();};cancel.addEventListener('click',close);dialog.addEventListener('cancel',()=>dialog.remove());
+      form.addEventListener('submit',async event=>{event.preventDefault();const name=input.value.trim();if(!name){message.textContent='Enter a name.';return;}save.disabled=true;try{if(s.mode==='ayg'){if(await o.renameAyG(id,name)===false)throw Error('Rename could not be saved.');}else{const result=await o.host.fileCapability('rename',{path:item.path,newName:name});if(!result?.ok)throw Error(result?.message||'Rename failed.');s.selected=null;s.machineListings.clear();}close();render();}catch(error){message.textContent=error.message;save.disabled=false;}});dialog.showModal();input.focus();input.select();return;
+    }
     let row=body.querySelector('.workspace-navigator-row.selected');
     let label=row?.querySelector('.workspace-navigator-label');
     let graphEditor=false;
@@ -1692,7 +1700,9 @@ export function createWorkspaceNavigator(o) {
     }
   }
   function render(){
+    if(optionsPanel&&optionsPanel.dataset.mode&&optionsPanel.dataset.mode!==s.mode){optionsPanel.remove();optionsPanel=null;}
     refreshGraphVisibility();
+    const activeOptions=viewOptions[s.mode];optionsButton.classList.toggle('is-filtered',Boolean(activeOptions.name||activeOptions.type||activeOptions.minSize||activeOptions.maxSize||activeOptions.after||activeOptions.before));
     savedStates?.syncDurable();
     syncChrome();
     if (s.collapsed) return;
@@ -1812,10 +1822,18 @@ export function createWorkspaceNavigator(o) {
     },
     art:(element,saved)=>{const folder=navigatorFolderPill(saved,o.getState().groups||[]);const linked=(folder.currentId||'').startsWith('group-proxima-');element.classList.toggle('navigator-proxima-pill-art',linked);const item=savedArtItem(saved);element.innerHTML=icon(item);const path=saved.path||(o.isAbsoluteWindowsPath(item.target)?item.target:null);if(path)loadMachineArt(element,{path,kind:saved.mode==='machine'?'folder':'file'});else hydrateArt(element,item);},
   });
+  const graphFilter=()=>{if(!graphSlot)return;const opt=viewOptions.ayg,active=s.mode==='ayg'&&Boolean(opt.name||opt.type||opt.minSize||opt.maxSize||opt.after||opt.before);const allowed=new Set(projectRows(o.itemsIn(o.getState(),currentAyG())).flatMap(x=>[x.id,x.shortcutId].filter(Boolean)));for(const tile of graphSlot.querySelectorAll('.icon-item[data-id]')){const hidden=active&&!allowed.has(tile.dataset.id);if(tile.classList.contains('navigator-filter-hidden')!==hidden)tile.classList.toggle('navigator-filter-hidden',hidden);}};
+  if(graphSlot){const observer=new d.defaultView.MutationObserver(graphFilter);observer.observe(graphSlot,{childList:true,subtree:true});d.defaultView.addEventListener('pagehide',()=>observer.disconnect(),{once:true});}
+  const filterTimer=d.defaultView.setInterval(graphFilter,350);d.defaultView.addEventListener('pagehide',()=>d.defaultView.clearInterval(filterTimer),{once:true});
+  if(!phoneMode)bindDesktopControlScale({panel,window:d.defaultView});
   if(phoneMode){
-    const transfer=d.createElement('button');transfer.type='button';transfer.className='phone-pill-transfer';transfer.hidden=true;const clearTransfer=d.createElement('button');clearTransfer.type='button';clearTransfer.className='phone-pill-transfer phone-pill-transfer-clear';clearTransfer.hidden=true;clearTransfer.textContent='↓×';clearTransfer.title='Move selected entries and clear their pills';clearTransfer.setAttribute('aria-label',clearTransfer.title);const pasteIcon=d.createElement('button');pasteIcon.type='button';pasteIcon.className='phone-pill-transfer phone-paste-icon';pasteIcon.hidden=true;pasteIcon.title='Paste clipboard image as selected icons';pasteIcon.setAttribute('aria-label',pasteIcon.title);pasteIcon.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 5V3h8v2M6 17l5-5 3 3 3-2 3 4"/><circle cx="16" cy="9" r="1"/></svg>';d.body.append(transfer,clearTransfer,pasteIcon);
+    bindPhoneControlScale({document:d,window:d.defaultView});
+    const cutObserver=new d.defaultView.MutationObserver(paintPhoneCut);for(const root of [body,graphSlot].filter(Boolean))cutObserver.observe(root,{childList:true,subtree:true});
+    d.defaultView.addEventListener('storage',paintPhoneCut);const cutTimer=d.defaultView.setInterval(paintPhoneCut,400);d.defaultView.addEventListener('pagehide',()=>{cutObserver.disconnect();d.defaultView.clearInterval(cutTimer);},{once:true});
+    const transfer=d.createElement('button');transfer.type='button';transfer.className='phone-pill-transfer';transfer.hidden=true;const clearTransfer=d.createElement('button');clearTransfer.type='button';clearTransfer.className='phone-pill-transfer phone-pill-transfer-clear';clearTransfer.hidden=true;clearTransfer.textContent='↓×';clearTransfer.title='Move selected entries and clear their pills';clearTransfer.setAttribute('aria-label',clearTransfer.title);const pasteIcon=d.createElement('button');pasteIcon.type='button';pasteIcon.className='phone-pill-transfer phone-paste-icon';pasteIcon.hidden=true;pasteIcon.title='Paste clipboard image as selected icons';pasteIcon.setAttribute('aria-label',pasteIcon.title);pasteIcon.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 5V3h8v2M6 17l5-5 3 3 3-2 3 4"/><circle cx="16" cy="9" r="1"/></svg>';const removePills=d.createElement('button');removePills.type='button';removePills.className='phone-pill-transfer phone-pill-remove';removePills.hidden=true;removePills.textContent='×';removePills.title='Remove selected pills';removePills.setAttribute('aria-label',removePills.title);d.body.append(transfer,clearTransfer,pasteIcon,removePills);
+    removePills.addEventListener('click',async()=>{removePills.disabled=true;try{await savedStates.removeSelected();savedStates.finishSelection();}catch(error){transferStatus(error.message,true);}finally{removePills.disabled=false;update();}});
     pasteIcon.addEventListener('click',async()=>{pasteIcon.disabled=true;try{const pills=savedStates.isSelecting()?savedStates.selected():null;const icon=await o.pasteSelectionIcon?.(pills);if(pills&&icon)await savedStates.setSelectedIcon(icon);transferStatus('Icons updated.',true);}catch(error){transferStatus(error.message,true);}finally{pasteIcon.disabled=false;}});
-    const update=()=>{if(phoneGestures.isSelecting()&&savedStates.isSelecting())savedStates.finishSelection();const down=savedStates.isSelecting();transfer.hidden=!down&&!phoneGestures.isSelecting();clearTransfer.hidden=!down;pasteIcon.hidden=!down&&(!phoneGestures.isSelecting()||s.mode==='machine');transfer.textContent=down?'↓':'↑';transfer.title=down?'Move selected pills into this folder':'Add selection to saved items';transfer.setAttribute('aria-label',transfer.title);};
+    const update=()=>{if(phoneGestures.isSelecting()&&savedStates.isSelecting())savedStates.finishSelection();const down=savedStates.isSelecting();transfer.hidden=!down&&!phoneGestures.isSelecting();clearTransfer.hidden=!down;removePills.hidden=!down;pasteIcon.hidden=!down&&(!phoneGestures.isSelecting()||s.mode==='machine');transfer.textContent=down?'↓':'↑';transfer.title=down?'Move selected pills into this folder':'Add selection to saved items';transfer.setAttribute('aria-label',transfer.title);};
     body.addEventListener('pointerup',()=>d.defaultView.setTimeout(update,0));body.addEventListener('click',update);
     const watch=new d.defaultView.MutationObserver(update);watch.observe(body,{attributes:true,attributeFilter:['class']});watch.observe(savedPills,{childList:true,subtree:true});
     const performTransfer=async clearPills=>{transfer.disabled=clearTransfer.disabled=true;try{
@@ -1828,7 +1846,8 @@ export function createWorkspaceNavigator(o) {
           if(s.mode==='machine'){
             const targets=paths?[paths]:o.nativeDragPaths?.([id])||[];
             if(!targets.length)throw Error('This entry has no file to move into this directory.');
-            const result=await moveNavigatorFiles({host:o.host,paths:targets,destination:s.path,retarget:async moves=>{completedMoves=moves;return await retargetMovedFiles(moves);}});ok=result?.ok===true;
+            const aliases=[];const moveTargets=[];for(const path of targets){let canonical=path;if(phoneMode){const resolved=await o.host.fileCapability('resolve-storage-path',{path});if(!resolved?.ok)throw Error(resolved?.message||'This file has no accessible Android storage location.');canonical=resolved.path;}moveTargets.push(canonical);if(canonical!==path)aliases.push({oldPath:path,canonical});}
+            const result=await moveNavigatorFiles({host:o.host,paths:moveTargets,destination:s.path,retarget:async moves=>{completedMoves=[...moves,...aliases.flatMap(alias=>{const move=moves.find(x=>x.oldPath===alias.canonical);return move?[{oldPath:alias.oldPath,newPath:move.newPath}]:[];})];return await retargetMovedFiles(completedMoves);}});ok=result?.ok===true;
           }else{
             const group=(o.getState().groups||[]).find(x=>x.id===id);const shortcut=(o.getState().shortcuts||[]).find(x=>x.id===id);
             const active=group?!group.bin:shortcut?.placements?.some(x=>!x.bin);
@@ -1841,13 +1860,13 @@ export function createWorkspaceNavigator(o) {
         }
         savedStates.finishSelection();s.machineListings.clear();render();transferStatus(chosen.length+' entr'+(chosen.length===1?'y':'ies')+' added to '+(s.mode==='machine'?'this directory':'As you Go')+'.',true);
       }else{
-        if(s.mode==='machine')for(const path of s.machineSelected){const result=await o.host.fileCapability('stat',{path});if(!result?.ok)throw Error(result?.message||'File unavailable.');const entry=result.entry;if(await savedStates.add({mode:entry.kind==='folder'?'machine':'action',path,machineRoot:path,view:'nav',name:entry.name})===false)throw Error('Saved items could not be saved.');}
-        else for(const id of o.getSession().selected){const item=[...(o.getState().groups||[]).map(x=>({...x,kind:'group'})),...(o.getState().shortcuts||[])].find(x=>x.id===id||x.id===o.resolveAyGDragIdentity?.(id)?.itemId);const saved=item&&navigatorSavedStateForItem(item);if(saved&&await savedStates.add(saved)===false)throw Error('Saved items could not be saved.');}
+        if(s.mode==='machine')for(const path of [...s.machineSelected]){const result=await o.host.fileCapability('stat',{path});if(!result?.ok)throw Error(result?.message||'File unavailable.');const entry=result.entry;if(await savedStates.add({mode:entry.kind==='folder'?'machine':'action',path,machineRoot:path,view:'nav',name:entry.name})===false)throw Error('Saved items could not be saved.');}
+        else for(const id of [...o.getSession().selected]){const item=[...(o.getState().groups||[]).map(x=>({...x,kind:'group'})),...(o.getState().shortcuts||[])].find(x=>x.id===id||x.id===o.resolveAyGDragIdentity?.(id)?.itemId);const saved=item&&navigatorSavedStateForItem(item);if(saved&&await savedStates.add(saved)===false)throw Error('Saved items could not be saved.');}
         phoneGestures.finish();
       }
     }catch(error){transferStatus(error.message,true);}finally{transfer.disabled=clearTransfer.disabled=false;update();}};
     transfer.addEventListener('click',()=>performTransfer(false));clearTransfer.addEventListener('click',()=>performTransfer(true));
-    d.defaultView.addEventListener('pagehide',()=>{watch.disconnect();transfer.remove();clearTransfer.remove();pasteIcon.remove();},{once:true});
+    d.defaultView.addEventListener('pagehide',()=>{watch.disconnect();transfer.remove();clearTransfer.remove();pasteIcon.remove();removePills.remove();},{once:true});
   }
   syncChrome(); render();
   o.workspace.addEventListener('pointerdown',(event)=>{

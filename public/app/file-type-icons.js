@@ -5,3 +5,14 @@ export function fileTypeIcon(path){
  const [,label,color]=family;const text=label==='</>'?'&lt;/&gt;':label;
  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2.5h9l5 5v14H5z" fill="${color}" fill-opacity=".13" stroke="${color}" stroke-width="1.25"/><path d="M14 2.5v5h5" fill="none" stroke="${color}"/><text x="12" y="16" text-anchor="middle" fill="${color}" font-family="system-ui,sans-serif" font-size="6.4" font-weight="700">${text}</text></svg>`;
 }
+
+const outline=paths=>`<svg viewBox="0 0 20 20" aria-hidden="true">${paths.map(d=>`<path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</svg>`;
+export function fileFallbackIcon(item={}){
+ if(item.kind==='folder'||item.kind==='group')return outline(['M2.5 6h5l1.5 2h8.5v8.5h-15z']);
+ return fileTypeIcon(item.target||item.path)||fileTypeIcon(item.name)||outline(['M5 2.5h7l3 3v12H5z','M12 2.5v4h4']);
+}
+export async function phoneGraphFallback(item,stat){
+ if(item?.icon)return item.icon;
+ let entry=null;try{const result=await stat(item.target);if(result?.ok)entry=result.entry;}catch{}
+ return 'data:image/svg+xml,'+encodeURIComponent(fileFallbackIcon({...item,...entry,target:item.target}).replace('<svg ','<svg xmlns="http://www.w3.org/2000/svg" ').replaceAll('currentColor','#b4c0ba'));
+}

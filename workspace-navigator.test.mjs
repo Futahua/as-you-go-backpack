@@ -387,7 +387,7 @@ test('graph rename uses selected graph record and Escape cancels without a write
  let callback,input,writes=0;
  const node=()=>({dataset:{},textContent:'',className:'',listeners:{},append(x){this.child=x;},prepend(x){this.child=x;},querySelector(){return null;},replaceChildren(x){this.child=x;input=x;},setAttribute(){},addEventListener(t,f){this.listeners[t]=f;},focus(){},select(){},remove(){this.removed=true;}});
  const graphSlot=node();graphSlot.querySelectorAll=()=>[];
- const context={rename:{addEventListener(t,f){callback=f}},body:{querySelector(){return null}},s:{mode:'ayg',graphViewActive:true},graphSlot,d:{createElement:node},o:{getSession:()=>({selected:new Set(['g'])}),getState:()=>({groups:[{id:'g',name:'Original'}]}),rootId:'root',itemsIn:()=>[],setStatus:assert.fail,renameAyG:()=>{writes++}},render(){},queueMicrotask};
+ const context={phoneMode:false,rename:{addEventListener(t,f){callback=f}},body:{querySelector(){return null}},s:{mode:'ayg',graphViewActive:true},graphSlot,d:{createElement:node},o:{getSession:()=>({selected:new Set(['g'])}),getState:()=>({groups:[{id:'g',name:'Original'}]}),rootId:'root',itemsIn:()=>[],setStatus:assert.fail,renameAyG:()=>{writes++}},render(){},queueMicrotask};
  vm.runInNewContext(source.slice(start,end),context);callback();
  assert.equal(input.value,'Original');assert.equal(graphSlot.child.dataset.rename,'true');
  input.listeners.keydown({key:'Escape',stopPropagation(){},preventDefault(){}});await Promise.resolve();

@@ -68,3 +68,5 @@ test('nothing happens outside the thumbnail view', () => {
   s.handlers.touchmove({ touches: [{ clientX: 0, clientY: 0 }, { clientX: 200, clientY: 0 }], preventDefault() { throw Error('not active'); } });
   assert.equal(zoom.size(), 112);
 });
+
+test('mobile requests bounded thumbnails for PC PDFs instead of fetching full previews',async()=>{const calls=[];const loader=createThumbnailLoader({window:{location:{href:'https://papers.local/?papers-phone=1'}},host:{fileCapability:async(op,p)=>{calls.push(op);return {ok:true,preview:{kind:'image',dataUrl:'data:image/jpeg;base64,YQ=='}};}}});const tile=art();loader.observe(tile,'\\\\papers~pc\\file.pdf');await tick();await tick();assert.deepEqual(calls,['thumbnail']);assert.equal(tile.children[0].src,'data:image/jpeg;base64,YQ==');});
