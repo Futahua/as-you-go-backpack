@@ -377,13 +377,16 @@ export function createWorkspaceNavigator(o) {
   // Graph tiles take the same hold-to-select / tap-to-toggle / double-tap-to-open gestures as rows.
   const phoneGestures=phoneMode?bindPhoneFileGestures({body,extra:[graphSlot],window:d.defaultView}):null;
   let refreshGraphVisibility = () => {};
-  // The view button cycles list → graph → thumbnails (graph only where it applies: As you Go, not a
-  // real folder). The mode is remembered per root here and in the document's preferences.
+  // The view button shows the current view (list, graph, thumbnails); clicking it drops down the other
+  // views to pick from (graph only where it applies: As you Go, not a real folder). The mode is
+  // remembered per root here and in the document's preferences.
   const VIEW_MODES=['list','graph','thumbs'];
+  const VIEW_ICONS={list:['M3 5h14','M3 10h14','M3 15h14'],graph:['M3 4h4v4H3z','M13 12h4v4h-4z','M7 6l8 8'],thumbs:['M4 4h12v12H4z']};
+  const VIEW_NAMES={list:'List',graph:'Graph',thumbs:'Thumbnails'};
   const thumbnails=createThumbnailLoader({host:o.host,window:d.defaultView});
   {
     if (graphSlot) { graphSlot.className = 'navigator-graph-surface'; graphSlot.append(o.graphContent); }
-    const viewToggle = button(d,'Switch list / graph / thumbnails',['M3 4h4v4H3z','M13 12h4v4h-4z','M7 6l8 8']);
+    const viewToggle = button(d,'View: list, graph or thumbnails',VIEW_ICONS.list);
     let viewMode = 'list', viewModeSaving = false;
     try { const stored = d.defaultView.localStorage.getItem('papers:ayg:left-graph:'+o.rootId); viewMode = stored === '1' ? 'graph' : VIEW_MODES.includes(stored) ? stored : 'list'; } catch {}
     const saved = () => { const p=o.getState().view?.preferences||{}; return VIEW_MODES.includes(p.navigatorViewMode) ? p.navigatorViewMode : typeof p.navigatorGraphMode==='boolean' ? (p.navigatorGraphMode ? 'graph' : 'list') : null; };
@@ -400,14 +403,26 @@ export function createWorkspaceNavigator(o) {
         if (thumbs) { s.viewBeforeThumbs=s.view; s.view='nav'; if(s.mode==='machine'&&!s.path)s.path=s.machineRoot; }
         else { if (s.viewBeforeThumbs) s.view=s.viewBeforeThumbs; s.viewBeforeThumbs=null; thumbnails.releaseAll(); }
       }
+      const shown=available().includes(viewMode)?viewMode:'list';
+      if(viewToggle.dataset.viewMode!==viewMode||viewToggle.dataset.shown!==shown){viewToggle.innerHTML=svg(VIEW_ICONS[shown]);viewToggle.dataset.shown=shown;}
       viewToggle.setAttribute('aria-pressed',String(viewMode!=='list')); viewToggle.dataset.viewMode=viewMode;
     };
-    refreshGraphVisibility=apply;
-    viewToggle.addEventListener('click',()=>{
-      const modes=available(),current=modes.includes(viewMode)?viewMode:'list';
-      viewMode=modes[(modes.indexOf(current)+1)%modes.length];
+    let viewMenu=null;
+    const closeViewMenu=()=>{viewMenu?.remove();viewMenu=null;};
+    const chooseView=mode=>{
+      closeViewMenu();if(mode===viewMode)return;viewMode=mode;
       persistUi('papers:ayg:left-graph:'+o.rootId,viewMode);viewModeSaving=true;render();
       Promise.resolve(o.saveNavigatorGraphMode?.(viewMode)).finally(()=>{viewModeSaving=false;render();});
+    };
+    refreshGraphVisibility=apply;
+    viewToggle.addEventListener('click',event=>{
+      event.stopPropagation();if(viewMenu){closeViewMenu();return;}
+      const current=available().includes(viewMode)?viewMode:'list';
+      viewMenu=d.createElement('div');viewMenu.className='navigator-view-menu';viewMenu.setAttribute('role','menu');
+      for(const mode of available().filter(m=>m!==current)){const item=button(d,VIEW_NAMES[mode],VIEW_ICONS[mode]);item.setAttribute('role','menuitem');item.addEventListener('click',e=>{e.stopPropagation();chooseView(mode);});viewMenu.append(item);}
+      const box=viewToggle.getBoundingClientRect();viewMenu.style.left=Math.round(box.left)+'px';viewMenu.style.top=Math.round(box.bottom+4)+'px';
+      d.body.append(viewMenu);
+      setTimeout(()=>d.addEventListener('pointerdown',function away(e){if(viewMenu&&!viewMenu.contains(e.target)&&e.target!==viewToggle&&!viewToggle.contains(e.target))closeViewMenu();if(!viewMenu)d.removeEventListener('pointerdown',away,true);},true));
     });
     tools.append(viewToggle); apply();
   }
