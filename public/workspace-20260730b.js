@@ -5014,8 +5014,10 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
       const selection=iconSelection();if(!selection.length)throw Error('Select an As you Go entry first.');if(await applyIcon(selection,file)!==true)throw Error('Icons could not be saved.');return true;
     },
     savedStatesReady: () => workspaceLoad.ok,
-    saveNavigatorGraphMode: async navigatorGraphMode => {
-      const saved=await commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,navigatorGraphMode}}};},{requireDurable:true});
+    // The view mode: 'list' | 'graph' | 'thumbs' (a boolean from older pages means graph or list).
+    saveNavigatorGraphMode: async mode => {
+      const navigatorViewMode=typeof mode==='string'?mode:(mode?'graph':'list'),navigatorGraphMode=navigatorViewMode==='graph';
+      const saved=await commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,navigatorGraphMode,navigatorViewMode}}};},{requireDurable:true});
       if(!saved)setStatus('Could not save the Files view mode.');
       workspaceNavigator?.render();
       return saved===true;

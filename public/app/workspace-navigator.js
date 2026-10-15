@@ -7,6 +7,7 @@ import { REMOTE_ROOT, remoteDeviceNames } from './remote-paths.js';
 import { moveNavigatorFiles as runNavigatorFileMove, retryNavigatorFileLinks, navigatorFileMoveAllowed } from './navigator-file-transfer.js';
 const svg = (paths) => `<svg viewBox="0 0 20 20" aria-hidden="true">${paths.map((d) => `<path d="${d}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</svg>`;
 import { createBreadcrumbPopup } from './navigator-breadcrumb-popup.js';
+import { createThumbnailLoader, installThumbnailZoom, isThumbnailImage, FOLDER_ART } from './navigator-thumbnails.js';
 import { createNavigatorSavedStates, navigatorDropEffect } from './navigator-saved-states.js';
 export { navigatorDropEffect } from './navigator-saved-states.js';
 import { assignSpatialFolderHues, FOLDER_DISTANCE } from '../graph-model-20260730b.js';
@@ -376,15 +377,39 @@ export function createWorkspaceNavigator(o) {
   // Graph tiles take the same hold-to-select / tap-to-toggle / double-tap-to-open gestures as rows.
   const phoneGestures=phoneMode?bindPhoneFileGestures({body,extra:[graphSlot],window:d.defaultView}):null;
   let refreshGraphVisibility = () => {};
-  if (graphSlot) {
-    graphSlot.className = 'navigator-graph-surface'; graphSlot.append(o.graphContent);
-    const graphToggle = button(d,'Switch list / graph',['M3 4h4v4H3z','M13 12h4v4h-4z','M7 6l8 8']);
-    let graphMode = false, graphModeSaving = false;
-    try { graphMode = d.defaultView.localStorage.getItem('papers:ayg:left-graph:'+o.rootId) === '1'; } catch {}
-    const apply = () => { const saved=o.getState().view?.preferences?.navigatorGraphMode;if(!graphModeSaving&&typeof saved==='boolean')graphMode=saved; const visible=graphMode&&s.mode==='ayg'&&!s.searchQuery;s.graphViewActive=visible;panel.classList.toggle('graph-mode',visible);graphSlot.hidden = !visible; body.hidden = visible; graphToggle.setAttribute('aria-pressed',String(graphMode)); };
+  // The view button cycles list → graph → thumbnails (graph only where it applies: As you Go, not a
+  // real folder). The mode is remembered per root here and in the document's preferences.
+  const VIEW_MODES=['list','graph','thumbs'];
+  const thumbnails=createThumbnailLoader({host:o.host,window:d.defaultView});
+  {
+    if (graphSlot) { graphSlot.className = 'navigator-graph-surface'; graphSlot.append(o.graphContent); }
+    const viewToggle = button(d,'Switch list / graph / thumbnails',['M3 4h4v4H3z','M13 12h4v4h-4z','M7 6l8 8']);
+    let viewMode = 'list', viewModeSaving = false;
+    try { const stored = d.defaultView.localStorage.getItem('papers:ayg:left-graph:'+o.rootId); viewMode = stored === '1' ? 'graph' : VIEW_MODES.includes(stored) ? stored : 'list'; } catch {}
+    const saved = () => { const p=o.getState().view?.preferences||{}; return VIEW_MODES.includes(p.navigatorViewMode) ? p.navigatorViewMode : typeof p.navigatorGraphMode==='boolean' ? (p.navigatorGraphMode ? 'graph' : 'list') : null; };
+    const available = () => graphSlot && s.mode==='ayg' ? VIEW_MODES : ['list','thumbs'];
+    const apply = () => {
+      const stored=saved(); if(!viewModeSaving&&stored)viewMode=stored;
+      const graphVisible=!!graphSlot&&viewMode==='graph'&&s.mode==='ayg'&&!s.searchQuery;
+      s.graphViewActive=graphVisible; panel.classList.toggle('graph-mode',graphVisible);
+      if (graphSlot) { graphSlot.hidden = !graphVisible; body.hidden = graphVisible; }
+      const thumbs=viewMode==='thumbs'&&!s.searchQuery;
+      if (thumbs !== Boolean(s.thumbsActive)) {
+        s.thumbsActive=thumbs; panel.classList.toggle('thumbs-mode',thumbs);
+        // Thumbnails show one folder at a time; the list's own tree/flat choice comes back after.
+        if (thumbs) { s.viewBeforeThumbs=s.view; s.view='nav'; if(s.mode==='machine'&&!s.path)s.path=s.machineRoot; }
+        else { if (s.viewBeforeThumbs) s.view=s.viewBeforeThumbs; s.viewBeforeThumbs=null; thumbnails.releaseAll(); }
+      }
+      viewToggle.setAttribute('aria-pressed',String(viewMode!=='list')); viewToggle.dataset.viewMode=viewMode;
+    };
     refreshGraphVisibility=apply;
-    graphToggle.addEventListener('click',()=>{graphMode=!graphMode;persistUi('papers:ayg:left-graph:'+o.rootId,graphMode?'1':'0');graphModeSaving=true;apply();Promise.resolve(o.saveNavigatorGraphMode?.(graphMode)).finally(()=>{graphModeSaving=false;apply();});});
-    tools.append(graphToggle); apply();
+    viewToggle.addEventListener('click',()=>{
+      const modes=available(),current=modes.includes(viewMode)?viewMode:'list';
+      viewMode=modes[(modes.indexOf(current)+1)%modes.length];
+      persistUi('papers:ayg:left-graph:'+o.rootId,viewMode);viewModeSaving=true;render();
+      Promise.resolve(o.saveNavigatorGraphMode?.(viewMode)).finally(()=>{viewModeSaving=false;render();});
+    });
+    tools.append(viewToggle); apply();
   }
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
   panel.replaceChildren(head,search,loc,body,resizer);
@@ -401,6 +426,7 @@ export function createWorkspaceNavigator(o) {
   d.addEventListener('keyup',event=>{if(event.key==='Shift')shiftExport(false);},true);
   d.addEventListener('pointermove',event=>shiftExport(event.shiftKey),{capture:true,passive:true});
   d.defaultView.addEventListener('blur',()=>shiftExport(false));
+  installThumbnailZoom({panel,surface:body,window:d.defaultView,isActive:()=>Boolean(s.thumbsActive)});
   installNavigatorDropTarget(body,()=>s.mode==='machine'?{path:s.view==='tree'?s.machineRoot:s.path}:{item:{id:s.view==='tree'?o.rootId:currentAyG()}});
   const rowInteractions = bindNavigatorRowInteractions({document:d,body,
     dropEffect: allowed => navigatorDropEffect(allowed,'move'),
@@ -962,20 +988,27 @@ export function createWorkspaceNavigator(o) {
         t.addEventListener('click',(e)=>{e.stopPropagation(); s.expanded.has(x.id)?s.expanded.delete(x.id):s.expanded.add(x.id); render();}); row.append(t);
       } else { const sp=d.createElement('span'); sp.className='navigator-tree-spacer'; row.append(sp); }
       const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x);
-      hydrateArt(art, x);
+      // Thumbnails: folders take the graph's folder art and images their real picture; the icon
+      // loader would overwrite either when it finishes, so it runs only for the rest.
+      const thumbArt=s.thumbsActive&&!x.icon&&(x.kind==='group'||(!o.isWebLink(x)&&isThumbnailImage(x.target)));
+      // A link to a real path waits for its stat below in thumbnails: a folder takes folder art.
+      const awaitStat=s.thumbsActive&&!x.icon&&!thumbArt&&x.kind!=='group'&&!o.isWebLink(x)&&o.isAbsoluteWindowsPath(x.target);
+      if(!thumbArt&&!awaitStat)hydrateArt(art, x);
+      else if(x.kind==='group')art.innerHTML=FOLDER_ART;else thumbnails.observe(art,x.target);
       const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=(x.id.startsWith('group-proxima-')?'\u2605 ':'')+(x.name||'Untitled');
       if(x.kind!=='group'&&!o.isWebLink(x)&&o.isAbsoluteWindowsPath(x.target)){
         void o.host.fileCapability('stat',{path:x.target}).then(result=>{
+          if(awaitStat){if(result?.ok&&result.entry?.kind==='folder')art.innerHTML=FOLDER_ART;else hydrateArt(art,x);}
           if(result?.ok&&result.entry?.kind==='folder'&&label.isConnected){
             row.classList.add('navigator-filesystem-link');
             installNavigatorDropTarget(row,{path:x.target});
             const marker=d.createElement('span');marker.className='navigator-linked-folder-marker';marker.textContent=' <';label.append(marker);
           }
-        }).catch(()=>{});
+        }).catch(()=>{if(awaitStat)hydrateArt(art,x);});
       }
 
       if(x.id.startsWith('group-proxima-'))label.classList.add('navigator-proxima-label');
-      if(x.kind==='group'&&s.expanded.has(x.id)){const h=d.createElement('span');h.className='navigator-tree-folder-heading';h.append(art,label);row.append(h);row.classList.add('navigator-tree-expanded');}else row.append(art,label);
+      if(x.kind==='group'&&s.expanded.has(x.id)&&!s.thumbsActive){const h=d.createElement('span');h.className='navigator-tree-folder-heading';h.append(art,label);row.append(h);row.classList.add('navigator-tree-expanded');}else row.append(art,label);
       row.tabIndex=-1;
       row.addEventListener('click',(e)=>{row.focus({preventScroll:true});if(e.shiftKey&&!e.ctrlKey){e.preventDefault();void enterAyG(x);return;}o.selectAyG(id,visibleIds(),{ctrlKey:e.ctrlKey});syncChrome();body.querySelectorAll('.workspace-navigator-row[data-id]').forEach(candidate=>candidate.classList.toggle('selected',o.getSession().selected.has(candidate.dataset.id)));body.tabIndex=-1;body.focus({preventScroll:true});});
       row.addEventListener('dblclick',(e)=>{
@@ -989,7 +1022,7 @@ export function createWorkspaceNavigator(o) {
         render();
       });
       if(x.kind==='group')installNavigatorDropTarget(row,{item:x});
-      f.append(row);if(x.kind==='group'&&s.expanded.has(x.id)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left',`${14+depth*13}px`);children.append(aygChildren(x.id,depth+1));installNavigatorDropTarget(children,{item:x});f.append(children);treeBranches.push({id,depth,start,end:treeRowIndex-1,row,children});}
+      f.append(row);if(x.kind==='group'&&s.expanded.has(x.id)&&!s.thumbsActive){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left',`${14+depth*13}px`);children.append(aygChildren(x.id,depth+1));installNavigatorDropTarget(children,{item:x});f.append(children);treeBranches.push({id,depth,start,end:treeRowIndex-1,row,children});}
     } return f;
   }
   function renderAyG() {treeBranches=[];treeRowIndex=0;
@@ -1192,7 +1225,9 @@ export function createWorkspaceNavigator(o) {
     row.addEventListener('dragend',()=>{s.internalDragSource=null;});
     const folder=x.kind==='folder', lead=d.createElement(folder?'button':'span'); lead.className=folder?'navigator-tree-toggle':'navigator-tree-spacer';
     if(folder){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'':'>';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
-    const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x); hydrateMachineArt(art,x);
+    const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x);
+    if(!s.thumbsActive||(x.kind!=='folder'&&!isThumbnailImage(x.path)))hydrateMachineArt(art,x);
+    else if(x.kind==='folder')art.innerHTML=FOLDER_ART;else thumbnails.observe(art,x.path);
     const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name;row.append(lead);if(folder&&!searchResult&&s.machineExpanded.has(x.path)){const h=d.createElement('span');h.className='navigator-tree-folder-heading';h.append(art,label);row.append(h);row.classList.add('navigator-tree-expanded');}else row.append(art,label);
     if(folder&&!searchResult)installNavigatorDropTarget(row,{path:x.path});
     if(!searchResult&&s.view==='nav'){
@@ -1322,12 +1357,12 @@ export function createWorkspaceNavigator(o) {
     body.replaceChildren();
     const items=orderedMachineItems(sortedMachineItems(result.items || []),path);
     if(items.length){
-      body.append(machineColumnHeader());
+      if(!s.thumbsActive)body.append(machineColumnHeader());
       const rows=d.createElement('div'); rows.className='workspace-navigator-machine-rows';
       const tree={index:0,branches:[]};
       for (const x of items) {
         const start=tree.index++,row=machineRow(x);rows.append(row);
-        if(x.kind==='folder'&&s.machineExpanded.has(x.path)) {
+        if(x.kind==='folder'&&s.machineExpanded.has(x.path)&&!s.thumbsActive) {
           const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left','14px');children.append(await machineTree(x.path,1,gen,tree));
           if(gen!==s.renderGen)return;
           rows.append(children);tree.branches.push({id:`machine:${x.path.toLowerCase()}`,depth:0,start,end:tree.index-1,row,children});
