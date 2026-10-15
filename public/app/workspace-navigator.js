@@ -984,18 +984,18 @@ export function createWorkspaceNavigator(o) {
         row.title = 'Drag to move in As you Go; Shift-drag to drag the file into another application';
       }
       if (x.kind === 'group') {
-        const t = d.createElement('button'); t.type='button'; t.className='navigator-tree-toggle'; t.textContent=s.expanded.has(x.id)?'':'>';
+        const t = d.createElement('button'); t.type='button'; t.className='navigator-tree-toggle'; t.textContent=s.thumbsActive?'>':s.expanded.has(x.id)?'':'>'; if(s.thumbsActive)t.classList.toggle('is-expanded',s.expanded.has(x.id));
         t.addEventListener('click',(e)=>{e.stopPropagation(); s.expanded.has(x.id)?s.expanded.delete(x.id):s.expanded.add(x.id); render();}); row.append(t);
       } else { const sp=d.createElement('span'); sp.className='navigator-tree-spacer'; row.append(sp); }
       const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x);
       // Thumbnails: folders take the graph's folder art and images their real picture; the icon
       // loader would overwrite either when it finishes, so it runs only for the rest.
-      const thumbArt=s.thumbsActive&&!x.icon&&(x.kind==='group'||(!o.isWebLink(x)&&isThumbnailImage(x.target)));
+      const thumbArt=s.thumbsActive&&!x.icon&&(x.kind==='group'||(!o.isWebLink(x)&&(isThumbnailImage(x.target)||isThumbnailImage(x.name))));
       // A link to a real path waits for its stat below in thumbnails: a folder takes folder art.
       const awaitStat=s.thumbsActive&&!x.icon&&!thumbArt&&x.kind!=='group'&&!o.isWebLink(x)&&o.isAbsoluteWindowsPath(x.target);
       if(!thumbArt&&!awaitStat)hydrateArt(art, x);
-      else if(x.kind==='group')art.innerHTML=FOLDER_ART;else thumbnails.observe(art,x.target);
-      const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=(x.id.startsWith('group-proxima-')?'\u2605 ':'')+(x.name||'Untitled');
+      else if(x.kind==='group')art.innerHTML=FOLDER_ART;else thumbnails.observe(art,x.target,x.name);
+      const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=(x.id.startsWith('group-proxima-')?'\u2605 ':'')+(s.thumbsActive&&x.kind==='group'?'> ':'')+(x.name||'Untitled');
       if(x.kind!=='group'&&!o.isWebLink(x)&&o.isAbsoluteWindowsPath(x.target)){
         void o.host.fileCapability('stat',{path:x.target}).then(result=>{
           if(awaitStat){if(result?.ok&&result.entry?.kind==='folder')art.innerHTML=FOLDER_ART;else hydrateArt(art,x);}
@@ -1022,7 +1022,7 @@ export function createWorkspaceNavigator(o) {
         render();
       });
       if(x.kind==='group')installNavigatorDropTarget(row,{item:x});
-      f.append(row);if(x.kind==='group'&&s.expanded.has(x.id)&&!s.thumbsActive){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left',`${14+depth*13}px`);children.append(aygChildren(x.id,depth+1));installNavigatorDropTarget(children,{item:x});f.append(children);treeBranches.push({id,depth,start,end:treeRowIndex-1,row,children});}
+      f.append(row);if(x.kind==='group'&&s.expanded.has(x.id)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left',`${14+depth*13}px`);children.append(aygChildren(x.id,depth+1));installNavigatorDropTarget(children,{item:x});f.append(children);treeBranches.push({id,depth,start,end:treeRowIndex-1,row,children});}
     } return f;
   }
   function renderAyG() {treeBranches=[];treeRowIndex=0;
@@ -1224,11 +1224,11 @@ export function createWorkspaceNavigator(o) {
     });
     row.addEventListener('dragend',()=>{s.internalDragSource=null;});
     const folder=x.kind==='folder', lead=d.createElement(folder?'button':'span'); lead.className=folder?'navigator-tree-toggle':'navigator-tree-spacer';
-    if(folder){lead.type='button';lead.textContent=s.machineExpanded.has(x.path)?'':'>';lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
+    if(folder){lead.type='button';lead.textContent=s.thumbsActive?'>':s.machineExpanded.has(x.path)?'':'>';if(s.thumbsActive)lead.classList.toggle('is-expanded',s.machineExpanded.has(x.path));lead.addEventListener('click',(e)=>{e.stopPropagation();void toggleMachine(x.path);});}
     const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x);
-    if(!s.thumbsActive||(x.kind!=='folder'&&!isThumbnailImage(x.path)))hydrateMachineArt(art,x);
-    else if(x.kind==='folder')art.innerHTML=FOLDER_ART;else thumbnails.observe(art,x.path);
-    const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name;row.append(lead);if(folder&&!searchResult&&s.machineExpanded.has(x.path)){const h=d.createElement('span');h.className='navigator-tree-folder-heading';h.append(art,label);row.append(h);row.classList.add('navigator-tree-expanded');}else row.append(art,label);
+    if(!s.thumbsActive||(x.kind!=='folder'&&!isThumbnailImage(x.path)&&!isThumbnailImage(x.name)))hydrateMachineArt(art,x);
+    else if(x.kind==='folder')art.innerHTML=FOLDER_ART;else thumbnails.observe(art,x.path,x.name);
+    const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name;row.append(lead);if(folder&&!searchResult&&s.machineExpanded.has(x.path)&&!s.thumbsActive){const h=d.createElement('span');h.className='navigator-tree-folder-heading';h.append(art,label);row.append(h);row.classList.add('navigator-tree-expanded');}else row.append(art,label);
     if(folder&&!searchResult)installNavigatorDropTarget(row,{path:x.path});
     if(!searchResult&&s.view==='nav'){
       row.classList.add('machine-list-row');
@@ -1362,7 +1362,7 @@ export function createWorkspaceNavigator(o) {
       const tree={index:0,branches:[]};
       for (const x of items) {
         const start=tree.index++,row=machineRow(x);rows.append(row);
-        if(x.kind==='folder'&&s.machineExpanded.has(x.path)&&!s.thumbsActive) {
+        if(x.kind==='folder'&&s.machineExpanded.has(x.path)) {
           const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left','14px');children.append(await machineTree(x.path,1,gen,tree));
           if(gen!==s.renderGen)return;
           rows.append(children);tree.branches.push({id:`machine:${x.path.toLowerCase()}`,depth:0,start,end:tree.index-1,row,children});

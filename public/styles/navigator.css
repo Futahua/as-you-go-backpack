@@ -127,9 +127,17 @@
 .workspace-navigator.thumbs-mode .workspace-navigator-body>.workspace-navigator-empty{grid-column:1/-1}
 .workspace-navigator.thumbs-mode .workspace-navigator-row,.workspace-navigator.thumbs-mode .workspace-navigator-row.machine-list-row{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:5px;min-width:0;min-height:0;padding:8px 4px 6px!important;border-radius:10px;text-align:center}
 .workspace-navigator.thumbs-mode .workspace-navigator-art{width:calc(var(--thumb-size,112px)*.74);height:calc(var(--thumb-size,112px)*.74);display:grid;place-items:center;overflow:visible}
-.workspace-navigator.thumbs-mode .workspace-navigator-art>svg,.workspace-navigator.thumbs-mode .workspace-navigator-art>img{width:100%;height:100%;object-fit:contain}
-.workspace-navigator.thumbs-mode .workspace-navigator-art.has-thumbnail>img{object-fit:cover;border-radius:6px;box-shadow:0 1px 4px #0006}
+.workspace-navigator.thumbs-mode .workspace-navigator-art>svg,.workspace-navigator.thumbs-mode .workspace-navigator-art>img{width:calc(var(--thumb-size,112px)*.74);height:calc(var(--thumb-size,112px)*.74);max-width:none;max-height:none;object-fit:contain}
+/* Pictures are shown whole (letterboxed in the square), as Opus does. */
+.workspace-navigator.thumbs-mode .workspace-navigator-art.has-thumbnail{overflow:hidden}
+.workspace-navigator.thumbs-mode .workspace-navigator-art.has-thumbnail>img{object-fit:contain;filter:drop-shadow(0 1px 3px #0008)}
 .workspace-navigator.thumbs-mode .workspace-navigator-art>.folder-art{width:92%;height:70%;margin-top:14%}
 .workspace-navigator.thumbs-mode .workspace-navigator-label{width:100%;white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:1.25}
-.workspace-navigator.thumbs-mode .navigator-tree-toggle,.workspace-navigator.thumbs-mode .navigator-tree-spacer,.workspace-navigator.thumbs-mode .workspace-navigator-machine-type,.workspace-navigator.thumbs-mode .workspace-navigator-machine-size,.workspace-navigator.thumbs-mode .workspace-navigator-machine-modified,.workspace-navigator.thumbs-mode .navigator-tree-branch{display:none}
-.workspace-navigator.thumbs-mode .workspace-navigator-row>.phone-selection-checkbox{top:4px;left:4px;transform:none;z-index:2}
+.workspace-navigator.thumbs-mode .navigator-tree-spacer,.workspace-navigator.thumbs-mode .workspace-navigator-machine-type,.workspace-navigator.thumbs-mode .workspace-navigator-machine-size,.workspace-navigator.thumbs-mode .workspace-navigator-machine-modified{display:none}
+.workspace-navigator.thumbs-mode .workspace-navigator-row>.phone-selection-checkbox{top:4px;left:auto;right:4px;transform:none;z-index:2}
+/* Opus-style expand arrow on a folder tile's top-left corner; an expanded folder's contents flow into
+   the grid right after it, tinted. */
+.workspace-navigator.thumbs-mode .navigator-tree-toggle{position:absolute;top:3px;left:3px;z-index:2;width:22px;height:22px;padding:0;border:0;background:none;color:#4ea1ff;font-weight:700;font-size:13px;line-height:22px;visibility:visible!important;transition:transform .12s}
+.workspace-navigator.thumbs-mode .navigator-tree-toggle.is-expanded{transform:rotate(90deg)}
+.workspace-navigator.thumbs-mode .navigator-tree-branch{display:contents}
+.workspace-navigator.thumbs-mode .navigator-tree-branch .workspace-navigator-row:not(.selected){background:color-mix(in srgb,#4ea1ff 9%,transparent)}

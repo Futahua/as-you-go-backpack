@@ -39,8 +39,10 @@ export function createThumbnailLoader({ host, window: w }) {
   }, { rootMargin: '200px' }) : null;
   return {
     /** Shows the real picture in `art` when `path` is an image, once the tile is near view. */
-    observe(art, path) {
-      if (!isThumbnailImage(path)) return;
+    observe(art, path, name = '') {
+      // A phone file picked with the paperclip is addressed by a content:// URI that may not end in its
+      // file name, so its name decides too.
+      if (!isThumbnailImage(path) && !isThumbnailImage(name)) return;
       art.dataset.thumbnailPath = path;
       if (observer) observer.observe(art); else { queue.push({ art, path }); pump(); }
     },
