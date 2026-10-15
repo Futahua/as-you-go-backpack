@@ -434,7 +434,7 @@ export function createWorkspaceNavigator(o) {
   const saveViewOptions=()=>{try{d.defaultView.localStorage.setItem('papers:ayg:view-options:'+o.rootId+':'+(o.host.deviceId||'local')+':'+s.mode,JSON.stringify(viewOptions[s.mode]));}catch{}};
   const pumpMetadata=()=>{while(metadataRunning<4&&metadataQueue.length){const path=metadataQueue.shift();metadataRunning++;Promise.resolve(o.host.fileCapability('stat',{path})).then(result=>viewMetadata.set(path,result?.ok?result.entry:{})).catch(()=>viewMetadata.set(path,{})).finally(()=>{metadataPending.delete(path);metadataRunning--;clearTimeout(metadataTimer);metadataTimer=setTimeout(()=>render(),70);pumpMetadata();});}};
   s.machineSort={key:viewOptions.machine.key,direction:viewOptions.machine.direction};
-  refresh.addEventListener('click',()=>viewMetadata.clear());
+  refresh.addEventListener('click',()=>{viewMetadata.clear();customIcons.clear();});
   const projectRows=items=>{
     const options=viewOptions[s.mode];
     if(s.mode==='ayg'&&(options.key==='size'||options.key==='modified'||options.minSize||options.maxSize||options.after||options.before||/folder/.test(options.type))){
@@ -450,9 +450,10 @@ export function createWorkspaceNavigator(o) {
     const field=(key,label,type='text',choices=null)=>{const wrap=d.createElement('label');wrap.textContent=label;const input=d.createElement(choices?'select':'input');if(choices)for(const [value,text]of choices){const option=d.createElement('option');option.value=value;option.textContent=text;input.append(option);}else input.type=type;input.name=key;input.setAttribute('aria-label',label);input.value=String(current[key]??'');wrap.append(input);form.append(wrap);fields[key]=input;};
     if(!s.graphViewActive){field('key','Sort by','text',[['manual','Manual order'],['name','Name'],['type','Type'],['size','Size'],['modified','Modified date'],...(s.searchQuery?[['path','Path']]:[])]);field('direction','Order','text',[['1','Ascending'],['-1','Descending']]);}
     field('name','Name contains');field('type','Type / extension');fields.type.placeholder='pdf, jpg, folders, images…';field('minSize','Minimum size');fields.minSize.placeholder='500 KB';field('maxSize','Maximum size');fields.maxSize.placeholder='10 MB';field('after','Modified from','date');field('before','Modified through','date');
+    {const wrap=d.createElement('label');wrap.className='navigator-view-options-check';const input=d.createElement('input');input.type='checkbox';input.name='showHidden';input.checked=current.showHidden===true;wrap.append(input,d.createTextNode('Show hidden items'));form.append(wrap);fields.showHidden=input;}
     const message=d.createElement('p');message.setAttribute('role','status');form.append(message);const actions=d.createElement('div');for(const [label,action]of [['Reset','reset'],['Cancel','button'],['Apply','submit']]){const b=d.createElement('button');b.type=action;b.textContent=label;if(label==='Cancel')b.addEventListener('click',()=>{form.remove();optionsPanel=null;});actions.append(b);}form.append(actions);
     form.addEventListener('reset',event=>{event.preventDefault();Object.assign(viewOptions[mode],defaultViewOptions());if(mode==='machine')s.machineSort={key:'manual',direction:1};s.searchSort={key:null,direction:1};saveViewOptions();form.remove();optionsPanel=null;render();});
-    form.addEventListener('submit',event=>{event.preventDefault();try{const next={...current};for(const [key,input]of Object.entries(fields))next[key]=key==='direction'?Number(input.value):input.value;validateViewOptions(next);viewOptions[mode]=next;saveViewOptions();if(mode==='machine')s.machineSort={key:next.key,direction:next.direction};if(s.searchQuery)s.searchSort={key:next.key==='manual'?null:next.key,direction:next.direction};form.remove();optionsPanel=null;render();}catch(error){message.textContent=error.message;}});
+    form.addEventListener('submit',event=>{event.preventDefault();try{const next={...current};for(const [key,input]of Object.entries(fields))next[key]=key==='direction'?Number(input.value):input.type==='checkbox'?input.checked:input.value;validateViewOptions(next);viewOptions[mode]=next;saveViewOptions();if(mode==='machine')s.machineSort={key:next.key,direction:next.direction};if(s.searchQuery)s.searchSort={key:next.key==='manual'?null:next.key,direction:next.direction};form.remove();optionsPanel=null;render();}catch(error){message.textContent=error.message;}});
     const rect=optionsButton.getBoundingClientRect();form.style.left=Math.max(8,Math.min(rect.left,d.defaultView.innerWidth-320))+'px';form.style.top=Math.min(rect.bottom+6,Math.max(8,d.defaultView.innerHeight-440))+'px';d.body.append(form);fields.name.focus();
   });
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
@@ -541,7 +542,7 @@ export function createWorkspaceNavigator(o) {
       s.icons.set(key, pending);
     }
     pending.then((source) => {
-      if (!source || !art.isConnected) return;
+      if (!source || !art.isConnected || art.classList.contains('has-custom-icon')) return;
       const image = d.createElement('img');
       image.src = source;
       image.alt = '';
@@ -565,6 +566,24 @@ export function createWorkspaceNavigator(o) {
       image.src = source;
       image.alt = '';
       art.replaceChildren(image);
+    });
+  }
+  // Custom pictures of real files and folders, kept on the device that owns them (Papers
+  // customIconStore / PhoneCustomIcons): one request per folder, shared by its rows.
+  const customIcons = new Map();
+  function customIconsIn(folder) {
+    const key = String(folder || '').toLocaleLowerCase();
+    if (!customIcons.has(key)) customIcons.set(key, Promise.resolve(o.host.fileCapability('custom-icons', { path: folder }))
+      .then((result) => result?.ok && result.icons && typeof result.icons === 'object' ? result.icons : {}).catch(() => ({})));
+    return customIcons.get(key);
+  }
+  function applyCustomIcon(art, item) {
+    void customIconsIn(parentPath(item.path)).then((icons) => {
+      const name = String(item.name || ''), lower = name.toLocaleLowerCase();
+      const icon = icons[name] ?? Object.entries(icons).find(([key]) => key.toLocaleLowerCase() === lower)?.[1];
+      if (!icon || !art.isConnected || !/^data:image\//.test(icon)) return;
+      const image = d.createElement('img'); image.src = icon; image.alt = ''; image.className = 'navigator-custom-icon';
+      art.classList.add('has-custom-icon'); art.replaceChildren(image);
     });
   }
   function hydrateMachineArt(art, item) {
@@ -1242,6 +1261,7 @@ export function createWorkspaceNavigator(o) {
     const art=d.createElement('span'); art.className='workspace-navigator-art'; art.innerHTML=icon(x);
     if(!s.thumbsActive||(x.kind!=='folder'&&!isThumbnailImage(x.path)&&!isThumbnailImage(x.name)))hydrateMachineArt(art,x);
     else if(x.kind==='folder')art.innerHTML=FOLDER_ART;else thumbnails.observe(art,x.path,x.name);
+    if(!searchResult)applyCustomIcon(art,x);
     const label=d.createElement('span'); label.className='workspace-navigator-label'; label.textContent=x.name;row.append(lead);if(folder&&!searchResult&&s.machineExpanded.has(x.path)&&!s.thumbsActive){const h=d.createElement('span');h.className='navigator-tree-folder-heading';h.append(art,label);row.append(h);row.classList.add('navigator-tree-expanded');}else row.append(art,label);
     if(folder&&!searchResult)installNavigatorDropTarget(row,{path:x.path});
     if(!searchResult&&s.view==='nav'){
@@ -1833,7 +1853,7 @@ export function createWorkspaceNavigator(o) {
     const transfer=d.createElement('button');transfer.type='button';transfer.className='phone-pill-transfer';transfer.hidden=true;const clearTransfer=d.createElement('button');clearTransfer.type='button';clearTransfer.className='phone-pill-transfer phone-pill-transfer-clear';clearTransfer.hidden=true;clearTransfer.textContent='↓×';clearTransfer.title='Move selected entries and clear their pills';clearTransfer.setAttribute('aria-label',clearTransfer.title);const pasteIcon=d.createElement('button');pasteIcon.type='button';pasteIcon.className='phone-pill-transfer phone-paste-icon';pasteIcon.hidden=true;pasteIcon.title='Paste clipboard image as selected icons';pasteIcon.setAttribute('aria-label',pasteIcon.title);pasteIcon.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 5V3h8v2M6 17l5-5 3 3 3-2 3 4"/><circle cx="16" cy="9" r="1"/></svg>';const removePills=d.createElement('button');removePills.type='button';removePills.className='phone-pill-transfer phone-pill-remove';removePills.hidden=true;removePills.textContent='×';removePills.title='Remove selected pills';removePills.setAttribute('aria-label',removePills.title);d.body.append(transfer,clearTransfer,pasteIcon,removePills);
     removePills.addEventListener('click',async()=>{removePills.disabled=true;try{await savedStates.removeSelected();savedStates.finishSelection();}catch(error){transferStatus(error.message,true);}finally{removePills.disabled=false;update();}});
     pasteIcon.addEventListener('click',async()=>{pasteIcon.disabled=true;try{const pills=savedStates.isSelecting()?savedStates.selected():null;const icon=await o.pasteSelectionIcon?.(pills);if(pills&&icon)await savedStates.setSelectedIcon(icon);transferStatus('Icons updated.',true);}catch(error){transferStatus(error.message,true);}finally{pasteIcon.disabled=false;}});
-    const update=()=>{if(phoneGestures.isSelecting()&&savedStates.isSelecting())savedStates.finishSelection();const down=savedStates.isSelecting();transfer.hidden=!down&&!phoneGestures.isSelecting();clearTransfer.hidden=!down;removePills.hidden=!down;pasteIcon.hidden=!down&&(!phoneGestures.isSelecting()||s.mode==='machine');transfer.textContent=down?'↓':'↑';transfer.title=down?'Move selected pills into this folder':'Add selection to saved items';transfer.setAttribute('aria-label',transfer.title);};
+    const update=()=>{if(phoneGestures.isSelecting()&&savedStates.isSelecting())savedStates.finishSelection();const down=savedStates.isSelecting();transfer.hidden=!down&&!phoneGestures.isSelecting();clearTransfer.hidden=!down;removePills.hidden=!down;pasteIcon.hidden=!down&&!phoneGestures.isSelecting();transfer.textContent=down?'↓':'↑';transfer.title=down?'Move selected pills into this folder':'Add selection to saved items';transfer.setAttribute('aria-label',transfer.title);};
     body.addEventListener('pointerup',()=>d.defaultView.setTimeout(update,0));body.addEventListener('click',update);
     const watch=new d.defaultView.MutationObserver(update);watch.observe(body,{attributes:true,attributeFilter:['class']});watch.observe(savedPills,{childList:true,subtree:true});
     const performTransfer=async clearPills=>{transfer.disabled=clearTransfer.disabled=true;try{
@@ -1886,6 +1906,14 @@ export function createWorkspaceNavigator(o) {
     copySelectionPaths,
     downloadSelectionPaths:()=>s.mode==='machine'?[...s.machineSelected]:(o.nativeDragPaths?.([...o.getSession().selected])||[]),
     isMachineMode: () => s.mode === 'machine',
+    selectedMachinePaths: () => s.mode === 'machine' ? [...s.machineSelected] : [],
+    /** Gives real files and folders a custom picture (null removes it), stored on their own device. */
+    async setMachineIcons(paths, icon) {
+      const result = await o.host.fileCapability('custom-icon-set', { paths, icon });
+      if (!result?.ok) throw Error(result?.message || 'The picture could not be saved.');
+      for (const path of paths) customIcons.delete(parentPath(path).toLocaleLowerCase());
+      render(); return true;
+    },
     currentFolder: () => s.mode === 'ayg' && s.view !== 'tree' ? currentAyG() : o.rootId,
     isCollapsed: () => s.collapsed,
     setCollapsed,

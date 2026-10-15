@@ -14,9 +14,7 @@ function canvasBlob(canvas, quality) {
 /** Downsizes and re-encodes an image so it is safe to store as a shortcut
  * or folder icon: no larger than 512px on its longest side and no more than
  * ~500KB. Small images pass through as-is. */
-export async function compressIconFile(file) {
-  const maximumDimension = 512;
-  const targetBytes = 500_000;
+export async function compressIconFile(file, { maximumDimension = 512, targetBytes = 500_000 } = {}) {
   const bitmap = await createImageBitmap(file);
   try {
     if (

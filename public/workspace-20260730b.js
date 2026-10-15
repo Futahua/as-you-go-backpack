@@ -5019,7 +5019,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
       const [head,base64]=String(result.dataUrl).split(',',2),bytes=Uint8Array.from(atob(base64||''),c=>c.charCodeAt(0));
       const file=new Blob([bytes],{type:/^data:([^;,]+)/.exec(head)?.[1]||'image/png'});
       if(pills){const ids=pills.map(x=>x.itemId||x.currentId||x.art?.shortcutId).filter(Boolean);const selection=ids.map(id=>{const g=state.groups.find(x=>x.id===id);const item=g||shortcutByRecordOrPlacementId(id);return item?{kind:g?'group':'shortcut',item}:null;}).filter(Boolean);if(selection.length&&await applyIcon(selection,file)!==true)throw Error('Icons could not be saved.');return await compressIconFile(file);}
-      const selection=iconSelection();if(!selection.length)throw Error('Select an As you Go entry first.');if(await applyIcon(selection,file)!==true)throw Error('Icons could not be saved.');return true;
+      const selection=iconSelection();if(!selection.length)throw Error('Select an entry or a file first.');if(await applyIcon(selection,file)!==true)throw Error('Icons could not be saved.');return true;
     },
     savedStatesReady: () => workspaceLoad.ok,
     // The view mode: 'list' | 'graph' | 'thumbs' (a boolean from older pages means graph or list).
@@ -5410,7 +5410,8 @@ const editorDialog = createEditorDialog({
   createShortcut,
 });
 const iconSelection=(targetId=null)=>{
-  if(workspaceNavigator?.isMachineMode?.())return [];
+  // Real files and folders: the picture is kept on the device that owns them.
+  if(workspaceNavigator?.isMachineMode?.()){const paths=workspaceNavigator.selectedMachinePaths?.()||[];return (targetId&&!paths.includes(targetId)?[targetId]:paths).map(path=>({kind:'native',path}));}
   // A drop onto an unselected row changes that row alone; onto a selected row, the whole selection.
   const ids=targetId&&!session.selected.has(targetId)?[targetId]:[...session.selected];
   return ids.map(id=>{
@@ -5419,6 +5420,8 @@ const iconSelection=(targetId=null)=>{
   }).filter(Boolean);
 };
 const applyIcon=async(selection,file)=>{
+  const natives=selection.filter(x=>x.kind==='native');
+  if(natives.length)return workspaceNavigator.setMachineIcons(natives.map(x=>x.path),await compressIconFile(file,{maximumDimension:256,targetBytes:180_000}));
   const icon=await compressIconFile(file);
   return commitWhenWorkspaceReady(()=>replaceSelectedIcons(store.getSnapshot(),selection,icon),{requireDurable:true,preserveSelection:true});
 };

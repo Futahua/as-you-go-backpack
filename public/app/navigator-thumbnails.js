@@ -20,7 +20,7 @@ export function createThumbnailLoader({ host, window: w }) {
   const pump = () => {
     while (running < 3 && queue.length) {
       const job = queue.shift(); if (!job.art.isConnected) continue; running++;
-      load(job.path).then((src) => { if (src && job.art.isConnected) show(job.art, src); }).finally(() => { running--; pump(); });
+      load(job.path).then((src) => { if (src && job.art.isConnected && !job.art.classList?.contains?.('has-custom-icon')) show(job.art, src); }).finally(() => { running--; pump(); });
     }
   };
   function load(path) {
