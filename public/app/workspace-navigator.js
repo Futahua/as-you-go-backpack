@@ -774,7 +774,7 @@ export function createWorkspaceNavigator(o) {
     panel.dataset.mode = s.mode;
     panel.dataset.view = s.view;
     const remoteRoot = s.mode === 'machine' && String(s.path || '').match(REMOTE_ROOT);
-    provider.textContent = remoteRoot ? remoteDeviceNames.get(remoteRoot[0].toLowerCase()) || 'Device' : s.mode === 'machine' ? (/^\\\\papers~phone\\/i.test(s.path||'') ? deviceLabel || 'This phone' : 'Opus') : deviceLabel || 'As you Go';
+    provider.textContent = remoteRoot ? remoteDeviceNames.get(remoteRoot[0].toLowerCase()) || 'Device' : s.mode === 'machine' ? (/^\\\\papers~phone\\/i.test(s.path||'') ? deviceLabel || 'This phone' : deviceLabel || 'Opus') : deviceLabel || 'As you Go';
     provider.title = 'Devices: files or As you Go (middle-click a choice for a new tab)';
     provider.setAttribute('aria-label', provider.title);
     panel.classList.toggle('collapsed', s.collapsed);
