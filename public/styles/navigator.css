@@ -163,3 +163,16 @@ html.papers-phone .phone-selection-mode .icon-item{touch-action:none;user-select
 .workspace-navigator .navigator-devices-button,.workspace-navigator .workspace-navigator-provider{color:#91bd99}
 
 html:not(.papers-phone) .workspace-navigator-header{zoom:var(--navigator-toolbar-scale,1)}
+/* The As you Go pill's menu: each device with its Files and its As you Go (device-modes.js). */
+.navigator-mode-menu{position:fixed;z-index:3000;min-width:220px;max-width:calc(100vw - 16px);padding:4px;border:1px solid var(--line,#414d5b);border-radius:8px;background:var(--surface,#232a31);box-shadow:0 8px 24px #0008;color:var(--text,#e6e9ef)}
+.navigator-mode-row{display:flex;align-items:center;gap:4px;padding:2px 2px 2px 8px;border-radius:6px}
+.navigator-mode-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.navigator-mode-menu .navigator-mode-choice{display:grid;place-items:center;opacity:.7}
+.navigator-mode-menu .navigator-mode-choice:hover{opacity:1}
+.navigator-mode-menu .navigator-mode-choice.active{opacity:1;background:color-mix(in srgb,var(--accent,#afc3d4) 22%,transparent);outline:1px solid color-mix(in srgb,var(--accent,#afc3d4) 55%,transparent)}
+.navigator-mode-menu .navigator-device-settings-button{margin:4px 2px 0 auto;display:grid;place-items:center}
+/* Opus's sort bar above the thumbnail grid. */
+.workspace-navigator.thumbs-mode .navigator-thumbs-sort{grid-column:1/-1;position:sticky;top:-8px;z-index:2;display:flex;margin:-8px -8px 2px;border-bottom:1px solid var(--border-subtle,#ffffff1a);background:var(--surface,#232a31)}
+.navigator-thumbs-sort-key{flex:0 0 auto;padding:4px 12px;border:0;border-right:1px solid var(--border-subtle,#ffffff1a);background:transparent;color:var(--text-muted,#a9b1bc);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.navigator-thumbs-sort-key:hover{color:var(--text,#e6e9ef);background:var(--surface-soft,#ffffff0d)}
+.navigator-thumbs-sort-key.active{color:var(--text,#e6e9ef)}

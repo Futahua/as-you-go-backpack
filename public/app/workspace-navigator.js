@@ -1,3 +1,4 @@
+import {currentDeviceMode,sameDeviceMode,writeNavigateIntent,takeNavigateIntent,NAVIGATE_INTENT_KEY} from './device-modes.js';
 import {defaultViewOptions,validateViewOptions,projectNavigatorItems} from './navigator-view-options.js';
 import {bindPhoneControlScale,bindDesktopControlScale} from './phone-control-scale.js';
 import {fileFallbackIcon} from './file-type-icons.js';
@@ -462,9 +463,8 @@ export function createWorkspaceNavigator(o) {
   const devices = button(d, 'Files on another device', ['M2 3h10v8H2z', 'M6 11v3', 'M3 14h6', 'M14 7h4v10h-4z']);
   devices.classList.add('navigator-devices-button');
   devices.addEventListener('click', () => { void breadcrumbPopup.show(devices, { devices: true }, addDeviceSettings); });
-  // On computers the device name pill opens this menu on right-click; the phone keeps the button.
-  if (new URL(d.defaultView.location.href).searchParams.has('papers-phone')) tools.append(devices);
-  else provider.addEventListener('contextmenu', event => { event.preventDefault(); event.stopPropagation(); void breadcrumbPopup.show(provider, { devices: true }, addDeviceSettings); });
+  // The pill opens the six places (each device's files or As you Go); right-click opens it too.
+  provider.addEventListener('contextmenu', event => { event.preventDefault(); event.stopPropagation(); void openModeMenu(); });
   if (graphSlot) { panel.insertBefore(graphSlot,resizer); panel.classList.add('has-graph-surface'); }
   // Holding Shift turns the selection blue: a drag now carries the real files to other apps.
   const shiftExport=on=>panel.classList.toggle('shift-export',Boolean(on));
@@ -617,20 +617,7 @@ export function createWorkspaceNavigator(o) {
     if (s.mode === 'machine' && REMOTE_ROOT.test(String(s.path || ''))) { clearSearch({ renderNow: false }); setMode('ayg'); }
   }
   // Gear in the devices popup: each device's inbox, where files dropped into its As you Go land.
-  function addDeviceSettings(popup, { isOpen, close }) {
-    if(new URL(d.defaultView.location.href).searchParams.has('papers-phone')){
-      const folder=d.createElement('button');folder.type='button';folder.style.cssText='display:flex;align-items:center;gap:12px;width:100%;max-width:none;padding:8px 10px;margin:0 0 6px;background:transparent;border:0;border-bottom:1px solid #ffffff18;border-radius:0;color:inherit;font:inherit;text-align:left;white-space:nowrap';const title=d.createElement('span'),value=d.createElement('span');title.textContent='Download to';title.style.opacity='.65';value.textContent='Loading…';value.style.cssText='margin-left:auto;overflow:hidden;text-overflow:ellipsis;min-width:0;font-size:12px';folder.append(title,value);popup.append(folder);
-      const show=response=>{const result=response?.result??response;value.textContent=result?.valid?result.name:'Choose folder…';folder.title=result?.valid?'Change phone download folder':'Choose a writable phone folder';};
-      void o.host.fileCapability('remote-files',{operation:'download-folder'}).then(value=>{if(isOpen())show(value);});
-      folder.addEventListener('click',async()=>{folder.disabled=true;try{const value=await o.host.fileCapability('remote-files',{operation:'download-folder-pick'});if(value?.ok===false)throw Error(value.message);if(isOpen())show(value);}catch(error){o.setStatus(error.message);}finally{folder.disabled=false;}});
-    }
-    const here = d.createElement('div'); here.className = 'workspace-navigator-row navigator-this-device';
-    const spacer = d.createElement('span'); spacer.className = 'navigator-tree-spacer';
-    const art = d.createElement('span'); art.className = 'workspace-navigator-art'; art.innerHTML = svg(['M3 4.5h14v9H3z', 'M7.5 16.5h5M10 13.5v3']);
-    const label = d.createElement('span'); label.className = 'workspace-navigator-label'; label.textContent = 'This device';
-    here.append(spacer, art, label);
-    here.addEventListener('click', () => { close(); returnToThisDevice(); });
-    popup.append(here);
+  function addDeviceSettings(popup, { isOpen }) {
     const gear = button(d, 'Device settings', ['M10 7.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5z', 'M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M4.3 15.7l1.8-1.8M13.9 6.1l1.8-1.8']);
     gear.classList.add('navigator-device-settings-button');
     gear.addEventListener('click', async event => {
@@ -640,6 +627,13 @@ export function createWorkspaceNavigator(o) {
       const own = o.host.deviceId ? null : await o.host.fileCapability('remote-files', { operation: 'status' }).then(value => value?.result?.owner).catch(() => null);
       if (!isOpen()) return;
       popup.replaceChildren(gear);
+      // The phone's download folder lives with the other device settings.
+    if(new URL(d.defaultView.location.href).searchParams.has('papers-phone')){
+      const folder=d.createElement('button');folder.type='button';folder.style.cssText='display:flex;align-items:center;gap:12px;width:100%;max-width:none;padding:8px 10px;margin:0 0 6px;background:transparent;border:0;border-bottom:1px solid #ffffff18;border-radius:0;color:inherit;font:inherit;text-align:left;white-space:nowrap';const title=d.createElement('span'),value=d.createElement('span');title.textContent='Download to';title.style.opacity='.65';value.textContent='Loading…';value.style.cssText='margin-left:auto;overflow:hidden;text-overflow:ellipsis;min-width:0;font-size:12px';folder.append(title,value);popup.append(folder);
+      const show=response=>{const result=response?.result??response;value.textContent=result?.valid?result.name:'Choose folder…';folder.title=result?.valid?'Change phone download folder':'Choose a writable phone folder';};
+      void o.host.fileCapability('remote-files',{operation:'download-folder'}).then(value=>{if(isOpen())show(value);});
+      folder.addEventListener('click',async()=>{folder.disabled=true;try{const value=await o.host.fileCapability('remote-files',{operation:'download-folder-pick'});if(value?.ok===false)throw Error(value.message);if(isOpen())show(value);}catch(error){o.setStatus(error.message);}finally{folder.disabled=false;}});
+    }
       for (const device of [...(own?.id ? [{ path: '\\\\papers~' + own.id, name: own.name || 'This device' }] : []), ...devicesList]) {
         const id = device.path.slice(9);
         const row = d.createElement('label'); row.className = 'navigator-device-inbox';
@@ -659,6 +653,76 @@ export function createWorkspaceNavigator(o) {
     });
     popup.append(gear);
   }
+  // The pill's menu: every device, each with its real files and its As you Go.
+  const PHONE_PAGE = new URL(d.defaultView.location.href).searchParams.has('papers-phone');
+  const MODE_ICONS = { files: ['M2.5 6h5l1.5 2h8.5v8.5h-15z'], ayg: ['M3 3.5h6v6H3z', 'M11 3.5h6v6h-6z', 'M3 11.5h6v5H3z', 'M11 11.5h6v5h-6z'] };
+  const MODE_NAMES = { files: 'Files', ayg: 'As you Go' };
+  let modeMenu = null;
+  const closeModeMenu = () => { modeMenu?.remove(); modeMenu = null; };
+  async function openModeMenu() {
+    if (modeMenu) { closeModeMenu(); return; }
+    const menu = modeMenu = d.createElement('div'); menu.className = 'navigator-mode-menu'; menu.setAttribute('role', 'menu');
+    const box = provider.getBoundingClientRect();
+    menu.style.left = Math.round(Math.max(8, Math.min(box.left, d.defaultView.innerWidth - 280))) + 'px'; menu.style.top = Math.round(box.bottom + 4) + 'px';
+    d.body.append(menu);
+    setTimeout(() => d.addEventListener('pointerdown', function away(event) { if (modeMenu === menu && !menu.contains(event.target) && !provider.contains(event.target)) closeModeMenu(); if (modeMenu !== menu) d.removeEventListener('pointerdown', away, true); }, true));
+    const devicesList = await remoteDevices().catch(() => []);
+    if (modeMenu !== menu) return;
+    const current = currentDeviceMode({ remoteDevice: o.remoteDevice, mode: s.mode, path: s.path });
+    const rows = [{ device: 'self', name: 'This device' }, ...devicesList.map(device => ({ device: device.deviceId.toLowerCase(), name: device.name }))];
+    for (const row of rows) {
+      const line = d.createElement('div'); line.className = 'navigator-mode-row';
+      const name = d.createElement('span'); name.className = 'navigator-mode-name'; name.textContent = row.name;
+      line.append(name);
+      for (const mode of ['files', 'ayg']) {
+        const target = { device: row.device, mode }, choice = button(d, `${row.name}: ${MODE_NAMES[mode]}`, MODE_ICONS[mode]);
+        choice.classList.add('navigator-mode-choice'); choice.setAttribute('role', 'menuitemradio');
+        const active = sameDeviceMode(current, target); choice.classList.toggle('active', active); choice.setAttribute('aria-checked', String(active));
+        choice.addEventListener('click', event => { event.stopPropagation(); closeModeMenu(); void navigateToMode(target); });
+        line.append(choice);
+      }
+      menu.append(line);
+    }
+    addDeviceSettings(menu, { isOpen: () => modeMenu === menu });
+  }
+  // This device's own files: the phone's internal storage, or the folder Files last showed on a computer.
+  async function ownFilesRoot() {
+    if (PHONE_PAGE) return '\\\\papers~phone\\primary';
+    let root = null; try { root = d.defaultView.localStorage.getItem('papers:ayg:navigator-local-root'); } catch {}
+    if (!root && s.machineRoot && !/^\\\\papers~/i.test(s.machineRoot)) root = s.machineRoot;
+    if (root) { const stat = await o.host.fileCapability('stat', { path: root }).catch(() => null); if (stat?.ok && stat.entry?.kind === 'folder') return root; }
+    return null;
+  }
+  async function openDeviceAyg(deviceId) {
+    const next = new URL(d.defaultView.location.href);
+    for (const key of ['papers-surface', 'as-you-go-folder']) next.searchParams.delete(key);
+    next.searchParams.set('papers-device', deviceId);
+    try { if (await o.openDeviceInline?.(next.toString())) return; await o.host.openNewSurface(next.toString()); }
+    catch (error) { o.setStatus(error instanceof Error ? error.message : String(error)); }
+  }
+  async function navigateToMode(target) {
+    if (sameDeviceMode(currentDeviceMode({ remoteDevice: o.remoteDevice, mode: s.mode, path: s.path }), target)) return;
+    if (o.remoteDevice) {
+      // On another device's As you Go page, its own As you Go stays here; anything else goes back to
+      // this device's page, which carries the choice out (device-modes.js).
+      if (target.device === String(o.remoteDevice).toLowerCase() && target.mode === 'ayg') { clearSearch({ renderNow: false }); setMode('ayg'); return; }
+      writeNavigateIntent(d.defaultView.localStorage, target); o.leaveDevice?.(); return;
+    }
+    clearSearch({ renderNow: false });
+    if (target.device === 'self' && target.mode === 'ayg') { setMode('ayg'); return; }
+    if (target.device === 'self') {
+      const root = await ownFilesRoot();
+      if (root) { await enterMachine(root, false); return; }
+      if (s.mode === 'machine') setMode('ayg');
+      await switchProvider(); return;
+    }
+    if (target.mode === 'files') { await enterMachine(`\\\\papers~${target.device}`, false); return; }
+    await openDeviceAyg(target.device);
+  }
+  // A choice made on another device's page arrives here: on load, or while this page waits under it.
+  const applyNavigateIntent = () => { if (o.remoteDevice) return; const target = takeNavigateIntent(d.defaultView.localStorage); if (target) void navigateToMode(target); };
+  d.defaultView.addEventListener('storage', event => { if (event.key === NAVIGATE_INTENT_KEY && event.newValue) applyNavigateIntent(); });
+  setTimeout(applyNavigateIntent, 0);
   async function remoteDevices() {
     const status = await o.host.fileCapability('remote-files', { operation: 'status' }).catch(() => null);
     const devices = status?.ok ? status.result?.devices || [] : [];
@@ -1104,7 +1168,7 @@ export function createWorkspaceNavigator(o) {
         item:crumb.item,
         activate:()=>navigateAyG(crumb.id),
       })));
-      body.replaceChildren(aygChildren(current));paintTreeBranches();
+      body.replaceChildren(...(s.thumbsActive?[thumbsSortBar()]:[]),aygChildren(current));paintTreeBranches();
     }
     back.disabled=s.view!=='nav'||s.aygHi<=0;
     fwd.disabled=s.view!=='nav'||s.aygHi>=s.aygHistory.length-1;
@@ -1189,6 +1253,33 @@ export function createWorkspaceNavigator(o) {
         && contains(modified,filters.modified);
     });
     return filtered;
+  }
+  // Thumbnails get Opus's sort bar above the grid: Name, Size, Type, Modified; again reverses. In As you
+  // Go a third press returns to its own (manual) order.
+  function thumbsSortBar() {
+    const bar = d.createElement('div'); bar.className = 'navigator-thumbs-sort'; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Sort');
+    const machine = s.mode === 'machine', current = machine ? s.machineSort : viewOptions.ayg;
+    for (const [key, label] of [['name', 'Name'], ['size', 'Size'], ['type', 'Type'], ['modified', 'Modified']]) {
+      const sort = d.createElement('button'); sort.type = 'button'; sort.className = 'navigator-thumbs-sort-key';
+      const active = current.key === key; sort.classList.toggle('active', active);
+      sort.textContent = label + (active ? (current.direction === -1 ? ' ▼' : ' ▲') : '');
+      sort.title = `Sort by ${label}`; sort.setAttribute('aria-pressed', String(active));
+      sort.addEventListener('click', () => {
+        if (machine) {
+          s.machineSort = s.machineSort.key === key ? { key, direction: -s.machineSort.direction } : { key, direction: 1 };
+          viewOptions.machine.key = key; viewOptions.machine.direction = s.machineSort.direction; saveViewOptions(); s.machineOrders.delete(s.path);
+          if (s.path) void loadMachine(s.path, false);
+          return;
+        }
+        const options = viewOptions.ayg;
+        if (options.key !== key) { options.key = key; options.direction = 1; }
+        else if (options.direction === 1) options.direction = -1;
+        else { options.key = 'manual'; options.direction = 1; }
+        saveViewOptions(); render();
+      });
+      bar.append(sort);
+    }
+    return bar;
   }
   function machineColumnHeader() {
     const header=d.createElement('div'); header.className='workspace-navigator-machine-columns';
@@ -1391,7 +1482,7 @@ export function createWorkspaceNavigator(o) {
     body.replaceChildren();
     const items=projectRows(orderedMachineItems(result.items || [],path));
     if(items.length){
-      if(!s.thumbsActive)body.append(machineColumnHeader());
+      body.append(s.thumbsActive?thumbsSortBar():machineColumnHeader());
       const rows=d.createElement('div'); rows.className='workspace-navigator-machine-rows';
       const tree={index:0,branches:[]};
       for (const x of items) {
@@ -1415,6 +1506,7 @@ export function createWorkspaceNavigator(o) {
       s.machineListings.clear();
     }
     persistUi('papers:ayg:navigator-machine-root', s.machineRoot);
+    if (!/^\\\\papers~/i.test(path)) persistUi('papers:ayg:navigator-local-root', path);
     s.mode = 'machine';
     if (fromGesture) setView('nav', false);
     syncChrome();
@@ -1494,7 +1586,7 @@ export function createWorkspaceNavigator(o) {
     renderSearch();
   }
   const destination=()=>{const ids=[...o.getSession().selected]; return ids.length===1&&o.getState().groups.some((g)=>g.id===ids[0])?ids[0]:(currentAyG()||o.rootId);};
-  provider.addEventListener('click',()=>{void switchProvider();});
+  provider.addEventListener('click',event=>{event.stopPropagation();void openModeMenu();});
   searchInput.addEventListener('input',()=>{
     if(s.searchTimer)clearTimeout(s.searchTimer);
     s.searchTimer=setTimeout(()=>{s.searchTimer=null;void runSearch(searchInput.value);},120);

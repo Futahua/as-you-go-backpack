@@ -16,7 +16,8 @@ export function scopeLocalStorage(ownerId, storage = globalThis.localStorage) {
   const prefix = `papers-device:${ownerId}:`;
   for (const name of ['getItem', 'setItem', 'removeItem']) {
     const original = storage[name].bind(storage);
-    storage[name] = (key, ...rest) => original(prefix + key, ...rest);
+    // The pill's hand-off to this device's own page (device-modes.js) is shared, not scoped.
+    storage[name] = (key, ...rest) => original(key === 'papers:ayg:navigate-intent' ? key : prefix + key, ...rest);
   }
 }
 
