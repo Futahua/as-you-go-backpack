@@ -1,4 +1,4 @@
-import {currentDeviceMode,sameDeviceMode,writeNavigateIntent,takeNavigateIntent,NAVIGATE_INTENT_KEY} from './device-modes.js';
+import {currentDeviceMode,sameDeviceMode,takeNavigateIntent,parseNavigateTarget,formatNavigateTarget,NAVIGATE_INTENT_KEY} from './device-modes.js';
 import {defaultViewOptions,validateViewOptions,projectNavigatorItems} from './navigator-view-options.js';
 import {bindPhoneControlScale,bindDesktopControlScale} from './phone-control-scale.js';
 import {fileFallbackIcon} from './file-type-icons.js';
@@ -419,15 +419,24 @@ export function createWorkspaceNavigator(o) {
       Promise.resolve(o.saveNavigatorGraphMode?.(viewMode)).finally(()=>{viewModeSaving=false;render();});
     };
     refreshGraphVisibility=apply;
-    viewToggle.addEventListener('click',event=>{
-      event.stopPropagation();if(viewMenu){closeViewMenu();return;}
+    const openViewMenu=()=>{
+      if(viewMenu)return;
       const current=available().includes(viewMode)?viewMode:'list';
       viewMenu=d.createElement('div');viewMenu.className='navigator-view-menu';viewMenu.setAttribute('role','menu');
       for(const mode of available().filter(m=>m!==current)){const item=button(d,VIEW_NAMES[mode],VIEW_ICONS[mode]);item.setAttribute('role','menuitem');item.addEventListener('click',e=>{e.stopPropagation();chooseView(mode);});viewMenu.append(item);}
       const box=viewToggle.getBoundingClientRect();viewMenu.style.left=Math.round(box.left)+'px';viewMenu.style.top=Math.round(box.bottom+4)+'px';
       d.body.append(viewMenu);
       setTimeout(()=>d.addEventListener('pointerdown',function away(e){if(viewMenu&&!viewMenu.contains(e.target)&&e.target!==viewToggle&&!viewToggle.contains(e.target))closeViewMenu();if(!viewMenu)d.removeEventListener('pointerdown',away,true);},true));
-    });
+      // On a computer the menu also follows the mouse: it opens on hover and closes once the mouse
+      // has left both the button and the menu.
+      if(!hoverMenus)return;
+      viewMenu.addEventListener('mouseenter',()=>clearTimeout(hoverClose));
+      viewMenu.addEventListener('mouseleave',scheduleHoverClose);
+    };
+    const hoverMenus=!new URL(d.defaultView.location.href).searchParams.has('papers-phone')&&d.defaultView.matchMedia?.('(hover: hover)')?.matches!==false;
+    let hoverClose=0;const scheduleHoverClose=()=>{clearTimeout(hoverClose);hoverClose=setTimeout(closeViewMenu,250);};
+    viewToggle.addEventListener('click',event=>{event.stopPropagation();if(viewMenu&&!hoverMenus){closeViewMenu();return;}openViewMenu();});
+    if(hoverMenus){viewToggle.addEventListener('mouseenter',()=>{clearTimeout(hoverClose);openViewMenu();});viewToggle.addEventListener('mouseleave',scheduleHoverClose);}
     tools.append(viewToggle); apply();
   }
   const viewOptions={ayg:defaultViewOptions(),machine:{...defaultViewOptions(),key:'name'}},viewMetadata=new Map(),metadataPending=new Set(),metadataQueue=[];let metadataRunning=0;let metadataTimer=0,optionsPanel=null;
@@ -657,11 +666,20 @@ export function createWorkspaceNavigator(o) {
   const PHONE_PAGE = new URL(d.defaultView.location.href).searchParams.has('papers-phone');
   const MODE_ICONS = { files: ['M2.5 6h5l1.5 2h8.5v8.5h-15z'], ayg: ['M3 3.5h6v6H3z', 'M11 3.5h6v6h-6z', 'M3 11.5h6v5H3z', 'M11 11.5h6v5h-6z'] };
   const MODE_NAMES = { files: 'Files', ayg: 'As you Go' };
-  let modeMenu = null;
-  const closeModeMenu = () => { modeMenu?.remove(); modeMenu = null; };
-  async function openModeMenu() {
-    if (modeMenu) { closeModeMenu(); return; }
+  let modeMenu = null, modeHoverClose = 0;
+  const closeModeMenu = () => { clearTimeout(modeHoverClose); modeMenu?.remove(); modeMenu = null; };
+  // On a computer the menu follows the mouse, like the view button's: hover opens it, leaving both
+  // the pill and the menu closes it.
+  const HOVER_MENUS = !PHONE_PAGE && d.defaultView.matchMedia?.('(hover: hover)')?.matches !== false;
+  const scheduleModeClose = () => { clearTimeout(modeHoverClose); modeHoverClose = setTimeout(closeModeMenu, 250); };
+  if (HOVER_MENUS) {
+    provider.addEventListener('mouseenter', () => { clearTimeout(modeHoverClose); if (!modeMenu) void openModeMenu(); });
+    provider.addEventListener('mouseleave', scheduleModeClose);
+  }
+  async function openModeMenu({ toggle = true } = {}) {
+    if (modeMenu) { if (toggle && !HOVER_MENUS) closeModeMenu(); return; }
     const menu = modeMenu = d.createElement('div'); menu.className = 'navigator-mode-menu'; menu.setAttribute('role', 'menu');
+    if (HOVER_MENUS) { menu.addEventListener('mouseenter', () => clearTimeout(modeHoverClose)); menu.addEventListener('mouseleave', scheduleModeClose); }
     const box = provider.getBoundingClientRect();
     menu.style.left = Math.round(Math.max(8, Math.min(box.left, d.defaultView.innerWidth - 280))) + 'px'; menu.style.top = Math.round(box.bottom + 4) + 'px';
     d.body.append(menu);
@@ -679,6 +697,9 @@ export function createWorkspaceNavigator(o) {
         choice.classList.add('navigator-mode-choice'); choice.setAttribute('role', 'menuitemradio');
         const active = sameDeviceMode(current, target); choice.classList.toggle('active', active); choice.setAttribute('aria-checked', String(active));
         choice.addEventListener('click', event => { event.stopPropagation(); closeModeMenu(); void navigateToMode(target); });
+        // Middle-click: the same place in a new tab (computers).
+        choice.addEventListener('mousedown', event => { if (event.button === 1) event.preventDefault(); });
+        choice.addEventListener('auxclick', event => { if (event.button !== 1) return; event.preventDefault(); event.stopPropagation(); closeModeMenu(); void openModeInNewTab(target); });
         line.append(choice);
       }
       menu.append(line);
@@ -700,13 +721,20 @@ export function createWorkspaceNavigator(o) {
     try { if (await o.openDeviceInline?.(next.toString())) return; await o.host.openNewSurface(next.toString()); }
     catch (error) { o.setStatus(error instanceof Error ? error.message : String(error)); }
   }
+  async function openModeInNewTab(target) {
+    const next = new URL(d.defaultView.location.href);
+    for (const key of ['papers-surface', 'as-you-go-folder', 'papers-device', 'papers-navigate', 'papers-inline-device', 'papers-files-parent', 'papers-files-group']) next.searchParams.delete(key);
+    if (target.device !== 'self' && target.mode === 'ayg') next.searchParams.set('papers-device', target.device);
+    else next.searchParams.set('papers-navigate', formatNavigateTarget(target));
+    try { await o.host.openNewSurface(next.toString()); } catch (error) { o.setStatus(error instanceof Error ? error.message : String(error)); }
+  }
   async function navigateToMode(target) {
     if (sameDeviceMode(currentDeviceMode({ remoteDevice: o.remoteDevice, mode: s.mode, path: s.path }), target)) return;
     if (o.remoteDevice) {
       // On another device's As you Go page, its own As you Go stays here; anything else goes back to
       // this device's page, which carries the choice out (device-modes.js).
       if (target.device === String(o.remoteDevice).toLowerCase() && target.mode === 'ayg') { clearSearch({ renderNow: false }); setMode('ayg'); return; }
-      writeNavigateIntent(d.defaultView.localStorage, target); o.leaveDevice?.(); return;
+      o.leaveDevice?.(target); return;
     }
     clearSearch({ renderNow: false });
     if (target.device === 'self' && target.mode === 'ayg') { setMode('ayg'); return; }
@@ -714,15 +742,28 @@ export function createWorkspaceNavigator(o) {
       const root = await ownFilesRoot();
       if (root) { await enterMachine(root, false); return; }
       if (s.mode === 'machine') setMode('ayg');
-      await switchProvider(); return;
+      await switchProvider();
+      // Nothing remembered and nothing local in this As you Go: start at the system drive.
+      if (s.mode !== 'machine' && !PHONE_PAGE) await enterMachine('C:\\', false);
+      return;
     }
     if (target.mode === 'files') { await enterMachine(`\\\\papers~${target.device}`, false); return; }
     await openDeviceAyg(target.device);
   }
-  // A choice made on another device's page arrives here: on load, or while this page waits under it.
-  const applyNavigateIntent = () => { if (o.remoteDevice) return; const target = takeNavigateIntent(d.defaultView.localStorage); if (target) void navigateToMode(target); };
-  d.defaultView.addEventListener('storage', event => { if (event.key === NAVIGATE_INTENT_KEY && event.newValue) applyNavigateIntent(); });
-  setTimeout(applyNavigateIntent, 0);
+  // A choice made on another device's page arrives at this page only: in its address when a computer
+  // tab returns here, from the phone shell when the device's layer closes, or (a device shown inside a
+  // Files group) through storage, taken once.
+  if (!o.remoteDevice) {
+    const url = new URL(d.defaultView.location.href), carried = parseNavigateTarget(url.searchParams.get('papers-navigate'));
+    if (url.searchParams.has('papers-navigate')) { url.searchParams.delete('papers-navigate'); try { d.defaultView.history.replaceState(d.defaultView.history.state, '', url.toString()); } catch {} }
+    if (carried) setTimeout(() => void navigateToMode(carried), 0);
+    d.defaultView.addEventListener('message', event => {
+      if (event.source !== d.defaultView.parent || event.origin !== d.defaultView.location.origin || event.data?.type !== 'papers:phone:navigate') return;
+      const target = parseNavigateTarget(event.data.navigate); if (target) void navigateToMode(target);
+    });
+    const applyStored = () => { const target = takeNavigateIntent(d.defaultView.localStorage); if (target) void navigateToMode(target); };
+    if (!PHONE_PAGE) d.defaultView.addEventListener('storage', event => { if (event.key === NAVIGATE_INTENT_KEY && event.newValue && d.defaultView.document.visibilityState === 'visible') applyStored(); });
+  }
   async function remoteDevices() {
     const status = await o.host.fileCapability('remote-files', { operation: 'status' }).catch(() => null);
     const devices = status?.ok ? status.result?.devices || [] : [];
@@ -734,7 +775,7 @@ export function createWorkspaceNavigator(o) {
     panel.dataset.view = s.view;
     const remoteRoot = s.mode === 'machine' && String(s.path || '').match(REMOTE_ROOT);
     provider.textContent = remoteRoot ? remoteDeviceNames.get(remoteRoot[0].toLowerCase()) || 'Device' : s.mode === 'machine' ? (/^\\\\papers~phone\\/i.test(s.path||'') ? deviceLabel || 'This phone' : 'Opus') : deviceLabel || 'As you Go';
-    provider.title = (s.mode === 'machine' ? 'Switch to As you Go' : 'Switch to Opus') + ' · right-click for devices';
+    provider.title = 'Devices: files or As you Go (middle-click a choice for a new tab)';
     provider.setAttribute('aria-label', provider.title);
     panel.classList.toggle('collapsed', s.collapsed);
     o.workspace.classList.toggle('navigator-collapsed', s.collapsed);

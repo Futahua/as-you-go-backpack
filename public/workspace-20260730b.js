@@ -1,3 +1,4 @@
+import { writeNavigateIntent, formatNavigateTarget } from './app/device-modes.js';
 import {isPhoneResizeLocked} from './app/phone-control-scale.js';
 import {fileFallbackIcon,phoneGraphFallback} from './app/file-type-icons.js';
 import {isDeviceFilesPane,installDeviceFilesPane} from './app/device-files-pane.js';
@@ -4963,10 +4964,11 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     // A computer switches this same tab to the device's As you Go (no new Papers tab); the phone keeps its layer.
     openDeviceInline: async (url) => { if (PHONE) return false; await paneLayout.openDevice(url); return true; },
     // "This device": the phone closes the device's layer; a computer turns this tab back into its own As you Go.
-    leaveDevice: () => {
-      if (PHONE) { window.parent.postMessage({ type: 'papers:phone:this-device' }, window.location.origin); return; }
-      if(new URL(location.href).searchParams.get('papers-inline-device')==='1'){void host.fileCapability('pane-inline-device-close',{}).catch(error=>setStatus(error.message));return;}
-      const next = new URL(window.location.href); next.searchParams.delete('papers-device'); window.location.replace(next.toString());
+    // `navigate` is the place picked in the pill (device-modes.js); this device's own page carries it out.
+    leaveDevice: (navigate = null) => {
+      if (PHONE) { window.parent.postMessage({ type: 'papers:phone:this-device', navigate }, window.location.origin); return; }
+      if(new URL(location.href).searchParams.get('papers-inline-device')==='1'){if(navigate)writeNavigateIntent(window.localStorage,navigate);void host.fileCapability('pane-inline-device-close',{}).catch(error=>setStatus(error.message));return;}
+      const next = new URL(window.location.href); next.searchParams.delete('papers-device'); if (navigate) next.searchParams.set('papers-navigate', formatNavigateTarget(navigate)); window.location.replace(next.toString());
     },
     getState: () => state,
     getSession: () => session,

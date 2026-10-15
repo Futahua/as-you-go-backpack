@@ -32,3 +32,10 @@ export function takeNavigateIntent(storage, now = Date.now()) {
   } catch { return null; }
 }
 export const NAVIGATE_INTENT_KEY = INTENT;
+/** A place as text for an address ("self:ayg", "<device id>:files") and back; null when malformed. */
+export const formatNavigateTarget = target => `${target.device}:${target.mode}`;
+export function parseNavigateTarget(value) {
+  const [device, mode] = typeof value === 'string' ? value.split(':') : [value?.device, value?.mode];
+  if (!['files', 'ayg'].includes(mode) || !(device === 'self' || /^[0-9a-f-]{36}$/i.test(String(device || '')))) return null;
+  return { device: device === 'self' ? 'self' : String(device).toLowerCase(), mode };
+}

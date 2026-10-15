@@ -26,3 +26,10 @@ test('stale or malformed hand-offs are ignored', () => {
   s.setItem('papers:ayg:navigate-intent', '{nope');
   assert.equal(takeNavigateIntent(s, 10), null);
 });
+test('a place survives an address round trip; junk does not', async () => {
+  const { formatNavigateTarget, parseNavigateTarget } = await import('./public/app/device-modes.js');
+  assert.deepEqual(parseNavigateTarget(formatNavigateTarget({ device: 'self', mode: 'files' })), { device: 'self', mode: 'files' });
+  assert.deepEqual(parseNavigateTarget(formatNavigateTarget({ device: LAP, mode: 'ayg' })), { device: LAP, mode: 'ayg' });
+  assert.deepEqual(parseNavigateTarget({ device: LAP.toUpperCase(), mode: 'files' }), { device: LAP, mode: 'files' });
+  for (const bad of [null, '', 'self', 'self:open', 'x:ayg', '../..:files', { device: 'self' }]) assert.equal(parseNavigateTarget(bad), null);
+});
