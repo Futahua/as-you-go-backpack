@@ -721,19 +721,26 @@ export function createWorkspaceNavigator(o) {
     try { if (await o.openDeviceInline?.(next.toString())) return; await o.host.openNewSurface(next.toString()); }
     catch (error) { o.setStatus(error instanceof Error ? error.message : String(error)); }
   }
+  // Middle-click: another device opens as a tab in this window's Files group (the device's Files pane,
+  // as its device row always did), showing the chosen mode. This device has no such tab; it opens here.
   async function openModeInNewTab(target) {
-    const next = new URL(d.defaultView.location.href);
-    for (const key of ['papers-surface', 'as-you-go-folder', 'papers-device', 'papers-navigate', 'papers-inline-device', 'papers-files-parent', 'papers-files-group']) next.searchParams.delete(key);
-    if (target.device !== 'self' && target.mode === 'ayg') next.searchParams.set('papers-device', target.device);
-    else next.searchParams.set('papers-navigate', formatNavigateTarget(target));
-    try { await o.host.openNewSurface(next.toString()); } catch (error) { o.setStatus(error instanceof Error ? error.message : String(error)); }
+    if (target.device === 'self' || !o.openDeviceInline) { await navigateToMode(target); return; }
+    const url = new URL(deviceFilesUrl(d.defaultView.location, target.device));
+    for (const key of ['papers-navigate', 'papers-inline-device', 'papers-files-parent', 'papers-files-group']) url.searchParams.delete(key);
+    if (target.mode === 'files') url.searchParams.set('papers-navigate', formatNavigateTarget(target));
+    try { if (!await o.openDeviceInline(url.toString())) await navigateToMode(target); }
+    catch (error) { o.setStatus(error instanceof Error ? error.message : String(error)); }
   }
   async function navigateToMode(target) {
     if (sameDeviceMode(currentDeviceMode({ remoteDevice: o.remoteDevice, mode: s.mode, path: s.path }), target)) return;
     if (o.remoteDevice) {
       // On another device's As you Go page, its own As you Go stays here; anything else goes back to
       // this device's page, which carries the choice out (device-modes.js).
-      if (target.device === String(o.remoteDevice).toLowerCase() && target.mode === 'ayg') { clearSearch({ renderNow: false }); setMode('ayg'); return; }
+      if (target.device === String(o.remoteDevice).toLowerCase()) {
+        clearSearch({ renderNow: false });
+        if (target.mode === 'ayg') setMode('ayg'); else await enterMachine(`\\\\papers~${target.device}`, false);
+        return;
+      }
       o.leaveDevice?.(target); return;
     }
     clearSearch({ renderNow: false });
@@ -753,10 +760,13 @@ export function createWorkspaceNavigator(o) {
   // A choice made on another device's page arrives at this page only: in its address when a computer
   // tab returns here, from the phone shell when the device's layer closes, or (a device shown inside a
   // Files group) through storage, taken once.
-  if (!o.remoteDevice) {
+  {
+    // A device tab opened for that device's Files carries the mode in its address too.
     const url = new URL(d.defaultView.location.href), carried = parseNavigateTarget(url.searchParams.get('papers-navigate'));
     if (url.searchParams.has('papers-navigate')) { url.searchParams.delete('papers-navigate'); try { d.defaultView.history.replaceState(d.defaultView.history.state, '', url.toString()); } catch {} }
-    if (carried) setTimeout(() => void navigateToMode(carried), 0);
+    if (carried && (!o.remoteDevice || carried.device === String(o.remoteDevice).toLowerCase())) setTimeout(() => void navigateToMode(carried), 0);
+  }
+  if (!o.remoteDevice) {
     d.defaultView.addEventListener('message', event => {
       if (event.source !== d.defaultView.parent || event.origin !== d.defaultView.location.origin || event.data?.type !== 'papers:phone:navigate') return;
       const target = parseNavigateTarget(event.data.navigate); if (target) void navigateToMode(target);
