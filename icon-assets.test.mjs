@@ -9,3 +9,10 @@ test('verified assets replace duplicate images without changing authored data',a
 });
 test('asset failure blocks JSON replacement',async()=>{const h=createIconAssets({fileCapability:async()=>({ok:false,message:'disk full'})});await assert.rejects(h.encode(JSON.stringify({icon:'data:image/png;base64,dGVzdA==',view:{preferences:{snapshotStorage:{statePath:'D:/fixture/state.json'}}}})),/disk full/);});
 test('workspace without a snapshot folder keeps icons embedded and still saves',async()=>{let calls=0;const h=createIconAssets({fileCapability:async()=>{calls++;return {ok:true};}});const state=JSON.stringify({icon:'data:image/png;base64,dGVzdA==',view:{preferences:{}}});assert.equal(await h.encode(state),state);assert.equal(calls,0);});
+test('remote workspace preserves display icons and coordination bases for its owner',async()=>{
+ const host={deviceId:'remote-owner',fileCapability:async()=>{throw Error('Viewer must not store owner assets');}};
+ const assets=createIconAssets(host),state=JSON.stringify({groups:[{name:'Hello',icon:'data:image/png;base64,dGVzdA=='}],view:{preferences:{snapshotStorage:{statePath:'D:/owner/state.json'}}}});
+ assert.equal(await assets.encode(state),state);
+ const metadata=await assets.metadata({baseSerialized:state,pendingSnapshots:[{serialized:state,baseSerialized:state}]});
+ assert.equal(metadata.baseSerialized,state);assert.equal(metadata.pendingSnapshots[0].serialized,state);assert.equal(metadata.pendingSnapshots[0].baseSerialized,state);
+});

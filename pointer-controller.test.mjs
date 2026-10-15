@@ -535,3 +535,25 @@ test('pointerdown on an interior window-layout control never begins graph draggi
     'and no marquee either');
   assert.equal(h.effects.reheat.length, 0);
 });
+
+test('a finger on blank graph space pans instead of starting the marquee', () => {
+  const h = createHarness();
+  const event = pointerEvent(1, 30, 30, { pointerType: 'touch' });
+  event.target.closest = (sel) => (sel.includes('data-icon-grid') ? { dataset: {} } : null);
+  h.grid._dispatch('pointerdown', event);
+  assert.ok(!h.commandCalls.some(([name]) => name === 'marquee-start'));
+});
+
+test('a finger on a tile drags it without changing the selection', () => {
+  const h = createHarness();
+  const n = node('s1', 100, 100);
+  h.graphNodes.set('s1', n);
+  const tile = fakeNode();
+  tile.dataset = { id: 's1', kind: 'shortcut' };
+  const shell = fakeNode();
+  tile.closest = (sel) => (sel === '.icon-item' ? tile : sel === '.graph-node-shell' ? shell : null);
+  h.grid._dispatch('pointerdown', pointerEvent(1, 100, 100, { target: tile, pointerType: 'touch' }));
+  assert.ok(!h.commandCalls.some(([name]) => name === 'select'), 'touch-down never selects');
+  h.grid._dispatch('pointermove', pointerEvent(1, 140, 100, { target: tile, pointerType: 'touch' }));
+  assert.equal(n.fx, 140, 'the touched tile follows the finger');
+});

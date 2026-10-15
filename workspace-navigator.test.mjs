@@ -406,3 +406,12 @@ test('existing linked folder pills navigate Files rather than previewing a direc
  const result=await activateNavigatorFilePill({mode:'action',itemId:'linked',art:{target:'D:\\LapSlop brotherhood'}},{},{isAbsoluteWindowsPath:()=>true,host:{fileCapability:async()=>({ok:true,entry:{kind:'folder'}})},openMachineFolder:async path=>opened.push(path),previewMachinePath:()=>assert.fail('Folders must navigate, not preview')});
  assert.equal(result,true);assert.deepEqual(opened,['D:\\LapSlop brotherhood']);
 });
+
+test('deleting machine files sends the whole selection with one confirmation', async () => {
+  const calls=[];let asked='';
+  const o={confirm:message=>{asked=message;return true;},host:{fileCapability:(...args)=>calls.push(args)}};
+  const paths=['\\papers~dev\C:\a.txt','\\papers~dev\C:\b.txt','\\papers~dev\C:\c.txt'];
+  await deleteNavigatorSelection('machine',{name:'c.txt',path:paths[2]},o,paths);
+  assert.match(asked,/Delete 3 machine files or folders/);
+  assert.deepEqual(calls,[['delete',{paths}]]);
+});

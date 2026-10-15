@@ -1128,7 +1128,7 @@ export function createDroppedShortcuts(state, droppedTargets, parentId = ROOT_ID
       target,
       parentId,
       description: '',
-      icon: null,
+      icon: dropped.icon ?? null,
     });
     existingTargets.add(key);
   }

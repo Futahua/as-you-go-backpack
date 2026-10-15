@@ -23,6 +23,7 @@ export function createWorkspaceCommands({
   item,
   isWebLink,
   host,
+  openFileTarget = null,
   graph,
   resolveBinTargets,
   visiblePlacementIdFor,
@@ -337,6 +338,8 @@ export function createWorkspaceCommands({
     try {
       if (isWebLink(chosen)) {
         await host.openWebLink(chosen.target);
+      } else if(openFileTarget) {
+        const result=await openFileTarget(chosen);if(result?.ok===false)throw Error(result.message||'The file could not be opened.');
       } else {
         await host.launchShortcut(itemId);
       }
@@ -813,19 +816,21 @@ export function createWorkspaceCommands({
 
   /** Same creation path as an OS file drop, but for paths already resolved by
    * the inline machine explorer / Everything search. */
-  async function dropResolvedTargets(targets, destination) {
+  async function dropResolvedTargets(targets, destination, { requireDurable = false } = {}) {
     const normalizedDestination = scopedDestination(destination);
-    if (!scopeAllowsDestination(normalizedDestination)) return;
+    if (!scopeAllowsDestination(normalizedDestination)) return false;
     try {
       const before = store.getSnapshot();
       const next = createDroppedShortcuts(before, targets, normalizedDestination);
       if (next.shortcuts.length === before.shortcuts.length) {
+        if (requireDurable) return await store.commit(before, { requireDurable: true });
         setStatus('Those shortcuts already exist here.');
-        return;
+        return true;
       }
-      await store.commit(next);
+      return await store.commit(next, { requireDurable });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      return false;
     }
   }
 

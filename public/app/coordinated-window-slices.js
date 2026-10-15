@@ -254,7 +254,13 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
     if(!groupId)throw new Error('Window layout is not ready.');
     const opened=await host.fileCapability('pane-layout-open',{groupId,source:'lens:'+win.crypto.randomUUID(),url:result.url});if(opened.snapshot)accept(opened.snapshot);if(!opened.ok)throw new Error(opened.error||'Lens could not open');
   }
-  return {searchLens,active:()=>mounted,setSettings(){},setPreviews(next){previews=next;schedule();if(mounted)void (async()=>{for(const tab of previews)await ensureDocument(tab);
+  return {searchLens,hasPage:key=>snapshot?.groups.some(group=>group.tabs.some(tab=>tab.preview?.PageKey===key))===true,async openDevice(url,pageKey){
+    if(!mounted)throw Error('The Files group is not ready.');
+    const group=snapshot.groups.find(group=>group.tabs.some(tab=>pageKey?tab.preview?.PageKey===pageKey:tab.id===ref('workspace-files')))||snapshot.groups.find(group=>group.presentation!=='minimized');
+    if(!group)throw Error('The Files group closed.');
+    const next=new URL(url);next.searchParams.set('papers-files-parent',new URL(win.location.href).searchParams.get('papers-surface-key')||'root');next.searchParams.set('papers-files-group',group.id);
+    return host.openNewSurface(next.toString(),{inlineGroupId:group.id});
+  },active:()=>mounted,setSettings(){},setPreviews(next){previews=next;schedule();if(mounted)void (async()=>{for(const tab of previews)await ensureDocument(tab);
     for(const tab of snapshot.groups.flatMap(g=>g.tabs).filter(t=>t.kind==='document'&&!t.preview?.PageKey))if(!protectedTabs.some(p=>ref(p.id)===tab.id)&&!previews.some(p=>ref(p.id)===tab.id))await command('document-remove',{tabId:tab.id});})().catch(()=>{});},
     selectPreview:tab=>{void selectPreview(tab).catch(()=>{});},nativeSelected(){},setOverlay:value=>{void setOverlay(value).catch(()=>{});},refresh:schedule,isMaximized:()=>Boolean(snapshot?.groups.some(g=>g.presentation==='maximized')),ownsNativeEdge:()=>false,
     splitPreview:async(id,side)=>{const tab=previews.find(p=>p.id===id);if(!tab)return;const key=await ensureDocument(tab);await command('split',{tabId:key,groupId:snapshot.groups[0].id,newGroupId:'slice-'+win.crypto.randomUUID(),side});},

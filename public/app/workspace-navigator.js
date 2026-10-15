@@ -1,3 +1,6 @@
+import {fileTypeIcon} from './file-type-icons.js';
+import { bindPhoneFileGestures } from './phone-file-gestures.js';
+import {deviceFilesUrl} from './device-files-pane.js';
 import { bindNavigatorRowInteractions } from './navigator-row-interactions.js';
 import { createRemoteFileView } from './remote-file-view.js';
 import { REMOTE_ROOT, remoteDeviceNames } from './remote-paths.js';
@@ -16,6 +19,22 @@ export function navigatorFolderPill(saved,groups){if(saved?.mode!=='action'||!sa
 
 export const NAVIGATOR_AYG_DRAG_TYPE = 'application/x-papers-ayg-navigator-items';
 export const NAVIGATOR_MACHINE_DRAG_TYPE = 'application/x-papers-machine-navigator-items';
+// Files on another device, dragged between Papers pages: {page, paths:[device paths]}.
+export const DEVICE_FILES_DRAG_TYPE = 'application/x-papers-device-files';
+// One id per page, shared by the list and the icon grid, so a page ignores its own drags.
+const DRAG_PAGE = (globalThis.__papersDragPage ??= (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Math.random())));
+// paths: files on another device. local: this computer's files, which a device's view sends to that device's inbox.
+export function readDeviceFilesDrag(dataTransfer) {
+  try {
+    const parsed = JSON.parse(dataTransfer?.getData?.(DEVICE_FILES_DRAG_TYPE) || 'null');
+    if (!parsed || parsed.page === DRAG_PAGE) return { paths: [], local: [] };
+    return { paths: (Array.isArray(parsed.paths) ? parsed.paths : []).filter((path) => typeof path === 'string' && REMOTE_ROOT.test(path)),
+      local: (Array.isArray(parsed.local) ? parsed.local : []).filter((path) => typeof path === 'string' && /^[A-Za-z]:[\\/]/.test(path)) };
+  } catch { return { paths: [], local: [] }; }
+}
+function setDeviceFilesDrag(dataTransfer, paths, local = []) {
+  if (paths.length || local.length) dataTransfer?.setData(DEVICE_FILES_DRAG_TYPE, JSON.stringify({ page: DRAG_PAGE, paths, local }));
+}
 export async function searchNavigatorFiles({search,query,isCurrent=()=>true,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))}) {
   for(let attempt=0;attempt<3;attempt++){
     if(!isCurrent())return null;
@@ -30,6 +49,12 @@ function button(doc, title, paths) {
   const b = doc.createElement('button');
   b.type = 'button'; b.className = 'navigator-icon-button'; b.title = title;
   b.setAttribute('aria-label', title); b.innerHTML = svg(paths); return b;
+}
+export function navigatorPhoneLabel(name,path) {
+  if(!/^\\\\papers~phone\\/i.test(String(path||'')))return name;
+  const part=String(path).split('\\').filter(Boolean).at(-1);
+  if(name!==part)return name; // Preserve authored pill names.
+  try{return decodeURIComponent(name);}catch{return name;}
 }
 const parentPath = (value) => {
   const p = String(value || '').replace(/\//g, '\\').replace(/\\+$/, '');
@@ -240,10 +265,17 @@ export async function activateNavigatorFilePill(saved, { run = false } = {}, o) 
   return true;
 }
 
-export async function deleteNavigatorSelection(mode, selected, o) {
+export async function deleteNavigatorSelection(mode, selected, o, selectedPaths = []) {
   if (mode === 'ayg') return o.deleteAyG();
-  if (!selected || !o.confirm(`Delete machine file or folder "${selected.name}"?\n\n${selected.path}\n\nThis moves the actual file or folder to the Windows Recycle Bin, including its contents. Continue?`)) return;
-  return o.host.fileCapability('delete', { paths: [selected.path] });
+  // The whole batch selection, not only the last clicked row.
+  const paths = [...new Set(selectedPaths.length ? selectedPaths : selected ? [selected.path] : [])];
+  if (!paths.length) return;
+  const recycle = paths.every(path=>/^\\\\papers~phone\\/i.test(path)) ? 'the phone’s Papers recycle folder' : 'the Windows Recycle Bin';
+  const message = paths.length === 1
+    ? `Delete machine file or folder "${selected?.path === paths[0] ? selected.name : paths[0].split('\\').pop()}"?\n\n${paths[0]}\n\nThis moves the actual file or folder to ${recycle}, including its contents. Continue?`
+    : `Delete ${paths.length} machine files or folders?\n\n${paths.slice(0, 8).join('\n')}${paths.length > 8 ? `\n…and ${paths.length - 8} more` : ''}\n\nThis moves the actual files or folders to ${recycle}, including their contents. Continue?`;
+  if (!o.confirm(message)) return;
+  return o.host.fileCapability('delete', { paths });
 }
 
 export function createWorkspaceNavigator(o) {
@@ -339,7 +371,10 @@ export function createWorkspaceNavigator(o) {
   search.append(searchInput, searchInfo,transferNotice);
   const savedPills=d.createElement('div');savedPills.className='navigator-saved-pills';search.insertBefore(savedPills,searchInfo);
   const body = d.createElement('div'); body.className = 'workspace-navigator-body';
+  const phoneMode=new URL(d.defaultView.location.href).searchParams.has('papers-phone');
   const graphSlot = o.graphContent ? d.createElement('div') : null;
+  // Graph tiles take the same hold-to-select / tap-to-toggle / double-tap-to-open gestures as rows.
+  const phoneGestures=phoneMode?bindPhoneFileGestures({body,extra:[graphSlot],window:d.defaultView}):null;
   let refreshGraphVisibility = () => {};
   if (graphSlot) {
     graphSlot.className = 'navigator-graph-surface'; graphSlot.append(o.graphContent);
@@ -356,8 +391,16 @@ export function createWorkspaceNavigator(o) {
   const remoteFiles = createRemoteFileView({ document: d, container: panel, call: params => o.host.fileCapability('remote-files', params) });
   const devices = button(d, 'Files on another device', ['M2 3h10v8H2z', 'M6 11v3', 'M3 14h6', 'M14 7h4v10h-4z']);
   devices.addEventListener('click', () => { void breadcrumbPopup.show(devices, { devices: true }, addDeviceSettings); });
-  tools.append(devices);
+  // On computers the device name pill opens this menu on right-click; the phone keeps the button.
+  if (new URL(d.defaultView.location.href).searchParams.has('papers-phone')) tools.append(devices);
+  else provider.addEventListener('contextmenu', event => { event.preventDefault(); event.stopPropagation(); void breadcrumbPopup.show(provider, { devices: true }, addDeviceSettings); });
   if (graphSlot) { panel.insertBefore(graphSlot,resizer); panel.classList.add('has-graph-surface'); }
+  // Holding Shift turns the selection blue: a drag now carries the real files to other apps.
+  const shiftExport=on=>panel.classList.toggle('shift-export',Boolean(on));
+  d.addEventListener('keydown',event=>{if(event.key==='Shift')shiftExport(true);},true);
+  d.addEventListener('keyup',event=>{if(event.key==='Shift')shiftExport(false);},true);
+  d.addEventListener('pointermove',event=>shiftExport(event.shiftKey),{capture:true,passive:true});
+  d.defaultView.addEventListener('blur',()=>shiftExport(false));
   installNavigatorDropTarget(body,()=>s.mode==='machine'?{path:s.view==='tree'?s.machineRoot:s.path}:{item:{id:s.view==='tree'?o.rootId:currentAyG()}});
   const rowInteractions = bindNavigatorRowInteractions({document:d,body,
     dropEffect: allowed => navigatorDropEffect(allowed,'move'),
@@ -380,7 +423,7 @@ export function createWorkspaceNavigator(o) {
     finishSelection: () => {if(s.mode==='ayg')o.finishAyGMarquee?.();},
     setSelection: ids => {
       if(s.mode==='ayg') o.setAyGSelection?.(ids);
-      else {s.machineSelected=new Set(ids);s.selected=s.machineRows.get(ids.at(-1))||null;}
+      else {s.machineSelected=new Set(ids);s.selected=s.machineRows.get(ids.at(-1))||null;if(ids.length)claimSelection();}
       const selected=s.mode==='ayg'?o.getSession().selected:s.machineSelected;
       body.querySelectorAll('.workspace-navigator-row[data-id]').forEach(row=>row.classList.toggle('selected',selected.has(row.dataset.id)));
     },
@@ -413,7 +456,7 @@ export function createWorkspaceNavigator(o) {
   const icon = (x) => x.icon ? `<img src="${x.icon}" alt="">` : (x.kind === 'group' || x.kind === 'folder')
     ? svg(['M2.5 6h5l1.5 2h8.5v8.5h-15z']) : o.isWebLink(x)
       ? svg(['M3 10a7 7 0 1 0 14 0 7 7 0 1 0-14 0','M3.5 10h13','M10 3c2 2 2 12 0 14','M10 3c-2 2-2 12 0 14'])
-      : svg(['M5 2.5h7l3 3v12H5z','M12 2.5v4h4']);
+      : fileTypeIcon(x.target||x.path||x.name)||svg(['M5 2.5h7l3 3v12H5z','M12 2.5v4h4']);
   function hydrateArt(art, item) {
     if (item.kind !== 'shortcut' || item.icon) return;
     const web = o.isWebLink(item);
@@ -484,6 +527,12 @@ export function createWorkspaceNavigator(o) {
   }
   // Gear in the devices popup: each device's inbox, where files dropped into its As you Go land.
   function addDeviceSettings(popup, { isOpen, close }) {
+    if(new URL(d.defaultView.location.href).searchParams.has('papers-phone')){
+      const folder=d.createElement('button');folder.type='button';folder.style.cssText='display:flex;align-items:center;gap:12px;width:100%;max-width:none;padding:8px 10px;margin:0 0 6px;background:transparent;border:0;border-bottom:1px solid #ffffff18;border-radius:0;color:inherit;font:inherit;text-align:left;white-space:nowrap';const title=d.createElement('span'),value=d.createElement('span');title.textContent='Download to';title.style.opacity='.65';value.textContent='Loading…';value.style.cssText='margin-left:auto;overflow:hidden;text-overflow:ellipsis;min-width:0;font-size:12px';folder.append(title,value);popup.append(folder);
+      const show=response=>{const result=response?.result??response;value.textContent=result?.valid?result.name:'Choose folder…';folder.title=result?.valid?'Change phone download folder':'Choose a writable phone folder';};
+      void o.host.fileCapability('remote-files',{operation:'download-folder'}).then(value=>{if(isOpen())show(value);});
+      folder.addEventListener('click',async()=>{folder.disabled=true;try{const value=await o.host.fileCapability('remote-files',{operation:'download-folder-pick'});if(value?.ok===false)throw Error(value.message);if(isOpen())show(value);}catch(error){o.setStatus(error.message);}finally{folder.disabled=false;}});
+    }
     const here = d.createElement('div'); here.className = 'workspace-navigator-row navigator-this-device';
     const spacer = d.createElement('span'); spacer.className = 'navigator-tree-spacer';
     const art = d.createElement('span'); art.className = 'workspace-navigator-art'; art.innerHTML = svg(['M3 4.5h14v9H3z', 'M7.5 16.5h5M10 13.5v3']);
@@ -496,9 +545,11 @@ export function createWorkspaceNavigator(o) {
     gear.addEventListener('click', async event => {
       event.stopPropagation();
       const devicesList = await remoteDevices();
+      // This computer's own inbox comes first.
+      const own = o.host.deviceId ? null : await o.host.fileCapability('remote-files', { operation: 'status' }).then(value => value?.result?.owner).catch(() => null);
       if (!isOpen()) return;
       popup.replaceChildren(gear);
-      for (const device of devicesList) {
+      for (const device of [...(own?.id ? [{ path: '\\\\papers~' + own.id, name: own.name || 'This device' }] : []), ...devicesList]) {
         const id = device.path.slice(9);
         const row = d.createElement('label'); row.className = 'navigator-device-inbox';
         const name = d.createElement('span'); name.className = 'navigator-device-inbox-name'; name.textContent = device.name + ' inbox';
@@ -521,14 +572,14 @@ export function createWorkspaceNavigator(o) {
     const status = await o.host.fileCapability('remote-files', { operation: 'status' }).catch(() => null);
     const devices = status?.ok ? status.result?.devices || [] : [];
     for (const device of devices) remoteDeviceNames.set(`\\\\papers~${device.id}`.toLowerCase(), device.name);
-    return devices.map(device => ({ path: `\\\\papers~${device.id}`, name: device.name, kind: 'folder' }));
+    return devices.map(device => ({ deviceId:device.id, path: `\\\\papers~${device.id}`, name: device.name, kind: 'folder' }));
   }
   function syncChrome() {
     panel.dataset.mode = s.mode;
     panel.dataset.view = s.view;
     const remoteRoot = s.mode === 'machine' && String(s.path || '').match(REMOTE_ROOT);
-    provider.textContent = remoteRoot ? remoteDeviceNames.get(remoteRoot[0].toLowerCase()) || 'Device' : s.mode === 'machine' ? 'Opus' : deviceLabel || 'As you Go';
-    provider.title = s.mode === 'machine' ? 'Switch to As you Go' : 'Switch to Opus';
+    provider.textContent = remoteRoot ? remoteDeviceNames.get(remoteRoot[0].toLowerCase()) || 'Device' : s.mode === 'machine' ? (/^\\\\papers~phone\\/i.test(s.path||'') ? deviceLabel || 'This phone' : 'Opus') : deviceLabel || 'As you Go';
+    provider.title = (s.mode === 'machine' ? 'Switch to As you Go' : 'Switch to Opus') + ' · right-click for devices';
     provider.setAttribute('aria-label', provider.title);
     panel.classList.toggle('collapsed', s.collapsed);
     o.workspace.classList.toggle('navigator-collapsed', s.collapsed);
@@ -579,7 +630,7 @@ export function createWorkspaceNavigator(o) {
       for (const key of ['papers-surface', 'as-you-go-folder']) next.searchParams.delete(key);
       next.searchParams.set('papers-device', device[0].slice(9).toLowerCase());
       // Inline where the page can navigate itself (a computer's tab); the phone opens it as a layer.
-      if (o.openDeviceInline?.(next.toString())) return;
+      try { if (await o.openDeviceInline?.(next.toString())) return; } catch(error) { o.setStatus(error instanceof Error ? error.message : String(error)); return; }
       try { await o.host.openNewSurface(next.toString()); }
       catch (error) { o.setStatus(error instanceof Error ? error.message : String(error)); }
       return;
@@ -663,6 +714,8 @@ export function createWorkspaceNavigator(o) {
     return saved;
   }
   async function handleNavigatorDrop(segment, event) {
+    const deviceDrag=segment.item&&!s.internalDragSource?readDeviceFilesDrag(event.dataTransfer):{paths:[],local:[]};
+    if((deviceDrag.paths.length||deviceDrag.local.length)&&o.importDevicePaths){s.nativeDragSource=null;dropPending=false;await o.importDevicePaths(deviceDrag.paths,segment.item.id||o.rootId,deviceDrag.local);render();return;}
     const files = [...(event.dataTransfer?.files || [])];
     const transferredAyG = parseAyGDragPayload(event.dataTransfer);
     const transferredMachine = parseDragList(event.dataTransfer, NAVIGATOR_MACHINE_DRAG_TYPE);
@@ -671,6 +724,7 @@ export function createWorkspaceNavigator(o) {
       transferredMachine,
       internalDragSource:s.internalDragSource,
     });
+    if(segment.item && dragSources.machine.length && dragSources.machine.every(path=>/^\\\\papers~phone\\/i.test(path)) && o.importDevicePaths){await o.importDevicePaths(dragSources.machine,segment.item.id||o.rootId);render();return;}
     const nativeSource=s.nativeDragSource;
     const resolvedPaths=await navigatorResolveDropPaths(nativeSource,files,droppedPaths);
     if(segment.path && !navigatorFileMoveAllowed(resolvedPaths.length?resolvedPaths:nativeSource?.paths||[],segment.path)){reportDropResult('A folder cannot be moved into itself or its contents.');return;}
@@ -736,7 +790,10 @@ export function createWorkspaceNavigator(o) {
       const types=[...(event.dataTransfer?.types || [])];
       const internalType = segment.path ? NAVIGATOR_MACHINE_DRAG_TYPE : NAVIGATOR_AYG_DRAG_TYPE;
       const expectedMode = segment.path ? 'machine' : 'ayg';
-      if(!types.includes('Files')&&!types.includes(internalType)&&s.internalDragSource?.mode!==expectedMode)return;
+      const deviceFiles=Boolean(segment.item&&o.importDevicePaths&&types.includes(DEVICE_FILES_DRAG_TYPE)&&!s.internalDragSource);
+      if(deviceFiles){event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect=navigatorDropEffect(event.dataTransfer.effectAllowed,'copy');moveHint.hidden=true;if(s.activeDropTarget!==element){s.activeDropTarget?.classList.remove('drop-target');s.activeDropTarget=element;element.classList.add('drop-target');}return;}
+      const phoneLinks=segment.item&&o.importDevicePaths&&types.includes(NAVIGATOR_MACHINE_DRAG_TYPE)&&s.internalDragSource?.paths?.every(path=>/^\\\\papers~phone\\/i.test(path));
+      if(!types.includes('Files')&&!types.includes(internalType)&&s.internalDragSource?.mode!==expectedMode&&!phoneLinks)return;
       const paths=s.nativeDragSource?.paths||[];
       if((segment.path && paths.length && !navigatorFileMoveAllowed(paths,segment.path)) || (segment.item && s.internalDragSource?.mode==='ayg' && o.canMoveAyGItems?.(s.internalDragSource.itemIds,segment.item.id)===false)){
         event.preventDefault();event.stopPropagation();element.classList.remove('drop-target');moveHint.hidden=true;if(event.dataTransfer)event.dataTransfer.dropEffect='none';return;
@@ -865,6 +922,8 @@ export function createWorkspaceNavigator(o) {
           resolveIdentity:o.resolveAyGDragIdentity,
         });
         event.dataTransfer?.setData(NAVIGATOR_AYG_DRAG_TYPE,JSON.stringify(dragPayload));
+        if(!o.host?.deviceId)setDeviceFilesDrag(event.dataTransfer,[],aygNavigatorNativePaths({itemId:id,selectedIds:o.getSession().selected,resolvePaths:o.nativeDragPaths}));
+        else setDeviceFilesDrag(event.dataTransfer,aygNavigatorNativePaths({itemId:id,selectedIds:o.getSession().selected,resolvePaths:o.nativeDragPaths}).map(path=>REMOTE_ROOT.test(path)?path:'\\\\papers~'+o.host.deviceId+'\\'+path));
         if(event.ctrlKey)return;
         rememberInternalDrag({mode:'ayg',...dragPayload});
         const saved=navigatorSavedStateForItem(x);
@@ -876,9 +935,9 @@ export function createWorkspaceNavigator(o) {
       if (ownNativePaths.length > 0) {
         row.draggable = true;
         row.addEventListener('dragstart', (event) => {
-          // Normal dragging moves the AYG link. Alt explicitly exports the
+          // Normal dragging moves the AYG link. Shift explicitly exports the
           // underlying file to Windows, whose native loop cancels HTML drag.
-          if (!event.altKey) return;
+          if (!event.shiftKey) return;
           const dragPayload = navigatorAyGDragPayload({
             itemId:id,
             selectedIds:o.getSession().selected,
@@ -896,7 +955,7 @@ export function createWorkspaceNavigator(o) {
             host: o.host,
           });
         });
-        row.title = 'Drag to move in As you Go; Alt-drag to drag the file into another application';
+        row.title = 'Drag to move in As you Go; Shift-drag to drag the file into another application';
       }
       if (x.kind === 'group') {
         const t = d.createElement('button'); t.type='button'; t.className='navigator-tree-toggle'; t.textContent=s.expanded.has(x.id)?'':'>';
@@ -1125,6 +1184,9 @@ export function createWorkspaceNavigator(o) {
         event.dataTransfer?.setData('application/x-papers-pill',JSON.stringify(x.kind==='folder'?{mode:'machine',path:x.path,machineRoot:x.path,view:'nav',name:x.name}:{mode:'action',path:x.path,name:x.name}));
       }
       rememberNativeDrag({ mode:'machine', paths });
+      // A device's files stay a Papers drag: As you Go downloads them into its inbox on drop.
+      if(paths.some(path=>REMOTE_ROOT.test(path))){setDeviceFilesDrag(event.dataTransfer,paths.filter(path=>REMOTE_ROOT.test(path)));if(event.dataTransfer)event.dataTransfer.effectAllowed='copyLink';return;}
+      if(paths.some(path=>/^\\\\papers~phone\\/i.test(path))){if(event.dataTransfer)event.dataTransfer.effectAllowed='copyLink';return;}
       beginNavigatorNativeDrag({ event, paths, host: o.host });
     });
     row.addEventListener('dragend',()=>{s.internalDragSource=null;});
@@ -1176,7 +1238,8 @@ export function createWorkspaceNavigator(o) {
       s.selected=s.machineSelected.has(x.path)?x:(s.machineRows.get([...s.machineSelected].at(-1))||null);
       body.querySelectorAll('.machine-row').forEach(candidate=>candidate.classList.toggle('selected',s.machineSelected.has(candidate.dataset.id)));
       o.clearCanvasForMachine();
-      o.previewMachinePath(x.path,x.name);
+      if(s.machineSelected.size)claimSelection();
+      if(!e.papersTouchSelection)o.previewMachinePath(x.path,x.name);
     });
     row.addEventListener('dblclick',(e)=>{
       if(e.button!==0)return;
@@ -1187,7 +1250,7 @@ export function createWorkspaceNavigator(o) {
         if(searchResult||s.mode!=='machine')void enterMachine(x.path,false);
         else void loadMachine(x.path,true);
       }else{
-        void o.host.fileCapability('open',{path:x.path});
+        if(new URL(d.defaultView.location.href).searchParams.has('papers-phone')){o.setStatus(REMOTE_ROOT.test(x.path)?'Fetching file to open…':'Opening file…');void o.host.fileCapability('open',{path:x.path}).then(result=>o.setStatus(result?.ok?'':result?.message||'The file could not be opened.')).catch(error=>o.setStatus(error.message));}else void o.host.fileCapability('open',{path:x.path});
       }
     });
     row.addEventListener('contextmenu',(e)=>{
@@ -1204,6 +1267,10 @@ export function createWorkspaceNavigator(o) {
  async function renderMachineTree(){const generation=++s.renderGen,root=s.machineRoot;if(!root)return;setLocation([{key:root.toLowerCase(),label:root,title:root,path:root}]);const tree={index:1,branches:[]},fragment=d.createDocumentFragment(),row=machineRow({path:root,name:root,kind:'folder'});fragment.append(row);if(s.machineExpanded.has(root)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left','14px');children.append(await machineTree(root,1,generation,tree));installNavigatorDropTarget(children,{path:root});fragment.append(children);tree.branches.push({id:`machine:${root.toLowerCase()}`,depth:0,start:0,end:tree.index-1,row,children});}if(generation===s.renderGen&&s.mode==='machine'&&s.view==='tree'){body.replaceChildren(fragment);paintTreeBranches(tree.branches);}}
   function machinePathCrumbs(path) {
     const normalized=String(path||'').replace(/\//g,'\\').replace(/\\+$/,'');
+    if(/^\\\\papers~phone\\/i.test(normalized)){
+      const parts=normalized.slice('\\\\papers~phone\\'.length).split('\\').filter(Boolean);
+      let cursor='\\\\papers~phone';return parts.map((part,index)=>{cursor+='\\'+part;return {path:cursor,name:index===0?(part==='primary'?'Internal storage':navigatorPhoneLabel(part,cursor)):navigatorPhoneLabel(part,cursor)};});
+    }
     const remote=normalized.match(REMOTE_ROOT);
     if(remote){
       let cursor=remote[0];
@@ -1285,7 +1352,25 @@ export function createWorkspaceNavigator(o) {
     if (s.view === 'nav') await loadMachine(path, false);
     else render();
   }
+  // One selection at a time across As you Go pages (this computer's Files, a device's Files, other
+  // windows): clipboard, delete, rename and Preview each act on one selection, so a new selection
+  // anywhere clears the others instead of leaving two live selections to disambiguate.
+  const selectionPeers=typeof d.defaultView.BroadcastChannel==='function'?new d.defaultView.BroadcastChannel('papers-selection-owner'):null;
+  const selectionPageId=d.defaultView.crypto?.randomUUID?.()||String(Math.random());
+  let releasingSelection=false;
+  function claimSelection(){if(!releasingSelection)selectionPeers?.postMessage({owner:selectionPageId});}
+  if(selectionPeers)selectionPeers.onmessage=event=>{
+    if(!event.data?.owner||event.data.owner===selectionPageId)return;
+    releasingSelection=true;
+    try{
+      if(o.getSession().selected.size)o.setAyGSelection?.([]);
+      if(s.machineSelected.size){s.machineSelected.clear();s.selected=null;}
+      body.querySelectorAll('.workspace-navigator-row.selected').forEach(row=>row.classList.remove('selected'));
+    }finally{releasingSelection=false;}
+  };
+  d.defaultView.addEventListener('pagehide',()=>selectionPeers?.close(),{once:true});
   async function syncCanvasSelection(selection) {
+    if (selection?.selectionCount > 0) claimSelection();
     if (selection?.mode === 'empty' && selection.selectionCount === 0) {
       if (s.mode === 'ayg') render();
       return;
@@ -1293,7 +1378,9 @@ export function createWorkspaceNavigator(o) {
     const gen=++s.gen, path=selection?.mode==='single'?selection.item?.path:null;
     if (!path || !o.isAbsoluteWindowsPath(path)) { if(s.mode!=='ayg') setMode('ayg'); else render(); return; }
     const result=await o.host.fileCapability('stat',{path}).catch(()=>null); if(gen!==s.gen) return;
-    if(result?.ok && result.entry?.kind==='folder') return enterMachine(path, false);
+    // While the graph is this pane's view, selecting a linked folder only selects it; entering it
+    // (double tap / double-click) would replace the graph the selection was made in.
+    if(result?.ok && result.entry?.kind==='folder' && !s.graphViewActive) return enterMachine(path, false);
     if(s.mode!=='ayg') setMode('ayg'); else render();
   }
   function renderSearch({preserveFocus=null} = {}) {
@@ -1426,16 +1513,42 @@ export function createWorkspaceNavigator(o) {
   let machineClipboard=null;
   function copyNavigator(cut=false){
     if(s.mode==='ayg'){machineClipboard=null;return cut?o.cutAyG():o.copyAyG();}
-    if(s.machineSelected.size)machineClipboard={paths:[...s.machineSelected],cut,base:o.getSession().clipboard};
+    if(!s.machineSelected.size)return;
+    const paths=[...s.machineSelected],sharedId=o.sharedClipboard?.write({cut,paths})??null;
+    machineClipboard={paths,cut,base:o.getSession().clipboard,sharedId};
+    // Also on the Windows clipboard, as Explorer does (Cut included), so other apps can paste them.
+    const local=paths.filter(path=>!REMOTE_ROOT.test(path));
+    const written=local.length?Promise.resolve(o.host.fileCapability('clipboard-write-files',{paths:local,cut})).then(value=>value?.ok===true?value.fingerprint:null).catch(()=>null):Promise.resolve(null);
+    if(sharedId)void written.then(fingerprint=>fingerprint??Promise.resolve(o.host.fileCapability('clipboard-read',{})).then(value=>value?.fingerprint).catch(()=>null)).then(fingerprint=>o.sharedClipboard.setFingerprint(sharedId,fingerprint));
+  }
+  // Files another pane copied, pasted into this folder. On one device: copy or move as usual.
+  // Across devices: always a copy (the originals stay); Papers downloads or uploads the files.
+  async function pasteForeignFiles(record){
+    const owner=path=>REMOTE_ROOT.test(path)?path.slice(9,45).toLowerCase():'local';
+    const here=o.host.deviceId?String(o.host.deviceId).toLowerCase():'local',target=owner(s.path)==='local'?here:owner(s.path);
+    // A device's view reads drive paths as that device's, so this computer's files go in long-path form.
+    const longPath=String.fromCharCode(92,92,63,92);
+    const paths=record.paths.map(path=>owner(path)==='local'&&o.host.deviceId?longPath+path:path);
+    const cut=record.cut&&record.paths.every(path=>owner(path)===target||(owner(path)==='local'&&target==='local'));
+    transferStatus(cut?'Moving files…':'Copying files…');
+    const result=await o.host.fileCapability(cut?'move':'copy',{paths,destination:s.path}).catch(error=>({ok:false,message:error.message}));
+    if(!result?.ok){transferStatus(result?.message||'File transfer failed.');return;}
+    if(cut)o.sharedClipboard.consume(record.id);
+    s.machineListings.clear();render();
+    transferStatus(result.pending?result.message:cut?'Files moved.':record.cut?'Copied; the originals stay on their device.':'Files copied.',!result.pending);
   }
   async function moveNavigatorFiles(options){return runNavigatorFileMove({...options,onProgress:options.onProgress||((progress)=>{s.machineListings.clear();render();transferStatus('Moving files… '+progress.completed+'/'+progress.total+' confirmed'+(progress.pending?' · waiting for Directory Opus':''));})});}
   async function pasteNavigator(){
-    if(machineClipboard&&machineClipboard.base!==o.getSession().clipboard)machineClipboard=null;
+    // The computer-wide clipboard decides: a newer copy in another pane replaces this pane's own.
+    const shared=o.sharedClipboard?.current(null)||null,foreign=shared&&shared.page!==o.sharedClipboard.page?shared:null;
+    if(machineClipboard&&(foreign||machineClipboard.base!==o.getSession().clipboard))machineClipboard=null;
     if(s.mode==='ayg'){
       if(machineClipboard){await o.linkNavigatorPaths?.(machineClipboard.paths,destination());return;}
       return o.pasteAyG(destination());
     }
     const clipboard=o.getSession().clipboard;
+    if(foreign&&foreign.paths.length){await pasteForeignFiles(foreign);return;}
+    if(foreign){o.setStatus('Those are As you Go folders or links; copy files to paste them into a folder.');return;}
     const source=machineClipboard||{paths:o.nativeDragPaths?.(clipboard?.ids||[])||[],cut:clipboard?.mode==='cut'};
     if(!source.paths.length){o.setStatus('Copy files before pasting into a real folder.');return;}
     transferStatus(source.cut?'Moving files with Directory Opus…':'Copying files with Directory Opus…');
@@ -1450,11 +1563,12 @@ export function createWorkspaceNavigator(o) {
   d.addEventListener('keydown',event=>{
     if(s.collapsed||!panel.contains(event.target)||event.target?.closest?.('input,textarea,[contenteditable="true"]')||!event.ctrlKey||event.altKey)return;
     const key=event.key.toLowerCase();if(!['c','x','v'].includes(key))return;
+    if(key==='v'&&s.mode==='ayg')return; // handled by the paste event below, which carries pasted images
     event.preventDefault();event.stopImmediatePropagation();
     if(key==='v')void pasteNavigator();else copyNavigator(key==='x');
   },true);
   d.addEventListener('paste',event=>{
-    if(s.mode!=='machine'||!panel.contains(event.target)||event.target?.closest?.('input,textarea,[contenteditable="true"]'))return;
+    if(s.collapsed||!panel.contains(event.target)||event.target?.closest?.('input,textarea,[contenteditable="true"]'))return;
     event.preventDefault();event.stopImmediatePropagation();void pasteNavigator();
   },true);
   rename.addEventListener('click',()=>{
@@ -1498,12 +1612,12 @@ export function createWorkspaceNavigator(o) {
   });
   del.addEventListener('click',async()=>{
     let r;del.disabled=true;
-    try{r=await deleteNavigatorSelection(s.mode,s.selected,{...o,confirm:message=>d.defaultView?.confirm(message)});}
+    try{r=await deleteNavigatorSelection(s.mode,s.selected,{...o,confirm:message=>d.defaultView?.confirm(message)},s.mode==='machine'?[...s.machineSelected]:[]);}
     catch(error){o.setStatus(error.message||'Delete failed.');return;}
     finally{del.disabled=false;}
     if(s.mode==='ayg'||!r)return;
     if(!r.ok){o.setStatus(r.message||'Delete failed.');return;}
-    s.selected=null;s.machineListings.clear();render();
+    s.selected=null;s.machineSelected.clear();s.machineListings.clear();render();
   });
   function revealPath(){return s.mode==='machine'?(s.selected?.path||s.path):(o.nativeDragPaths?.([...o.getSession().selected])||[])[0];}
   reveal.addEventListener('click',()=>{const path=revealPath();if(path)void o.host.fileCapability('reveal',{path}).then(result=>{if(!result?.ok)o.setStatus(result?.message||'Could not reveal that file.');}).catch(error=>o.setStatus(error.message||'Could not reveal that file.'));});
@@ -1544,7 +1658,7 @@ export function createWorkspaceNavigator(o) {
     children:async parent=>parent.devices ? await remoteDevices() : parent.path ? (await machineList(parent.path))?.items || []
       : o.itemsIn(o.getState(),parent.id).filter(item=>item.kind!=='window-layout'),
     art:(element,item)=>{element.innerHTML=icon(item);if(item.path)loadMachineArt(element,item);else hydrateArt(element,item);},
-    activate:async item=>{if(item.path){if(item.kind==='folder'){s.machineExpanded.clear();setView('nav',false);await enterMachine(item.path,false);}else await o.host.fileCapability('open',{path:item.path});}else await enterAyG(item);},
+    activate:async item=>{if(item.deviceId && o.openDeviceInline){try{if(await o.openDeviceInline(deviceFilesUrl(d.defaultView.location,item.deviceId)))return;}catch(error){o.setStatus(error.message);return;}}if(item.path){if(item.kind==='folder'){s.machineExpanded.clear();setView('nav',false);await enterMachine(item.path,false);}else await o.host.fileCapability('open',{path:item.path});}else await enterAyG(item);},
   });
   const savedArtItem = (saved) => {
     if (saved?.itemId) {
@@ -1560,6 +1674,7 @@ export function createWorkspaceNavigator(o) {
     return { kind:saved?.mode === 'ayg' ? 'group' : 'folder', icon:typeof saved?.icon === 'string' ? saved.icon : null };
   };
   savedStates=createNavigatorSavedStates({document:d,container:savedPills,
+    onSelectionChange:active=>{if(active)phoneGestures?.finish();},
     loadSavedStates:()=>o.getState().view?.preferences?.navigatorSavedStates,
     isReady:()=>o.savedStatesReady?.() ?? true,
     saveSavedStates:o.saveNavigatorSavedStates,
@@ -1568,7 +1683,7 @@ export function createWorkspaceNavigator(o) {
     decorateLabel:(label,saved)=>{
       const normalized=navigatorFolderPill(saved,o.getState().groups||[]);
       if(normalized.mode==='ayg'){label.textContent=(s.expanded.has(normalized.currentId)?'':'> ')+saved.name;return;}
-      if(saved.mode==='machine'){label.textContent=saved.name+' <';label.closest('.navigator-saved-pill')?.classList.add('navigator-filesystem-link');return;}
+      if(saved.mode==='machine'){label.textContent=navigatorPhoneLabel(saved.name,saved.path)+' <';label.closest('.navigator-saved-pill')?.classList.add('navigator-filesystem-link');return;}
       const target=saved.path||saved.art?.target||o.nativeDragPaths?.([saved.itemId])?.[0];
       if(target&&o.isAbsoluteWindowsPath(target))void o.host.fileCapability('stat',{path:target}).then(result=>{
         if(label.isConnected&&result?.ok&&result.entry?.kind==='folder'){
@@ -1629,7 +1744,7 @@ export function createWorkspaceNavigator(o) {
     },
     snapshot:()=>{
       const item=s.mode==='ayg'?(o.getState().groups||[]).find(g=>g.id===currentAyG()):null;
-      return {mode:s.mode,view:s.view,currentId:currentAyG(),path:s.path,machineRoot:s.machineRoot,expanded:[...s.expanded],machineExpanded:[...s.machineExpanded],query:s.searchQuery,name:s.mode==='machine'?(s.path?.split(/[\\/]/).filter(Boolean).pop()||s.path||'Folder'):(item?.name||'As you Go'),icon:item?.icon||null};
+      return {mode:s.mode,view:s.view,currentId:currentAyG(),path:s.path,machineRoot:s.machineRoot,expanded:[...s.expanded],machineExpanded:[...s.machineExpanded],query:s.searchQuery,name:s.mode==='machine'?navigatorPhoneLabel(s.path?.split(/[\\/]/).filter(Boolean).pop()||s.path||'Folder',s.path):(item?.name||'As you Go'),icon:item?.icon||null};
     },
     restore:async (saved, modifiers)=>{
       saved=navigatorFolderPill(saved,o.getState().groups||[]);
@@ -1647,6 +1762,43 @@ export function createWorkspaceNavigator(o) {
     },
     art:(element,saved)=>{const folder=navigatorFolderPill(saved,o.getState().groups||[]);const linked=(folder.currentId||'').startsWith('group-proxima-');element.classList.toggle('navigator-proxima-pill-art',linked);const item=savedArtItem(saved);element.innerHTML=icon(item);const path=saved.path||(o.isAbsoluteWindowsPath(item.target)?item.target:null);if(path)loadMachineArt(element,{path,kind:saved.mode==='machine'?'folder':'file'});else hydrateArt(element,item);},
   });
+  if(phoneMode){
+    const transfer=d.createElement('button');transfer.type='button';transfer.className='phone-pill-transfer';transfer.hidden=true;const clearTransfer=d.createElement('button');clearTransfer.type='button';clearTransfer.className='phone-pill-transfer phone-pill-transfer-clear';clearTransfer.hidden=true;clearTransfer.textContent='↓×';clearTransfer.title='Move selected entries and clear their pills';clearTransfer.setAttribute('aria-label',clearTransfer.title);const pasteIcon=d.createElement('button');pasteIcon.type='button';pasteIcon.className='phone-pill-transfer phone-paste-icon';pasteIcon.hidden=true;pasteIcon.title='Paste clipboard image as selected icons';pasteIcon.setAttribute('aria-label',pasteIcon.title);pasteIcon.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 5V3h8v2M6 17l5-5 3 3 3-2 3 4"/><circle cx="16" cy="9" r="1"/></svg>';d.body.append(transfer,clearTransfer,pasteIcon);
+    pasteIcon.addEventListener('click',async()=>{pasteIcon.disabled=true;try{const pills=savedStates.isSelecting()?savedStates.selected():null;const icon=await o.pasteSelectionIcon?.(pills);if(pills&&icon)await savedStates.setSelectedIcon(icon);transferStatus('Icons updated.',true);}catch(error){transferStatus(error.message,true);}finally{pasteIcon.disabled=false;}});
+    const update=()=>{if(phoneGestures.isSelecting()&&savedStates.isSelecting())savedStates.finishSelection();const down=savedStates.isSelecting();transfer.hidden=!down&&!phoneGestures.isSelecting();clearTransfer.hidden=!down;pasteIcon.hidden=!down&&(!phoneGestures.isSelecting()||s.mode==='machine');transfer.textContent=down?'↓':'↑';transfer.title=down?'Move selected pills into this folder':'Add selection to saved items';transfer.setAttribute('aria-label',transfer.title);};
+    body.addEventListener('pointerup',()=>d.defaultView.setTimeout(update,0));body.addEventListener('click',update);
+    const watch=new d.defaultView.MutationObserver(update);watch.observe(body,{attributes:true,attributeFilter:['class']});watch.observe(savedPills,{childList:true,subtree:true});
+    const performTransfer=async clearPills=>{transfer.disabled=clearTransfer.disabled=true;try{
+      if(savedStates.isSelecting()){
+        const chosen=savedStates.selected();if(!chosen.length)throw Error('Select at least one pill.');
+        for(const saved of chosen){
+          const id=saved.itemId||saved.currentId||saved.art?.shortcutId;
+          const paths=saved.path||saved.art?.target;
+          let ok=false,completedMoves=[];
+          if(s.mode==='machine'){
+            const targets=paths?[paths]:o.nativeDragPaths?.([id])||[];
+            if(!targets.length)throw Error('This entry has no file to move into this directory.');
+            const result=await moveNavigatorFiles({host:o.host,paths:targets,destination:s.path,retarget:async moves=>{completedMoves=moves;return await retargetMovedFiles(moves);}});ok=result?.ok===true;
+          }else{
+            const group=(o.getState().groups||[]).find(x=>x.id===id);const shortcut=(o.getState().shortcuts||[]).find(x=>x.id===id);
+            const active=group?!group.bin:shortcut?.placements?.some(x=>!x.bin);
+            if(id&&active)ok=await o.moveAyGItemsToFolder?.([id],[],currentAyG());
+            else if(paths)ok=await o.linkNavigatorPaths?.([paths],currentAyG(),{name:saved.name,icon:saved.icon||saved.art?.icon});
+          }
+          if(ok===true&&s.mode==='ayg')ok=o.itemsIn(o.getState(),currentAyG()).some(item=>item.id===id||item.shortcutId===id||(paths&&String(item.target||'').toLowerCase()===paths.toLowerCase()));
+          if(ok!==true)throw Error('The entry was not added to this folder. Its pill was kept.');
+          if(clearPills)await savedStates.remove(saved,completedMoves);
+        }
+        savedStates.finishSelection();s.machineListings.clear();render();transferStatus(chosen.length+' entr'+(chosen.length===1?'y':'ies')+' added to '+(s.mode==='machine'?'this directory':'As you Go')+'.',true);
+      }else{
+        if(s.mode==='machine')for(const path of s.machineSelected){const result=await o.host.fileCapability('stat',{path});if(!result?.ok)throw Error(result?.message||'File unavailable.');const entry=result.entry;if(await savedStates.add({mode:entry.kind==='folder'?'machine':'action',path,machineRoot:path,view:'nav',name:entry.name})===false)throw Error('Saved items could not be saved.');}
+        else for(const id of o.getSession().selected){const item=[...(o.getState().groups||[]).map(x=>({...x,kind:'group'})),...(o.getState().shortcuts||[])].find(x=>x.id===id||x.id===o.resolveAyGDragIdentity?.(id)?.itemId);const saved=item&&navigatorSavedStateForItem(item);if(saved&&await savedStates.add(saved)===false)throw Error('Saved items could not be saved.');}
+        phoneGestures.finish();
+      }
+    }catch(error){transferStatus(error.message,true);}finally{transfer.disabled=clearTransfer.disabled=false;update();}};
+    transfer.addEventListener('click',()=>performTransfer(false));clearTransfer.addEventListener('click',()=>performTransfer(true));
+    d.defaultView.addEventListener('pagehide',()=>{watch.disconnect();transfer.remove();clearTransfer.remove();pasteIcon.remove();},{once:true});
+  }
   syncChrome(); render();
   o.workspace.addEventListener('pointerdown',(event)=>{
     if(event.button!==0||panel.contains(event.target))return;
@@ -1663,6 +1815,7 @@ export function createWorkspaceNavigator(o) {
     rememberNativeFileDrag(source){rememberNativeDrag(source);},
     syncCanvasSelection,
     copySelectionPaths,
+    downloadSelectionPaths:()=>s.mode==='machine'?[...s.machineSelected]:(o.nativeDragPaths?.([...o.getSession().selected])||[]),
     isMachineMode: () => s.mode === 'machine',
     currentFolder: () => s.mode === 'ayg' && s.view !== 'tree' ? currentAyG() : o.rootId,
     isCollapsed: () => s.collapsed,

@@ -7,9 +7,10 @@ import { createNavigatorSavedStates, decodeNavigatorSavedStates, uniqueNavigator
 function pillFixture(options={}) {
   const element=()=>Object.assign(new EventTarget(),{
     style:{setProperty(){}},classList:{add(){},remove(){}},children:[],setAttribute(){},after(){},
-    append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;},
+    prepend(...items){this.children.unshift(...items);},append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;},
   });
   const document={createElement:element,defaultView:{innerHeight:900,localStorage:options.storage||{getItem:()=>null,setItem(){}},addEventListener(){}}};
+  Object.assign(document.defaultView,options.window||{});document.addEventListener=()=>{};
   const container=element();
   const saved=createNavigatorSavedStates({document,container,art(){},restore(){},...options});
   return {saved,container,names:()=>container.children[1].children.map(pill=>pill.children[1].textContent)};
@@ -117,7 +118,7 @@ test('saved pills survive a new browser session through durable preferences, inc
     const element=()=>{
       const node=new EventTarget();
       Object.assign(node,{style:{setProperty(){}},classList:{add(){},remove(){}},children:[],
-        setAttribute(){},after(){},append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;}});
+        setAttribute(){},after(){},prepend(...items){this.children.unshift(...items);},append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;}});
       elements.push(node);return node;
     };
     const document={createElement:element,defaultView:{innerHeight:900,localStorage:{getItem:()=>null,setItem(){}},addEventListener(){}}};
@@ -146,7 +147,7 @@ test('shared cache cannot replace document-backed pills', () => {
   const listeners = {};
   const document = {createElement:()=>Object.assign(new EventTarget(), {
     style:{setProperty(){}},classList:{add(){},remove(){}},children:[],setAttribute(){},after(){},
-    append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;},
+    prepend(...items){this.children.unshift(...items);},append(...items){this.children.push(...items);},replaceChildren(...items){this.children=items;},
   }),defaultView:{innerHeight:900,localStorage:{getItem:()=>null,setItem(){}},
     addEventListener(type,fn){listeners[type]=fn;},
     BroadcastChannel:class {addEventListener(type,fn){listeners.broadcast=fn;} postMessage(){}},
@@ -200,4 +201,26 @@ test('legacy cache migration waits for a loaded document without saved pills',as
   await new Promise(resolve=>setImmediate(resolve));
   fixture.saved.syncDurable();
   assert.deepEqual(writes,[legacy]);assert.deepEqual(fixture.names(),['Work']);
+});
+
+test('explicit pill removal waits for durable success and keeps unrelated pills',async()=>{
+ let fail=true,disk=[{mode:'action',path:'D:/a.txt',name:'A'},{mode:'action',path:'D:/b.txt',name:'B'}];
+ const f=pillFixture({loadSavedStates:()=>disk,saveSavedStates:async next=>{if(fail)return false;disk=next;return true;}});
+ await assert.rejects(f.saved.remove(disk[0]),/could not be saved/);assert.deepEqual(f.names(),['A','B']);
+ fail=false;await f.saved.remove(disk[0]);assert.deepEqual(f.names(),['B']);
+});
+test('move-and-clear removes the retargeted pill after a verified filesystem move',async()=>{
+ let disk=[{mode:'action',path:'D:/a.txt',name:'Authored A'}];const old=disk[0];
+ const f=pillFixture({loadSavedStates:()=>disk,saveSavedStates:async next=>{disk=next;return true;}});
+ const moves=[{oldPath:'D:/a.txt',newPath:'D:/folder/a.txt'}];f.saved.retargetPaths(moves);await new Promise(r=>setImmediate(r));
+ await f.saved.remove(old,moves);assert.deepEqual(f.names(),[]);assert.deepEqual(disk,[]);
+});
+
+test('phone pill selection survives durable hydration with reordered fields',()=>{
+ let fire,disk=[{mode:'action',path:'D:/a.txt',name:'A'}];
+ const f=pillFixture({window:{location:{href:'https://papers.local/ayg/?papers-phone=1'},setTimeout:fn=>{fire=fn;return 1;},clearTimeout(){}},loadSavedStates:()=>disk});
+ const event=new Event('pointerdown');Object.assign(event,{pointerType:'touch',clientX:10,clientY:10});f.container.children[1].children[0].dispatchEvent(event);fire();assert.equal(f.saved.selected().length,1);
+ f.container.children[1].children[0].dispatchEvent(new Event('click',{cancelable:true}));assert.equal(f.saved.selected().length,1,'lifting the held finger must not deselect the pill');
+ disk=[{name:'A',path:'D:/a.txt',mode:'action',icon:null}];f.saved.syncDurable();assert.equal(f.saved.selected().length,1);assert.equal(f.saved.selected()[0].name,'A');
+ f.saved.finishSelection();assert.equal(f.saved.selected().length,0);
 });

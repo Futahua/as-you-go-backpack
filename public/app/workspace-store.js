@@ -60,6 +60,8 @@ export function createWorkspaceStore({
   let redoStack = [];
   let saveQueue = Promise.resolve();
   let lastSaveError = null;
+  let lastSaveWasAutomatic = false;
+  let pendingEditError = null;
   let lastPersistedSnapshot = null;
   let lastQueuedSnapshot = null;
   const queuedSaves = [];
@@ -193,11 +195,16 @@ export function createWorkspaceStore({
     // operation directly so callers observe failure without an extra finally
     // microtask delaying UI error reporting.
     saveQueue = operation.then((result) => {
-      if (!result?.superseded) lastSaveError = null;
+      if (!result?.superseded) {
+        lastSaveError = null;
+        if (!metadata?.rebaseAutomaticSave) pendingEditError = null;
+      }
       cleanup();
       return result;
     }, (error) => {
       lastSaveError = error;
+      lastSaveWasAutomatic = metadata?.rebaseAutomaticSave === true;
+      if (!lastSaveWasAutomatic) pendingEditError = error;
       cleanup();
       return undefined;
     });
@@ -273,8 +280,11 @@ export function createWorkspaceStore({
     // Resolve only after every save queued before the call is terminal. The
     // queue deliberately remains usable after a rejection, while this
     // barrier still reports that rejection to a close-time caller.
-    flush: () => saveQueue.then(() => {
-      if (lastSaveError) throw lastSaveError;
+    flush: ({ ignoreAutomaticWriterRefusal = false } = {}) => saveQueue.then(() => {
+      if (ignoreAutomaticWriterRefusal && pendingEditError) throw pendingEditError;
+      const viewRefusal = ignoreAutomaticWriterRefusal && lastSaveWasAutomatic
+        && lastSaveError?.message === 'This surface is not the writer and may not save the board.';
+      if (lastSaveError && !viewRefusal) throw lastSaveError;
       return undefined;
     }),
     getSession: () => session,

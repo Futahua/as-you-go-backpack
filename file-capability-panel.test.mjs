@@ -105,7 +105,7 @@ test('file preview is a collapsed/expanded dock with a draggable width and no fa
   assert.match(navigatorCss, /\.workspace-navigator-machine-columns/);
   assert.match(navigatorCss, /\.workspace-navigator-row\.machine-list-row/);
   assert.match(navigator, /fileCapability\('icon'/);
-  assert.match(navigator, /searchNavigatorFiles\(\{query:normalized,search:query=>o\.host\.fileCapability\('search',\{query,limit:1000\}\)/);
+  assert.match(navigator, /searchNavigatorFiles\(\{query:normalized,search:query=>o\.host\.fileCapability\('search',\{query,limit:1000(?:,[\s\S]*?)?\}\)/);
   assert.match(navigator, /searchResult\.total/);
   assert.match(navigator, /formatSearchSize/);
   assert.match(navigator, /formatSearchDate/);
@@ -346,7 +346,7 @@ test('file capability panel source keeps destructive retargeting verification-bo
   assert.match(source, /setButtonSvg\(documentRef, expandButton, 'Expand file preview'/);
   assert.doesNotMatch(css, /file-capability-expand::before/);
   assert.match(source, /isFullPage: \(\) => state\.fullPage/);
-  assert.match(workspace, /toggleSidePanes:[\s\S]*fileCapabilityPanel\.isFullPage/);
+  assert.match(workspace, /toggleSidePanes:[\s\S]*fileCapabilityPanel\??\.isFullPage/);
   assert.match(workspace, /paneLayout\.toggleSurfaces\(\)/);
   assert.match(workspace, /installWorkspacePaneLayout/);
   assert.match(css, /\.file-capability-native-preview/);

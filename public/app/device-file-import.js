@@ -7,7 +7,10 @@ const bytes = n => { if (n < 1024) return n + ' B'; const unit = n < 1048576 ? '
 
 export const isDevicePath = path => typeof path === 'string' && REMOTE.test(path);
 
-export function createDeviceFileImport({ document: d, host, link }) {
+export function createDeviceFileImport({ document: d, host, link: saveLink, scopeKey, filesOnly = false }) {
+  const pendingKey = PENDING + ':' + (scopeKey || 'main');
+  const link = async (...args) => { if (await saveLink(...args) !== true) throw Error('The workspace did not confirm saving the link.'); };
+  const linkResults = new Map();
   const panel = d.createElement('section'); panel.className = 'device-import-panel'; panel.hidden = true; panel.setAttribute('aria-label', 'Downloads');
   const heading = d.createElement('strong'), close = d.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', 'Hide download progress');
   const top = d.createElement('div'); top.className = 'device-import-heading'; top.append(heading, close);
@@ -22,13 +25,14 @@ export function createDeviceFileImport({ document: d, host, link }) {
   let button = null;
   const mountButton = () => {
     if (button?.isConnected) return true;
-    const lens = d.querySelector('.workspace-left-actions .native-window-lens');
-    if (!lens) return false;
-    button = d.createElement('button'); button.type = 'button'; button.className = lens.className; button.classList.remove('native-window-lens'); button.classList.add('device-import-button');
+    const lens = filesOnly ? null : d.querySelector('.workspace-left-actions .native-window-lens');
+    const toolbar = filesOnly ? d.querySelector('.workspace-navigator-toolbar') : null;
+    if (!lens && !toolbar) return false;
+    button = d.createElement('button'); button.type = 'button'; button.className = lens?.className || 'navigator-icon-button'; button.classList.remove('native-window-lens'); button.classList.add('device-import-button');
     button.title = 'Downloads'; button.setAttribute('aria-label', 'Downloads');
     button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg>';
     button.addEventListener('click', () => { if (!panel.hidden) { panel.hidden = true; return; } panel.hidden = false; if (!shown) { heading.textContent = 'No downloads yet'; file.textContent = 'Drop files from another device into As you Go.'; progress.hidden = true; detail.textContent = ''; destination.textContent = ''; actions.hidden = true; } else void poll(true); });
-    lens.after(button); return true;
+    if (lens) lens.after(button); else toolbar.append(button); return true;
   };
   const place = () => {
     if (panel.hidden) return;
@@ -45,8 +49,8 @@ export function createDeviceFileImport({ document: d, host, link }) {
   if (!mountButton()) { const observer = new MutationObserver(() => { if (mountButton()) observer.disconnect(); }); observer.observe(d.body, { childList: true, subtree: true }); setTimeout(() => observer.disconnect(), 60000); }
 
   const storage = (() => { try { return d.defaultView.localStorage; } catch { return null; } })();
-  const readPending = () => { try { const value = JSON.parse(storage?.getItem(PENDING) || '[]'); return Array.isArray(value) ? value.filter(item => typeof item?.jobId === 'string') : []; } catch { return []; } };
-  const writePending = list => { try { storage?.setItem(PENDING, JSON.stringify(list)); } catch { /* the link is still made while this page stays open */ } };
+  const readPending = () => { try { const value = JSON.parse(storage?.getItem(pendingKey) || '[]'); return Array.isArray(value) ? value.filter(item => typeof item?.jobId === 'string') : []; } catch { return []; } };
+  const writePending = list => { try { storage?.setItem(pendingKey, JSON.stringify(list)); } catch { /* the link is still made while this page stays open */ } };
   const pending = new Map(readPending().map(item => [item.jobId, item]));
   const save = () => writePending([...pending.values()]);
 
@@ -57,25 +61,27 @@ export function createDeviceFileImport({ document: d, host, link }) {
 
   function showError(title, error) { panel.hidden = false; heading.textContent = title; file.textContent = error?.message || String(error); file.title = file.textContent; progress.hidden = true; detail.textContent = ''; destination.textContent = ''; actions.hidden = true; }
   function draw(job) {
+    if (linkResults.has(job.id)) Object.assign(job, linkResults.get(job.id));
     const now = performance.now(), active = ['preparing', 'downloading', 'verifying', 'publishing'].includes(job.phase);
     if (previous?.id === job.id && now > previous.time && job.bytes >= previous.bytes && job.phase === 'downloading') speed = speed * .65 + (job.bytes - previous.bytes) / ((now - previous.time) / 1000) * .35; else if (previous?.id !== job.id) speed = 0;
     previous = { id: job.id, time: now, bytes: job.bytes || 0 };
     const count = job.results?.length || 0;
-    heading.textContent = job.phase === 'completed' ? (job.linked === false ? 'Downloaded, not linked' : 'Downloaded and linked') : job.phase === 'paused' ? 'Download paused' : job.phase === 'failed' ? 'Download stopped' : job.phase === 'uncertain' ? 'Download interrupted' : job.phase === 'preparing' ? 'Finding files…' : job.phase === 'verifying' ? 'Checking file' : job.phase === 'publishing' ? 'Saving to inbox' : 'Downloading';
+    heading.textContent = job.phase === 'completed' ? (job.linked === true ? 'Downloaded and linked' : job.linked === false ? 'Downloaded, not linked' : 'Downloaded') : job.phase === 'paused' ? 'Download paused' : job.phase === 'failed' ? 'Download stopped' : job.phase === 'uncertain' ? 'Download interrupted' : job.phase === 'preparing' ? 'Finding files…' : job.phase === 'verifying' ? 'Checking file' : job.phase === 'publishing' ? 'Saving to inbox' : 'Downloading';
     file.textContent = job.error || (job.phase === 'completed' && count ? job.results.map(item => item.name).join(', ') : job.name || ''); file.title = file.textContent;
     progress.hidden = false; progress.max = Math.max(1, job.totalBytes || 0);
     if (job.totalBytes == null && active) progress.removeAttribute('value'); else progress.value = job.phase === 'completed' ? progress.max : job.bytes || 0;
     detail.textContent = job.totalBytes == null ? '' : bytes(job.bytes || 0) + ' / ' + bytes(job.totalBytes) + (job.phase === 'downloading' ? ' · ' + bytes(Math.round(speed)) + '/s' : '');
     destination.textContent = job.destination ? 'To ' + job.destination : '';
-    actions.hidden = !(active || job.phase === 'paused' || job.phase === 'failed');
-    pause.textContent = active ? 'Pause' : 'Resume'; pause.disabled = job.phase === 'publishing';
+    actions.hidden = !(active || job.phase === 'paused' || job.phase === 'failed' || (job.phase === 'completed' && pending.has(job.id) && job.linked === false));
+    pause.textContent = job.phase === 'completed' ? 'Retry link' : active ? 'Pause' : 'Resume'; pause.disabled = job.phase === 'publishing';
   }
 
   async function finish(job, entry) {
-    pending.delete(job.id); save();
     if (job.phase !== 'completed') return;
-    try { await link(job.results.map(item => ({ target: ownPath(item.target), name: item.name, kind: item.kind })), entry.destination); job.linked = true; }
-    catch (error) { job.linked = false; job.error = 'Saved in the inbox, but the link failed: ' + (error?.message || error); }
+    if (entry.linkFailed) { Object.assign(job, { linked: false, error: entry.linkError }); return; }
+    try { await link(job.results.map(item => ({ target: ownPath(item.target), name: item.name, kind: item.kind })), entry.destination); job.linked = true; pending.delete(job.id); save(); }
+    catch (error) { job.linked = false; job.error = 'Saved in the inbox, but the link failed: ' + (error?.message || error); entry.linkFailed = true; entry.linkError = job.error; save(); }
+    linkResults.set(job.id, { linked: job.linked, error: job.error });
   }
   async function poll(force = false) {
     if (polling || disposed) return; polling = true;
@@ -99,7 +105,9 @@ export function createDeviceFileImport({ document: d, host, link }) {
 
   pause.addEventListener('click', async () => {
     if (!shown) return; pause.disabled = true;
-    try { const job = await call({ operation: pause.textContent === 'Pause' ? 'inbox-pause' : 'inbox-resume', jobId: shown }); if (job) draw(job); watch(); }
+    try {
+      if (pause.textContent === 'Retry link') { const entry = pending.get(shown); if (entry) { delete entry.linkFailed; delete entry.linkError; linkResults.delete(shown); save(); await poll(true); } return; }
+      const job = await call({ operation: pause.textContent === 'Pause' ? 'inbox-pause' : 'inbox-resume', jobId: shown }); if (job) draw(job); watch(); }
     catch (error) { file.textContent = error.message; }
     finally { pause.disabled = false; }
   });

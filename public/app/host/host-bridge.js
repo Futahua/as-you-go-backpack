@@ -322,7 +322,7 @@ export function createHostBridge(window) {
     openWebLink: (url) => request('papers:project:open-web-link', { url }),
     dismissCommandSurface: ({ destination = 'restore' } = {}) =>
       request('papers:project:command-surface-dismiss', { destination }),
-    openNewSurface: (url) => request('papers:project:open-new-surface', { url }),
+    openNewSurface: (url, {inlineGroupId} = {}) => request('papers:project:open-new-surface', { url, ...(inlineGroupId ? {inlineGroupId} : {}) }),
     pickTarget: (kind) => request('papers:project:as-you-go-pick-target', { kind }),
     shortcutIcon: (detail) => request('papers:project:as-you-go-shortcut-icon', detail),
     resolveWebIcon: (url) => request('papers:project:resolve-web-link-icon', { url }),
@@ -337,6 +337,8 @@ export function createHostBridge(window) {
         { operation, params },
         operation === 'native-drag'
           ? null
+          : operation === 'open' && new URL(window.location.href).searchParams.has('papers-phone')
+            ? 30 * 60 * 1000
           : operation === 'preview' || operation === 'pane-layout-mount'
             ? FILE_PREVIEW_REQUEST_TIMEOUT_MS
             : operation.startsWith('pane-layout-')

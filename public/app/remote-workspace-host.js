@@ -38,6 +38,7 @@ export function createRemoteWorkspaceHost(base, ownerId) {
   const root = `\\\\papers~${ownerId}`;
   const rootLower = root.toLowerCase() + '\\';
   let workspaceId = null;
+  let sharedRoots = [];
   // Last 50 device requests, readable from DevTools as __papersRemoteTrace.
   const trace = (globalThis.__papersRemoteTrace = []);
   const call = async (params) => {
@@ -56,7 +57,7 @@ export function createRemoteWorkspaceHost(base, ownerId) {
     if (!found[0]) throw new Error('That device has no As you Go to open.');
     return (workspaceId = found[0].id);
   };
-  const isDevicePath = (value) => typeof value === 'string' && /^[A-Za-z]:[\\/]/.test(value);
+  const isDevicePath = (value) => typeof value === 'string' && (/^[A-Za-z]:[\\/]/.test(value) || sharedRoots.some(name => value === name || value.startsWith(name + '\\')));
   const toRemote = (value) => {
     if (isDevicePath(value)) return `${root}\\${value.replace(/\//g, '\\')}`;
     if (Array.isArray(value)) return value.map(toRemote);
@@ -92,6 +93,7 @@ export function createRemoteWorkspaceHost(base, ownerId) {
   const restoreIcons = (state) => mapStrings(state, (text) => iconRefs.get(text) ?? text);
   const loadVersioned = async () => {
     const loaded = await call({ operation: 'workspace-load', workspaceId: await workspace() });
+    sharedRoots = loaded.sharedRoots || [];
     const decoded = decodeWorkspaceState(JSON.stringify(loaded.state));
     const state = typeof decoded === 'string' ? JSON.parse(decoded) : decoded;
     return { state: await inlineIcons(state), revision: loaded.revision };

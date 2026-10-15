@@ -843,3 +843,12 @@ test('dragDropToFolder with mixed ids moves only the non-ancestor ids', async ()
   await h.commands.dragDropToFolder({ itemIds: ['anc-f1', 'g2'], placementIds: new Map(), folderId: 'dest' });
   assert.deepEqual(h.store.getSnapshot().moved, ['p-g2', 'dest']);
 });
+
+test('download linking reports persistence failure and retries the existing optimistic link durably', async () => {
+ let accepted=false, writes=0;
+ const h=createHarness({persist:async()=>{writes++;return accepted ? {ok:true} : {ok:false,message:'disk full'};},model:{createDroppedShortcuts:(s,targets)=>s.shortcuts.length?s:{...s,shortcuts:targets}}});
+ assert.equal(await h.commands.dropResolvedTargets([{target:'D:\\inbox\\file.txt'}],'root',{requireDurable:true}),false);
+ accepted=true;
+ assert.equal(await h.commands.dropResolvedTargets([{target:'D:\\inbox\\file.txt'}],'root',{requireDurable:true}),true);
+ assert.equal(h.store.getSnapshot().shortcuts.length,1);assert.equal(writes,2);
+});

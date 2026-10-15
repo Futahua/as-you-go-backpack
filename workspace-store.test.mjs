@@ -643,3 +643,21 @@ test('pane preference commits preserve live selection while ordinary document ed
  assert.deepEqual([...h.store.getSession().selected],['root']);assert.equal(h.store.getSession().selectionAnchor,'root');
  await h.store.commit({...h.getState(),items:['changed']});assert.equal(h.store.getSession().selected.size,0);
 });
+for (const [label, automatic, message, allowed] of [
+  ['view writer refusal', true, 'This surface is not the writer and may not save the board.', true],
+  ['real edit writer refusal', false, 'This surface is not the writer and may not save the board.', false],
+  ['view I/O failure', true, 'disk full', false],
+]) test('device close handles ' + label, async () => {
+  const store = createWorkspaceStore({ getState: () => ({}), setState: () => {}, persist: async () => { throw Error(message); } });
+  await assert.rejects(store.save({}, { rebaseAutomaticSave: automatic }));
+  if (allowed) await store.flush({ ignoreAutomaticWriterRefusal: true });
+  else await assert.rejects(store.flush({ ignoreAutomaticWriterRefusal: true }), { message });
+  await assert.rejects(store.flush(), { message });
+});
+test('an automatic refusal cannot conceal an earlier failed edit on device close', async () => {
+  let n = 0;
+  const store = createWorkspaceStore({ getState: () => ({}), setState: () => {}, persist: async () => { throw Error(++n === 1 ? 'edit failed' : 'This surface is not the writer and may not save the board.'); } });
+  await assert.rejects(store.save({}));
+  await assert.rejects(store.save({}, { rebaseAutomaticSave: true }));
+  await assert.rejects(store.flush({ ignoreAutomaticWriterRefusal: true }), /edit failed/);
+});
