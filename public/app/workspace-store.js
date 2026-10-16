@@ -42,6 +42,7 @@ export function createWorkspaceStore({
   persist,
   normalizeState,
   prepare,
+  prepareHistoryChange,
   afterCommit,
   setStatus,
   initialSession = {},
@@ -217,6 +218,7 @@ export function createWorkspaceStore({
     saveMetadata,
     requireDurable = false,
     preserveSelection = false,
+    historyBefore,
   } = {}) {
     if (!canMutateDocument()) {
       // Refused before the history stacks or the document are touched, so a
@@ -224,7 +226,7 @@ export function createWorkspaceStore({
       onMutationBlocked('commit');
       return Promise.resolve(false);
     }
-    const previous = getState();
+    const previous = historyBefore ?? getState();
     if (isUndo) {
       redoStack.push(previous);
     } else if (isRedo) {
@@ -261,21 +263,46 @@ export function createWorkspaceStore({
       });
   }
 
+  let historyBusy = false;
   async function undo() {
     if (!canMutateDocument()) { onMutationBlocked('undo'); return; }
-    if (undoStack.length === 0) return;
-    const previous = undoStack.pop();
-    return commit(previous, { isUndo: true });
+    return replayHistory(undoStack, true);
   }
 
   async function redo() {
     if (!canMutateDocument()) { onMutationBlocked('redo'); return; }
-    if (redoStack.length === 0) return;
-    const next = redoStack.pop();
-    return commit(next, { isRedo: true });
+    return replayHistory(redoStack, false);
+  }
+
+  async function replayHistory(stack, isUndo) {
+    if (historyBusy || !stack.length) return;
+    historyBusy = true;
+    const target = stack.at(-1), current = getState();
+    try {
+      if (target.externalEffect) {
+        if(await target.effect[isUndo ? 'undo' : 'redo']()===false)return false;
+        if(stack.at(-1)!==target)return false;
+        stack.pop();
+        (isUndo ? redoStack : undoStack).push(target);
+        afterCommit?.();
+        setStatus?.('');
+        return true;
+      }
+      const next = prepareHistoryChange ? await prepareHistoryChange(current, target) : target;
+      if (next === false || stack.at(-1) !== target || !canMutateDocument()) return false;
+      stack.pop();
+      return await commit(next, { isUndo, isRedo: !isUndo, historyBefore: current });
+    } catch (error) {
+      setStatus?.(error instanceof Error ? error.message : String(error));
+      return false;
+    } finally { historyBusy = false; }
   }
 
   return {
+    recordExternalEffect(effect) {
+      undoStack.push({externalEffect:true,effect});
+      redoStack.length=0;
+    },
     getSnapshot: getState,
     // Resolve only after every save queued before the call is terminal. The
     // queue deliberately remains usable after a rejection, while this

@@ -60,6 +60,7 @@ export function createWorkspaceCommands({
   closeMenu,
   render,
   setStatus,
+  confirmDiskDeletion = async () => true,
   // The computer-wide clipboard (shared-clipboard.js) and the paste of a record another pane wrote.
   sharedClipboard = null,
   sharedPathsFor = () => [],
@@ -535,8 +536,11 @@ export function createWorkspaceCommands({
           next = copySelectionModel(next, ids, parentId);
         }
       }
-      if (wasCut) store.setClipboard(null);
-      await store.commit(next);
+      const cutRecord=wasCut?sharedClipboard?.current(null):null;
+      const saved=await store.commit(next,{requireDurable:wasCut});
+      if(saved===false)return false;
+      if(wasCut){if(cutRecord?.cut&&cutRecord.ayg?.ids?.length===clipboard.ids.length&&clipboard.ids.every(id=>cutRecord.ayg.ids.includes(id)))sharedClipboard.consume(cutRecord.id);store.setClipboard(null);}
+      return true;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -632,20 +636,38 @@ export function createWorkspaceCommands({
     return false;
   }
 
-  async function moveSelectionToBin() {
-    if (store.getSession().selected.size === 0) return;
-    const selected = [...store.getSession().selected]
+  async function moveSelectionToBin({deleteDisk=false,selectedIds=null}={}) {
+    const requested=selectedIds===null?[...store.getSession().selected]:[...selectedIds];
+    if (!requested.length) { if(deleteDisk)setStatus('Select an entry linked to a real file or folder.');return; }
+    const selected = requested
       // Bound project roots anchor scoped views (and the Bin pill counts as a
       // move out of the top level for them): neither binning path may take one.
-      .filter((id) => id !== scopeRootId);
+      .filter((id) => id !== scopeRootId)
+      .filter(id=>!deleteDisk||fileForSelection(id));
     if (selected.length === 0) {
-      setStatus('The project folder cannot be moved to the Bin.');
+      setStatus(deleteDisk?'Select an entry linked to a real file or folder.':'The project folder cannot be moved to the Bin.');
       return;
     }
     if (!scopeAllowsSelection(selected)) return;
-    await store.commit(
-      binSelection(store.getSnapshot(), resolveBinTargets(selected)),
-    );
+    if(deleteDisk&&!await confirmDiskDeletion([...new Map(selected.map(fileForSelection).filter(Boolean).map(file=>[file.target,file])).values()]))return;
+    const historyBefore=store.getSnapshot();
+    const deletion=await prepareFileDeletion(selected,deleteDisk);if(!deletion)return;
+    let snapshot=store.getSnapshot();if(deleteDisk&&deletion.receipts?.length){snapshot={...snapshot,shortcuts:snapshot.shortcuts.map(file=>{const receipt=deletion.receipts.find(r=>r.recordId===file.id&&r.path===file.target);if(!receipt?.target?.targetId||file.fileTarget?.id&&file.fileTarget.id!==receipt.target.targetId)return file;return {...file,fileTarget:{id:receipt.target.targetId,status:'deleted',revision:receipt.target.revision,name:file.fileTarget?.name||file.name}};})};}
+    await store.commit(binSelection(snapshot,resolveBinTargets(selected)),{historyBefore});
+  }
+
+  function fileForSelection(id){
+    const file=shortcut(id)||store.getSnapshot().shortcuts?.find(x=>x.placements?.some(p=>p.id===id));
+    return file&&!isWebLink(file)&&/^(?:[a-z]:[\\/]|\\\\|content:\/\/)/i.test(file.target||'')?file:null;
+  }
+  async function prepareFileDeletion(ids,deleteDisk=false){
+    if(!deleteDisk)return true;
+    const files=[...new Map(ids.map(fileForSelection).filter(Boolean).map(x=>[x.target,x])).values()];
+    if(!files.length)return true;
+    try{
+      const receipts=[];for(const file of files){const result=await host.fileCapability('delete',{paths:[file.target]});if(result?.ok!==true)throw Error(result?.message||'The device did not confirm recycling this file.');receipts.push(...(result.targets||[]));}
+      return {receipts};
+    }catch(error){setStatus(error instanceof Error?error.message:String(error));return false;}
   }
 
   function resetGraphPositions() {
@@ -690,6 +712,7 @@ export function createWorkspaceCommands({
         : 'The path to this folder cannot be deleted.');
       return;
     }
+    if(!await prepareFileDeletion(deletable))return;
     try {
       const next = removeGraphRestPositions(
         removeGraphPositions(

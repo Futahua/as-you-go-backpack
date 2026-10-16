@@ -17,7 +17,7 @@ export function scopeLocalStorage(ownerId, storage = globalThis.localStorage) {
   for (const name of ['getItem', 'setItem', 'removeItem']) {
     const original = storage[name].bind(storage);
     // The pill's hand-off to this device's own page (device-modes.js) is shared, not scoped.
-    storage[name] = (key, ...rest) => original(key === 'papers:ayg:navigate-intent' ? key : prefix + key, ...rest);
+    storage[name] = (key, ...rest) => original(['papers:ayg:navigate-intent','papers-shared-clipboard'].includes(key) ? key : prefix + key, ...rest);
   }
 }
 
@@ -40,6 +40,7 @@ export function createRemoteWorkspaceHost(base, ownerId) {
   const rootLower = root.toLowerCase() + '\\';
   let workspaceId = null;
   let sharedRoots = [];
+  let loadedState = null;
   // Last 50 device requests, readable from DevTools as __papersRemoteTrace.
   const trace = (globalThis.__papersRemoteTrace = []);
   const call = async (params) => {
@@ -97,10 +98,13 @@ export function createRemoteWorkspaceHost(base, ownerId) {
     sharedRoots = loaded.sharedRoots || [];
     const decoded = decodeWorkspaceState(JSON.stringify(loaded.state));
     const state = typeof decoded === 'string' ? JSON.parse(decoded) : decoded;
+    loadedState = state;
     return { state: await inlineIcons(state), revision: loaded.revision };
   };
   const overrides = {
     deviceId: ownerId,
+    // Export only paths belonging to this device, including Android shared roots.
+    deviceFilePath: (value) => isDevicePath(value) ? toRemote(value) : null,
     loadWorkspaceVersioned: loadVersioned,
     loadWorkspace: async () => (await loadVersioned()).state,
     saveWorkspaceChecked: async (state, revision) => {
@@ -114,7 +118,7 @@ export function createRemoteWorkspaceHost(base, ownerId) {
     releaseWorkspaceWriterLease: async () => ({ ok: true }),
     fileCapability: (operation, params = {}) => operation === 'remote-files'
       ? base.fileCapability(operation, params)
-      : base.fileCapability(operation, toRemote(params)).then(toDevice),
+      : base.fileCapability(operation, toRemote(operation === 'search' && !params.path ? { ...params, path: root } : params)).then(toDevice),
     // Files dropped from this computer are copied into the device's inbox, then referenced there.
     resolveDroppedTargets: async (files) => {
       const local = await base.resolveDroppedTargets(files);
@@ -123,7 +127,12 @@ export function createRemoteWorkspaceHost(base, ownerId) {
       return local.map((item, index) => ({ ...item, target: toDevice(sent[index]) }));
     },
     pickTarget: async () => { throw new Error(NOT_HERE); },
-    shortcutIcon: async () => null,
+    shortcutIcon: async ({actionId}) => {
+      const item=loadedState?.shortcuts?.find(x=>x.id===actionId||x.placements?.some(p=>p.id===actionId));
+      if(!item?.target||!isDevicePath(item.target))return null;
+      const result=await overrides.fileCapability('icon',{path:item.target});
+      return result?.ok?result.icon??null:null;
+    },
   };
   return new Proxy(base, {
     get(target, key) {

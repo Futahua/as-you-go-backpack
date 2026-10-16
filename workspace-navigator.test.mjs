@@ -8,6 +8,7 @@ import {
   navigatorFolderPill,
   navigatorBranchHues,
   aygNavigatorNativePaths,
+  copyNavigatorDeviceFiles,
   beginNavigatorNativeDrag,
   navigatorAyGDragPayload,
   navigatorBreadcrumbMovePlan,
@@ -118,6 +119,7 @@ test('a local-file row keeps normal internal dragging alive and exports only on 
   const end=source.indexOf('\n        });',start);
   const calls=[];let remembered=0,prevented=0;
   const listener=vm.runInNewContext('('+source.slice(start+"row.addEventListener('dragstart', ".length,end)+ '\n})',{
+    ownNativePaths:['D:\\file.epub'],REMOTE_ROOT:/^\\\\papers~/i,
     id:'placement',o:{getSession:()=>({selected:new Set()}),resolveAyGDragIdentity:()=>({itemId:'file',placementId:'placement'}),
       nativeDragPaths:()=>['D:\\file.epub'],host:{fileCapability:(...args)=>calls.push(args)}},
     navigatorAyGDragPayload,aygNavigatorNativePaths,beginNavigatorNativeDrag,rememberNativeDrag:()=>remembered++,
@@ -414,4 +416,67 @@ test('deleting machine files sends the whole selection with one confirmation', a
   await deleteNavigatorSelection('machine',{name:'c.txt',path:paths[2]},o,paths);
   assert.match(asked,/Delete 3 machine files or folders/);
   assert.deepEqual(calls,[['delete',{paths}]]);
+});
+
+
+test('phone AYG drag exports shared-root targets under the phone identity', async () => {
+  const {createRemoteWorkspaceHost}=await import('./public/app/remote-workspace-host.js');
+  const owner='74bc3b85-e64b-43f0-aa9d-c43e8c64c747';
+  const host=createRemoteWorkspaceHost({fileCapability:async(_,p)=>({ok:true,result:
+    p.operation==='workspaces'?[{id:'ayg'}]:p.operation==='workspace-load'?{state:{shortcuts:[]},revision:'1',sharedRoots:['Internal storage']}:{}
+  })},owner);
+  await host.loadWorkspaceVersioned();
+  const source=await readFile(new URL('./public/workspace-20260730b.js',import.meta.url),'utf8');
+  const start=source.indexOf('function nativeDragPathsForItemIds('),end=source.indexOf('\n}',start)+2;
+  const records={photo:{target:'Internal storage\\Download\\photo.jpg'},folder:{target:'Internal storage\\Download\\Photos'},web:{target:'https://example.com'},bad:{target:'not a shared root\\file'}};
+  const resolve=vm.runInNewContext('('+source.slice(start,end)+')',{
+    host,shortcutByRecordOrPlacementId:id=>records[id],isWebLink:r=>r.target.startsWith('https:'),
+    isAbsoluteWindowsPath:p=>/^(?:[a-z]:|\\\\)/i.test(p),
+  });
+  assert.deepEqual(Array.from(resolve(['photo','folder','web','bad','photo'])),[
+    `\\\\papers~${owner}\\Internal storage\\Download\\photo.jpg`,
+    `\\\\papers~${owner}\\Internal storage\\Download\\Photos`,
+  ]);
+  assert.equal(host.deviceFilePath('Internal storage impostor\\file'),null);
+});
+
+test('device files copy to a real PC folder as a batch without moving the originals',async()=>{
+  const calls=[],paths=['\\\\papers~74bc3b85-e64b-43f0-aa9d-c43e8c64c747\\Internal storage\\Download\\photo.jpg','\\\\papers~74bc3b85-e64b-43f0-aa9d-c43e8c64c747\\Internal storage\\Download\\Photos'];
+  const host={fileCapability:async(...args)=>{calls.push(args);return {ok:true,paths:['D:\\Inbox\\photo.jpg','D:\\Inbox\\Photos']};}};
+  assert.equal((await copyNavigatorDeviceFiles({host,drag:{paths:[...paths,paths[0]],local:[]},destination:'D:\\Inbox'})).ok,true);
+  assert.deepEqual(calls,[['copy',{paths,destination:'D:\\Inbox'}]]);
+  assert.equal((await copyNavigatorDeviceFiles({host,drag:{paths:[paths[1]]},destination:paths[1]+'\\nested'})).ok,false);
+  assert.equal(calls.length,1);
+  host.fileCapability=async()=>({ok:false,message:'Phone offline'});
+  assert.deepEqual(await copyNavigatorDeviceFiles({host,drag:{paths},destination:'D:\\Inbox'}),{ok:false,message:'Phone offline'});
+});
+
+test('same-page phone clipboard crosses into a PC folder as a copy, retaining cut originals',async()=>{
+ const source=await readFile(new URL('./public/app/workspace-navigator.js',import.meta.url),'utf8');
+ const start=source.indexOf('  async function pasteForeignFiles('),end=source.indexOf('  async function moveNavigatorFiles(',start);
+ const calls=[],phone='\\\\papers~phone\\primary\\Download\\photo.png',pc='\\\\papers~dedd3a17-6f98-40ba-8daa-f6ac3d1bf82e\\D:\\Inbox';
+ const paste=vm.runInNewContext('('+source.slice(start,end).trim()+')',{
+  REMOTE_ROOT:/^\\\\papers~[a-f0-9-]{36}/i,s:{path:pc,machineListings:new Map()},
+  o:{host:{fileCapability:async(...args)=>{calls.push(args);return {ok:true};}},sharedClipboard:{consume:()=>{throw Error('Cross-device cut must remain a copy');}}},transferStatus:()=>{},render:()=>{},
+ });
+ await paste({id:'copy',paths:[phone],cut:true});assert.equal(calls[0][0],'copy');assert.equal(calls[0][1].paths[0],phone);assert.equal(calls[0][1].destination,pc);
+});
+
+test('pasting native PC files into phone AYG downloads and links instead of saving the remote path',async()=>{
+ const source=await readFile(new URL('./public/app/workspace-navigator.js',import.meta.url),'utf8');const start=source.indexOf('  async function pasteNavigator('),end=source.indexOf("  copy.addEventListener('click'",start);
+ const paths=['\\\\papers~dedd3a17-6f98-40ba-8daa-f6ac3d1bf82e\\D:\\photo.png'],calls=[],base={};
+ const paste=vm.runInNewContext('('+source.slice(start,end).trim()+')',{
+  REMOTE_ROOT:/^\\\\papers~[a-f0-9-]{36}/i,s:{mode:'ayg'},machineClipboard:{paths,base},destination:()=> 'folder',
+  o:{host:{},sharedClipboard:{current:()=>null},getSession:()=>({clipboard:base}),importDevicePaths:async(...args)=>calls.push(args),linkNavigatorPaths:()=>{throw Error('Must download before linking');}},
+ });await paste();assert.equal(calls.length,1);assert.equal(calls[0][0][0],paths[0]);assert.equal(calls[0][1],'folder');
+});
+
+test('saved file pills keep HTML drag identity and exact placement for pane drops',async()=>{
+ const {navigatorSavedPillDrag}=await import('./public/app/workspace-navigator.js');
+ const state={groups:[{id:'folder'}],shortcuts:[{id:'file',placements:[{id:'placement',parentId:'folder'}]}]};
+ const resolve=id=>({itemId:id,placementId:id==='file'?'placement':null});
+ assert.deepEqual(navigatorSavedPillDrag({mode:'action',itemId:'file',path:'D:\\file.txt'},state,resolve),{mode:'ayg',itemIds:['file'],placementIds:[['file','placement']]});
+ assert.deepEqual(navigatorSavedPillDrag({mode:'ayg',currentId:'folder'},state,resolve),{mode:'ayg',itemIds:['folder'],placementIds:[]});
+ assert.deepEqual(navigatorSavedPillDrag({mode:'action',path:'D:\\disk.txt'},state,resolve),{mode:'machine',paths:['D:\\disk.txt']});
+ assert.deepEqual(navigatorSavedPillDrag({itemId:'stale',path:'D:\\disk.txt'},state,resolve),{mode:'machine',paths:['D:\\disk.txt']});
 });

@@ -337,7 +337,7 @@ export function createHostBridge(window) {
         { operation, params },
         operation === 'native-drag'
           ? null
-          : operation === 'open' && new URL(window.location.href).searchParams.has('papers-phone')
+          : (operation === 'open' || ['copy','move'].includes(operation) || (operation==='remote-files'&&['send-to-inbox','receive-to-phone'].includes(params.operation))) && new URL(window.location.href).searchParams.has('papers-phone')
             ? 30 * 60 * 1000
           : operation === 'preview' || operation === 'pane-layout-mount'
             ? FILE_PREVIEW_REQUEST_TIMEOUT_MS

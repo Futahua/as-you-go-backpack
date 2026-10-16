@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {createRemoteWorkspaceHost} from './public/app/remote-workspace-host.js';
+test('remote AYG search defaults to its owner and retains an explicit other-device scope',async()=>{const calls=[],owner='b2b514db-668a-4092-bda4-67e33c52c807';const host=createRemoteWorkspaceHost({fileCapability:async(op,params)=>{calls.push({op,params});return {ok:true,results:[]};}},owner);await host.fileCapability('search',{query:'sb'});assert.equal(calls[0].params.path,'\\\\papers~'+owner);await host.fileCapability('search',{query:'sb',path:'\\\\papers~other'});assert.equal(calls[1].params.path,'\\\\papers~other');});

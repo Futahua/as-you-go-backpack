@@ -2,20 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createThumbnailLoader, installThumbnailZoom, isThumbnailImage } from './public/app/navigator-thumbnails.js';
 
-const art = () => ({ isConnected: true, dataset: {}, classList: { add(k) { this.k = k; } }, children: [], ownerDocument: { createElement: () => ({}) }, replaceChildren(...c) { this.children = c; } });
+const art = () => ({ isConnected: true, dataset: {}, classList: { add(k) { this.k = k; } }, children: [], ownerDocument: { createElement: () => ({}) }, replaceChildren(...c) { this.children = c; }, append(...c) { this.children.push(...c); } });
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-test('only image files are fetched, and a tile then shows the real picture', async () => {
+test('native images and documents use the same bounded owner thumbnail operation', async () => {
   const calls = [];
   const host = { fileCapability: async (op, params) => { calls.push([op, params.path]); return { ok: true, preview: { kind: 'image', url: 'papers-file-preview://g/' + params.path, resourceId: 'r-' + calls.length } }; } };
   const loader = createThumbnailLoader({ host, window: {} });
   const photo = art(), doc = art();
   loader.observe(photo, 'D:\\Photos\\a.JPG'); loader.observe(doc, 'D:\\Docs\\b.pdf');
   await tick(); await tick();
-  assert.deepEqual(calls, [['preview', 'D:\\Photos\\a.JPG']]);
+  assert.deepEqual(calls, [['thumbnail', 'D:\\Photos\\a.JPG'], ['thumbnail', 'D:\\Docs\\b.pdf']]);
   assert.equal(photo.children[0].src, 'papers-file-preview://g/D:\\Photos\\a.JPG');
   assert.equal(photo.classList.k, 'has-thumbnail');
-  assert.equal(doc.children.length, 0);
+  assert.equal(doc.children.length, 1);
   assert.ok(isThumbnailImage('x.webp') && !isThumbnailImage('x.dwg'));
 });
 
@@ -70,3 +70,11 @@ test('nothing happens outside the thumbnail view', () => {
 });
 
 test('mobile requests bounded thumbnails for PC PDFs instead of fetching full previews',async()=>{const calls=[];const loader=createThumbnailLoader({window:{location:{href:'https://papers.local/?papers-phone=1'}},host:{fileCapability:async(op,p)=>{calls.push(op);return {ok:true,preview:{kind:'image',dataUrl:'data:image/jpeg;base64,YQ=='}};}}});const tile=art();loader.observe(tile,'\\\\papers~pc\\file.pdf');await tick();await tick();assert.deepEqual(calls,['thumbnail']);assert.equal(tile.children[0].src,'data:image/jpeg;base64,YQ==');});
+
+test('desktop remote files use owner thumbnails for app icons as well as pictures',async()=>{const calls=[];const loader=createThumbnailLoader({window:{location:{href:'papers-backpack://fixture/workspace.html?papers-device=owner'}},host:{fileCapability:async(op,p)=>{calls.push([op,p.path]);return{ok:true,preview:{kind:'image',dataUrl:'data:image/jpeg;base64,YQ=='}};}}});const tile=art();loader.observe(tile,'C:\\drawing.dwg');await tick();await tick();assert.deepEqual(calls,[['thumbnail','C:\\drawing.dwg']]);assert.equal(tile.children[0].src,'data:image/jpeg;base64,YQ==');});
+
+test('rendered previews carry a small actual file icon; plain app icons are not badged twice',async()=>{for(const renderKind of ['thumbnail','icon']){const loader=createThumbnailLoader({window:{},host:{fileCapability:async()=>({ok:true,preview:{kind:'image',renderKind,dataUrl:'data:image/jpeg;base64,YQ==',iconDataUrl:'data:image/png;base64,Yg=='}})}});const tile=art();loader.observe(tile,'C:\\drawing.dwg');await tick();await tick();assert.equal(tile.children.length,renderKind==='thumbnail'?2:1);if(renderKind==='thumbnail'){assert.equal(tile.children[1].className,'navigator-filetype-badge');assert.equal(tile.children[1].src,'data:image/png;base64,Yg==');}}});
+
+test('image thumbnails omit the file-type badge, including URI-addressed phone pictures',async()=>{
+ for(const [path,name] of [['C:\\photo.png',''],['content://provider/123','photo.jpg']]){const loader=createThumbnailLoader({window:{},host:{fileCapability:async()=>({ok:true,preview:{kind:'image',renderKind:'thumbnail',dataUrl:'data:image/png;base64,YQ==',iconDataUrl:'data:image/png;base64,Yg=='}})}});const tile=art();loader.observe(tile,path,name);await tick();await tick();assert.equal(tile.children.length,1);}
+});

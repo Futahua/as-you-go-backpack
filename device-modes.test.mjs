@@ -33,3 +33,19 @@ test('a place survives an address round trip; junk does not', async () => {
   assert.deepEqual(parseNavigateTarget({ device: LAP.toUpperCase(), mode: 'files' }), { device: LAP, mode: 'files' });
   for (const bad of [null, '', 'self', 'self:open', 'x:ayg', '../..:files', { device: 'self' }]) assert.equal(parseNavigateTarget(bad), null);
 });
+
+test('one visit trail crosses native devices and As you Go without losing forward history',async()=>{
+ const {createNavigatorHistory}=await import('./public/app/device-modes.js');const h=createNavigatorHistory();
+ const own={device:'self',mode:'ayg',currentId:'root'},phone={device:'self',mode:'machine',path:'\\\\papers~phone\\primary\\Download'},pc={device:'self',mode:'machine',path:'\\\\papers~11111111-1111-1111-1111-111111111111\\D:\\Inbox'},remoteAyg={device:'11111111-1111-1111-1111-111111111111',mode:'ayg',currentId:'root',surface:'remote'};
+ for(const visit of [own,phone,pc,remoteAyg])h.record(visit);assert.equal(h.canBack,true);assert.equal(h.canForward,false);
+ assert.deepEqual(h.go(-1),pc);h.record({...pc,view:'tree'});assert.equal(h.canForward,true);assert.deepEqual(h.go(-1),phone);assert.deepEqual(h.go(-1),own);assert.equal(h.go(-1),null);
+ h.go(1);h.record({device:'self',mode:'ayg',currentId:'new'});assert.equal(h.canForward,false);assert.equal(h.go(1),null);
+});
+test('visit history retains exact Android case and is bounded',async()=>{const {createNavigatorHistory}=await import('./public/app/device-modes.js');const h=createNavigatorHistory(2);h.record({mode:'machine',path:'Download/Test'});h.record({mode:'machine',path:'Download/test'});h.record({mode:'ayg',currentId:'root'});assert.equal(h.go(-1).path,'Download/test');assert.equal(h.go(-1),null);});
+
+test('Bin visits and nested Bin folders participate in Back and Forward independently of live folders',async()=>{
+ const {createNavigatorHistory}=await import('./public/app/device-modes.js'),h=createNavigatorHistory();
+ const live={device:'self',mode:'ayg',currentId:'folder',binMode:false},bin={device:'self',mode:'ayg',currentId:'bin',binMode:true},nested={...bin,currentId:'folder'};
+ for(const v of [live,bin,nested])h.record(v);
+ assert.deepEqual(h.go(-1),bin);h.record({...bin});assert.equal(h.canForward,true);assert.deepEqual(h.go(-1),live);assert.deepEqual(h.go(1),bin);assert.deepEqual(h.go(1),nested);
+});

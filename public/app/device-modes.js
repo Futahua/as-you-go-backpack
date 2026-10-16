@@ -39,3 +39,16 @@ export function parseNavigateTarget(value) {
   if (!['files', 'ayg'].includes(mode) || !(device === 'self' || /^[0-9a-f-]{36}$/i.test(String(device || '')))) return null;
   return { device: device === 'self' ? 'self' : String(device).toLowerCase(), mode };
 }
+
+
+/** One bounded visit trail across As you Go and real folders, including remote devices. */
+export function createNavigatorHistory(limit=100) {
+  let entries=[],index=-1;
+  const key=value=>JSON.stringify([value?.device||'self',value?.mode,value?.mode==='ayg'&&Boolean(value?.binMode),value?.mode==='machine'?String(value.path||'').replace(/\\+$/,''):value?.currentId]);
+  return {
+    record(value){if(!value||!['ayg','machine'].includes(value.mode))return;if(key(entries[index])===key(value)){entries[index]={...value};return;}entries=entries.slice(0,index+1);entries.push({...value});if(entries.length>limit)entries.shift();index=entries.length-1;},
+    go(delta){const next=index+delta;if(next<0||next>=entries.length)return null;index=next;return {...entries[index]};},
+    get canBack(){return index>0;},get canForward(){return index>=0&&index<entries.length-1;},
+    matches(value){return key(entries[index])===key(value);},
+  };
+}

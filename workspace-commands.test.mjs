@@ -79,6 +79,7 @@ function createHarness({ groups = [], shortcuts = [], model = {}, persist = asyn
   const commands = createWorkspaceCommands({
     store,
     host,
+    sharedClipboard:model.sharedClipboard||null,
     graph: {
       destroyGraphView: () => { effects.destroyGraph += 1; },
       _getNode: (id) => graphNodes.get(id) ?? null,
@@ -851,4 +852,36 @@ test('download linking reports persistence failure and retries the existing opti
  accepted=true;
  assert.equal(await h.commands.dropResolvedTargets([{target:'D:\\inbox\\file.txt'}],'root',{requireDurable:true}),true);
  assert.equal(h.store.getSnapshot().shortcuts.length,1);assert.equal(writes,2);
+});
+
+
+test('a confirmed cut paste consumes its shared cut marker; failed saves keep it',async()=>{
+ for(const accepted of [true,false]){
+  const consumed=[],sharedClipboard={current:()=>({id:'cut-ticket',cut:true,ayg:{ids:['file']}}),consume:id=>consumed.push(id)};
+  const h=createHarness({groups:[{id:'folder'}],shortcuts:[{id:'file'}],model:{sharedClipboard},persist:async()=>accepted?{ok:true}:{ok:false,message:'Save refused'}});
+  h.store.setClipboard({mode:'cut',ids:['file'],collapseWhole:new Set(),placementIds:new Map([['file','p-file']])});
+  const result=await h.commands.pasteInto('folder');
+  assert.deepEqual(consumed,accepted?['cut-ticket']:[]);
+  assert.equal(h.store.getSession().clipboard===null,accepted);
+  assert.equal(result,accepted);
+ }
+});
+
+test('ordinary AYG removal never recycles a disk target',async()=>{
+ const calls=[];const h=createHarness({shortcuts:[{id:'file',target:'D:\\report.txt',placements:[{id:'placement'}]}],model:{host:{fileCapability:async(...args)=>{calls.push(args);return{ok:true};}}}});
+ h.store.setSelection(['file']);await h.commands.moveSelectionToBin();assert.equal(calls.length,0);assert.deepEqual(h.store.getSnapshot().binned,['file']);
+});
+test('skull recycles disk-backed selections immediately, resolves placement IDs, and skips virtual items',async()=>{
+ const calls=[];const h=createHarness({groups:[{id:'virtual'}],shortcuts:[{id:'file',target:'D:\\report.txt',placements:[{id:'placement'}]}],model:{host:{fileCapability:async(...args)=>{calls.push(args);return{ok:true};}}}});
+ h.store.setSelection(['placement','virtual']);await h.commands.moveSelectionToBin({deleteDisk:true});assert.deepEqual(calls,[['delete',{paths:['D:\\report.txt']}]]);assert.deepEqual(h.store.getSnapshot().binned,['placement']);
+});
+test('skull keeps an entry when its owning device refuses recycling',async()=>{
+ const h=createHarness({shortcuts:[{id:'file',target:'D:\\report.txt',placements:[]}],model:{host:{fileCapability:async()=>({ok:false,message:'Offline'})}}});
+ h.store.setSelection(['file']);await h.commands.moveSelectionToBin({deleteDisk:true});assert.equal(h.store.getSnapshot().binned,undefined);assert.equal(h.effects.status.at(-1),'Offline');
+});
+
+test('skull carries captured placement intent after a remote refresh clears transient selection',async()=>{
+ const calls=[];const h=createHarness({shortcuts:[{id:'file',target:'C:\\remote.txt',placements:[{id:'placement'}]}],model:{host:{fileCapability:async(...args)=>{calls.push(args);return{ok:true};}}}});
+ h.store.setSelection(['placement']);const selectedIds=[...h.store.getSession().selected];h.store.clearSelection();
+ await h.commands.moveSelectionToBin({deleteDisk:true,selectedIds});assert.deepEqual(calls,[['delete',{paths:['C:\\remote.txt']}]]);assert.deepEqual(h.store.getSnapshot().binned,['placement']);
 });

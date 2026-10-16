@@ -1194,6 +1194,7 @@ export function updateShortcut(state, shortcutId, changes) {
       name,
       description: String(changes.description ?? '').trim(),
       target,
+      ...(candidate.fileTarget&&(candidate.target!==target||changes.resetFileTarget===true)?{fileTarget:changes.fileTarget??undefined}:{}),
       icon: changes.icon ?? null,
     };
   });

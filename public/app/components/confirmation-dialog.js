@@ -10,6 +10,7 @@ export function createConfirmationDialog({
   binItemName,
   permanentlyDelete,
   restoreSelection,
+  prepareRestore = async state => state,
   commit,
   present = () => {},
 }) {
@@ -49,6 +50,12 @@ export function createConfirmationDialog({
     present(elements.confirmLayer);
     elements.confirmLayer.hidden = false;
     return new Promise((resolve) => { pendingConfirm = resolve; });
+  }
+
+  async function askFileDelete({count,paths,deleteDisk=false}) {
+    const question=askConfirm({title:count===1?'Remove this entry?':`Remove ${count} entries?`,copy:paths.join('\n'),confirmLabel:'Remove'});
+    const d=elements.confirmCopy.ownerDocument,label=d.createElement('label'),toggle=d.createElement('input');toggle.type='checkbox';toggle.checked=deleteDisk;label.style.cssText='display:flex;gap:8px;align-items:center;margin-top:12px';label.append(toggle,d.createTextNode('Also recycle the actual files on their owning device'));elements.confirmCopy.after(label);
+    try{return{confirmed:await question,deleteDisk:toggle.checked};}finally{label.remove();}
   }
 
   function askPermanentDelete(ids, deletingAll = false) {
@@ -110,10 +117,8 @@ export function createConfirmationDialog({
       await commit(next, 'Deleted permanently.');
     }, { signal });
     elements.confirmRestore.addEventListener('click', async () => {
-      const next = restoreSelection(getState(), pendingRestoreIds);
-      pendingRestoreIds = [];
-      elements.confirmLayer.hidden = true;
-      await commit(next, 'Restored.');
+      elements.confirmRestore.disabled=true;
+      try{const prepared=await prepareRestore(getState(),pendingRestoreIds);const next=restoreSelection(prepared,pendingRestoreIds);await commit(next,'Restored.');pendingRestoreIds=[];elements.confirmLayer.hidden=true;}catch(error){elements.confirmCopy.textContent=error.message||'Restore failed. The entries remain in the Bin.';}finally{elements.confirmRestore.disabled=false;}
     }, { signal });
   }
 
@@ -125,5 +130,5 @@ export function createConfirmationDialog({
     pendingRestoreIds = [];
   }
 
-  return { askPermanentDelete, askRestoreConfirm, askConfirm, close, mount, destroy };
+  return { askPermanentDelete, askRestoreConfirm, askConfirm, askFileDelete, close, mount, destroy };
 }

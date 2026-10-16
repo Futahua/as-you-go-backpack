@@ -1694,3 +1694,14 @@ test('embedded project editing uses its Papers scope lease even when browser loc
   assert.equal(chooseWorkspaceWriterLock({ embedded: true, rendererLock, hostLock, fallback }), hostLock);
   assert.equal(chooseWorkspaceWriterLock({ embedded: false, rendererLock, hostLock, fallback }), rendererLock);
 });
+
+test('a remote owner rejection reloads its current contents without freezing or replaying the rejected edit',async()=>{
+ const disk=fakeDisk(),installed=[],invalidated=[];const coordinator=createSurfaceCoordinator({lock:fakeLock(),channel:fakeChannel(),host:disk,ownerAuthoritative:true,installDocument:s=>installed.push(s),invalidatePendingSaves:()=>invalidated.push(true)});
+ await coordinator.start();const newer={schemaVersion:1,groups:[{id:'owner-folder'}],shortcuts:[]};disk.externalWrite(newer);
+ const result=await coordinator.saveSerialized(ser({schemaVersion:1,groups:[{id:'stale-client-folder'}],shortcuts:[]}));assert.equal(result.ok,false);assert.equal(result.code,'OWNER_CHANGED');assert.deepEqual(installed.at(-1),newer);assert.equal(coordinator.role,SURFACE_ROLE.WRITER);assert.equal(coordinator.frozen,null);assert.equal(invalidated.length,1);assert.deepEqual(disk.state,newer);
+ const newest={...newer,shortcuts:[{id:'owner-file'}]};disk.externalWrite(newest);assert.equal((await coordinator.refreshFromHost()).changed,true);assert.deepEqual(installed.at(-1),newest);coordinator.release();
+});
+test('remote recovery stays refreshable when the owner briefly disconnects after rejecting a save',async()=>{
+ const disk=fakeDisk(),installed=[];let offline=false;const host={saveChecked:async(...args)=>{const result=await disk.saveChecked(...args);if(!result.ok)offline=true;return result;},loadVersioned:async()=>{if(offline)throw Error('offline');return disk.loadVersioned();}};
+ const coordinator=createSurfaceCoordinator({lock:fakeLock(),channel:fakeChannel(),host,ownerAuthoritative:true,installDocument:s=>installed.push(s)});await coordinator.start();disk.externalWrite({schemaVersion:1,groups:[{id:'real'}],shortcuts:[]});assert.equal((await coordinator.saveSerialized(ser({schemaVersion:1,groups:[{id:'rejected'}],shortcuts:[]}))).ok,false);assert.notEqual(coordinator.role,SURFACE_ROLE.CONFLICT);offline=false;await coordinator.refreshFromHost();assert.equal(installed.at(-1).groups[0].id,'real');coordinator.release();
+});
