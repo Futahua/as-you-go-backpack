@@ -34,6 +34,7 @@ export function createEditorDialog({
   let editorIcon = null;
   let editorTargetIcon = null;
   let abortController = null;
+  let relinkCurrentFile=false,relinkControl=null;
 
   function showIconPreview(source) {
     if (!source) {
@@ -75,6 +76,10 @@ export function createEditorDialog({
         ? visiblePlacementIdFor(existing.id)
         : null;
     editorMode = { kind, item: existing, parentId, representedPlacementId };
+    relinkCurrentFile=false;relinkControl?.remove();relinkControl=null;
+    if(kind==='shortcut'&&existing?.fileTarget&&existing.fileTarget.status!=='present'){
+      relinkControl=document.createElement('button');relinkControl.type='button';relinkControl.textContent='Relink to the current disk file';relinkControl.addEventListener('click',()=>{relinkCurrentFile=!relinkCurrentFile;relinkControl.textContent=relinkCurrentFile?'Will relink when saved':'Relink to the current disk file';});elements.targetActions.append(relinkControl);
+    }
     editorIcon = existing?.icon ?? null;
     editorTargetIcon =
       kind === 'shortcut' && existing && !existing.icon
@@ -104,6 +109,7 @@ export function createEditorDialog({
   }
 
   function hideEditor() {
+    relinkControl?.remove();relinkControl=null;relinkCurrentFile=false;
     editorMode = null;
     editorIcon = null;
     editorTargetIcon = null;
@@ -173,6 +179,7 @@ export function createEditorDialog({
         } else {
           const isNewShortcut = !editorMode.item && editorMode.kind === 'shortcut';
           const changes = {
+            ...(relinkCurrentFile?{resetFileTarget:true}:{}),
             name,
             description: elements.description.value.trim(),
             target: elements.target.value.trim(),

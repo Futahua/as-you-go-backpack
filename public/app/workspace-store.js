@@ -42,6 +42,7 @@ export function createWorkspaceStore({
   persist,
   normalizeState,
   prepare,
+  prepareHistoryChange,
   afterCommit,
   setStatus,
   initialSession = {},
@@ -60,6 +61,8 @@ export function createWorkspaceStore({
   let redoStack = [];
   let saveQueue = Promise.resolve();
   let lastSaveError = null;
+  let lastSaveWasAutomatic = false;
+  let pendingEditError = null;
   let lastPersistedSnapshot = null;
   let lastQueuedSnapshot = null;
   const queuedSaves = [];
@@ -193,11 +196,16 @@ export function createWorkspaceStore({
     // operation directly so callers observe failure without an extra finally
     // microtask delaying UI error reporting.
     saveQueue = operation.then((result) => {
-      if (!result?.superseded) lastSaveError = null;
+      if (!result?.superseded) {
+        lastSaveError = null;
+        if (!metadata?.rebaseAutomaticSave) pendingEditError = null;
+      }
       cleanup();
       return result;
     }, (error) => {
       lastSaveError = error;
+      lastSaveWasAutomatic = metadata?.rebaseAutomaticSave === true;
+      if (!lastSaveWasAutomatic) pendingEditError = error;
       cleanup();
       return undefined;
     });
@@ -210,6 +218,7 @@ export function createWorkspaceStore({
     saveMetadata,
     requireDurable = false,
     preserveSelection = false,
+    historyBefore,
   } = {}) {
     if (!canMutateDocument()) {
       // Refused before the history stacks or the document are touched, so a
@@ -217,7 +226,7 @@ export function createWorkspaceStore({
       onMutationBlocked('commit');
       return Promise.resolve(false);
     }
-    const previous = getState();
+    const previous = historyBefore ?? getState();
     if (isUndo) {
       redoStack.push(previous);
     } else if (isRedo) {
@@ -254,27 +263,55 @@ export function createWorkspaceStore({
       });
   }
 
+  let historyBusy = false;
   async function undo() {
     if (!canMutateDocument()) { onMutationBlocked('undo'); return; }
-    if (undoStack.length === 0) return;
-    const previous = undoStack.pop();
-    return commit(previous, { isUndo: true });
+    return replayHistory(undoStack, true);
   }
 
   async function redo() {
     if (!canMutateDocument()) { onMutationBlocked('redo'); return; }
-    if (redoStack.length === 0) return;
-    const next = redoStack.pop();
-    return commit(next, { isRedo: true });
+    return replayHistory(redoStack, false);
+  }
+
+  async function replayHistory(stack, isUndo) {
+    if (historyBusy || !stack.length) return;
+    historyBusy = true;
+    const target = stack.at(-1), current = getState();
+    try {
+      if (target.externalEffect) {
+        if(await target.effect[isUndo ? 'undo' : 'redo']()===false)return false;
+        if(stack.at(-1)!==target)return false;
+        stack.pop();
+        (isUndo ? redoStack : undoStack).push(target);
+        afterCommit?.();
+        setStatus?.('');
+        return true;
+      }
+      const next = prepareHistoryChange ? await prepareHistoryChange(current, target) : target;
+      if (next === false || stack.at(-1) !== target || !canMutateDocument()) return false;
+      stack.pop();
+      return await commit(next, { isUndo, isRedo: !isUndo, historyBefore: current });
+    } catch (error) {
+      setStatus?.(error instanceof Error ? error.message : String(error));
+      return false;
+    } finally { historyBusy = false; }
   }
 
   return {
+    recordExternalEffect(effect) {
+      undoStack.push({externalEffect:true,effect});
+      redoStack.length=0;
+    },
     getSnapshot: getState,
     // Resolve only after every save queued before the call is terminal. The
     // queue deliberately remains usable after a rejection, while this
     // barrier still reports that rejection to a close-time caller.
-    flush: () => saveQueue.then(() => {
-      if (lastSaveError) throw lastSaveError;
+    flush: ({ ignoreAutomaticWriterRefusal = false } = {}) => saveQueue.then(() => {
+      if (ignoreAutomaticWriterRefusal && pendingEditError) throw pendingEditError;
+      const viewRefusal = ignoreAutomaticWriterRefusal && lastSaveWasAutomatic
+        && lastSaveError?.message === 'This surface is not the writer and may not save the board.';
+      if (lastSaveError && !viewRefusal) throw lastSaveError;
       return undefined;
     }),
     getSession: () => session,

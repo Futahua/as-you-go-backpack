@@ -114,7 +114,7 @@ export function createPointerController({
     if (!event.target.closest('[data-expand]') && !event.target.closest('button') && !event.ctrlKey) {
       const tile = event.target.closest('.icon-item');
       const shell = tile?.closest('.graph-node-shell');
-      if (shell && event.pointerType !== 'touch' && !tile.classList.contains('bin-origin-ghost')) {
+      if (shell && !tile.classList.contains('bin-origin-ghost')) {
         const itemId = tile.dataset.id;
         if (tile.classList.contains('ancestor-item')) {
           // Assignment 003: an ancestor tile is draggable like any body —
@@ -143,18 +143,22 @@ export function createPointerController({
           event.preventDefault();
           return;
         }
-        if (!session.selected.has(itemId)) {
+        // A finger drags the touched tile (with the selection when it is part of it) without
+        // selecting on touch-down: the phone's hold-to-select owns touch selection.
+        const touch = event.pointerType === 'touch';
+        if (!touch && !session.selected.has(itemId)) {
           commands.selectItem(itemId, { shiftKey: false, ctrlKey: false, visibleItemIds: [] });
         }
+        const draggedIds = !touch || session.selected.has(itemId) ? [...session.selected] : [itemId];
         const dragPlacementIds = new Map();
-        for (const id of session.selected) {
+        for (const id of draggedIds) {
           if (group(id)) continue;
           const placementId = visiblePlacementIdFor(id);
           if (placementId) dragPlacementIds.set(id, placementId);
         }
         drag = {
           pointerId: event.pointerId,
-          itemIds: [...session.selected],
+          itemIds: draggedIds,
           placementIds: dragPlacementIds,
           primaryNodeId: itemId,
           startClientX: event.clientX,
@@ -176,6 +180,8 @@ export function createPointerController({
       event.target.closest('.icon-item')
       || !event.target.closest('[data-blank-parent], [data-icon-grid]')
     ) return;
+    // A finger on blank space pans and pinches (the graph's zoom behaviour); only a mouse draws a marquee.
+    if (event.pointerType === 'touch') return;
 
     closeMenu();
     marquee.start({

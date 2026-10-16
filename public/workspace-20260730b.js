@@ -1,4 +1,9 @@
-import { bindSelectedIconDrop, replaceSelectedIcons } from './app/selected-icon-drop.js?build=instant-icon-drop-20261011';
+import {getTransferFeedback} from './app/transfer-feedback.js';
+import { writeNavigateIntent, formatNavigateTarget } from './app/device-modes.js';
+import {isPhoneResizeLocked} from './app/phone-control-scale.js';
+import {fileFallbackIcon,phoneGraphFallback} from './app/file-type-icons.js';
+import {isDeviceFilesPane,installDeviceFilesPane} from './app/device-files-pane.js';
+import { bindSelectedIconDrop, bindSelectedIconPaste, replaceSelectedIcons } from './app/selected-icon-drop.js?build=icon-paste-20261014';
 import { createIconAssets } from './app/icon-assets.js?build=icon-assets-v3-20261011';
 import {readPagePaneSettings,writePagePaneSettings} from './app/page-pane-settings.js';
 import { bootstrapWindowLayoutWidget as bootstrapCompactWindowLayoutWidget } from './app/window-layout-widget-surface.js';
@@ -107,6 +112,11 @@ import { regionCentroid, regionPath } from './set-region-model.js';
 import { createRegionLayout } from './set-region-layout.js';
 import { hydrateIcons as hydrateIconsScoped, hydrateWebPreview } from './web-link-icon-20260730b.js';
 import { createHostBridge } from './app/host/host-bridge.js?build=coordination-v18';
+import { createRemoteWorkspaceHost, remoteDeviceFromUrl, scopeLocalStorage } from './app/remote-workspace-host.js';
+import {createTransferIndicatorHost} from './app/transfer-indicators.js';
+import { createDeviceFileImport, isDevicePath } from './app/device-file-import.js';
+import { createSharedClipboard } from './app/shared-clipboard.js';
+import { remoteDeviceNames } from './app/remote-paths.js';
 import { createFileCapabilityPanel, isAbsoluteWindowsPath } from './app/file-capability-panel.js?build=linked-folder-pill-20261011';
 import { installWorkspacePaneLayout } from './app/workspace-pane-layout.js';
 import { createWorkspaceNavigator } from './app/workspace-navigator.js?build=linked-folder-pill-20261011';
@@ -156,6 +166,7 @@ import { bindStateSnapshots } from './app/state-snapshots.js?build=icon-assets-2
 import { createVisualObservability, hydrationSummaryDisagrees, semanticKeyForItem } from './app/visual-observability.js';
 import { createWorkspaceStore } from './app/workspace-store.js';
 import { createWorkspaceCommands } from './app/workspace-commands.js';
+import {createFileTargets,createFileTargetHost,enrollNewFileTargets,createFileRecycleEffect} from './app/file-targets.js';
 import { resolveContextTarget } from './app/context-target-model.js';
 import { createKeyboardController } from './app/interactions/keyboard-controller.js';
 import { bindQuickRunWorkspace } from './app/quick-run/quick-run-workspace.js';
@@ -188,7 +199,18 @@ import {
   destinationInScope,
 } from './workspace-scope.js';
 
-const host = createHostBridge(window);
+// A tab opened for another device shows that device's As you Go through the same page.
+const REMOTE_DEVICE = remoteDeviceFromUrl(window.location);
+// On the phone the navigator fills the screen and a tapped file's preview slides over it.
+const PHONE = new URL(window.location.href).searchParams.has('papers-phone');
+if (PHONE) document.documentElement.classList.add('papers-phone');
+const DEVICE_FILES = isDeviceFilesPane(window.location);
+if (DEVICE_FILES) document.documentElement.classList.add('papers-device-files');
+if (REMOTE_DEVICE) { try { scopeLocalStorage(REMOTE_DEVICE); } catch { /* storage is optional */ } }
+const baseHost = REMOTE_DEVICE ? createRemoteWorkspaceHost(createHostBridge(window), REMOTE_DEVICE) : createHostBridge(window);
+let fileTargets=null;
+const fileEffectHost = createTransferIndicatorHost(baseHost,document);
+const host = createFileTargetHost(fileEffectHost,()=>fileTargets,id=>shortcut(id));
 const iconAssets = createIconAssets(host);
 const PROJECT_SURFACE_KEY = (() => {
   const value = new URLSearchParams(window.location.search).get('papers-surface-key');
@@ -342,6 +364,7 @@ const store = createWorkspaceStore({
   setStatus: workspaceStoreStatus,
   initialSession: { currentId: ROOT_ID },
   prepare: (next, session) => captureWorkspaceViewFrom(next, session),
+  prepareHistoryChange:(current,next)=>fileTargets?fileTargets.prepareHistory(current,next,confirmDiskDeletion):next,
   afterCommit: () => {
     closeMenu();
     render();
@@ -557,7 +580,7 @@ function saveWorkspaceView({ persistSurfaceLocation = false } = {}) {
   // the live surface. Update the in-memory fallback for this window only; no
   // store save or coordinator mutation request is generated.
   state = store.replace(captureWorkspaceView());
-  if (persistSurfaceLocation && PROJECT_SURFACE_KEY) {
+  if (persistSurfaceLocation && PROJECT_SURFACE_KEY && !REMOTE_DEVICE) {
     pendingSurfaceLocationSave = store.save(state, { rebaseAutomaticSave: true }).catch((error) => {
       setStatus(error instanceof Error ? error.message : String(error));
     });
@@ -629,6 +652,8 @@ function syncWorkspaceTabIdentity() {
     title = current?.name || scopedRoot?.name || 'Workspace';
     icon = current?.icon || scopedRoot?.icon || generatedWorkspaceTabIcon(current ? 'folder' : 'root');
   }
+  if (DEVICE_FILES) {title='Files';icon=generatedWorkspaceTabIcon('folder');}
+  if (REMOTE_DEVICE) title = `${remoteDeviceNames.get(`\\\\papers~${REMOTE_DEVICE}`) || 'Device'} · ${title}`;
   if (document.title !== title) document.title = title;
   let favicon = document.head.querySelector('link[data-papers-tab-icon]');
   if (!favicon) {
@@ -695,7 +720,7 @@ function iconMarkup(candidate) {
   if (isWebLink(candidate)) {
     return `<img data-web-icon="${escapeHtml(candidate.target)}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
   }
-  return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">↗</span>`;
+  return `<img data-default-icon="${candidate.id}" alt="" hidden /><span class="shortcut-fallback" aria-hidden="true">${fileFallbackIcon(candidate)}</span>`;
 }
 
 function linkMarkup(candidate) {
@@ -1932,8 +1957,9 @@ const windowLayoutTrackingLifecycle = createWindowLayoutTrackingLifecycle({
   setWindowLayoutStatus, windowLayoutMemberPreview, windowLayoutFromState,
   windowLayoutStatusForOutcome,
 });
-const reconcileTrackingBaseline = windowLayoutTrackingLifecycle.baseline;
-const scheduleClosedWindowReconcile = windowLayoutTrackingLifecycle.schedule;
+// A device's tab never reconciles that device's window layouts against this computer's windows.
+const reconcileTrackingBaseline = REMOTE_DEVICE ? async () => {} : windowLayoutTrackingLifecycle.baseline;
+const scheduleClosedWindowReconcile = REMOTE_DEVICE ? () => {} : windowLayoutTrackingLifecycle.schedule;
 const stopClosedWindowReconcile = windowLayoutTrackingLifecycle.stop;
 const handleWindowLayoutTrackingToggle = windowLayoutTrackingLifecycle.toggle;
 
@@ -2408,7 +2434,7 @@ const windowLayoutWidgetLifecycle = createWindowLayoutWidgetLifecycle({
   itemsIn,
 });
 const openWindowLayoutWidgetWithRetry = windowLayoutWidgetLifecycle.open;
-const ensureStartupWindowLayoutWidget = windowLayoutWidgetLifecycle.ensureStartup;
+const ensureStartupWindowLayoutWidget = REMOTE_DEVICE ? async () => {} : windowLayoutWidgetLifecycle.ensureStartup;
 const windowLayoutWidgetOpenSucceeded = windowLayoutWidgetLifecycle.succeeded;
 const graph = createGraphController();
 
@@ -2531,7 +2557,10 @@ function createGraphController() {
         .scaleExtent([0.35, 3])
         .filter((event) => {
           if (event.type === 'mousedown' && event.button === 0) return false;
+          if (PHONE&&isPhoneResizeLocked(window)&&event.type==='touchstart'&&event.touches?.length>1)return false;
           if (event.type === 'dblclick') return false;
+          // A finger that starts on a tile drags the tile, not the camera.
+          if (event.type === 'touchstart' && event.touches?.length === 1 && event.target?.closest?.('.icon-item')) return false;
           if (event.type === 'wheel' && event.ctrlKey) return false;
           return true;
         })
@@ -4048,8 +4077,8 @@ function render() {
   syncSelection();
 
   const binCount = binnedItems(state).length;
-  elements.binButton.hidden = false;
-  elements.binCount.hidden = binCount === 0;
+  elements.binButton.hidden = true;
+  elements.binCount.hidden = true;
   elements.binCount.textContent = String(binCount);
   elements.binButton.setAttribute('aria-pressed', String(session.binMode));
   elements.binLabel.textContent = session.binMode ? 'Close Bin' : 'Bin';
@@ -4103,8 +4132,9 @@ windowLayoutPillTray?.addEventListener('click', (event) => {
 function nativeDragPathsForItemIds(itemIds) {
   return [...new Set(itemIds.flatMap((itemId) => {
     const record = shortcutByRecordOrPlacementId(itemId);
-    if (!record || isWebLink(record) || !isAbsoluteWindowsPath(record.target)) return [];
-    return [record.target];
+    if (!record || isWebLink(record)) return [];
+    const target = host.deviceFilePath?.(record.target) || record.target;
+    return isAbsoluteWindowsPath(target) ? [target] : [];
   }))];
 }
 
@@ -4166,11 +4196,19 @@ function syncSelection({ syncNavigator = true, syncPreview = true } = {}) {
   if (syncNavigator) void workspaceNavigator?.syncCanvasSelection(selectedFileCapabilityContext());
 }
 
+async function shortcutIconForSurface(detail){
+  if(!PHONE&&!REMOTE_DEVICE)return host.shortcutIcon(detail);
+  const item=shortcutByRecordOrPlacementId(detail.actionId);
+  if(item&&!item.icon&&(REMOTE_DEVICE||String(item.target).startsWith('\\\\papers~'))){
+    try{const result=await host.fileCapability('thumbnail',{path:item.target});if(result?.ok&&result.preview?.kind==='image')return result.preview.dataUrl||result.preview.url;}catch{}
+  }
+  return item?phoneGraphFallback(item,path=>host.fileCapability('stat',{path})):null;
+}
 async function hydrateIcons() {
   await hydrateIconsScoped(
     document,
     iconCache,
-    (detail) => host.shortcutIcon(detail),
+    (detail) => shortcutIconForSurface(detail),
     (url) => host.resolveWebIcon(url),
   );
 }
@@ -4180,7 +4218,7 @@ function hydrateNodeIcons(shell) {
   hydrateIconsScoped(
     shell,
     iconCache,
-    (detail) => host.shortcutIcon(detail),
+    (detail) => shortcutIconForSurface(detail),
     (url) => host.resolveWebIcon(url),
   );
 }
@@ -4190,6 +4228,9 @@ async function persist(nextState = state, metadata) {
 }
 
 async function commit(nextState, options = {}) {
+  const baseline=store.getSnapshot();
+  nextState=await enrollNewFileTargets(nextState,baseline,(operation,params)=>fileEffectHost.fileCapability(operation,params));
+  if(store.getSnapshot()!==baseline){setStatus('The workspace changed while identifying this file. Try the change again.');return false;}
   return store.commit(nextState, options);
 }
 
@@ -4776,6 +4817,7 @@ const toolbar = createToolbarController({
 });
 
 const confirmDialog = createConfirmationDialog({
+  prepareRestore:(state,ids)=>fileTargets?fileTargets.prepareRestore(state,ids):state,
   elements,
   present: layer => {
     const pane=document.querySelector('#workspace-navigator');
@@ -4810,7 +4852,27 @@ const openMenu = (...args) => menu.openMenu(...args);
 // Constructed after graph and closeMenu are initialized (both are consts
 // declared later in the file); evaluating graph/closeMenu as argument
 // values any earlier would hit the temporal dead zone.
+// One clipboard for every pane and window on this computer (see shared-clipboard.js).
+const sharedClipboard = createSharedClipboard({ window, deviceId: host.deviceId || null });
+// Pastes what another pane copied into As you Go folders: the same As you Go pastes its items;
+// files otherwise link here, download from their device, or are sent to the device shown here.
+async function foreignPaste(record, destinations) {
+  if (record.ayg?.ids?.length && record.scope === sharedClipboard.scope) {
+    store.setClipboard({ mode: record.cut ? 'cut' : 'copy', ids: record.ayg.ids, collapseWhole: new Set(record.ayg.collapseWhole || []), placementIds: new Map(record.ayg.placementIds || []) });
+    await commands.pasteInto(destinations);
+    return true;
+  }
+  if (!record.paths.length) { setStatus('Those are As you Go folders or web links; they paste only into the same As you Go.'); return true; }
+  if (PHONE) { await importFilePaths(record.paths,destinations[0]); return true; }
+  if (!deviceFileImport) { setStatus('Files from another pane cannot be pasted here.'); return true; }
+  await deviceFileImport.importPaths(record.paths.filter(isDevicePath), destinations[0], record.paths.filter((path) => !isDevicePath(path)));
+  if (record.cut) setStatus('Pasted as a copy; the originals stay where they were.');
+  return true;
+}
+async function confirmDiskDeletion(files) {const locations=await Promise.all(files.map(async file=>{const result=await host.fileCapability('stat',{path:file.target});if(!result?.ok)throw Error(result?.message||'The file location could not be verified.');return file.name+'\n'+(result.entry?.remote?.device?result.entry.remote.device+' · ':'')+(result.entry?.path||file.target);}));return confirmDialog.askConfirm({title:'Kill these?',copy:locations.join('\n\n')+'\n\nRestore the files and entries later from the AYG Bin.',confirmLabel:'Kill'});}
 const commands = createWorkspaceCommands({
+  confirmDiskDeletion,
+  openFileTarget: PHONE ? chosen => host.fileCapability('open', {path:chosen.target}) : null,
   store,
   group,
   windowLayout,
@@ -4854,9 +4916,30 @@ const commands = createWorkspaceCommands({
   closeMenu,
   render,
   setStatus,
+  sharedClipboard,
+  sharedPathsFor: (ids) => nativeDragPathsForItemIds(ids),
+  foreignPaste,
 });
+// Files dropped from another device download into this device's inbox, then link (list and grid).
+const deviceFileImport = PHONE || WIDGET_SURFACE || commandSurfaceMode === 'overlay' ? null : createDeviceFileImport({ document, host, filesOnly: DEVICE_FILES, scopeKey: `${PROJECT_SURFACE_KEY || 'main'}:${SCOPE_ROOT_ID || 'root'}`, link: (targets, destination) => commands.dropResolvedTargets(targets, destination, { requireDurable: true }) });
 
-if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
+const importFilePaths = deviceFileImport?.importPaths || (PHONE ? async (paths, destination) => {
+  const feedback=getTransferFeedback(document),transferId=feedback.begin({destinationId:destination,items:paths.map(source=>({source,name:source.split(/[\\/]/).pop()}))});
+  if(!paths.length)return false;
+  try {
+    let copied=paths;
+    if(host.deviceId){const result=await host.fileCapability('remote-files',{operation:'send-to-inbox',ownerId:host.deviceId,paths});if(!result?.ok)throw Error(result?.message||'Upload failed.');copied=(result.result||[]).map(path=>path.replace(/^\\\\papers~[a-f0-9-]{36}\\/i,''));}
+    else if(paths.some(isDevicePath)){const result=await host.fileCapability('remote-files',{operation:'receive-to-phone',paths});if(!result?.ok)throw Error(result?.message||'Download failed.');copied=result.result||[];}
+    const targets=[];
+    for(const path of copied){const stat=await host.fileCapability('stat',{path});if(!stat?.ok)throw Error(stat?.message||'The copied file is unavailable.');targets.push({target:path,name:stat.entry.name,kind:stat.entry.kind});}
+    if(targets.length!==paths.length)throw Error('The transfer did not confirm every selected item.');
+    if(await commands.dropResolvedTargets(targets,destination,{requireDurable:true})!==true)throw Error('Files copied, but their As you Go links could not be saved.');
+  feedback.complete(transferId,{items:targets.map(item=>({name:item.name,target:item.target}))});
+  }catch(error){feedback.fail(transferId,error);setStatus(error.message);}
+  return true;
+} : undefined);
+
+if (!WIDGET_SURFACE && !DEVICE_FILES && commandSurfaceMode !== 'overlay') {
   fileCapabilityPanel = createFileCapabilityPanel({
     document,
     host,
@@ -4891,24 +4974,41 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     openPaneQuickRun:panel=>{
       const layer=elements.quickRunLayer;panel.append(layer);layer.classList.add('navigator-quick-run');const pills=panel.querySelector('.navigator-saved-pills');
       const position=()=>layer.style.setProperty('--navigator-run-top',(pills.getBoundingClientRect().bottom-panel.getBoundingClientRect().top+4)+'px');
-      layer.navigatorPillsObserver?.disconnect();layer.navigatorPillsObserver=new ResizeObserver(position);layer.navigatorPillsObserver.observe(pills);position();quickRun.open();
+      layer.navigatorPillsObserver?.disconnect();layer.navigatorPillsObserver=new ResizeObserver(position);layer.navigatorPillsObserver.observe(pills);position();
+      if(!layer.querySelector('.navigator-quick-run-close')){const close=document.createElement('button');close.type='button';close.className='navigator-quick-run-close';close.textContent='×';close.setAttribute('aria-label','Close Quick Search');close.addEventListener('click',()=>{elements.quickRunInput?.blur();quickRun.close();layer.navigatorPillsObserver?.disconnect();});layer.append(close);}quickRun.open();
     },
     runPinnedQuickRun:key=>quickRun.activateKey(key),
     pinnedQuickRunPath:key=>quickRun.filePathForKey(key),
-    openPinnedUrl:(url,name)=>{fileCapabilityPanel.syncSelection({mode:'web',item:{url,name}});fileCapabilityPanel.setExpanded(true);},
+    openPinnedUrl:(url,name)=>{if(DEVICE_FILES){paneLayout?.syncSelection({mode:'web',item:{url,name}});return;}fileCapabilityPanel.syncSelection({mode:'web',item:{url,name}});fileCapabilityPanel.setExpanded(true);},
     rootId: SCOPE_ROOT_ID || ROOT_ID,
+    remoteDevice: REMOTE_DEVICE,
+    // A computer switches this same tab to the device's As you Go (no new Papers tab); the phone keeps its layer.
+    openDeviceInline: async (url) => { if (PHONE) return false; await paneLayout.openDevice(url); return true; },
+    // "This device": the phone closes the device's layer; a computer turns this tab back into its own As you Go.
+    // `navigate` is the place picked in the pill (device-modes.js); this device's own page carries it out.
+    leaveDevice: (navigate = null) => {
+      if (PHONE) { window.parent.postMessage({ type: 'papers:phone:this-device', navigate }, window.location.origin); return; }
+      if(new URL(location.href).searchParams.get('papers-inline-device')==='1'){if(navigate)writeNavigateIntent(window.localStorage,navigate);void host.fileCapability('pane-inline-device-close',{}).catch(error=>setStatus(error.message));return;}
+      const next = new URL(window.location.href); next.searchParams.delete('papers-device'); if (navigate) next.searchParams.set('papers-navigate', formatNavigateTarget(navigate)); window.location.replace(next.toString());
+    },
     getState: () => state,
     getSession: () => session,
-    itemsIn,
+    binControls:{bin:elements.binButton,restore:elements.restoreAllBin},
+    recycleDiskFiles:async paths=>{const effect=await createFileRecycleEffect(fileEffectHost,paths);store.recordExternalEffect({undo:effect.undo,redo:async()=>await confirmDiskDeletion(paths.map(target=>({target,name:target.split(/[\\/]/).pop()})))?effect.redo():false});await effect.redo();return {ok:true};},
+    setBinView:(binMode,binCurrentId='bin')=>{store.clearSelection();store.setNavigation({binMode,binCurrentId});queueMicrotask(render);},
+    itemsIn:(snapshot,id)=>session.binMode?(id==='bin'?binnedItems(snapshot).filter(x=>!SCOPE_ROOT_ID||itemInScope(snapshot,x.id,SCOPE_ROOT_ID)):itemsInBinnedGroup(snapshot,id)):itemsIn(snapshot,id),
     isWebLink,
     isAbsoluteWindowsPath,
     nativeDragPaths: nativeDragPathsForItemIds,
+    importDevicePaths: importFilePaths,
+    sharedClipboard,
     dropNavigatorFiles:(files,destination)=>commands.dropFiles(files,destination),
-    linkNavigatorPaths:async(paths,destination)=>{
-      const targets=[];for(const path of paths){const stat=await host.fileCapability('stat',{path});if(stat?.ok)targets.push({target:path,path,name:stat.entry?.name||path.split(/[\\/]/).pop(),kind:stat.entry?.kind});}
-      await commands.dropResolvedTargets(targets,destination);
+    linkNavigatorPaths:async(paths,destination,appearance={})=>{
+      const targets=[];for(const path of paths){const stat=await host.fileCapability('stat',{path});if(!stat?.ok)throw Error(stat?.message||'File unavailable.');targets.push({target:path,path,name:(paths.length===1&&appearance.name)||stat.entry?.name||path.split(/[\\/]/).pop(),icon:appearance.icon||null,kind:stat.entry?.kind});}
+      return await commands.dropResolvedTargets(targets,destination,{requireDurable:true});
     },
     retargetMovedFiles:async moves=>{
+      for(const move of moves)await host.fileCapability('file-target-relocate',{path:move.oldPath,oldPath:move.oldPath,newPath:move.newPath});
       const key=path=>String(path||'').replace(/\//g,'\\').toLowerCase();
       const build=()=>{
         let next=store.getSnapshot();
@@ -4940,9 +5040,19 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     },
     setAyGSelection: ids => { store.setSelection(ids); syncSelection({syncNavigator:false,syncPreview:false}); },
     finishAyGMarquee: () => syncFileCapabilitySelection(),
+    pasteSelectionIcon:async pills=>{
+      const result=await host.fileCapability('clipboard-image',{});if(!result?.ok||!result.dataUrl)throw Error(result?.message||'Copy an image to the clipboard first.');
+      // Decoded in place: the phone page's policy (connect-src 'none') refuses even fetch() of a data: URL.
+      const [head,base64]=String(result.dataUrl).split(',',2),bytes=Uint8Array.from(atob(base64||''),c=>c.charCodeAt(0));
+      const file=new Blob([bytes],{type:/^data:([^;,]+)/.exec(head)?.[1]||'image/png'});
+      if(pills){const ids=pills.map(x=>x.itemId||x.currentId||x.art?.shortcutId).filter(Boolean);const selection=ids.map(id=>{const g=state.groups.find(x=>x.id===id);const item=g||shortcutByRecordOrPlacementId(id);return item?{kind:g?'group':'shortcut',item}:null;}).filter(Boolean);if(selection.length&&await applyIcon(selection,file)!==true)throw Error('Icons could not be saved.');return await compressIconFile(file);}
+      const selection=iconSelection();if(!selection.length)throw Error('Select an entry or a file first.');if(await applyIcon(selection,file)!==true)throw Error('Icons could not be saved.');return true;
+    },
     savedStatesReady: () => workspaceLoad.ok,
-    saveNavigatorGraphMode: async navigatorGraphMode => {
-      const saved=await commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,navigatorGraphMode}}};},{requireDurable:true});
+    // The view mode: 'list' | 'graph' | 'thumbs' (a boolean from older pages means graph or list).
+    saveNavigatorGraphMode: async mode => {
+      const navigatorViewMode=typeof mode==='string'?mode:(mode?'graph':'list'),navigatorGraphMode=navigatorViewMode==='graph';
+      const saved=await commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,navigatorGraphMode,navigatorViewMode}}};},{requireDurable:true});
       if(!saved)setStatus('Could not save the Files view mode.');
       workspaceNavigator?.render();
       return saved===true;
@@ -4994,7 +5104,8 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     copyAyG: () => commands.copySelection(),
     cutAyG: () => commands.cutSelection(),
     pasteAyG: (destination) => commands.pasteClipboard({}, destination),
-    deleteAyG: () => commands.moveSelectionToBin(),
+    deleteAyG: (options) => commands.moveSelectionToBin(options),
+    confirmSkull:paths=>confirmDialog.askConfirm({title:'Kill these?',copy:paths.map(path=>path.split(/[\\/]/).pop()+'\n'+path).join('\n\n')+'\n\nFiles go to their owning device recycle storage.',confirmLabel:'Kill'}),
     clearCanvasForMachine: () => {
       store.clearSelection();
       commands.clearSetSelection();
@@ -5036,13 +5147,101 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     render();
   });
   document.querySelector('.workspace-navigator-toolbar')?.append(parentGraphToggle);
+  // Undo / redo as toolbar buttons on every device (the same history as the keyboard shortcuts).
+  for (const [label, run, flip] of [['Undo', () => commands.undo(), false], ['Redo', () => commands.redo(), true]]) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'navigator-icon-button'; button.title = label; button.setAttribute('aria-label', label);
+    button.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true"${flip ? ' style="transform:scaleX(-1)"' : ''}><path d="M7.5 11.5 3.5 7.5l4-4M3.5 7.5h8.5a4.5 4.5 0 0 1 0 9H9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    button.addEventListener('click', (event) => { event.stopPropagation(); void run(); });
+    document.querySelector('.workspace-navigator-toolbar')?.append(button);
+  }
   workspaceNavigator.render();
-  paneLayout = installWorkspacePaneLayout({externalWindows:EMBEDDED_SURFACE==='proxima',document,host,navigator:workspaceNavigator,windows:fileCapabilityPanel,setStatus,
+  paneLayout = DEVICE_FILES ? installDeviceFilesPane({document,host}) : installWorkspacePaneLayout({externalWindows:EMBEDDED_SURFACE==='proxima',document,host,navigator:workspaceNavigator,windows:fileCapabilityPanel,setStatus,
     isReady:()=>workspaceLoad.ok,
     getSettings:()=>readPagePaneSettings(store.getSnapshot().view?.preferences?.paneLayouts||{},PROJECT_SURFACE_KEY,SCOPE_ROOT_ID||ROOT_ID,new URLSearchParams(window.location.search).get('papers-pane-legacy')==='1'),
     saveSettings:settings=>commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,paneLayouts:writePagePaneSettings(current.view.preferences.paneLayouts||{},PROJECT_SURFACE_KEY,SCOPE_ROOT_ID||ROOT_ID,settings,new URLSearchParams(window.location.search).get('papers-pane-legacy')==='1')}}};},{requireDurable:true,preserveSelection:true}),
   });
   window.addEventListener('pagehide',()=>paneLayout?.destroy(),{once:true});
+  if (PHONE && paneLayout) {
+    // Double-tap activation is owned by the phone row gestures and opens the file in Android.
+    // Pinch zooms the preview: an image through its own wheel zoom (anchored between the fingers),
+    // text by scaling it.
+    let previewPinch = null;
+    const spread = ([a, b]) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    document.addEventListener('touchstart', (event) => {
+      if (event.touches.length !== 2) { previewPinch = null; return; }
+      const target = event.target.closest?.('.file-capability-image-viewport,.file-capability-text-scroller');
+      previewPinch = target ? { target, distance: spread(event.touches), steps: 0 } : null;
+    }, { capture: true, passive: true });
+    document.addEventListener('touchmove', (event) => {
+      if (!previewPinch || event.touches.length !== 2) return;
+      event.preventDefault();
+      const distance = spread(event.touches), ratio = distance / Math.max(1, previewPinch.distance);
+      previewPinch.distance = distance;
+      const [a, b] = event.touches, x = (a.clientX + b.clientX) / 2, y = (a.clientY + b.clientY) / 2;
+      if (previewPinch.target.classList.contains('file-capability-image-viewport')) {
+        const step = Math.log(1.12);
+        previewPinch.steps += Math.log(ratio);
+        while (Math.abs(previewPinch.steps) >= step) {
+          const zoomIn = previewPinch.steps > 0;
+          previewPinch.steps += zoomIn ? -step : step;
+          previewPinch.target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: x, clientY: y, deltaY: zoomIn ? -100 : 100 }));
+        }
+      } else {
+        const text = previewPinch.target.querySelector('pre') || previewPinch.target;
+        text.style.zoom = String(Math.max(0.5, Math.min(4, (Number(text.style.zoom) || 1) * ratio)));
+      }
+    }, { capture: true, passive: false });
+    document.addEventListener('touchend', (event) => { if (event.touches.length < 2) previewPinch = null; }, { capture: true, passive: true });
+    // A clock after the camera (toolbar's second row) switches to Proxima (the phone shows other machines' Proxima).
+    const toolbar = document.querySelector('.workspace-left-actions') || document.querySelector('.workspace-navigator-toolbar');
+    void import('./app/phone-downloads.js').then(({mountPhoneDownloads})=>mountPhoneDownloads({document,host,getPaths:()=>workspaceNavigator?.downloadSelectionPaths()||[]}));
+    if (toolbar) {
+      const clock = document.createElement('button');
+      clock.type = 'button'; clock.className = 'navigator-proxima-clock'; clock.title = 'Proxima'; clock.setAttribute('aria-label', 'Proxima');
+      const tick = () => { const now = new Date(); clock.textContent = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'); };
+      tick(); setInterval(tick, 1000);
+      clock.addEventListener('click', (event) => { event.stopPropagation(); window.parent.postMessage({ type: 'papers:phone:proxima' }, window.location.origin); });
+      toolbar.append(clock);
+    }
+    // The paperclip pill (phone's own As you Go only): a tap adds files chosen on the phone, a swipe up adds a link.
+    if (!REMOTE_DEVICE) {
+      const attach = document.createElement('button');
+      attach.type = 'button'; attach.className = 'phone-attach'; attach.title = 'Add files (swipe up: add a link)'; attach.setAttribute('aria-label', attach.title);
+      attach.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 7.5 8.7 14.3a2 2 0 0 0 2.8 2.8l7.1-7.1a4 4 0 0 0-5.7-5.7l-7.4 7.4a6 6 0 0 0 8.5 8.5l4.6-4.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 15v6M16 18h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+      const folder = () => workspaceNavigator?.currentFolder?.() || SCOPE_ROOT_ID || ROOT_ID;
+      const addFiles = async () => {
+        try {
+          const picked = await host.pickPhoneFiles();
+          if (picked.length) await commands.dropResolvedTargets(picked.map((file) => ({ target: file.target, path: file.target, name: file.name, kind: 'file' })), folder());
+        } catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
+      };
+      const linkBar = document.createElement('form'); linkBar.className = 'phone-attach-link'; linkBar.hidden = true;
+      const linkInput = document.createElement('input'); linkInput.type = 'url'; linkInput.placeholder = 'Paste or type a link'; linkInput.setAttribute('aria-label', 'Link'); linkInput.autocomplete = 'off';
+      linkBar.append(linkInput);
+      const closeLink = () => { linkBar.hidden = true; linkInput.value = ''; linkInput.blur(); };
+      linkBar.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const url = linkInput.value.trim(); closeLink();
+        if (url) void commands.dropUrl(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : 'https://' + url, folder());
+      });
+      linkInput.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== linkInput) closeLink(); }, 150));
+      let press = null;
+      attach.addEventListener('pointerdown', (event) => { press = { y: event.clientY, id: event.pointerId }; try { attach.setPointerCapture(event.pointerId); } catch {} });
+      attach.addEventListener('pointerup', (event) => {
+        if (!press || press.id !== event.pointerId) return;
+        const swipedUp = press.y - event.clientY > 36; press = null;
+        if (swipedUp) { linkBar.hidden = false; linkInput.focus(); } else void addFiles();
+      });
+      attach.addEventListener('pointercancel', () => { press = null; });
+      document.body.append(linkBar, attach);
+    }
+    window.papersPhoneBack = () => {
+      if (!document.documentElement.classList.contains('phone-preview-open')) return false;
+      document.documentElement.classList.remove('phone-preview-open');
+      return true;
+    };
+  }
   syncFileCapabilitySelection();
 } else {
   document.querySelector('#workspace-navigator')?.setAttribute('hidden', '');
@@ -5103,6 +5302,7 @@ const drop = createDropController({
   elements,
   store,
   commands,
+  importDevicePaths: importFilePaths,
 });
 
 const dragWorkspaceFiles=(paths,source)=>{
@@ -5163,6 +5363,13 @@ window.__papersFlushBeforeClose = async () => {
   // supplies the document flush; capturing launcher state would queue an
   // unauthorized save and poison this surface's close barrier.
   if (commandSurfaceMode === 'overlay') return { ok: true, skipped: 'command-surface' };
+  // The compact widget is a client of the workspace's document, never its writer; capturing its view
+  // here queues a save it is refused, and that refusal kept the whole window from closing.
+  if (WIDGET_SURFACE) return { ok: true, skipped: 'compact-widget' };
+  // A device's Files tab saves its edits to that device as they happen; it is not that document's
+  // writer, so saving its view position is refused, which also blocked the window from closing.
+  if (REMOTE_DEVICE) { await store.flush({ ignoreAutomaticWriterRefusal: true }); return { ok: true, skipped: 'device-view' }; }
+  if(!hasDocumentWriteAuthority()){await store.flush({ignoreAutomaticWriterRefusal:true});return {ok:true,skipped:'follower-view'};}
   graph._saveRestPositionsNow();
   if (PROJECT_SURFACE_KEY && !detachSaveGate.isReadOnly()) {
     state = store.replace(captureWorkspaceView());
@@ -5186,6 +5393,11 @@ bindStateSnapshots({
   save:build=>commitWhenWorkspaceReady(build,{requireDurable:true}),
   confirm:question=>confirmDialog.askConfirm(question),setStatus,
 });
+
+fileTargets=createFileTargets({host:fileEffectHost,getState:()=>store.getSnapshot(),save:build=>{if(REMOTE_DEVICE)return true;const before=store.getSnapshot(),next=build(before);return next===before?true:commitWhenWorkspaceReady(()=>build(store.getSnapshot()),{requireDurable:true,preserveSelection:true,saveMetadata:{rebaseAutomaticSave:true}});},ready:()=>workspaceLoad.ok&&!REMOTE_DEVICE&&hasDocumentWriteAuthority()});
+window.addEventListener('focus',()=>{void fileTargets.refresh();});
+window.addEventListener('pagehide',()=>fileTargets.dispose(),{once:true});
+void fileTargets.refresh();
 
 async function commitWhenWorkspaceReady(next, message) {
   const build = typeof next === 'function' ? next : () => next;
@@ -5231,16 +5443,28 @@ const editorDialog = createEditorDialog({
   updateShortcut,
   createShortcut,
 });
-bindSelectedIconDrop({
-  element:document.querySelector('#workspace-navigator'),
-  getSelection:()=>workspaceNavigator?.isMachineMode?.()?[]:[...session.selected].map(id=>{
+const iconSelection=(targetId=null)=>{
+  // Real files and folders: the picture is kept on the device that owns them.
+  if(workspaceNavigator?.isMachineMode?.()){const paths=workspaceNavigator.selectedMachinePaths?.()||[];return (targetId&&!paths.includes(targetId)?[targetId]:paths).map(path=>({kind:'native',path}));}
+  // A drop onto an unselected row changes that row alone; onto a selected row, the whole selection.
+  const ids=targetId&&!session.selected.has(targetId)?[targetId]:[...session.selected];
+  return ids.map(id=>{
     const group=state.groups.find(x=>x.id===id);if(group)return {kind:'group',item:group};
     const item=shortcutByRecordOrPlacementId(id);return item?{kind:isWebLink(item)?'web':'shortcut',item}:null;
-  }).filter(Boolean),
-  apply:async(selection,file)=>{
-    const icon=await compressIconFile(file);
-    return commitWhenWorkspaceReady(()=>replaceSelectedIcons(store.getSnapshot(),selection,icon),{requireDurable:true,preserveSelection:true});
-  },setStatus,
+  }).filter(Boolean);
+};
+const applyIcon=async(selection,file)=>{
+  const natives=selection.filter(x=>x.kind==='native');
+  if(natives.length)return workspaceNavigator.setMachineIcons(natives.map(x=>x.path),await compressIconFile(file,{maximumDimension:256,targetBytes:180_000}));
+  const icon=await compressIconFile(file);
+  return commitWhenWorkspaceReady(()=>replaceSelectedIcons(store.getSnapshot(),selection,icon),{requireDurable:true,preserveSelection:true});
+};
+bindSelectedIconDrop({element:document.querySelector('#workspace-navigator'),getSelection:iconSelection,apply:applyIcon,setStatus});
+bindSelectedIconPaste({window,getSelection:()=>iconSelection(),apply:applyIcon,setStatus,
+  // Papers answers at once for a real file; pasted image data has no path and gets no answer, so don't
+  // wait out the request timeout (that delayed the icon by ~15 s).
+  isRealFile:async file=>{let timer;const targets=await Promise.race([host.resolveDroppedTargets([file]).catch(()=>null),new Promise(resolve=>{timer=setTimeout(()=>resolve(null),400);})]).finally(()=>clearTimeout(timer));return Array.isArray(targets)&&targets.length>0;},
+  fallback:(files,text)=>{void commands.pasteClipboard({files,text},commands.selectedPasteDestinations());},
 });
 
 const showEditor = (...args) => editorDialog.showEditor(...args);
@@ -5373,7 +5597,7 @@ const keyboard = createKeyboardController({
   copySelectionPaths: () => workspaceNavigator?.copySelectionPaths?.() ?? false,
   reservePaneTabAcrossControls: EMBEDDED_SURFACE === 'proxima',
   toggleSidePanes: () => {
-    if (!paneLayout || fileCapabilityPanel.isFullPage) return false;
+    if (DEVICE_FILES || !paneLayout || fileCapabilityPanel?.isFullPage) return false;
     paneLayout.toggleSurfaces();
     return true;
   },
@@ -5527,7 +5751,7 @@ if (WIDGET_SURFACE) {
     const lock = chooseWorkspaceWriterLock({ embedded: EMBEDDED_SURFACE === 'proxima',
       rendererLock, hostLock, fallback: localCasWriterLock });
     let channel;
-    const coordinationNamespace = SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '';
+    const coordinationNamespace = (SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '') + (REMOTE_DEVICE ? `:device:${REMOTE_DEVICE}` : '');
     if (typeof BroadcastChannel === 'function') {
       try {
         channel = new BroadcastChannel(`${SURFACE_DOCUMENT_CHANNEL}${coordinationNamespace}`);
@@ -5569,6 +5793,7 @@ if (WIDGET_SURFACE) {
     };
     surfaceCoordinator = createSurfaceCoordinator({
       lock,
+      ownerAuthoritative: Boolean(REMOTE_DEVICE),
       lockName: `${SURFACE_DOCUMENT_LOCK}${coordinationNamespace}`,
       channel,
       host: {

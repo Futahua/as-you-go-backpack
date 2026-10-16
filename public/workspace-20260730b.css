@@ -32,3 +32,25 @@
 .navigator-graph-rename-editor { position:absolute; top:42px; left:12px; width:220px; max-width:calc(100% - 24px); z-index:20; display:block; padding:6px; box-sizing:border-box; border:1px solid var(--line); border-radius:6px; background:var(--surface-raised); }
 .navigator-graph-rename-editor .workspace-navigator-label { display:block; width:100%; overflow:visible; }
 .navigator-graph-rename-editor input { width:100%; font-size:12px; }
+
+/* An inline device owns only Files; no second pane coordinator or workspace. */
+.papers-device-files .workspace { padding:0; }
+.papers-device-files .workspace > .navigation,
+.papers-device-files .workspace > #explorer,
+.papers-device-files #selection-status,
+.papers-device-files #parent-graph-toggle { display:none!important; }
+.papers-device-files #workspace-navigator { position:fixed; inset:0; width:100%; height:100%; max-width:none; border:0; border-radius:0; }
+.papers-device-files .workspace-navigator-resizer { display:none; }
+
+.papers-phone .workspace-navigator-row{ -webkit-touch-callout:none; }
+.papers-phone .phone-selection-checkbox{position:absolute;left:2px;top:50%;transform:translateY(-50%);width:18px;height:18px;box-sizing:border-box;border:1px solid #aebfb578;border-radius:4px;margin:0;display:inline-flex;align-items:center;justify-content:center;font:14px system-ui;color:#e8efe8;background:transparent;}
+.papers-phone .phone-selection-checkbox[aria-checked="true"]{background:#65816b;border-color:#8ca991;}
+
+.papers-phone .phone-selection-mode .workspace-navigator-row{position:relative;}
+/* The graph owns every finger on it: one finger drags a tile or pans, two pinch-zoom (its zoom
+   behaviour), double taps reach the page. Left to the browser (touch-action:auto), Chrome claimed moving
+   or double-tapping fingers and cancelled the page's pointer events: tiles snapped back, double taps vanished. */
+.papers-phone .graph-viewport{touch-action:none;}
+/* Graph tiles in selection mode: the same checkbox, on the tile's top-left corner. */
+.papers-phone .phone-selection-mode .icon-item>.phone-selection-checkbox{left:-6px;top:-6px;transform:none;z-index:3;}
+.papers-phone .phone-selection-mode .workspace-navigator-row>.navigator-tree-toggle,.papers-phone .phone-selection-mode .workspace-navigator-row>.navigator-tree-spacer{visibility:hidden;}

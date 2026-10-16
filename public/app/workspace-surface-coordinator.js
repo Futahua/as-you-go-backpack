@@ -580,6 +580,7 @@ export function createSurfaceCoordinator({
   lockName = SURFACE_DOCUMENT_LOCK,
   channel,
   host,
+  ownerAuthoritative = false,
   installDocument,
   installExternalDocument = installDocument,
   onHydrated = () => {},
@@ -1243,6 +1244,17 @@ export function createSurfaceCoordinator({
           }
           let parentRevision = revision;
           let result = await host.saveChecked(payload, parentRevision);
+          if(ownerAuthoritative&&result?.code==='STALE_REVISION'){
+            // A remote pane is a client of the physical owner, never an
+            // alternative authority. Retire this rejected generation before
+            // installing the owner's bytes, including any queued overlays.
+            invalidatePendingSaves();
+            pendingLocalSnapshots.length=0;
+            const recovered=await reloadAuthoritativeAfterFailedMutation('owner-refresh-failed',{forceFresh:true});
+            return {ok:false,code:'OWNER_CHANGED',message:recovered.ok
+              ?'The device changed. Its latest version is shown; this change was not applied.'
+              :'The device changed and could not be refreshed. Reconnect to load its latest version.'};
+          }
           if (result && result.ok !== true) {
             try {
               const parsed = JSON.parse(payload);

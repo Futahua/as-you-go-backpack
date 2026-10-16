@@ -8,6 +8,7 @@ import { createPreviewGeometryScheduler } from './preview-geometry-scheduler.js'
 import { createEditorLoadingProgress } from './editor-loading-progress.js';
 import { installNativeWindowTabs } from './native-window-tabs.js';
 import { chromeLayoutBounds, trackChromeLayout } from './chrome-layout.js';
+import { REMOTE_ROOT, displayPath } from './remote-paths.js';
 
 const SEARCH_DEBOUNCE_MS = 120;
 const VERIFY_ATTEMPTS = 40;
@@ -155,6 +156,8 @@ export function createFileCapabilityPanel(options) {
     });
   }
 
+  // Device files over 100 MB the creator chose to cache for preview (this page session).
+  const largePreviewApproved = new Set();
   const state = {
     expanded: false,
     width: embeddedSurface === 'proxima'
@@ -2077,9 +2080,9 @@ export function createFileCapabilityPanel(options) {
     state.officeEligible = false;
     updateOfficeButtons();
     itemMeta.textContent = 'Loading…';
-    pathText.textContent = target;
+    pathText.textContent = displayPath(target);
     copyPathButton.hidden = false;
-    revealButton.hidden = false;
+    revealButton.hidden = REMOTE_ROOT.test(target);
     openTabButton.hidden = state.fullPage || !state.expanded;
     state.lastPreviewResult = null;
     actions.hidden = false;
@@ -2089,10 +2092,29 @@ export function createFileCapabilityPanel(options) {
     loading.textContent = 'Loading preview…';
     preview.append(loading);
 
-    const result = await host.fileCapability('preview', { path: target }).catch((error) => ({
+    // Another device renders images and text itself (a Revit or DWG thumbnail, a picture): nothing is
+    // downloaded. A file that must be downloaded first and is over 100 MB comes back as
+    // LARGE_DOWNLOAD_CONFIRM until the creator agrees to cache it.
+    const result = await host.fileCapability('preview', { path: target, ...(largePreviewApproved.has(target) ? { allowLargeDownload: true } : {}) }).catch((error) => ({
       ok: false,
       message: error instanceof Error ? error.message : String(error),
     }));
+    if (generation === state.inspectGeneration && result?.code === 'LARGE_DOWNLOAD_CONFIRM') {
+      renderEntry(result.entry);
+      clearPreview();
+      const ask = documentRef.createElement('div');
+      ask.className = 'file-capability-empty file-capability-cache-ask';
+      const text = documentRef.createElement('p');
+      text.textContent = `This file is ${formatBytes(result.size)}, larger than 100 MB. Cache it on this computer to preview?`;
+      const cache = documentRef.createElement('button');
+      cache.type = 'button';
+      cache.className = 'file-capability-action';
+      cache.textContent = 'Cache and preview';
+      cache.addEventListener('click', () => { largePreviewApproved.add(target); void inspectPath(target); });
+      ask.append(text, cache);
+      preview.append(ask);
+      return true;
+    }
     if (generation !== state.inspectGeneration) {
       const staleResourceId = result && result.preview && typeof result.preview.resourceId === 'string'
         ? result.preview.resourceId

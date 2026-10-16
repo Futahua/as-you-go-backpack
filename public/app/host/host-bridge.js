@@ -221,6 +221,11 @@ export function createHostBridge(window) {
       task.resolve(event.data.fileCapability);
       return;
     }
+    // The phone's file chooser: the chosen phone files, each { target, name, size }.
+    if (task.type === 'papers:phone:pick-files') {
+      task.resolve({ picked: Array.isArray(event.data.picked) ? event.data.picked : [] });
+      return;
+    }
     if ('candidates' in event.data) {
       task.resolve({
         outcome: event.data.outcome,
@@ -317,19 +322,23 @@ export function createHostBridge(window) {
     openWebLink: (url) => request('papers:project:open-web-link', { url }),
     dismissCommandSurface: ({ destination = 'restore' } = {}) =>
       request('papers:project:command-surface-dismiss', { destination }),
-    openNewSurface: (url) => request('papers:project:open-new-surface', { url }),
+    openNewSurface: (url, {inlineGroupId} = {}) => request('papers:project:open-new-surface', { url, ...(inlineGroupId ? {inlineGroupId} : {}) }),
     pickTarget: (kind) => request('papers:project:as-you-go-pick-target', { kind }),
     shortcutIcon: (detail) => request('papers:project:as-you-go-shortcut-icon', detail),
     resolveWebIcon: (url) => request('papers:project:resolve-web-link-icon', { url }),
     resolveDroppedTargets: (files) =>
       request('papers:project:resolve-dropped-targets', { files }),
     copyText: (text) => request('papers:project:copy-text', { text }),
+    // The phone app's file chooser; waits as long as the person is choosing.
+    pickPhoneFiles: () => request('papers:phone:pick-files', {}, null).then((payload) => payload.picked || []),
     fileCapability: (operation, params = {}) =>
       request(
         'papers:project:file-capability',
         { operation, params },
         operation === 'native-drag'
           ? null
+          : (operation === 'open' || ['copy','move'].includes(operation) || (operation==='remote-files'&&['send-to-inbox','receive-to-phone'].includes(params.operation))) && new URL(window.location.href).searchParams.has('papers-phone')
+            ? 30 * 60 * 1000
           : operation === 'preview' || operation === 'pane-layout-mount'
             ? FILE_PREVIEW_REQUEST_TIMEOUT_MS
             : operation.startsWith('pane-layout-')

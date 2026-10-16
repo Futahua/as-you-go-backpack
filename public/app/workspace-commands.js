@@ -23,6 +23,7 @@ export function createWorkspaceCommands({
   item,
   isWebLink,
   host,
+  openFileTarget = null,
   graph,
   resolveBinTargets,
   visiblePlacementIdFor,
@@ -59,6 +60,11 @@ export function createWorkspaceCommands({
   closeMenu,
   render,
   setStatus,
+  confirmDiskDeletion = async () => true,
+  // The computer-wide clipboard (shared-clipboard.js) and the paste of a record another pane wrote.
+  sharedClipboard = null,
+  sharedPathsFor = () => [],
+  foreignPaste = async () => false,
 }) {
   let internalClipboardFingerprint = null;
   let internalClipboardFingerprintPending = false;
@@ -72,10 +78,17 @@ export function createWorkspaceCommands({
     }
   }
 
-  function rememberClipboardAtInternalCopy() {
+  // Copied files also go on the Windows clipboard (as Explorer does), so other apps can paste them; the
+  // Windows clipboard's fingerprint after that write marks this copy as the newest one.
+  function rememberClipboardAtInternalCopy(sharedId = null, windowsPaths = [], cut = false) {
     internalClipboardFingerprintPending = true;
-    void readClipboardSnapshot()
-      .then((snapshot) => { internalClipboardFingerprint = snapshot?.fingerprint ?? null; })
+    const files = windowsPaths.filter((target) => typeof target === 'string' && !/^\\\\papers~/i.test(target));
+    const written = files.length
+      ? Promise.resolve(host.fileCapability?.('clipboard-write-files', { paths: files, cut })).then((result) => result?.ok === true ? result.fingerprint : null).catch(() => null)
+      : Promise.resolve(null);
+    void written
+      .then((fingerprint) => fingerprint ?? readClipboardSnapshot().then((snapshot) => snapshot?.fingerprint ?? null))
+      .then((fingerprint) => { internalClipboardFingerprint = fingerprint; if (sharedId) sharedClipboard?.setFingerprint(sharedId, fingerprint); })
       .finally(() => { internalClipboardFingerprintPending = false; });
   }
 
@@ -326,6 +339,8 @@ export function createWorkspaceCommands({
     try {
       if (isWebLink(chosen)) {
         await host.openWebLink(chosen.target);
+      } else if(openFileTarget) {
+        const result=await openFileTarget(chosen);if(result?.ok===false)throw Error(result.message||'The file could not be opened.');
       } else {
         await host.launchShortcut(itemId);
       }
@@ -461,7 +476,14 @@ export function createWorkspaceCommands({
       collapseWhole,
       placementIds,
     });
-    rememberClipboardAtInternalCopy();
+    const copiedPaths = sharedPathsFor([...session.selected]);
+    const sharedId = sharedClipboard?.write({
+      cut: mode === 'cut',
+      paths: copiedPaths,
+      ayg: { ids: [...session.selected], collapseWhole: [...collapseWhole], placementIds: [...placementIds] },
+    }) ?? null;
+    // As you Go links point at files; cutting a link does not move its file, so Windows gets a copy.
+    rememberClipboardAtInternalCopy(sharedId, copiedPaths, false);
 
     setStatus('');
     closeMenu();
@@ -514,8 +536,11 @@ export function createWorkspaceCommands({
           next = copySelectionModel(next, ids, parentId);
         }
       }
-      if (wasCut) store.setClipboard(null);
-      await store.commit(next);
+      const cutRecord=wasCut?sharedClipboard?.current(null):null;
+      const saved=await store.commit(next,{requireDurable:wasCut});
+      if(saved===false)return false;
+      if(wasCut){if(cutRecord?.cut&&cutRecord.ayg?.ids?.length===clipboard.ids.length&&clipboard.ids.every(id=>cutRecord.ayg.ids.includes(id)))sharedClipboard.consume(cutRecord.id);store.setClipboard(null);}
+      return true;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     }
@@ -563,6 +588,14 @@ export function createWorkspaceCommands({
   async function pasteClipboard({ files = [], text = '' } = {}, parentIds) {
     const internal = store.getSession().clipboard;
     const snapshot = await readClipboardSnapshot();
+    // Another pane's copy is newer than this page's own: paste that one.
+    const shared = sharedClipboard?.current(snapshot?.fingerprint ?? null);
+    // With a fingerprint, Windows' clipboard is unchanged since that copy, so the event's files/text are stale.
+    if (shared && shared.page !== sharedClipboard.page && (shared.fingerprint || (!files.length && !String(text ?? '').trim()))) {
+      const destinations = (Array.isArray(parentIds) ? parentIds : [parentIds]).map(scopedDestination).filter(Boolean);
+      if (!destinations.length || destinations.includes('bin') || !destinations.every((destinationId) => scopeAllowsDestination(destinationId))) return false;
+      return foreignPaste(shared, destinations);
+    }
     const sameAsInternalCopy = Boolean(
       internal
       && (internalClipboardFingerprintPending
@@ -603,20 +636,38 @@ export function createWorkspaceCommands({
     return false;
   }
 
-  async function moveSelectionToBin() {
-    if (store.getSession().selected.size === 0) return;
-    const selected = [...store.getSession().selected]
+  async function moveSelectionToBin({deleteDisk=false,selectedIds=null}={}) {
+    const requested=selectedIds===null?[...store.getSession().selected]:[...selectedIds];
+    if (!requested.length) { if(deleteDisk)setStatus('Select an entry linked to a real file or folder.');return; }
+    const selected = requested
       // Bound project roots anchor scoped views (and the Bin pill counts as a
       // move out of the top level for them): neither binning path may take one.
-      .filter((id) => id !== scopeRootId);
+      .filter((id) => id !== scopeRootId)
+      .filter(id=>!deleteDisk||fileForSelection(id));
     if (selected.length === 0) {
-      setStatus('The project folder cannot be moved to the Bin.');
+      setStatus(deleteDisk?'Select an entry linked to a real file or folder.':'The project folder cannot be moved to the Bin.');
       return;
     }
     if (!scopeAllowsSelection(selected)) return;
-    await store.commit(
-      binSelection(store.getSnapshot(), resolveBinTargets(selected)),
-    );
+    if(deleteDisk&&!await confirmDiskDeletion([...new Map(selected.map(fileForSelection).filter(Boolean).map(file=>[file.target,file])).values()]))return;
+    const historyBefore=store.getSnapshot();
+    const deletion=await prepareFileDeletion(selected,deleteDisk);if(!deletion)return;
+    let snapshot=store.getSnapshot();if(deleteDisk&&deletion.receipts?.length){snapshot={...snapshot,shortcuts:snapshot.shortcuts.map(file=>{const receipt=deletion.receipts.find(r=>r.recordId===file.id&&r.path===file.target);if(!receipt?.target?.targetId||file.fileTarget?.id&&file.fileTarget.id!==receipt.target.targetId)return file;return {...file,fileTarget:{id:receipt.target.targetId,status:'deleted',revision:receipt.target.revision,name:file.fileTarget?.name||file.name}};})};}
+    await store.commit(binSelection(snapshot,resolveBinTargets(selected)),{historyBefore});
+  }
+
+  function fileForSelection(id){
+    const file=shortcut(id)||store.getSnapshot().shortcuts?.find(x=>x.placements?.some(p=>p.id===id));
+    return file&&!isWebLink(file)&&/^(?:[a-z]:[\\/]|\\\\|content:\/\/)/i.test(file.target||'')?file:null;
+  }
+  async function prepareFileDeletion(ids,deleteDisk=false){
+    if(!deleteDisk)return true;
+    const files=[...new Map(ids.map(fileForSelection).filter(Boolean).map(x=>[x.target,x])).values()];
+    if(!files.length)return true;
+    try{
+      const receipts=[];for(const file of files){const result=await host.fileCapability('delete',{paths:[file.target]});if(result?.ok!==true)throw Error(result?.message||'The device did not confirm recycling this file.');receipts.push(...(result.targets||[]));}
+      return {receipts};
+    }catch(error){setStatus(error instanceof Error?error.message:String(error));return false;}
   }
 
   function resetGraphPositions() {
@@ -661,6 +712,7 @@ export function createWorkspaceCommands({
         : 'The path to this folder cannot be deleted.');
       return;
     }
+    if(!await prepareFileDeletion(deletable))return;
     try {
       const next = removeGraphRestPositions(
         removeGraphPositions(
@@ -787,19 +839,21 @@ export function createWorkspaceCommands({
 
   /** Same creation path as an OS file drop, but for paths already resolved by
    * the inline machine explorer / Everything search. */
-  async function dropResolvedTargets(targets, destination) {
+  async function dropResolvedTargets(targets, destination, { requireDurable = false } = {}) {
     const normalizedDestination = scopedDestination(destination);
-    if (!scopeAllowsDestination(normalizedDestination)) return;
+    if (!scopeAllowsDestination(normalizedDestination)) return false;
     try {
       const before = store.getSnapshot();
       const next = createDroppedShortcuts(before, targets, normalizedDestination);
       if (next.shortcuts.length === before.shortcuts.length) {
+        if (requireDurable) return await store.commit(before, { requireDurable: true });
         setStatus('Those shortcuts already exist here.');
-        return;
+        return true;
       }
-      await store.commit(next);
+      return await store.commit(next, { requireDurable });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      return false;
     }
   }
 

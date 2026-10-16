@@ -36,7 +36,7 @@
 .navigator-saved-pills::-webkit-scrollbar{display:none}
 .navigator-saved-track{display:grid;grid-auto-flow:column;grid-template-rows:repeat(var(--pill-rows,3),24px);grid-auto-columns:max-content;align-content:start;justify-content:start;gap:2px 4px;width:max-content;min-width:100%;height:100%}
 .navigator-saved-pill{max-width:240px;height:24px;box-sizing:border-box}
-.navigator-pills-height-grip{height:6px;width:100%;cursor:row-resize;touch-action:none;background:transparent}
+.navigator-pills-height-grip{height:20px;min-height:20px;flex:0 0 20px;margin-top:-7px;margin-bottom:-7px;position:relative;z-index:4;width:100%;cursor:row-resize;touch-action:none;background:transparent}
 .navigator-saved-pills{position:relative}
 .navigator-saved-clear{position:sticky;z-index:3;top:2px;left:calc(100% - 24px);float:right;width:22px;height:22px;display:grid;place-items:center;margin-bottom:-22px;padding:0;border:1px solid transparent;border-radius:6px;background:var(--surface-raised);color:var(--text-muted);opacity:0;pointer-events:none;transition:opacity .12s ease,color .12s ease,border-color .12s ease,background .12s ease}
 .navigator-saved-pills:hover .navigator-saved-clear,.navigator-saved-clear:focus-visible{opacity:1;pointer-events:auto}
@@ -117,3 +117,83 @@
 .workspace-navigator-search input{background:#29353d;border-color:#465965;}
 
 .workspace-navigator-transfer-notice {padding:5px 8px;font-size:11px;line-height:1.4;color:var(--text);background:#d5bd5c14;border:1px solid #d5bd5c35;border-radius:4px;margin-top:4px;}
+.navigator-device-settings-button{float:right;margin:-1px -1px 2px 4px}.navigator-device-inbox{display:grid;gap:3px;clear:both;padding:6px 4px}.navigator-device-inbox-name{font-weight:600}.navigator-device-inbox input{width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font:inherit}.navigator-device-inbox-note{min-height:13px;color:var(--text-muted,inherit);opacity:.75}
+/* Shift held: the selection drags as real files into other apps. */
+.workspace-navigator.shift-export .workspace-navigator-row.selected,.workspace-navigator.shift-export .workspace-navigator-row.navigator-filesystem-link.selected{background:color-mix(in srgb,#3b82f6 55%,var(--accent-selection))}
+/* Thumbnail view (third view after list and graph): the same rows as a grid of tiles like Opus's
+   thumbnails. --thumb-size is set by Ctrl+wheel on a computer and pinch on the phone. */
+.workspace-navigator.thumbs-mode .workspace-navigator-body{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--thumb-size,112px),1fr));grid-auto-rows:max-content;align-content:start;gap:6px;padding:8px;touch-action:pan-y}
+.workspace-navigator.thumbs-mode .workspace-navigator-machine-rows{display:contents}
+.workspace-navigator.thumbs-mode .workspace-navigator-body>.workspace-navigator-empty{grid-column:1/-1}
+.workspace-navigator.thumbs-mode .workspace-navigator-row,.workspace-navigator.thumbs-mode .workspace-navigator-row.machine-list-row{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:5px;min-width:0;min-height:0;padding:8px 4px 6px!important;border-radius:10px;text-align:center}
+.workspace-navigator.thumbs-mode .workspace-navigator-art{width:calc(var(--thumb-size,112px)*.74);height:calc(var(--thumb-size,112px)*.74);display:grid;place-items:center;overflow:visible}
+.workspace-navigator.thumbs-mode .workspace-navigator-art>svg,.workspace-navigator.thumbs-mode .workspace-navigator-art>img{width:calc(var(--thumb-size,112px)*.74);height:calc(var(--thumb-size,112px)*.74);max-width:none;max-height:none;object-fit:contain}
+/* Pictures are shown whole (letterboxed in the square), as Opus does. */
+.workspace-navigator.thumbs-mode .workspace-navigator-art.has-thumbnail{overflow:hidden}
+.workspace-navigator.thumbs-mode .workspace-navigator-art.has-thumbnail>img{object-fit:contain;filter:drop-shadow(0 1px 3px #0008)}
+.workspace-navigator.thumbs-mode .workspace-navigator-art>.folder-art{width:92%;height:70%;margin-top:14%}
+.workspace-navigator.thumbs-mode .workspace-navigator-label{width:100%;white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:1.25}
+.workspace-navigator.thumbs-mode .navigator-tree-spacer,.workspace-navigator.thumbs-mode .workspace-navigator-machine-type,.workspace-navigator.thumbs-mode .workspace-navigator-machine-size,.workspace-navigator.thumbs-mode .workspace-navigator-machine-modified{display:none}
+.workspace-navigator.thumbs-mode .workspace-navigator-row>.phone-selection-checkbox{top:4px;left:auto;right:4px;transform:none;z-index:2}
+/* Opus-style expand arrow on a folder tile's top-left corner; an expanded folder's contents flow into
+   the grid right after it, tinted. */
+.workspace-navigator.thumbs-mode .navigator-tree-toggle{position:absolute;top:3px;left:3px;z-index:2;width:22px;height:22px;padding:0;border:0;background:none;color:#4ea1ff;font-weight:700;font-size:13px;line-height:22px;visibility:visible!important;transition:transform .12s}
+.workspace-navigator.thumbs-mode .navigator-tree-toggle.is-expanded{transform:rotate(90deg)}
+.workspace-navigator.thumbs-mode .navigator-tree-branch{display:contents}
+/* As in the list: the expanded folder is boxed in its branch colour, and the contents it spilled into
+   the grid get the branch line, here running horizontally under their names and across the gaps
+   between tiles (the list's vertical line is hidden). */
+.workspace-navigator.thumbs-mode .navigator-tree-branch::before{display:none}
+.workspace-navigator.thumbs-mode .workspace-navigator-row:has(> .navigator-tree-toggle.is-expanded){outline:1px solid var(--branch-color,#4ea1ff);outline-offset:-1px}
+.workspace-navigator.thumbs-mode .navigator-tree-branch .workspace-navigator-row::after{content:'';position:absolute;left:-3px;right:-3px;bottom:1px;height:2px;background:var(--branch-color,#4ea1ff);pointer-events:none}
+/* The view button's drop-down: the other views (list, graph, thumbnails) as icon buttons. */
+.navigator-view-menu{position:fixed;z-index:3000;display:flex;flex-direction:column;gap:2px;padding:3px;border:1px solid var(--line,#414d5b);border-radius:8px;background:var(--surface,#232a31);box-shadow:0 8px 24px #0008}
+.navigator-view-menu .navigator-icon-button{display:grid;place-items:center}
+
+.navigator-view-options{position:fixed;z-index:1600;width:min(304px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:12px;box-sizing:border-box;border:1px solid var(--border-strong);border-radius:10px;background:var(--surface-raised);color:var(--text);box-shadow:0 10px 30px #0006;display:grid;grid-template-columns:1fr 1fr;gap:9px;font:12px system-ui}
+.navigator-view-options>strong,.navigator-view-options>p,.navigator-view-options>div{grid-column:1/-1}.navigator-view-options label{display:grid;gap:4px;min-width:0}.navigator-view-options input,.navigator-view-options select{width:100%;box-sizing:border-box;min-width:0;background:var(--surface-soft);color:var(--text);border:1px solid var(--border-subtle);border-radius:5px;padding:6px;font:inherit}.navigator-view-options>div{display:flex;justify-content:flex-end;gap:8px}.navigator-view-options button{background:var(--surface-soft);color:var(--text);border:1px solid var(--border-strong);border-radius:5px;padding:6px 10px;font:inherit}.navigator-view-options p{margin:0;color:#dc9290}.navigator-filter-hidden{display:none!important}.navigator-view-options label.navigator-view-options-check{grid-column:1/-1;display:flex;align-items:center;gap:8px;cursor:pointer}.navigator-view-options .navigator-view-options-check input{width:auto;margin:0}.workspace-navigator-art img.navigator-custom-icon{width:100%;height:100%;object-fit:contain}
+
+.navigator-icon-button.is-filtered{color:var(--accent);background:var(--surface-soft);outline:1px solid var(--border-strong)}
+
+/* Selection painting owns touches only after hold-selection mode is active. */
+html.papers-phone .phone-selection-mode .workspace-navigator-row,
+html.papers-phone .phone-selection-mode .icon-item{touch-action:none;user-select:none;-webkit-user-select:none}
+.workspace-navigator .navigator-recycle-button{color:#df8e89}
+.workspace-navigator .workspace-navigator-toolbar .navigator-recycle-disk-button{color:#f05b60}
+.workspace-navigator .navigator-view-toggle{color:#86b5df}
+.workspace-navigator .navigator-devices-button,.workspace-navigator .workspace-navigator-provider{color:#91bd99}
+
+html:not(.papers-phone) .workspace-navigator-header{zoom:var(--navigator-toolbar-scale,1)}
+/* The As you Go pill's menu: each device with its Files and its As you Go (device-modes.js). */
+.navigator-mode-menu{position:fixed;z-index:3000;min-width:220px;max-width:calc(100vw - 16px);padding:4px;border:1px solid var(--line,#414d5b);border-radius:8px;background:var(--surface,#232a31);box-shadow:0 8px 24px #0008;color:var(--text,#e6e9ef)}
+.navigator-mode-row{display:flex;align-items:center;gap:4px;padding:2px 2px 2px 8px;border-radius:6px}
+.navigator-mode-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.navigator-mode-menu .navigator-mode-choice{display:grid;place-items:center;opacity:.7}
+.navigator-mode-menu .navigator-mode-choice:hover{opacity:1}
+.navigator-mode-menu .navigator-mode-choice.active{opacity:1;background:color-mix(in srgb,var(--accent,#afc3d4) 22%,transparent);outline:1px solid color-mix(in srgb,var(--accent,#afc3d4) 55%,transparent)}
+.navigator-mode-menu .navigator-device-settings-button{margin:4px 2px 0 auto;display:grid;place-items:center}
+/* Opus's sort bar above the thumbnail grid. */
+.workspace-navigator.thumbs-mode .navigator-thumbs-sort{grid-column:1/-1;position:sticky;top:-8px;z-index:2;display:flex;margin:-8px -8px 2px;border-bottom:1px solid var(--border-subtle,#ffffff1a);background:var(--surface,#232a31)}
+.navigator-thumbs-sort-key{flex:0 0 auto;padding:4px 12px;border:0;border-right:1px solid var(--border-subtle,#ffffff1a);background:transparent;color:var(--text-muted,#a9b1bc);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.navigator-thumbs-sort-key:hover{color:var(--text,#e6e9ef);background:var(--surface-soft,#ffffff0d)}
+.navigator-thumbs-sort-key.active{color:var(--text,#e6e9ef)}
+.navigator-edit-assignment-overlay{position:fixed;inset:0;z-index:10000;background:#0007;display:flex;align-items:center;justify-content:center;padding:18px}
+.navigator-edit-assignment-dialog{background:var(--panel-bg,#292b29);color:var(--text,#eee);border:1px solid #ffffff30;border-radius:10px;padding:16px;max-width:360px;width:100%;box-shadow:0 8px 35px #0008}
+.navigator-edit-assignment-dialog p{font-size:13px;line-height:1.4}
+.navigator-edit-assignment-dialog button{margin:4px;padding:7px 10px;border:1px solid var(--line,#ffffff30);border-radius:6px;background:var(--surface,#303a40);color:var(--text,#eee);font:inherit;font-size:13px;cursor:pointer}
+.navigator-edit-assignment-dialog button:hover:not(:disabled){background:var(--surface-hover,#42515a)}
+.navigator-edit-assignment-dialog button:disabled{opacity:.5;cursor:default}
+.navigator-edit-assignment-dialog button:focus-visible{outline:2px solid var(--accent,#9fc5db);outline-offset:2px}
+.navigator-editing-pen{color:#e4bc53!important}
+.workspace-navigator-row:has(.navigator-editing-stamp){position:relative}
+.navigator-editing-stamp{display:flex;align-items:center;gap:3px;max-width:100%;border:1px solid #e4bc5355;border-radius:4px;background:#292b29ed;color:var(--text,#eee);font:inherit;font-size:10px;padding:1px 4px;cursor:pointer;z-index:3}
+.navigator-editing-stamp span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.navigator-editing-stamp .navigator-editing-pen{font-size:15px;line-height:1}
+.thumbs-mode .navigator-editing-stamp{position:absolute;top:calc(8px + var(--thumb-size,112px)*.74 - 20px);right:4px;max-width:calc(100% - 8px)}
+.workspace-navigator-row.navigator-offline-entry:not(.navigator-editing-local){opacity:.4}
+.workspace-navigator-row.navigator-editing-local{opacity:1}
+.navigator-working-files{display:block;width:calc(100% - 4px);margin:2px;padding:8px;text-align:left;background:transparent;color:inherit;border:0;border-radius:6px;font:inherit;font-size:13px;cursor:pointer}
+.navigator-working-files:hover{background:var(--surface-soft,#ffffff0d)}
+
+.workspace-navigator-art.has-thumbnail{position:relative}.workspace-navigator-art .navigator-filetype-badge{position:absolute;top:0;left:0;width:clamp(16px,calc(var(--thumb-size,112px)*.21),26px)!important;height:clamp(16px,calc(var(--thumb-size,112px)*.21),26px)!important;object-fit:contain;box-sizing:content-box;padding:2px;border-radius:4px;background:var(--panel-bg,#292b29);box-shadow:0 1px 3px #0009;pointer-events:none}
+

@@ -1,3 +1,4 @@
+import {isPhoneResizeLocked} from './phone-control-scale.js';
 /** Saved pills belong to document preferences; browser storage is a legacy fallback. */
 const MODES = new Set(['ayg', 'machine', 'action']);
 
@@ -42,7 +43,7 @@ export function decodeNavigatorSavedStates(raw, resolveTarget) {
   }
 }
 
-export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile, decorateLabel, resolveTarget, loadSavedStates, saveSavedStates, isReady = () => true, onSaveError = () => {} }) {
+export function createNavigatorSavedStates({ document, container, snapshot, restore, art, fromDrop, dragFile, decorateLabel, resolveTarget, loadSavedStates, saveSavedStates, isReady = () => true, onSaveError = () => {}, onSelectionChange = () => {} }) {
   const win = document.defaultView;
   const storage = win?.localStorage;
   const key = 'papers:ayg:navigator-saved-states';
@@ -57,6 +58,8 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   let saveQueue = Promise.resolve();
   let pendingSaves = 0;
   let clearArmed = false;
+  let heldClick=null;let selecting=false;const selected=new Set();const selectionKey=state=>JSON.stringify([state.mode,state.itemId||state.currentId||state.quickRunKey||state.path||state.url||state.art?.target||state.name]);
+  const phone=new URL(win?.location?.href||"https://papers.local/").searchParams.has("papers-phone");
 
   const track = document.createElement('div');
   track.className = 'navigator-saved-track';
@@ -74,6 +77,9 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
   clear.setAttribute('aria-label', clear.title);
   clear.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 6h12M7 6v10h6V6M8 4h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+  const lock=document.createElement('button');lock.type='button';lock.className='phone-resize-lock';lock.hidden=!phone;
+  const paintLock=()=>{const locked=isPhoneResizeLocked(win);lock.setAttribute('aria-pressed',String(locked));lock.title=locked?'Unlock element resizing':'Lock element resizing';lock.setAttribute('aria-label',lock.title);lock.innerHTML='<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="4" y="9" width="12" height="9" rx="2"/>'+(locked?'<path d="M6 9V6a4 4 0 0 1 8 0v3"/>':'<path d="M6 9V6a4 4 0 0 1 8 0"/>')+'<path d="M10 12v3"/></svg>';};paintLock();
+  lock.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();try{storage?.setItem('papers:phone:resize-locked',isPhoneResizeLocked(win)?'0':'1');}catch{}paintLock();});
   const applyHeight = (value) => {
     const height = Math.max(28, Math.min(Math.max(28, win.innerHeight * .45), value));
     container.style.height = `${height}px`;
@@ -96,8 +102,10 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
       pendingSaves++;
       saveQueue=saveQueue.catch(()=>{}).then(()=>saveSavedStates(snapshot)).then(saved=>{
         if(saved===false)throw new Error('Saved items could not be saved.');
-      }).catch(onSaveError).finally(()=>{pendingSaves--;});
+        return true;
+      }).catch(error=>{onSaveError(error);return false;}).finally(()=>{pendingSaves--;});
     }
+    return saveQueue;
   };
   const persistHeight = (height) => {
     try { storage?.setItem(heightKey, String(height)); } catch {}
@@ -113,7 +121,7 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
 
   let resizing = false;
   grip.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || (phone&&isPhoneResizeLocked(win))) return;
     resizing = true;
     grip.setPointerCapture?.(event.pointerId);
     event.preventDefault();
@@ -184,11 +192,11 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
 
   function render() {
     track.replaceChildren();
-    container.replaceChildren(clear, track);
+    container.replaceChildren(...(phone?[clear,lock,track]:[clear,track]));
     clear.hidden = states.length === 0;
     for (const state of states) {
       const pill = document.createElement('button');
-      pill.draggable=true;
+      pill.draggable=!selecting;
       pill.addEventListener('dragstart',event=>dragFile?.(event,state));
       pill.type = 'button';
       pill.tabIndex = -1;
@@ -201,7 +209,16 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
       label.textContent = state.name;
       pill.append(image, label);
       decorateLabel?.(label,state);
-      pill.addEventListener('click', (event) => restore(state, { run: event.shiftKey === true }));
+      if(phone){
+        let timer=null,origin=null;
+        const cancel=()=>{win.clearTimeout(timer);timer=null;};
+        pill.addEventListener('pointerdown',e=>{if(e.pointerType!=='touch')return;origin={x:e.clientX,y:e.clientY};timer=win.setTimeout(()=>{win.getSelection?.()?.removeAllRanges();selecting=true;selected.add(selectionKey(state));heldClick={key:selectionKey(state),until:Date.now()+1200};render();onSelectionChange(true);},450);});
+        pill.addEventListener('pointermove',e=>{if(origin&&Math.hypot(e.clientX-origin.x,e.clientY-origin.y)>10)cancel();});
+        for(const type of ['pointerup','pointercancel'])pill.addEventListener(type,cancel);
+        pill.addEventListener('contextmenu',e=>{e.preventDefault();});
+        if(selecting){const box=document.createElement('span');box.setAttribute('role','checkbox');box.setAttribute('aria-checked',String(selected.has(selectionKey(state))));box.className='phone-pill-check';box.textContent=selected.has(selectionKey(state))?'✓':'';pill.prepend(box);}
+        pill.addEventListener('click',event=>{if(heldClick?.key===selectionKey(state)&&Date.now()<heldClick.until){heldClick=null;event.preventDefault();return;}if(selecting){event.preventDefault();selected.has(selectionKey(state))?selected.delete(selectionKey(state)):selected.add(selectionKey(state));render();onSelectionChange(true);}else restore(state,{run:false});});
+      }else pill.addEventListener('click', (event) => restore(state, { run: event.shiftKey === true }));
       pill.addEventListener('mousedown', (event) => { if (event.button === 1) event.preventDefault(); });
       pill.addEventListener('auxclick', (event) => {
         if (event.button !== 1) return;
@@ -215,11 +232,37 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
     }
   }
 
+  if(phone)document.addEventListener('click',event=>{
+    if(!selecting||container.contains(event.target)||event.target.closest?.('.phone-pill-transfer,.phone-pill-transfer-clear,.phone-paste-icon,.phone-resize-lock'))return;
+    selecting=false;selected.clear();render();onSelectionChange(false);
+    event.preventDefault();event.stopImmediatePropagation();
+  },true);
   // Persist removal of old duplicates so they cannot return after a reload.
   if(initialized)try {storage?.setItem(key,JSON.stringify(states));} catch {}
   render();
   if(initialized&&!Array.isArray(durableStates)&&states.length&&saveSavedStates)persistStates();
   return {
+    selected:()=>states.filter(state=>selected.has(selectionKey(state))),
+    async removeSelected(){
+      await saveQueue;const next=states.filter(state=>!selected.has(selectionKey(state)));
+      if(saveSavedStates&&await saveSavedStates(JSON.parse(JSON.stringify(next)))!==true)throw Error('Selected pills could not be removed.');
+      states=next;selected.clear();persistStates();render();
+    },
+    async setSelectedIcon(icon){
+      const next=states.map(state=>selected.has(selectionKey(state))?{...state,icon,art:state.art?{...state.art,icon}:state.art}:state);
+      await saveQueue;if(saveSavedStates&&await saveSavedStates(JSON.parse(JSON.stringify(next)))!==true)throw Error('Icons could not be saved.');
+      selected.clear();states=next;persistStates();render();
+    },
+    isSelecting:()=>selecting,
+    finishSelection(){selecting=false;selected.clear();render();onSelectionChange(false);},
+    async remove(state,moves=[]){
+      const replace=path=>moves.find(move=>typeof path==='string'&&move.oldPath.toLowerCase()===path.toLowerCase())?.newPath||path;
+      if(moves.length)state={...state,path:replace(state.path),art:state.art?{...state.art,target:replace(state.art.target)}:state.art};
+      await saveQueue;
+      const next=states.filter(saved=>selectionKey(saved)!==selectionKey(state));
+      if(saveSavedStates&&await saveSavedStates(JSON.parse(JSON.stringify(next)))!==true)throw Error('Saved items could not be saved.');
+      states=next;selected.delete(selectionKey(state));persistStates();render();
+    },
     syncDurable(){
       // Construction precedes the document load. Never import a browser cache
       // into the save queue until we know whether the document owns a list.
@@ -245,11 +288,12 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
       states=uniqueNavigatorSavedStates(states,resolveTarget);
       persistStates();render();
     },
-    add(state) {
-      if (!state) return;
+    async add(state) {
+      if (!state) return false;
       states=uniqueNavigatorSavedStates([...states,state],resolveTarget);
-      persistStates();
+      const saving=persistStates();
       render();
+      return await saving;
     },
     save() {
       const state = snapshot();

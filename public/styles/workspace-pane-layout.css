@@ -165,3 +165,40 @@ html.workspace-two-pane, .workspace-two-pane body { overflow:hidden; }
 .window-slice-header.is-tab-drop-target .pane-window-tab { background-color:transparent; }
 .window-slice-header.is-tab-drop-target .pane-window-tab.active { background-color:rgb(255 255 255 / 8%); }
 .window-slice-header.is-tab-drop-target .pane-window-tabs { background:transparent; }
+/* Phone: the navigator fills the screen; a tapped file's preview slides over it (Android back closes it). */
+html.papers-phone .workspace-navigator{display:grid !important;position:fixed !important;inset:0 !important;width:auto !important;height:auto !important;max-width:none !important;z-index:1000 !important;border-radius:0 !important;border:0 !important;box-shadow:none !important}
+html.papers-phone .workspace-navigator-resizer,html.papers-phone .workspace-pane-controls{display:none !important}
+html.papers-phone .workspace-follow-preview{display:grid !important;position:fixed !important;inset:0 !important;width:auto !important;height:auto !important;max-width:none !important;max-height:none !important;z-index:1100 !important;border-radius:0 !important;transform:translateX(100%);transition:transform .2s ease}
+html.papers-phone.phone-preview-open .workspace-follow-preview{transform:none}
+html.papers-phone .navigator-saved-pills{position:relative}
+html.papers-phone .phone-attach{position:fixed;right:16px;bottom:16px;z-index:1100;width:56px;height:56px;border-radius:28px;border:1px solid #3c4a55;background:#26323b;color:#fff;display:grid;place-items:center;padding:0;box-shadow:0 6px 18px #0006;touch-action:none}
+html.papers-phone .phone-attach svg{width:26px;height:26px;pointer-events:none}
+html.papers-phone .phone-attach-link{position:fixed;left:16px;right:84px;bottom:22px;z-index:1100;margin:0}
+html.papers-phone .phone-attach-link input{width:100%;box-sizing:border-box;height:44px;padding:0 16px;border-radius:22px;border:1px solid #3c4a55;background:#26323b;color:#fff;font:inherit;font-size:15px;outline:none}
+html.papers-phone .phone-preview-open .phone-attach,html.papers-phone.phone-preview-open .phone-attach,html.papers-phone.phone-preview-open .phone-attach-link{display:none}
+html.papers-phone .navigator-proxima-clock{align-self:center;margin-left:4px;padding:3px 9px;border:1px solid #3c4a55;border-radius:6px;background:#26323b;color:#fff;font:inherit;font-size:12px;font-weight:700;letter-spacing:.02em;box-shadow:0 1px 0 #0006}
+
+html.papers-phone .navigator-pills-height-grip{height:20px;min-height:20px;margin-top:-7px;margin-bottom:-7px;position:relative;z-index:4;touch-action:none;background:transparent}
+html.papers-phone .phone-pill-transfer{position:fixed;right:20px;bottom:84px;z-index:1100;width:48px;height:48px;border-radius:50%;border:1px solid #ffffff24;background:#26323b;color:#e1e8e5;font:26px system-ui;box-shadow:0 4px 12px #0004;padding:0;touch-action:manipulation}
+html.papers-phone .phone-pill-transfer[hidden],html.papers-phone.phone-preview-open .phone-pill-transfer{display:none}
+
+html.papers-phone .navigator-saved-pill,html.papers-phone .navigator-saved-pill *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+html.papers-phone .phone-pill-check{display:inline-block;min-width:10px;font-size:12px;color:#d2dfd5;border:0;background:none}
+html.papers-phone .phone-pill-transfer-clear{right:80px;font-size:22px}
+
+html.papers-phone .phone-paste-icon{right:84px;bottom:20px;width:44px;height:44px}
+html.papers-phone .phone-paste-icon svg{width:23px;height:23px}
+.shortcut-fallback svg{width:100%;height:100%}
+
+html.papers-phone .phone-pill-remove{right:22px;bottom:148px;width:36px;height:36px;font-size:25px;background:var(--surface-soft,#30332e);box-shadow:0 3px 10px #0003}
+html.papers-phone .item-icon .shortcut-fallback:has(svg){background:transparent;border-radius:0;color:var(--text-secondary);width:84%;height:84%}
+
+html.papers-phone .phone-pill-remove{background:#703534;color:#ffd0cc;border-color:#a95752}
+html.papers-phone .phone-cut-item{opacity:.4!important}
+html.papers-phone .phone-pill-transfer,html.papers-phone .phone-attach,html.papers-phone .phone-mouse-button{zoom:var(--phone-floating-scale,1)}
+html.papers-phone .workspace-navigator-header{zoom:var(--phone-toolbar-scale,1)}
+
+html.papers-phone .phone-resize-lock{position:absolute;right:3px;bottom:3px;z-index:5;width:24px;height:24px;padding:3px;border:0;border-radius:5px;background:var(--surface-raised);color:var(--text-muted);opacity:.65}
+html.papers-phone .phone-resize-lock[aria-pressed="true"]{color:#dfc28a;opacity:1}html.papers-phone .phone-resize-lock svg{width:18px;height:18px;pointer-events:none}
+.phone-resize-lock[hidden]{display:none}.navigator-quick-run-close{position:absolute;right:5px;top:5px;width:30px;height:30px;border:0;background:transparent;color:var(--text-secondary);font:24px system-ui;z-index:2}.navigator-quick-run .quick-run-input{padding-right:36px}
+.phone-rename-dialog{width:min(330px,calc(100vw - 32px));box-sizing:border-box;background:var(--surface-raised);color:var(--text);border:1px solid var(--border-strong);border-radius:12px;padding:16px}.phone-rename-dialog::backdrop{background:#0008}.phone-rename-dialog form{display:grid;gap:12px}.phone-rename-dialog input{box-sizing:border-box;width:100%;padding:10px;border:1px solid var(--border-strong);border-radius:6px;background:var(--surface-soft);color:var(--text);font:16px system-ui}.phone-rename-dialog p{margin:0;color:#df9993}.phone-rename-dialog form>div{display:flex;justify-content:flex-end;gap:8px}.phone-rename-dialog button{padding:7px 13px;background:var(--surface-soft);color:inherit;border:1px solid var(--border-strong);border-radius:6px}
