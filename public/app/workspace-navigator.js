@@ -368,6 +368,8 @@ export function createWorkspaceNavigator(o) {
   const newFolder = button(d,'New folder',['M10 4v12','M4 10h12']);
   const reveal = button(d,'Reveal',['M3 6h5l1.5 2H17v8H3z','M3 9h14']); tools.append(back,fwd,up,refresh,newFolder,copy,move,paste,rename,del,recycleDisk,reveal);
   if(o.binControls){o.binControls.restore.classList.add('navigator-icon-button');tools.append(o.binControls.restore);}
+  // In a blob workspace the kill bin is emptied here: that is what recycles files.
+  if(o.killOnly&&o.binControls?.deleteAll){o.binControls.deleteAll.classList.add('navigator-icon-button');tools.append(o.binControls.deleteAll);}
   del.title='Delete entry · Right-click to open Bin';
   let binHoldTimer=null,binHandledUntil=0;
   const openBin=event=>{event?.preventDefault();event?.stopPropagation();if(Date.now()<binHandledUntil)return;binHandledUntil=Date.now()+800;clearSearch({renderNow:false});o.setBinView?.(!o.getSession().binMode);s.mode='ayg';setView('nav',false);render();};
@@ -376,10 +378,11 @@ export function createWorkspaceNavigator(o) {
   del.addEventListener('pointerdown',event=>{cancelBinHold();if(event.pointerType==='touch')binHoldTimer=setTimeout(()=>openBin(),550);});
   for(const type of ['pointerup','pointercancel','pointerleave'])del.addEventListener(type,cancelBinHold);
   if(o.killOnly){
-    // A blob workspace has only killing: the skull kills (recoverably, on every device), and holding
-    // it, by mouse or finger, or right-clicking it opens the Bin instead.
+    // A blob workspace has only killing: the skull moves entries to the kill bin, and holding it, by
+    // mouse or finger, or right-clicking it opens the Bin instead.
     del.hidden=true;del.style.display='none';
     recycleDisk.title='Kill · Hold to open Bin';
+    // Killing keeps files in place until the kill bin is emptied.
     recycleDisk.addEventListener('contextmenu',openBin);
     recycleDisk.addEventListener('pointerdown',event=>{cancelBinHold();if(event.button===0)binHoldTimer=setTimeout(()=>openBin(),550);});
     for(const type of ['pointerup','pointercancel','pointerleave'])recycleDisk.addEventListener(type,cancelBinHold);
@@ -1975,6 +1978,7 @@ export function createWorkspaceNavigator(o) {
   recycleDisk.addEventListener('pointerdown',()=>{recycleSelection=s.mode==='ayg'?captureRecycleSelection():null;});
   recycleDisk.addEventListener('click',async()=>{
     if(o.killOnly&&Date.now()<binHandledUntil)return; // the hold opened the Bin; it does not also kill
+    if(o.killOnly&&o.getSession().binMode){o.emptyBin?.();return;} // in the kill bin the skull empties it
     recycleDisk.disabled=true;del.disabled=true;
     try{
       if(s.mode==='ayg'){const selectedIds=recycleSelection?.length?recycleSelection:captureRecycleSelection();recycleSelection=null;await o.deleteAyG({deleteDisk:true,selectedIds:selectedIds.length?selectedIds:[...o.getSession().selected]});return;}

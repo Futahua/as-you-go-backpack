@@ -4094,7 +4094,9 @@ function render() {
   elements.restoreAllBin.hidden = !session.binMode || binCount === 0;
   elements.deleteAllBin.classList.toggle('selective', hasSelection);
   elements.restoreAllBin.classList.toggle('selective', hasSelection);
-  elements.deleteAllBin.title = hasSelection ? 'Delete selection permanently' : 'Delete all';
+  elements.deleteAllBin.title = BLOB_TEMPLATE
+    ? (hasSelection ? 'Empty selection: recycles its files on every device' : 'Empty kill bin: recycles its files on every device')
+    : (hasSelection ? 'Delete selection permanently' : 'Delete all');
   elements.restoreAllBin.title = hasSelection ? 'Restore selection' : 'Restore all';
 
   hydrateIcons();
@@ -4939,19 +4941,11 @@ const commands = createWorkspaceCommands({
   foreignPaste,
 });
 if (BLOB_TEMPLATE) {
-  // A Proxima blob workspace has only killing: every route to the Bin (Delete key, menus, skull)
-  // kills its files and folders recoverably on every device. Web links have no file, so they are binned.
+  // A Proxima blob workspace has only killing. Every route to the Bin (skull, Delete key, menus)
+  // moves entries to the kill bin and leaves their files in place; only emptying the kill bin
+  // recycles the files, on every device (Proxima's synced workspace does that when entries go).
   const moveToBin = commands.moveSelectionToBin;
-  commands.moveSelectionToBin = async ({ selectedIds = null } = {}) => {
-    const ids = selectedIds ?? [...store.getSession().selected];
-    const isLink = (id) => {
-      const file = shortcut(id) || state.shortcuts.find((candidate) => candidate.placements?.some((placement) => placement.id === id));
-      return Boolean(file && /^https?:\/\//i.test(file.target || ''));
-    };
-    const links = ids.filter(isLink), others = ids.filter((id) => !isLink(id));
-    if (others.length) await moveToBin({ deleteDisk: true, selectedIds: others });
-    if (links.length) await moveToBin({ selectedIds: links });
-  };
+  commands.moveSelectionToBin = ({ selectedIds = null } = {}) => moveToBin({ selectedIds });
 }
 // Files dropped from another device download into this device's inbox, then link (list and grid).
 const deviceFileImport = PHONE || WIDGET_SURFACE || commandSurfaceMode === 'overlay' ? null : createDeviceFileImport({ document, host, filesOnly: DEVICE_FILES, scopeKey: `${PROJECT_SURFACE_KEY || 'main'}:${SCOPE_ROOT_ID || 'root'}`, link: (targets, destination) => commands.dropResolvedTargets(targets, destination, { requireDurable: true }) });
@@ -5028,7 +5022,8 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     },
     getState: () => state,
     getSession: () => session,
-    binControls:{bin:elements.binButton,restore:elements.restoreAllBin},
+    binControls:{bin:elements.binButton,restore:elements.restoreAllBin,deleteAll:elements.deleteAllBin},
+    emptyBin:()=>elements.deleteAllBin.click(),
     recycleDiskFiles:async paths=>{const effect=await createFileRecycleEffect(fileEffectHost,paths);store.recordExternalEffect({undo:effect.undo,redo:async()=>await confirmDiskDeletion(paths.map(target=>({target,name:target.split(/[\\/]/).pop()})))?effect.redo():false});await effect.redo();return {ok:true};},
     setBinView:(binMode,binCurrentId='bin')=>{store.clearSelection();store.setNavigation({binMode,binCurrentId});queueMicrotask(render);},
     itemsIn:(snapshot,id)=>session.binMode?(id==='bin'?binnedItems(snapshot).filter(x=>!SCOPE_ROOT_ID||itemInScope(snapshot,x.id,SCOPE_ROOT_ID)):itemsInBinnedGroup(snapshot,id)):itemsIn(snapshot,id),
