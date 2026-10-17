@@ -375,6 +375,15 @@ export function createWorkspaceNavigator(o) {
   del.addEventListener('contextmenu',openBin);
   del.addEventListener('pointerdown',event=>{cancelBinHold();if(event.pointerType==='touch')binHoldTimer=setTimeout(()=>openBin(),550);});
   for(const type of ['pointerup','pointercancel','pointerleave'])del.addEventListener(type,cancelBinHold);
+  if(o.killOnly){
+    // A blob workspace has only killing: the skull kills (recoverably, on every device), and holding
+    // it, by mouse or finger, or right-clicking it opens the Bin instead.
+    del.hidden=true;del.style.display='none';
+    recycleDisk.title='Kill · Hold to open Bin';
+    recycleDisk.addEventListener('contextmenu',openBin);
+    recycleDisk.addEventListener('pointerdown',event=>{cancelBinHold();if(event.button===0)binHoldTimer=setTimeout(()=>openBin(),550);});
+    for(const type of ['pointerup','pointercancel','pointerleave'])recycleDisk.addEventListener(type,cancelBinHold);
+  }
   const editOn=button(d,'Edit on…',['M3 14v3h3l9-9-3-3z','M11 6l3 3','M13 15h5','M16 13l2 2-2 2']);tools.append(editOn);
   editOn.classList.add('navigator-editing-pen');
   const editing=createNavigatorEditing({document:d,host:o.host,setStatus:o.setStatus,paths:()=>s.mode==='machine'?[...s.machineSelected]:(o.nativeDragPaths?.([...o.getSession().selected])||[])});
@@ -1295,7 +1304,9 @@ export function createWorkspaceNavigator(o) {
     } return f;
   }
   function renderAyG() {treeBranches=[];treeRowIndex=0;
-    if(s.view==='tree'&&!s.graphViewActive&&!o.getSession().binMode){
+    // A blob workspace's tree starts at the folder it opened (the blob's), with breadcrumbs back up.
+    const treeAtFolder=o.treeFollowsFolder&&currentAyG()!==o.rootId;
+    if(s.view==='tree'&&!s.graphViewActive&&!o.getSession().binMode&&!treeAtFolder){
       setLocation([{key:'ayg-root',label:'As you Go'}]);
       body.replaceChildren(thumbsSortBar(),aygChildren(o.rootId));paintTreeBranches();
     }
@@ -1310,7 +1321,7 @@ export function createWorkspaceNavigator(o) {
       body.replaceChildren(thumbsSortBar(),aygChildren(current));paintTreeBranches();
     }
     rememberVisit();
-    up.disabled=s.view!=='nav'||currentAyG()===o.rootId;
+    up.disabled=(s.view!=='nav'&&!o.treeFollowsFolder)||currentAyG()===o.rootId;
     if (!body.childElementCount) body.innerHTML = '<p class="workspace-navigator-empty">Workspace is empty.</p>';
   }
   async function machineList(path, force = false) {
@@ -1963,6 +1974,7 @@ export function createWorkspaceNavigator(o) {
   const captureRecycleSelection=()=>[...body.querySelectorAll('.workspace-navigator-row.selected[data-id]')].map(row=>row.dataset.id);
   recycleDisk.addEventListener('pointerdown',()=>{recycleSelection=s.mode==='ayg'?captureRecycleSelection():null;});
   recycleDisk.addEventListener('click',async()=>{
+    if(o.killOnly&&Date.now()<binHandledUntil)return; // the hold opened the Bin; it does not also kill
     recycleDisk.disabled=true;del.disabled=true;
     try{
       if(s.mode==='ayg'){const selectedIds=recycleSelection?.length?recycleSelection:captureRecycleSelection();recycleSelection=null;await o.deleteAyG({deleteDisk:true,selectedIds:selectedIds.length?selectedIds:[...o.getSession().selected]});return;}

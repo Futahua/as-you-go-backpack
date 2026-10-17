@@ -4938,6 +4938,21 @@ const commands = createWorkspaceCommands({
   sharedPathsFor: (ids) => nativeDragPathsForItemIds(ids),
   foreignPaste,
 });
+if (BLOB_TEMPLATE) {
+  // A Proxima blob workspace has only killing: every route to the Bin (Delete key, menus, skull)
+  // kills its files and folders recoverably on every device. Web links have no file, so they are binned.
+  const moveToBin = commands.moveSelectionToBin;
+  commands.moveSelectionToBin = async ({ selectedIds = null } = {}) => {
+    const ids = selectedIds ?? [...store.getSession().selected];
+    const isLink = (id) => {
+      const file = shortcut(id) || state.shortcuts.find((candidate) => candidate.placements?.some((placement) => placement.id === id));
+      return Boolean(file && /^https?:\/\//i.test(file.target || ''));
+    };
+    const links = ids.filter(isLink), others = ids.filter((id) => !isLink(id));
+    if (others.length) await moveToBin({ deleteDisk: true, selectedIds: others });
+    if (links.length) await moveToBin({ selectedIds: links });
+  };
+}
 // Files dropped from another device download into this device's inbox, then link (list and grid).
 const deviceFileImport = PHONE || WIDGET_SURFACE || commandSurfaceMode === 'overlay' ? null : createDeviceFileImport({ document, host, filesOnly: DEVICE_FILES, scopeKey: `${PROJECT_SURFACE_KEY || 'main'}:${SCOPE_ROOT_ID || 'root'}`, link: (targets, destination) => commands.dropResolvedTargets(targets, destination, { requireDurable: true }) });
 
@@ -4989,6 +5004,8 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     workspace: workspaceElement,
     graphContent: document.querySelector('#explorer'),
     permanentPane: true,
+    killOnly: BLOB_TEMPLATE,
+    treeFollowsFolder: BLOB_TEMPLATE,
     openPaneQuickRun:panel=>{
       const layer=elements.quickRunLayer;panel.append(layer);layer.classList.add('navigator-quick-run');const pills=panel.querySelector('.navigator-saved-pills');
       const position=()=>layer.style.setProperty('--navigator-run-top',(pills.getBoundingClientRect().bottom-panel.getBoundingClientRect().top+4)+'px');
