@@ -31,5 +31,15 @@ export function createBlobWorkspaceHost(base,workspaceId,win=window){
     resolveDroppedTargets:files=>request('resolve-dropped',[files]),pickTarget:kind=>request('pick-target',[kind]),pickPhoneFiles:()=>request('pick-phone'),
     fileCapability:(operation,detail={})=>request('file',[operation,detail]),
     acquireWorkspaceWriterLease:async()=>null,releaseWorkspaceWriterLease:async()=>{},
+    // A pasted or dropped link's title and icon come from Papers through the Proxima page.
+    resolveWebIcon:url=>request('resolve-web-icon',[url]),
+    // Native window layouts and widgets do not exist in a blob folder: answer at once with "none"
+    // (never a thrown error, which would restart the pane's startup) instead of waiting out a timeout.
+    windowLifecycleSnapshot:async()=>null,
+    windowControlSync:async()=>({outcome:'unavailable',results:[]}),
+    windowPreviewHide:async()=>({ok:true}),
+    widgetOpen:async()=>({ok:false,code:'UNAVAILABLE',message:'Widgets are not available in a blob folder.'}),
+    // The pane's close button (in the pill strip) closes the Proxima blob pane.
+    closeBlobPane:()=>win.parent.postMessage({type:'proxima:workspace:close',workspaceId},origin()),
   };
 }

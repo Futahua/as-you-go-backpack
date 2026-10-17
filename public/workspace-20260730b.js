@@ -5000,6 +5000,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     permanentPane: true,
     killOnly: BLOB_TEMPLATE,
     treeFollowsFolder: BLOB_TEMPLATE,
+    onClose: BLOB_TEMPLATE ? () => baseHost.closeBlobPane?.() : null,
     openPaneQuickRun:panel=>{
       const layer=elements.quickRunLayer;panel.append(layer);layer.classList.add('navigator-quick-run');const pills=panel.querySelector('.navigator-saved-pills');
       const position=()=>layer.style.setProperty('--navigator-run-top',(pills.getBoundingClientRect().bottom-panel.getBoundingClientRect().top+4)+'px');
@@ -5133,7 +5134,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     },
     copyAyG: () => commands.copySelection(),
     cutAyG: () => commands.cutSelection(),
-    pasteAyG: (destination) => commands.pasteClipboard({}, destination),
+    pasteAyG: (destination, data = {}) => commands.pasteClipboard(data, destination),
     deleteAyG: (options) => commands.moveSelectionToBin(options),
     confirmSkull:paths=>confirmDiskDeletion(paths.map(target=>({target,name:target.split(/[\\/]/).pop()}))),
     clearCanvasForMachine: () => {
@@ -5823,7 +5824,9 @@ if (WIDGET_SURFACE) {
     };
     surfaceCoordinator = createSurfaceCoordinator({
       lock,
-      ownerAuthoritative: Boolean(REMOTE_DEVICE),
+      // A device view follows its physical owner; a blob pane follows Proxima's synced root. Both rebase a
+      // stale save onto the latest version instead of freezing in a conflict.
+      ownerAuthoritative: Boolean(REMOTE_DEVICE || BLOB_WORKSPACE),
       lockName: `${SURFACE_DOCUMENT_LOCK}${coordinationNamespace}`,
       channel,
       host: {

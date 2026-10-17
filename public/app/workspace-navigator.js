@@ -395,6 +395,11 @@ export function createWorkspaceNavigator(o) {
   collapseAll.classList.add('workspace-navigator-collapse-all');
   collapseAll.addEventListener('click',()=>{s.expanded.clear();s.machineExpanded.clear();render();});
   head.append(provider, tools, collapseAll, collapse);
+  if(o.onClose){
+    // A Proxima blob pane has no header of its own: its close sits at the end of this strip.
+    const close=button(d,'Close',['M5 5l10 10','M15 5L5 15']);close.classList.add('workspace-navigator-close');
+    close.addEventListener('click',event=>{event.stopPropagation();o.onClose();});head.append(close);
+  }
   const navActions=d.createElement('div');navActions.className='navigator-state-actions';
   const quickSearch=button(d,'Quick Run in navigator',['M8.5 3a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11','M12.5 12.5 17 17']);
   navActions.append(quickSearch);head.insertBefore(navActions,collapseAll);
@@ -1865,7 +1870,9 @@ export function createWorkspaceNavigator(o) {
     transferStatus(result.pending?result.message:cut?'Files moved.':record.cut?'Copied; the originals stay on their device.':'Files copied.',!result.pending);
   }
   async function moveNavigatorFiles(options){return runNavigatorFileMove({...options,onProgress:options.onProgress||((progress)=>{s.machineListings.clear();render();transferStatus('Moving files… '+progress.completed+'/'+progress.total+' confirmed'+(progress.pending?' · waiting for Directory Opus':''));})});}
-  async function pasteNavigator(){
+  // A paste event carries its own files and text (as the canvas uses them), so pasting needs no
+  // separate clipboard read; inside an embedded pane that read is refused, the gesture being here.
+  async function pasteNavigator(data=null){
     // The computer-wide clipboard decides: a newer copy in another pane replaces this pane's own.
     const shared=o.sharedClipboard?.current(null)||null,foreign=shared&&shared.page!==o.sharedClipboard.page?shared:null;
     if(machineClipboard&&(foreign||machineClipboard.base!==o.getSession().clipboard))machineClipboard=null;
@@ -1877,7 +1884,9 @@ export function createWorkspaceNavigator(o) {
         else await o.linkNavigatorPaths?.(paths,destination());
         return;
       }
-      return o.pasteAyG(destination());
+      const pasted=await o.pasteAyG(destination(),data?{files:[...(data.files||[])],text:data.getData?.('text/plain')||''}:{});
+      if(pasted===false&&!data&&o.killOnly)o.setStatus('Press Ctrl+V to paste here.');
+      return pasted;
     }
     const clipboard=o.getSession().clipboard;
     const targetOwner=REMOTE_ROOT.test(s.path)?s.path.slice(9,45).toLowerCase():/^\\\\papers~phone\\/i.test(s.path)?'phone':o.host.deviceId||'local';
@@ -1916,7 +1925,7 @@ export function createWorkspaceNavigator(o) {
   },true);
   d.addEventListener('paste',event=>{
     if(s.collapsed||!panel.contains(event.target)||event.target?.closest?.('input,textarea,[contenteditable="true"]'))return;
-    event.preventDefault();event.stopImmediatePropagation();void pasteNavigator();
+    event.preventDefault();event.stopImmediatePropagation();void pasteNavigator(event.clipboardData);
   },true);
   rename.addEventListener('click',()=>{
     if(s.mode==='ayg'&&o.getSession().selected.size!==1){o.setStatus('Select one item to rename.');return;}
