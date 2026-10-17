@@ -5,7 +5,7 @@ export function createIconAssets(host) {
     if(typeof serialized!=='string'||!serialized.includes('data:image/'))return serialized;
     // Remote workspace icons were inlined for display. Its host restores known
     // references when saving; this viewer must not externalize them on its machine.
-    if(host.deviceId)return serialized;
+    if(host.deviceId||host.blobWorkspaceId)return serialized;
     const state=JSON.parse(serialized);
     const statePath=state.view?.preferences?.snapshotStorage?.statePath;
     // Without a configured snapshot folder there is nowhere to externalize icons. Keep them

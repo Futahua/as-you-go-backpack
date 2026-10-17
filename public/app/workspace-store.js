@@ -56,6 +56,7 @@ export function createWorkspaceStore({
   canMutateDocument = () => true,
   onMutationBlocked = () => {},
   onSaveGenerationInvalidated = () => {},
+  historyEnabled = true,
 }) {
   let undoStack = [];
   let redoStack = [];
@@ -227,7 +228,10 @@ export function createWorkspaceStore({
       return Promise.resolve(false);
     }
     const previous = historyBefore ?? getState();
-    if (isUndo) {
+    if (!historyEnabled) {
+      undoStack.length = 0;
+      redoStack.length = 0;
+    } else if (isUndo) {
       redoStack.push(previous);
     } else if (isRedo) {
       undoStack.push(previous);
@@ -265,11 +269,13 @@ export function createWorkspaceStore({
 
   let historyBusy = false;
   async function undo() {
+    if (!historyEnabled) return false;
     if (!canMutateDocument()) { onMutationBlocked('undo'); return; }
     return replayHistory(undoStack, true);
   }
 
   async function redo() {
+    if (!historyEnabled) return false;
     if (!canMutateDocument()) { onMutationBlocked('redo'); return; }
     return replayHistory(redoStack, false);
   }
@@ -300,6 +306,7 @@ export function createWorkspaceStore({
 
   return {
     recordExternalEffect(effect) {
+      if (!historyEnabled) return;
       undoStack.push({externalEffect:true,effect});
       redoStack.length=0;
     },

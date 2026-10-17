@@ -1024,7 +1024,7 @@ export function createSurfaceCoordinator({
           const decoded = mergeSurfaceSnapshots(base, incoming, current);
           const payload = JSON.stringify(decoded);
           let parentRevision = revision;
-          const result = await host.saveChecked(payload, parentRevision);
+          const result = await host.saveChecked(payload, parentRevision, { rebaseAutomaticSave: pending.automatic === true });
           if (!result || result.ok !== true) {
             const outcome = { ok: false, code: 'PROMOTION_REPLAY_REFUSED' };
             const recovery = await reloadAuthoritativeAfterFailedMutation(outcome.code);
@@ -1193,11 +1193,12 @@ export function createSurfaceCoordinator({
               .then((recovery) => settleFailedForward(requestId, pending, { ok: false, code: 'WRITER_ACK_TIMEOUT' }, recovery, { cancelIfUnresolved: true }));
           }, ackTimeoutMs);
           timer.unref?.();
-          pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision, localPending, generation: metadata.generation });
+          pendingRequests.set(requestId, { timer, resolve, serialized, baseSerialized, revision, localPending, generation: metadata.generation, automatic: metadata.rebaseAutomaticSave === true });
           });
         }
         const message = {
           type: MUTATION_MESSAGE,
+          ...(metadata.rebaseAutomaticSave === true ? { automatic: true } : {}),
           clientId,
           revision,
           serialized,
@@ -1243,7 +1244,7 @@ export function createSurfaceCoordinator({
             }
           }
           let parentRevision = revision;
-          let result = await host.saveChecked(payload, parentRevision);
+          let result = await host.saveChecked(payload, parentRevision, { rebaseAutomaticSave: metadata.rebaseAutomaticSave === true });
           if(ownerAuthoritative&&result?.code==='STALE_REVISION'){
             // A remote pane is a client of the physical owner, never an
             // alternative authority. Retire this rejected generation before
@@ -1279,7 +1280,7 @@ export function createSurfaceCoordinator({
                 loaded.state,
               ));
               parentRevision = loaded.revision;
-              result = await host.saveChecked(payload, parentRevision);
+              result = await host.saveChecked(payload, parentRevision, { rebaseAutomaticSave: metadata.rebaseAutomaticSave === true });
             } catch { break; /* preserve the original conflict outcome */ }
           }
           if (result && result.ok === true) {
@@ -1501,7 +1502,7 @@ export function createSurfaceCoordinator({
                 serialized = JSON.stringify(decoded);
               }
               let parentRevision = revision;
-              let result = await host.saveChecked(serialized, parentRevision);
+              let result = await host.saveChecked(serialized, parentRevision, { rebaseAutomaticSave: message.automatic === true });
               if (!result || result.ok !== true) {
                 // An external writer may have advanced the opaque host revision
                 // despite our Web Lock. Reload, rebase this same request once,
@@ -1516,7 +1517,7 @@ export function createSurfaceCoordinator({
                   : incoming;
                 serialized = JSON.stringify(decoded);
                 const retryParentRevision = revision;
-                result = await host.saveChecked(serialized, retryParentRevision);
+                result = await host.saveChecked(serialized, retryParentRevision, { rebaseAutomaticSave: message.automatic === true });
                 parentRevision = retryParentRevision;
               }
               if (!result || result.ok !== true) {

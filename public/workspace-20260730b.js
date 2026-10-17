@@ -1,4 +1,5 @@
 import {getTransferFeedback} from './app/transfer-feedback.js';
+import {blobWorkspaceFromUrl,createBlobWorkspaceHost} from './app/blob-workspace-host.js';
 import { writeNavigateIntent, formatNavigateTarget } from './app/device-modes.js';
 import {isPhoneResizeLocked} from './app/phone-control-scale.js';
 import {fileFallbackIcon,phoneGraphFallback} from './app/file-type-icons.js';
@@ -200,14 +201,17 @@ import {
 } from './workspace-scope.js';
 
 // A tab opened for another device shows that device's As you Go through the same page.
-const REMOTE_DEVICE = remoteDeviceFromUrl(window.location);
+const BLOB_WORKSPACE = blobWorkspaceFromUrl(window.location);
+const REMOTE_DEVICE = BLOB_WORKSPACE ? null : remoteDeviceFromUrl(window.location);
 // On the phone the navigator fills the screen and a tapped file's preview slides over it.
 const PHONE = new URL(window.location.href).searchParams.has('papers-phone');
 if (PHONE) document.documentElement.classList.add('papers-phone');
 const DEVICE_FILES = isDeviceFilesPane(window.location);
 if (DEVICE_FILES) document.documentElement.classList.add('papers-device-files');
 if (REMOTE_DEVICE) { try { scopeLocalStorage(REMOTE_DEVICE); } catch { /* storage is optional */ } }
-const baseHost = REMOTE_DEVICE ? createRemoteWorkspaceHost(createHostBridge(window), REMOTE_DEVICE) : createHostBridge(window);
+if (BLOB_WORKSPACE) { try { scopeLocalStorage('blob-'+BLOB_WORKSPACE); } catch { /* storage is optional */ } }
+const ordinaryHost = REMOTE_DEVICE ? createRemoteWorkspaceHost(createHostBridge(window), REMOTE_DEVICE) : createHostBridge(window);
+const baseHost = BLOB_WORKSPACE ? createBlobWorkspaceHost(ordinaryHost, BLOB_WORKSPACE, window) : ordinaryHost;
 let fileTargets=null;
 const fileEffectHost = createTransferIndicatorHost(baseHost,document);
 const host = createFileTargetHost(fileEffectHost,()=>fileTargets,id=>shortcut(id),{launchByRecord:new URL(window.location.href).searchParams.get('papers-surface')==='command-surface'});
@@ -218,6 +222,7 @@ const PROJECT_SURFACE_KEY = (() => {
 })();
 const SCOPE_ROOT_ID = scopeRootFromUrl(window.location);
 const EMBEDDED_SURFACE = new URLSearchParams(window.location.search).get('papers-embedded-surface');
+const BLOB_TEMPLATE = Boolean(BLOB_WORKSPACE);
 
 function embeddedParentOrigin() {
   try {
@@ -334,6 +339,7 @@ function isCurrentDocumentWriter() {
 }
 
 const store = createWorkspaceStore({
+  historyEnabled: !BLOB_TEMPLATE,
   getState: () => state,
   setState: (next) => { state = next; },
   normalizeState,
@@ -5763,7 +5769,7 @@ if (WIDGET_SURFACE) {
     const lock = chooseWorkspaceWriterLock({ embedded: EMBEDDED_SURFACE === 'proxima',
       rendererLock, hostLock, fallback: localCasWriterLock });
     let channel;
-    const coordinationNamespace = (SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '') + (REMOTE_DEVICE ? `:device:${REMOTE_DEVICE}` : '');
+    const coordinationNamespace = (BLOB_WORKSPACE ? `:blob:${BLOB_WORKSPACE}` : '') + (SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '') + (REMOTE_DEVICE ? `:device:${REMOTE_DEVICE}` : '');
     if (typeof BroadcastChannel === 'function') {
       try {
         channel = new BroadcastChannel(`${SURFACE_DOCUMENT_CHANNEL}${coordinationNamespace}`);
@@ -5810,7 +5816,7 @@ if (WIDGET_SURFACE) {
       channel,
       host: {
         loadVersioned: () => host.loadWorkspaceVersioned(),
-        saveChecked: (serialized, revision) => host.saveWorkspaceChecked(serialized, revision),
+        saveChecked: (serialized, revision, metadata) => host.saveWorkspaceChecked(serialized, revision, metadata),
       },
       // Installs the document only. This surface's navigation is deliberately
       // preserved, so two windows keep showing different places. Trail
