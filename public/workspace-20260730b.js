@@ -210,7 +210,7 @@ if (REMOTE_DEVICE) { try { scopeLocalStorage(REMOTE_DEVICE); } catch { /* storag
 const baseHost = REMOTE_DEVICE ? createRemoteWorkspaceHost(createHostBridge(window), REMOTE_DEVICE) : createHostBridge(window);
 let fileTargets=null;
 const fileEffectHost = createTransferIndicatorHost(baseHost,document);
-const host = createFileTargetHost(fileEffectHost,()=>fileTargets,id=>shortcut(id));
+const host = createFileTargetHost(fileEffectHost,()=>fileTargets,id=>shortcut(id),{launchByRecord:new URL(window.location.href).searchParams.get('papers-surface')==='command-surface'});
 const iconAssets = createIconAssets(host);
 const PROJECT_SURFACE_KEY = (() => {
   const value = new URLSearchParams(window.location.search).get('papers-surface-key');
@@ -4869,7 +4869,19 @@ async function foreignPaste(record, destinations) {
   if (record.cut) setStatus('Pasted as a copy; the originals stay where they were.');
   return true;
 }
-async function confirmDiskDeletion(files) {const locations=await Promise.all(files.map(async file=>{const result=await host.fileCapability('stat',{path:file.target});if(!result?.ok)throw Error(result?.message||'The file location could not be verified.');return file.name+'\n'+(result.entry?.remote?.device?result.entry.remote.device+' · ':'')+(result.entry?.path||file.target);}));return confirmDialog.askConfirm({title:'Kill these?',copy:locations.join('\n\n')+'\n\nRestore the files and entries later from the AYG Bin.',confirmLabel:'Kill'});}
+async function confirmDiskDeletion(files,{folders=[]}={}) {
+  const snapshot=store.getSnapshot();
+  const rows=await Promise.all(files.map(async file=>{
+    const result=await host.fileCapability('stat',{path:file.target});
+    if(!result?.ok)throw Error(result?.message||'The file location could not be verified.');
+    const names=[file.name]; let parent=file.parentId||file.placements?.find(p=>!p.bin)?.parentId;
+    const seen=new Set();
+    while(parent&&!seen.has(parent)){seen.add(parent);const group=snapshot.groups.find(g=>g.id===parent);if(!group)break;names.unshift(group.name);parent=group.parentId;}
+    return {ayg:names.filter(Boolean).join('/'),native:(result.entry?.remote?.device?result.entry.remote.device+' · ':'')+(result.entry?.path||file.target)};
+  }));
+  for(const folder of folders)rows.unshift({ayg:folder.name+'/',native:'AYG folder · '+files.length+' linked disk target'+(files.length===1?'':'s')});
+  return confirmDialog.askConfirm({title:'Kill these?',rows,copy:'Restore the files and entries later from the AYG Bin.',confirmLabel:'Kill'});
+}
 const commands = createWorkspaceCommands({
   confirmDiskDeletion,
   openFileTarget: PHONE ? chosen => host.fileCapability('open', {path:chosen.target}) : null,
@@ -4998,7 +5010,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     setBinView:(binMode,binCurrentId='bin')=>{store.clearSelection();store.setNavigation({binMode,binCurrentId});queueMicrotask(render);},
     itemsIn:(snapshot,id)=>session.binMode?(id==='bin'?binnedItems(snapshot).filter(x=>!SCOPE_ROOT_ID||itemInScope(snapshot,x.id,SCOPE_ROOT_ID)):itemsInBinnedGroup(snapshot,id)):itemsIn(snapshot,id),
     isWebLink,
-    isAbsoluteWindowsPath,
+    isAbsoluteWindowsPath: path=>isAbsoluteWindowsPath(path)||Boolean(host.deviceFilePath?.(path)),
     nativeDragPaths: nativeDragPathsForItemIds,
     importDevicePaths: importFilePaths,
     sharedClipboard,
@@ -5105,7 +5117,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     cutAyG: () => commands.cutSelection(),
     pasteAyG: (destination) => commands.pasteClipboard({}, destination),
     deleteAyG: (options) => commands.moveSelectionToBin(options),
-    confirmSkull:paths=>confirmDialog.askConfirm({title:'Kill these?',copy:paths.map(path=>path.split(/[\\/]/).pop()+'\n'+path).join('\n\n')+'\n\nFiles go to their owning device recycle storage.',confirmLabel:'Kill'}),
+    confirmSkull:paths=>confirmDiskDeletion(paths.map(target=>({target,name:target.split(/[\\/]/).pop()}))),
     clearCanvasForMachine: () => {
       store.clearSelection();
       commands.clearSetSelection();

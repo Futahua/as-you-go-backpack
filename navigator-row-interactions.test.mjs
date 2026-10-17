@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { navigatorReorderPlan, bindNavigatorRowInteractions } from './public/app/navigator-row-interactions.js';
+import { navigatorReorderPlan, bindNavigatorRowInteractions,navigatorSelectAllIds } from './public/app/navigator-row-interactions.js';
+
+test('Ctrl+A scope includes rendered rows and graph nodes but excludes roots, ancestors and hidden filters',()=>{
+ const row=(id,{hidden=false,ancestor=false}={})=>({dataset:{id},classList:{contains:()=>ancestor},getBoundingClientRect:()=>({width:hidden?0:80,height:hidden?0:40})});
+ assert.deepEqual(navigatorSelectAllIds([row('root'),row('one'),row('two'),row('filtered',{hidden:true}),row('ancestor',{ancestor:true})],['root']),['one','two']);
+});
 
 test('reorder keeps batch order and moves it before/after the current cursor row',()=>{
   assert.deepEqual(navigatorReorderPlan({rows:['a','b','c','d'],selected:['c','a'],target:'d',after:true}),

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createConfirmationDialog } from './public/app/components/confirmation-dialog.js';
+import { createConfirmationDialog, compactConfirmationPath } from './public/app/components/confirmation-dialog.js';
+
+test('confirmation paths retain the last two folders and actual filename',()=>{
+  assert.equal(compactConfirmationPath('C:\\owner\\upper1\\upper2\\item.dwg'),'…/upper1/upper2/item.dwg');
+  assert.equal(compactConfirmationPath('AYG/Folder/File'),'AYG/Folder/File');
+});
 
 function createHarness() {
   const committed = [];

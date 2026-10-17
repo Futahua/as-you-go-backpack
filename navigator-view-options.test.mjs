@@ -1,4 +1,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {defaultViewOptions,projectNavigatorItems,viewSize,validateViewOptions} from './public/app/navigator-view-options.js';
+import {inlineFilterSummary} from './public/app/navigator-inline-filter.js';
+test('inline headings show compact active parameters, including open ranges',()=>{
+ assert.equal(inlineFilterSummary('name',{name:'report'}),'report');
+ assert.equal(inlineFilterSummary('size',{minSize:'500 KB',maxSize:'10 MB'}),'500 KB – 10 MB');
+ assert.equal(inlineFilterSummary('size',{maxSize:'10 MB'}),'… – 10 MB');
+ assert.equal(inlineFilterSummary('modified',{after:'2026-10-01'}),'2026-10-01 – …');
+ assert.equal(inlineFilterSummary('size',{}),'');
+});
 const items=[{id:'a',name:'Zulu.pdf',size:2048,kind:'file',modifiedAt:Date.parse('2026-10-15T10:00:00+07:00')},{id:'b',name:'Ánh.jpg',size:500,kind:'file',modifiedAt:Date.parse('2026-10-14T10:00:00+07:00')},{id:'c',name:'Folder',kind:'folder'}];
 test('manual order and records are preserved, name sorting groups folders first',()=>{const before=structuredClone(items);assert.deepEqual(projectNavigatorItems(items,defaultViewOptions()),items);assert.deepEqual(projectNavigatorItems(items,{key:'name'}).map(x=>x.id),['c','b','a']);assert.deepEqual(items,before);});
 test('type, folded name, inclusive dates and measured size ranges combine',()=>{assert.deepEqual(projectNavigatorItems(items,{type:'pdf',minSize:'1 KB',maxSize:'3 KB',after:'2026-10-15',before:'2026-10-15'}).map(x=>x.id),['a']);assert.deepEqual(projectNavigatorItems(items,{name:'anh',type:'images'}).map(x=>x.id),['b']);assert.deepEqual(projectNavigatorItems(items,{type:'folders'}).map(x=>x.id),['c']);});

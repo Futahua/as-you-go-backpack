@@ -871,9 +871,20 @@ test('ordinary AYG removal never recycles a disk target',async()=>{
  const calls=[];const h=createHarness({shortcuts:[{id:'file',target:'D:\\report.txt',placements:[{id:'placement'}]}],model:{host:{fileCapability:async(...args)=>{calls.push(args);return{ok:true};}}}});
  h.store.setSelection(['file']);await h.commands.moveSelectionToBin();assert.equal(calls.length,0);assert.deepEqual(h.store.getSnapshot().binned,['file']);
 });
-test('skull recycles disk-backed selections immediately, resolves placement IDs, and skips virtual items',async()=>{
+test('skull resolves placement IDs and accepts empty virtual folders',async()=>{
  const calls=[];const h=createHarness({groups:[{id:'virtual'}],shortcuts:[{id:'file',target:'D:\\report.txt',placements:[{id:'placement'}]}],model:{host:{fileCapability:async(...args)=>{calls.push(args);return{ok:true};}}}});
- h.store.setSelection(['placement','virtual']);await h.commands.moveSelectionToBin({deleteDisk:true});assert.deepEqual(calls,[['delete',{paths:['D:\\report.txt']}]]);assert.deepEqual(h.store.getSnapshot().binned,['placement']);
+ h.store.setSelection(['placement','virtual']);await h.commands.moveSelectionToBin({deleteDisk:true});assert.deepEqual(calls,[['delete',{paths:['D:\\report.txt']}]]);assert.deepEqual(h.store.getSnapshot().binned,['placement','virtual']);
+});
+
+test('folder skull confirms nested contents and recycles each disk target once',async()=>{
+ const calls=[],confirmed=[];const h=createHarness({groups:[{id:'folder',name:'Folder'},{id:'nested',parentId:'folder'}],shortcuts:[{id:'one',target:'D:\\one.txt',placements:[{id:'p1',parentId:'folder'},{id:'p2',parentId:'nested'}]},{id:'two',target:'D:\\two.txt',placements:[{id:'p3',parentId:'nested'}]},{id:'other',target:'D:\\other.txt',placements:[{id:'p4',parentId:'elsewhere'}]}],model:{host:{fileCapability:async(op,args)=>{calls.push(args.paths[0]);return{ok:true};}},confirmDiskDeletion:async files=>{confirmed.push(...files.map(f=>f.target));return true;}}});
+ h.store.setSelection(['folder']);await h.commands.moveSelectionToBin({deleteDisk:true});
+ assert.deepEqual(confirmed,['D:\\one.txt','D:\\two.txt']);assert.deepEqual(calls,['D:\\one.txt','D:\\two.txt']);assert.deepEqual(h.store.getSnapshot().binned,['folder']);
+});
+
+test('cancelling folder skull preserves the folder and every backing file',async()=>{
+ let calls=0;const h=createHarness({groups:[{id:'folder'}],shortcuts:[{id:'one',target:'D:\\one.txt',placements:[{id:'p',parentId:'folder'}]}],model:{confirmDiskDeletion:async files=>{assert.equal(files.length,1);return false;},host:{fileCapability:async()=>{calls++;return{ok:true};}}}});
+ h.store.setSelection(['folder']);await h.commands.moveSelectionToBin({deleteDisk:true});assert.equal(calls,0);assert.equal(h.store.getSnapshot().binned,undefined);
 });
 test('skull keeps an entry when its owning device refuses recycling',async()=>{
  const h=createHarness({shortcuts:[{id:'file',target:'D:\\report.txt',placements:[]}],model:{host:{fileCapability:async()=>({ok:false,message:'Offline'})}}});

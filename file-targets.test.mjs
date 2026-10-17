@@ -1,4 +1,14 @@
-import {test} from 'node:test';import assert from 'node:assert/strict';import {applyFileTargetResult,createFileTargets,createFileTargetHost,createFileRecycleEffect} from './public/app/file-targets.js';
+import {test} from 'node:test';import assert from 'node:assert/strict';import {applyFileTargetResult,createFileTargets,createFileTargetHost,createFileRecycleEffect,prepareFileTargetHistory} from './public/app/file-targets.js';
+
+test('folder skull Undo restores disk children hidden by a binned ancestor and Redo recycles them',async()=>{
+ const file={id:'file',target:'D:\\file.txt',placements:[{id:'p',parentId:'nested'}],fileTarget:{id:'ref',status:'present',revision:1}};
+ const original={groups:[{id:'folder'},{id:'nested',parentId:'folder'}],shortcuts:[file]};
+ const killed={groups:[{id:'folder',bin:{}},{id:'nested',parentId:'folder'}],shortcuts:[{...file,fileTarget:{id:'ref',status:'deleted',revision:2}}]};
+ let restored=0,recycled=0;
+ const owners={prepareRestore:async(state,ids)=>{assert.deepEqual(ids,['file']);restored++;return state;},deletePath:async()=>{recycled++;return{target:{targetId:'ref',status:'deleted',revision:4}};}};
+ await prepareFileTargetHistory(killed,original,owners);assert.equal(restored,1);
+ await prepareFileTargetHistory(original,killed,owners);assert.equal(recycled,1);
+});
 import {createWorkspaceStore} from './public/app/workspace-store.js';
 const base=()=>({shortcuts:[{id:'one',target:'D:\\old.txt',name:'My label',icon:'custom',placements:[{id:'a',parentId:'root'},{id:'b',parentId:'folder'}]}],view:{preferences:{navigatorSavedStates:[{mode:'action',name:'Pin',art:{target:'D:\\old.txt',shortcutId:'one'}}]}}});
 test('retargeting preserves record/placements/labels/icons and updates pills without duplicate entries',()=>{const s=base(),next=applyFileTargetResult(s,{kind:'shortcut',id:'one',path:'D:\\old.txt'},{targetId:'ref',status:'present',path:'D:\\new.txt',revision:2});assert.equal(next.shortcuts.length,1);assert.equal(next.shortcuts[0].name,'My label');assert.equal(next.shortcuts[0].icon,'custom');assert.deepEqual(next.shortcuts[0].placements,s.shortcuts[0].placements);assert.equal(next.view.preferences.navigatorSavedStates[0].art.target,'D:\\new.txt');});
@@ -38,4 +48,16 @@ test('native skull participates in the same Undo/Redo history and refuses a repl
  const effect=await createFileRecycleEffect(raw,['D:\\native.txt']);store.recordExternalEffect(effect);await effect.redo();
  assert.equal(status,'deleted');collision=true;assert.equal(await store.undo(),false);assert.equal(store.canUndo(),true);assert.equal(status,'deleted');
  collision=false;assert.equal(await store.undo(),true);assert.equal(status,'present');assert.equal(await store.redo(),true);assert.equal(status,'deleted');assert.equal(await store.undo(),true);assert.equal(status,'present');
+});
+
+test('concurrent reads share identity verification but the next action verifies afresh',async()=>{
+ let calls=0,release;const state=base();state.shortcuts[0].fileTarget={id:'ref'};
+ const controller=createFileTargets({getState:()=>state,save:async()=>{},host:{fileCapability:async()=>{calls++;await new Promise(r=>release=r);return{ok:true,target:{targetId:'ref',status:'present',path:'D:\\old.txt',revision:1}};}}});
+ try{const reads=Array.from({length:24},()=>controller.resolvePath('D:\\old.txt'));assert.equal(calls,1);release();await Promise.all(reads);const next=controller.resolvePath('D:\\old.txt');assert.equal(calls,2);release();await next;}finally{controller.dispose();}
+});
+
+test('restricted launcher invokes a persisted record through its native launch owner',async()=>{
+ const calls=[],baseHost={launchShortcut:async id=>{calls.push(id);},fileCapability:async()=>{throw Error('Arbitrary paths forbidden');}};
+ const host=createFileTargetHost(baseHost,()=>({resolvePath:async()=>{throw Error('Launcher must not request arbitrary path capabilities');}}),()=>({target:'C:\\app.lnk',fileTarget:{id:'ref'}}),{launchByRecord:true});
+ await host.launchShortcut('shortcut-app');assert.deepEqual(calls,['shortcut-app']);
 });

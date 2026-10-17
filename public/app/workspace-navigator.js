@@ -1,3 +1,5 @@
+import {bindInlineFilter} from './navigator-inline-filter.js';
+import {bindNavigatorAddress,sharedPathCrumbs,createNavigatorArtworkQueue} from './navigator-address.js?v=artwork-20261017';
 import {getTransferFeedback} from './transfer-feedback.js';
 import {createNavigatorDirectoryRefresh} from './navigator-directory-refresh.js';
 import {createNavigatorEditing} from './navigator-editing.js';
@@ -7,7 +9,7 @@ import {bindPhoneControlScale,bindDesktopControlScale} from './phone-control-sca
 import {fileFallbackIcon} from './file-type-icons.js';
 import { bindPhoneFileGestures } from './phone-file-gestures.js';
 import {deviceFilesUrl} from './device-files-pane.js';
-import { bindNavigatorRowInteractions } from './navigator-row-interactions.js';
+import { bindNavigatorRowInteractions,navigatorSelectAllIds } from './navigator-row-interactions.js';
 import { createRemoteFileView } from './remote-file-view.js';
 import { REMOTE_ROOT, remoteDeviceNames } from './remote-paths.js';
 import { moveNavigatorFiles as runNavigatorFileMove, retryNavigatorFileLinks, navigatorFileMoveAllowed } from './navigator-file-transfer.js';
@@ -388,6 +390,28 @@ export function createWorkspaceNavigator(o) {
   const loc = d.createElement('div'); loc.className = 'workspace-navigator-location';
   const locTrack = d.createElement('div'); locTrack.className = 'workspace-navigator-location-track'; loc.append(locTrack);
   loc.prepend(navActions);
+  bindNavigatorAddress({document:d,location:loc,track:locTrack,
+    currentPath:()=>s.mode==='machine'?s.path:(o.nativeDragPaths?.([...o.getSession().selected])?.[0]||s.machineRoot||''),
+    onError:message=>o.setStatus(message),
+    navigate:async path=>{
+      const addressedOwner=path.match(REMOTE_ROOT)?.[0];
+      if(o.remoteDevice&&addressedOwner&&addressedOwner.toLowerCase()!==('\\\\papers~'+o.remoteDevice).toLowerCase())throw Error('Enter a path belonging to the device shown in this pane.');
+      if(!o.isAbsoluteWindowsPath(path)&&!o.host.deviceFilePath?.(path))throw Error('Enter an absolute path on this device.');
+      const listed=await o.host.fileCapability('list',{path,limit:500}).catch(()=>null);
+      if(listed?.ok){clearSearch({renderNow:false});await enterMachine(listed.entry?.path||path,true,listed);return;}
+      const result=await o.host.fileCapability('stat',{path});
+      if(!result?.ok)throw Error(result?.message||'Path unavailable on this device.');
+      if(result.entry?.kind!=='file')throw Error(listed?.message||'Could not list this folder on its device.');
+      clearSearch({renderNow:false});
+      const target=result.entry?.path||path;
+      const parent=parentPath(target),siblings=await o.host.fileCapability('list',{path:parent,limit:500});
+      if(!siblings?.ok)throw Error(siblings?.message||'Could not list the containing folder.');
+      await enterMachine(parent,true,siblings);
+      if(result.entry?.kind==='file'){
+        s.machineSelected=new Set([target]);s.selected=s.machineRows.get(target)||{...result.entry,path:target};
+        for(const row of body.querySelectorAll('.machine-row')){row.classList.toggle('selected',row.dataset.id===target);if(row.dataset.id===target)row.scrollIntoView({block:'nearest'});}
+      }
+    }});
   const search = d.createElement('div'); search.className = 'workspace-navigator-search';
   const searchInput = d.createElement('input');
   searchInput.type = 'search';
@@ -477,7 +501,7 @@ export function createWorkspaceNavigator(o) {
     if(hoverMenus){viewToggle.addEventListener('mouseenter',()=>{clearTimeout(hoverClose);openViewMenu();});viewToggle.addEventListener('mouseleave',scheduleHoverClose);}
     tools.append(viewToggle); apply();
   }
-  const viewOptions={ayg:defaultViewOptions(),machine:{...defaultViewOptions(),key:'name'}},viewMetadata=new Map(),metadataPending=new Set(),metadataQueue=[];let metadataRunning=0;let metadataTimer=0,optionsPanel=null;
+  const viewOptions={ayg:defaultViewOptions(),machine:{...defaultViewOptions(),key:'name'}},viewMetadata=new Map(),metadataPending=new Set(),metadataQueue=[];let metadataRunning=0;let metadataTimer=0;
   for(const mode of ['ayg','machine'])try{Object.assign(viewOptions[mode],JSON.parse(d.defaultView.localStorage.getItem('papers:ayg:view-options:'+o.rootId+':'+(o.host.deviceId||'local')+':'+mode)||'null'));validateViewOptions(viewOptions[mode]);}catch{viewOptions[mode]=mode==='machine'?{...defaultViewOptions(),key:'name'}:defaultViewOptions();}
   const saveViewOptions=()=>{try{d.defaultView.localStorage.setItem('papers:ayg:view-options:'+o.rootId+':'+(o.host.deviceId||'local')+':'+s.mode,JSON.stringify(viewOptions[s.mode]));}catch{}};
   const pumpMetadata=()=>{while(metadataRunning<4&&metadataQueue.length){const path=metadataQueue.shift();metadataRunning++;Promise.resolve(o.host.fileCapability('stat',{path})).then(result=>viewMetadata.set(path,result?.ok?result.entry:{})).catch(()=>viewMetadata.set(path,{})).finally(()=>{metadataPending.delete(path);metadataRunning--;clearTimeout(metadataTimer);metadataTimer=setTimeout(()=>render(),70);pumpMetadata();});}};
@@ -490,22 +514,23 @@ export function createWorkspaceNavigator(o) {
     }
     pumpMetadata();return projectNavigatorItems(items,options,viewMetadata);
   };
-  const optionsButton=button(d,'Sort and filter this folder',['M3 4h14l-5.5 6v6l-3-1v-5z']);tools.append(optionsButton);
-  optionsButton.addEventListener('click',event=>{
-    event.stopPropagation();if(optionsPanel){optionsPanel.remove();optionsPanel=null;return;}
-    const mode=s.mode,current={...viewOptions[mode]},form=d.createElement('form');form.dataset.mode=mode;optionsPanel=form;form.className='navigator-view-options';form.setAttribute('aria-label','Sort and filter this folder');const title=d.createElement('strong');title.textContent='Sort & filter';form.append(title);
-    const fields={};
-    const field=(key,label,type='text',choices=null)=>{const wrap=d.createElement('label');wrap.textContent=label;const input=d.createElement(choices?'select':'input');if(choices)for(const [value,text]of choices){const option=d.createElement('option');option.value=value;option.textContent=text;input.append(option);}else input.type=type;input.name=key;input.setAttribute('aria-label',label);input.value=String(current[key]??'');wrap.append(input);form.append(wrap);fields[key]=input;};
-    if(!s.graphViewActive){field('key','Sort by','text',[['manual','Manual order'],['name','Name'],['type','Type'],['size','Size'],['modified','Modified date'],...(s.searchQuery?[['path','Path']]:[])]);field('direction','Order','text',[['1','Ascending'],['-1','Descending']]);}
-    field('name','Name contains');field('type','Type / extension');fields.type.placeholder='pdf, jpg, folders, images…';field('minSize','Minimum size');fields.minSize.placeholder='500 KB';field('maxSize','Maximum size');fields.maxSize.placeholder='10 MB';field('after','Modified from','date');field('before','Modified through','date');
-    {const wrap=d.createElement('label');wrap.className='navigator-view-options-check';const input=d.createElement('input');input.type='checkbox';input.name='showHidden';input.checked=current.showHidden===true;wrap.append(input,d.createTextNode('Show hidden items'));form.append(wrap);fields.showHidden=input;}
-    const message=d.createElement('p');message.setAttribute('role','status');form.append(message);const actions=d.createElement('div');for(const [label,action]of [['Reset','reset'],['Cancel','button'],['Apply','submit']]){const b=d.createElement('button');b.type=action;b.textContent=label;if(label==='Cancel')b.addEventListener('click',()=>{form.remove();optionsPanel=null;});actions.append(b);}form.append(actions);
-    form.addEventListener('reset',event=>{event.preventDefault();Object.assign(viewOptions[mode],defaultViewOptions());if(mode==='machine')s.machineSort={key:'manual',direction:1};s.searchSort={key:null,direction:1};saveViewOptions();form.remove();optionsPanel=null;render();});
-    form.addEventListener('submit',event=>{event.preventDefault();try{const next={...current};for(const [key,input]of Object.entries(fields))next[key]=key==='direction'?Number(input.value):input.type==='checkbox'?input.checked:input.value;validateViewOptions(next);viewOptions[mode]=next;saveViewOptions();if(mode==='machine')s.machineSort={key:next.key,direction:next.direction};if(s.searchQuery)s.searchSort={key:next.key==='manual'?null:next.key,direction:next.direction};form.remove();optionsPanel=null;render();}catch(error){message.textContent=error.message;}});
-    const rect=optionsButton.getBoundingClientRect();form.style.left=Math.max(8,Math.min(rect.left,d.defaultView.innerWidth-320))+'px';form.style.top=Math.min(rect.bottom+6,Math.max(8,d.defaultView.innerHeight-440))+'px';d.body.append(form);fields.name.focus();
-  });
+  const optionsButton=button(d,'Show hidden items',['M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z','M10 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4']);tools.append(optionsButton);
+  const resetFilters=button(d,'Clear filters and restore manual order',['M4 5h9a5 5 0 1 1-4 8','M4 5l4-3','M4 5l3 4']);tools.append(resetFilters);
+  optionsButton.addEventListener('click',()=>{viewOptions[s.mode].showHidden=!viewOptions[s.mode].showHidden;saveViewOptions();render();});
+  resetFilters.addEventListener('click',()=>{viewOptions[s.mode]=defaultViewOptions();if(s.mode==='machine')s.machineSort={key:'manual',direction:1};s.searchSort={key:null,direction:1};s.searchFilters={};saveViewOptions();render();});
+  const filterColumn=(button,key)=>{
+    const mode=s.mode;
+    const node=bindInlineFilter({button,key,options:viewOptions[mode],onApply:next=>{
+      if(mode!==s.mode)return;
+      viewOptions[mode]=next;saveViewOptions();
+      if(mode==='machine')s.machineSort={key:next.key,direction:next.direction};
+      render();
+    }});
+    node.dataset.filterMode=mode;return node;
+  };
   const resizer = d.createElement('div'); resizer.className = 'workspace-navigator-resizer'; resizer.setAttribute('role','separator'); resizer.setAttribute('aria-orientation','vertical'); resizer.setAttribute('aria-label','Resize navigator');
-  panel.replaceChildren(head,search,loc,body,resizer);
+  const graphFilterStrip=d.createElement('div');graphFilterStrip.hidden=true;
+  panel.replaceChildren(head,search,loc,graphFilterStrip,body,resizer);
   const remoteFiles = createRemoteFileView({ document: d, container: panel, call: params => o.host.fileCapability('remote-files', params) });
   const devices = button(d, 'Files on another device', ['M2 3h10v8H2z', 'M6 11v3', 'M3 14h6', 'M14 7h4v10h-4z']);
   devices.classList.add('navigator-devices-button');
@@ -577,6 +602,7 @@ export function createWorkspaceNavigator(o) {
     ? svg(['M2.5 6h5l1.5 2h8.5v8.5h-15z']) : o.isWebLink(x)
       ? svg(['M3 10a7 7 0 1 0 14 0 7 7 0 1 0-14 0','M3.5 10h13','M10 3c2 2 2 12 0 14','M10 3c-2 2-2 12 0 14'])
       : fileFallbackIcon(x);
+  const queueArtwork=createNavigatorArtworkQueue();
   function hydrateArt(art, item) {
     if (item.kind !== 'shortcut' || item.icon) return;
     const web = o.isWebLink(item);
@@ -584,9 +610,8 @@ export function createWorkspaceNavigator(o) {
     const key = web ? `web:${item.target}` : `shortcut:${item.shortcutId}`;
     let pending = s.icons.get(key);
     if (!pending) {
-      pending = Promise.resolve(
-        web ? o.host.resolveWebIcon(item.target) : o.host.shortcutIcon({ actionId: item.shortcutId }),
-      ).then((result) => web ? result?.icon ?? null : result ?? null).catch(() => null);
+      pending = queueArtwork(()=>!art.isConnected?null:web ? o.host.resolveWebIcon(item.target) : o.host.shortcutIcon({ actionId: item.shortcutId }))
+        .then((result) => web ? result?.icon ?? null : result ?? null).catch(() => null);
       s.icons.set(key, pending);
     }
     pending.then((source) => {
@@ -604,7 +629,7 @@ export function createWorkspaceNavigator(o) {
     const key = 'native:' + item.path.toLocaleLowerCase();
     let pending = s.icons.get(key);
     if (!pending) {
-      pending = o.host.fileCapability('icon', { path: item.path })
+      pending = queueArtwork(()=>art.isConnected?o.host.fileCapability('icon', { path: item.path }):null)
         .then((result) => result?.ok ? result.icon ?? null : null)
         .catch(() => null);
       s.icons.set(key, pending);
@@ -1167,6 +1192,10 @@ export function createWorkspaceNavigator(o) {
       return;
     }
     if(!o.isWebLink(x)&&o.isAbsoluteWindowsPath(x.target)){
+      // Listing already verifies that this is a readable directory. Do not precede
+      // it with stat (and another identity/path traversal over the device link).
+      const listing=await o.host.fileCapability('list',{path:x.target,limit:500}).catch(()=>null);
+      if(listing?.ok){await enterMachine(listing.entry?.path||x.target,true,listing);return;}
       const stat=await o.host.fileCapability('stat',{path:x.target}).catch(()=>null);
       if(stat?.ok&&stat.entry?.kind==='folder'){await enterMachine(x.target,true);return;}
     }
@@ -1268,7 +1297,7 @@ export function createWorkspaceNavigator(o) {
   function renderAyG() {treeBranches=[];treeRowIndex=0;
     if(s.view==='tree'&&!s.graphViewActive&&!o.getSession().binMode){
       setLocation([{key:'ayg-root',label:'As you Go'}]);
-      body.replaceChildren(aygChildren(o.rootId));paintTreeBranches();
+      body.replaceChildren(thumbsSortBar(),aygChildren(o.rootId));paintTreeBranches();
     }
     else{
       const current=currentAyG();
@@ -1278,7 +1307,7 @@ export function createWorkspaceNavigator(o) {
         item:crumb.item,
         activate:()=>navigateAyG(crumb.id),
       })));
-      body.replaceChildren(...(s.thumbsActive?[thumbsSortBar()]:[]),aygChildren(current));paintTreeBranches();
+      body.replaceChildren(thumbsSortBar(),aygChildren(current));paintTreeBranches();
     }
     rememberVisit();
     up.disabled=s.view!=='nav'||currentAyG()===o.rootId;
@@ -1399,7 +1428,7 @@ export function createWorkspaceNavigator(o) {
         else { options.key = 'manual'; options.direction = 1; }
         saveViewOptions(); render();
       });
-      bar.append(sort);
+      bar.append(filterColumn(sort,key));
     }
     return bar;
   }
@@ -1417,7 +1446,7 @@ export function createWorkspaceNavigator(o) {
         viewOptions.machine.key=key;viewOptions.machine.direction=s.machineSort.direction;saveViewOptions();s.machineOrders.delete(s.path);
         if(s.path)void loadMachine(s.path,false);
       });
-      header.append(sort);
+      header.append(filterColumn(sort,key));
     }
     return header;
   }
@@ -1445,7 +1474,7 @@ export function createWorkspaceNavigator(o) {
       const input=d.createElement('input'); input.type='search'; input.value=s.searchFilters[key]||''; input.placeholder=placeholder; input.autocomplete='off'; input.spellcheck=false;
       input.setAttribute('aria-label',`Filter ${label}`);
       input.addEventListener('input',()=>{s.searchFilters[key]=input.value;renderSearch({preserveFocus:key});});
-      column.append(sort);if(key==='path')column.append(input);header.append(column);
+      column.append(filterColumn(sort,key));if(key==='path')column.append(input);header.append(column);
     }
     return header;
   }
@@ -1548,8 +1577,10 @@ export function createWorkspaceNavigator(o) {
  const fragment=d.createDocumentFragment(),result=await machineList(path);if(generation!==s.renderGen||s.mode!=='machine'||!result?.ok)return fragment;
  for(const x of projectRows(orderedMachineItems(result.items||[],path))){const start=tree.index++,row=machineRow(x,depth);fragment.append(row);if(x.kind==='folder'&&s.machineExpanded.has(x.path)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left',`${14+depth*13}px`);children.append(await machineTree(x.path,depth+1,generation,tree));installNavigatorDropTarget(children,{path:x.path});fragment.append(children);tree.branches.push({id:`machine:${x.path.toLowerCase()}`,depth,start,end:tree.index-1,row,children});}}return fragment;
  }
- async function renderMachineTree(){const generation=++s.renderGen,root=s.machineRoot;if(!root)return;setLocation([{key:root.toLowerCase(),label:root,title:root,path:root}]);const tree={index:1,branches:[]},fragment=d.createDocumentFragment(),row=machineRow({path:root,name:root,kind:'folder'});fragment.append(row);if(s.machineExpanded.has(root)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left','14px');children.append(await machineTree(root,1,generation,tree));installNavigatorDropTarget(children,{path:root});fragment.append(children);tree.branches.push({id:`machine:${root.toLowerCase()}`,depth:0,start:0,end:tree.index-1,row,children});}if(generation===s.renderGen&&s.mode==='machine'&&s.view==='tree'){body.replaceChildren(fragment);paintTreeBranches(tree.branches);}}
+ async function renderMachineTree(){const generation=++s.renderGen,root=s.machineRoot;if(!root)return;renderMachineCrumbs(root);const tree={index:1,branches:[]},fragment=d.createDocumentFragment(),row=machineRow({path:root,name:root,kind:'folder'});fragment.append(row);if(s.machineExpanded.has(root)){const children=d.createElement('div');children.className='navigator-tree-branch';children.style.setProperty('--branch-left','14px');children.append(await machineTree(root,1,generation,tree));installNavigatorDropTarget(children,{path:root});fragment.append(children);tree.branches.push({id:`machine:${root.toLowerCase()}`,depth:0,start:0,end:tree.index-1,row,children});}if(generation===s.renderGen&&s.mode==='machine'&&s.view==='tree'){body.replaceChildren(fragment);paintTreeBranches(tree.branches);}}
   function machinePathCrumbs(path) {
+    const shared=sharedPathCrumbs(path,value=>o.host.deviceFilePath?.(value));
+    if(shared)return shared;
     const normalized=String(path||'').replace(/\//g,'\\').replace(/\\+$/,'');
     if(/^\\\\papers~phone\\/i.test(normalized)){
       const parts=normalized.slice('\\\\papers~phone\\'.length).split('\\').filter(Boolean);
@@ -1585,10 +1616,11 @@ export function createWorkspaceNavigator(o) {
       label:entry.name,
       title:entry.path,
       path:entry.path,
-      activate:()=>void loadMachine(entry.path,true),
+      activate:()=>void enterMachine(entry.path,true),
     })));
   }
   async function loadMachine(path, push = true) {
+    if(s.path===path&&body.querySelector('.navigator-inline-filter-editor'))return;
     if(s.path!==path){s.machineSelected.clear();s.selected=null;}
     s.path = path;
     rememberVisit();
@@ -1601,8 +1633,8 @@ export function createWorkspaceNavigator(o) {
     historyButtons(); up.disabled=parentPath(path).toLowerCase()===path.toLowerCase();
     body.replaceChildren();
     const items=projectRows(orderedMachineItems(result.items || [],path));
+    body.append(s.thumbsActive?thumbsSortBar():machineColumnHeader());
     if(items.length){
-      body.append(s.thumbsActive?thumbsSortBar():machineColumnHeader());
       const rows=d.createElement('div'); rows.className='workspace-navigator-machine-rows';
       const tree={index:0,branches:[]};
       for (const x of items) {
@@ -1614,9 +1646,9 @@ export function createWorkspaceNavigator(o) {
         }
       }
       body.append(rows);paintTreeBranches(tree.branches);
-    }else body.innerHTML='<p class="workspace-navigator-empty">This folder is empty.</p>';
+    }else {const empty=d.createElement('p');empty.className='workspace-navigator-empty';empty.textContent='No matching items.';body.append(empty);}
   }
-  async function enterMachine(path, fromGesture = false) {
+  async function enterMachine(path, fromGesture = false, listing = null) {
     if (REMOTE_ROOT.test(path) && !remoteDeviceNames.has(path.match(REMOTE_ROOT)[0].toLowerCase())) await remoteDevices();
     const changed = !s.path || !s.machineRoot || s.machineRoot.toLocaleLowerCase() !== path.toLocaleLowerCase();
     if (changed) {
@@ -1627,6 +1659,7 @@ export function createWorkspaceNavigator(o) {
     persistUi('papers:ayg:navigator-machine-root', s.machineRoot);
     if (!/^\\\\papers~/i.test(path)) persistUi('papers:ayg:navigator-local-root', path);
     s.mode = 'machine';
+    if(listing?.ok)s.machineListings.set(path.toLocaleLowerCase(),Promise.resolve(listing));
     if (fromGesture) setView('nav', false);
     syncChrome();
     if (s.view === 'nav') await loadMachine(path, false);
@@ -1664,6 +1697,7 @@ export function createWorkspaceNavigator(o) {
     if(s.mode!=='ayg') setMode('ayg'); else render();
   }
   function renderSearch({preserveFocus=null} = {}) {
+    if(body.querySelector('.navigator-inline-filter-editor'))return;
     refreshGraphVisibility();
     setLocation([{key:'everything',label:'Everything'},{key:s.searchQuery,label:s.searchQuery}]);
     body.replaceChildren();
@@ -1852,7 +1886,16 @@ export function createWorkspaceNavigator(o) {
   paste.addEventListener('click',()=>void pasteNavigator());
   d.addEventListener('keydown',event=>{
     if(s.collapsed||!panel.contains(event.target)||event.target?.closest?.('input,textarea,[contenteditable="true"]')||!event.ctrlKey||event.altKey)return;
-    const key=event.key.toLowerCase();if(!['c','x','v'].includes(key))return;
+    const key=event.key.toLowerCase();if(!['a','c','x','v'].includes(key))return;
+    if(key==='a'){
+      event.preventDefault();event.stopImmediatePropagation();
+      const root=s.graphViewActive?graphSlot:body;
+      const rows=[...root.querySelectorAll(s.graphViewActive?'.icon-item[data-id]':'.workspace-navigator-row[data-id]')];
+      const ids=navigatorSelectAllIds(rows,[o.rootId,...(s.mode==='machine'&&s.view==='tree'?[s.machineRoot]:[])]);
+      if(s.mode==='ayg'){o.setAyGSelection?.(ids);o.finishAyGMarquee?.();}
+      else{s.machineSelected=new Set(ids);s.selected=s.machineRows.get(ids.at(-1))||null;if(ids.length)claimSelection();}
+      rows.forEach(row=>row.classList.toggle('selected',ids.includes(row.dataset.id)));return;
+    }
     if(key==='v'&&s.mode==='ayg')return; // handled by the paste event below, which carries pasted images
     event.preventDefault();event.stopImmediatePropagation();
     if(key==='v')void pasteNavigator();else copyNavigator(key==='x');
@@ -1954,9 +1997,12 @@ export function createWorkspaceNavigator(o) {
     }
   }
   function render(){
-    if(optionsPanel&&optionsPanel.dataset.mode&&optionsPanel.dataset.mode!==s.mode){optionsPanel.remove();optionsPanel=null;}
+    const editing=panel.querySelector('.navigator-inline-filter-editor');
+    if(editing&&editing.parentElement.dataset.filterMode===s.mode)return;
     refreshGraphVisibility();
-    const activeOptions=viewOptions[s.mode];optionsButton.classList.toggle('is-filtered',Boolean(activeOptions.name||activeOptions.type||activeOptions.minSize||activeOptions.maxSize||activeOptions.after||activeOptions.before));
+    graphFilterStrip.hidden=!s.graphViewActive;
+    if(s.graphViewActive)graphFilterStrip.replaceChildren(thumbsSortBar());
+    const activeOptions=viewOptions[s.mode];optionsButton.classList.toggle('is-filtered',activeOptions.showHidden);optionsButton.setAttribute('aria-pressed',String(activeOptions.showHidden));resetFilters.hidden=!(activeOptions.name||activeOptions.type||activeOptions.minSize||activeOptions.maxSize||activeOptions.after||activeOptions.before||activeOptions.showHidden||activeOptions.key!=='manual');
     savedStates?.syncDurable();
     syncChrome();
     rememberVisit();

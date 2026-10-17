@@ -55,6 +55,20 @@ test('start without preserve requests a clear via beginMarqueeSelection', () => 
   assert.equal(h.effects.captured, 1);
 });
 
+test('stationary marquee scrolls both edges, keeps its content anchor, and stops after release', () => {
+  const h=createHarness(); let callback=null;
+  const view={getComputedStyle:()=>({overflowY:'auto'}),requestAnimationFrame:fn=>{callback=fn;return 1;},cancelAnimationFrame:()=>{callback=null;}};
+  Object.assign(h.elements.grid,{ownerDocument:{defaultView:view},scrollTop:100,scrollHeight:900,clientHeight:200,getBoundingClientRect:()=>({top:0,bottom:200,height:200})});
+  const controller=createMarqueeController({elements:h.elements,commands:{beginMarqueeSelection:()=>[],updateMarqueeSelection:()=>{},finishMarqueeSelection:()=>{}},itemsIntersectingMarquee:()=>[]});
+  controller.start({pointerId:1,clientX:50,clientY:100});
+  controller.move({pointerId:1,clientX:50,clientY:1});
+  callback(); assert.ok(h.elements.grid.scrollTop<100);
+  assert.ok(Number.parseFloat(h.elements.marquee.style.height)>99);
+  controller.move({pointerId:1,clientX:50,clientY:199});
+  const before=h.elements.grid.scrollTop; callback(); assert.ok(h.elements.grid.scrollTop>before);
+  controller.finish(1); assert.equal(callback,null);
+});
+
 test('start with preserve keeps the selection and captures the pointer', () => {
   const h = createHarness();
   h.controller.start({ pointerId: 1, clientX: 50, clientY: 50, preserveSelection: true });

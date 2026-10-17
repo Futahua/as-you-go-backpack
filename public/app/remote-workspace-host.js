@@ -41,6 +41,35 @@ export function createRemoteWorkspaceHost(base, ownerId) {
   let workspaceId = null;
   let sharedRoots = [];
   let loadedState = null;
+  const verifiedResources=new Map();
+  const pathKey=value=>String(value||'').replace(/\//g,'\\').toLowerCase();
+  async function fileCapability(operation,params={}) {
+    if(operation==='remote-files')return base.fileCapability(operation,params);
+    const known=verifiedResources.get(pathKey(params.path));
+    // The checked target owner has just resolved this exact path and supplied its
+    // scoped resource. Browse that resource directly instead of enumerating parents.
+    if(known&&Date.now()-known.at<2000){
+      if(operation==='stat')return {ok:true,entry:{...known.entry,path:known.path,attributes:0,offline:false}};
+      if(operation==='list'&&known.entry.kind==='folder'){
+        const items=[];let offset=0,online=true;
+        do {
+          const page=await call({operation:'browse',resourceId:known.entry.id,offset});
+          if(page.folder?.id!==known.entry.id)throw Error('The owner returned a different folder.');
+          online&&=page.online!==false;
+          for(const item of page.entries||[])items.push({...item,path:known.path+'\\'+item.name,attributes:0,offline:page.online===false});
+          offset=page.nextOffset;
+        }while(offset!==null&&offset!==undefined);
+        return {ok:true,entry:{...known.entry,path:known.path},items,truncated:false,online};
+      }
+    }
+    const result=toDevice(await base.fileCapability(operation,toRemote(operation==='search'&&!params.path?{...params,path:root}:params)));
+    if(operation==='file-target-resolve'){
+      verifiedResources.delete(pathKey(params.path));
+      const target=result?.target;
+      if(result?.ok&&target?.status==='present'&&target.entry?.id&&target.path)verifiedResources.set(pathKey(target.path),{at:Date.now(),path:target.path,entry:target.entry});
+    }
+    return result;
+  }
   // Last 50 device requests, readable from DevTools as __papersRemoteTrace.
   const trace = (globalThis.__papersRemoteTrace = []);
   const call = async (params) => {
@@ -116,9 +145,7 @@ export function createRemoteWorkspaceHost(base, ownerId) {
     // The device's own copy decides between writers; this tab never holds this computer's lease.
     acquireWorkspaceWriterLease: async () => null,
     releaseWorkspaceWriterLease: async () => ({ ok: true }),
-    fileCapability: (operation, params = {}) => operation === 'remote-files'
-      ? base.fileCapability(operation, params)
-      : base.fileCapability(operation, toRemote(operation === 'search' && !params.path ? { ...params, path: root } : params)).then(toDevice),
+    fileCapability,
     // Files dropped from this computer are copied into the device's inbox, then referenced there.
     resolveDroppedTargets: async (files) => {
       const local = await base.resolveDroppedTargets(files);

@@ -9,6 +9,33 @@ export function createMarqueeController({
   itemSelector = '.icon-item',
 }) {
   let drag = null;
+  let frame = null;
+  const view = elements.grid.ownerDocument?.defaultView;
+  function scrollContainer() {
+    for (let node=elements.grid; node; node=node.parentElement) {
+      if (node.scrollHeight > node.clientHeight && /auto|scroll/.test(view?.getComputedStyle(node).overflowY || '')) return node;
+    }
+    return null;
+  }
+  function paint() {
+    const bounds=marqueeBounds(drag.startX, drag.startY, drag.clientX, drag.clientY);
+    showMarquee(bounds); updateMarqueeSelection(bounds);
+  }
+  function tick() {
+    frame=null;
+    if (!drag?.moved || !view) return;
+    const node=drag.scroll;
+    if (node) {
+      const rect=node.getBoundingClientRect(), edge=Math.min(44,rect.height/4);
+      const speed=drag.clientY < rect.top+edge ? -Math.min(1,(rect.top+edge-drag.clientY)/edge) : drag.clientY > rect.bottom-edge ? Math.min(1,(drag.clientY-rect.bottom+edge)/edge) : 0;
+      const before=node.scrollTop;
+      node.scrollTop += speed*16;
+      drag.startY -= node.scrollTop-before;
+      if (node.scrollTop!==before) paint();
+    }
+    frame=view.requestAnimationFrame(tick);
+  }
+  function stopFrame() { if(frame!==null)view?.cancelAnimationFrame(frame); frame=null; }
 
   function marqueeBounds(startX, startY, endX, endY) {
     return {
@@ -58,10 +85,13 @@ export function createMarqueeController({
   /** Begins a marquee gesture on blank workspace space. preserveSelection
    * comes from Ctrl being held; the command keeps or clears the selection. */
   function start({ pointerId, clientX, clientY, preserveSelection }) {
+    stopFrame();
     drag = {
       pointerId,
       startX: clientX,
       startY: clientY,
+      clientX, clientY,
+      scroll: scrollContainer(),
       baseSelection: commands.beginMarqueeSelection({ preserveSelection }),
       moved: false,
     };
@@ -73,8 +103,10 @@ export function createMarqueeController({
     const bounds = marqueeBounds(drag.startX, drag.startY, clientX, clientY);
     if (!drag.moved && bounds.right - bounds.left < 3 && bounds.bottom - bounds.top < 3) return;
     drag.moved = true;
+    drag.clientX=clientX; drag.clientY=clientY;
     showMarquee(bounds);
     updateMarqueeSelection(bounds);
+    if (frame===null && view) frame=view.requestAnimationFrame(tick);
   }
 
   /** Ends the gesture; returns whether it actually moved, or null if the
@@ -85,6 +117,7 @@ export function createMarqueeController({
       elements.grid.releasePointerCapture(pointerId);
     }
     const moved = drag.moved;
+    stopFrame();
     drag = null;
     commands.finishMarqueeSelection({ moved });
     elements.marquee.hidden = true;
@@ -97,6 +130,7 @@ export function createMarqueeController({
    * handoff begins. Normal gestures are unaffected (start/move/finish
    * unchanged). */
   function cancel() {
+    stopFrame();
     if (!drag) return;
     if (elements.grid.hasPointerCapture(drag.pointerId)) {
       elements.grid.releasePointerCapture(drag.pointerId);

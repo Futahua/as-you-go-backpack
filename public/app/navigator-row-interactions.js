@@ -1,6 +1,11 @@
 import { createMarqueeController } from './interactions/marquee-controller.js';
 import { itemsIntersectingMarquee } from '../workspace-model-20260730b.js';
 
+export function navigatorSelectAllIds(rows,protectedIds=[]){
+  const excluded=new Set(protectedIds);
+  return rows.filter(row=>!excluded.has(row.dataset.id)&&!row.classList.contains('ancestor-item')&&row.getBoundingClientRect().width>0&&row.getBoundingClientRect().height>0).map(row=>row.dataset.id);
+}
+
 export function navigatorReorderPlan({ rows, selected, target, after, sourceRows = rows }) {
   const moving = sourceRows.filter(id => selected.includes(id));
   if (!moving.length || moving.includes(target)) return null;

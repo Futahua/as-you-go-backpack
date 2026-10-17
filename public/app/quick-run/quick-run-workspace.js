@@ -105,6 +105,8 @@ export function bindQuickRunWorkspace({
     setStatus(GONE);
   };
 
+  const reportWorkspaceStatus=setStatus;
+  setStatus=message=>{reportWorkspaceStatus(message);if(commandSurface&&elements.notice){elements.notice.textContent=message||'';elements.notice.hidden=!message;}};
   surface = mountQuickRun({
     document,
     elements,

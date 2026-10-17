@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {isDeviceFilesPane,deviceFilesUrl,installDeviceFilesPane} from './public/app/device-files-pane.js';
+
+test('Android native folder paths resolve through their phone owner rather than Windows',async()=>{
+ const {createRemoteWorkspaceHost}=await import('./public/app/remote-workspace-host.js'),owner='b2b514db-668a-4092-bda4-67e33c52c807',calls=[];
+ const host=createRemoteWorkspaceHost({fileCapability:async(op,p)=>{if(op==='remote-files')return{ok:true,result:p.operation==='workspaces'?[{id:'ayg'}]:p.operation==='workspace-load'?{state:{schemaVersion:1,groups:[],shortcuts:[]},revision:'r1',sharedRoots:['Internal storage']}: {devices:[]}};calls.push([op,p.path]);return{ok:true,entry:{kind:'folder',path:p.path},items:[]};}},owner);
+ await host.loadWorkspaceVersioned();const path='Internal storage\\Downloads';assert.equal(host.deviceFilePath(path),'\\\\papers~'+owner+'\\'+path);
+ await host.fileCapability('stat',{path});await host.fileCapability('list',{path});assert.deepEqual(calls,[['stat','\\\\papers~'+owner+'\\'+path],['list','\\\\papers~'+owner+'\\'+path]]);
+});
 test('only desktop inline devices select Files-only composition',()=>{
  assert.equal(isDeviceFilesPane({href:'https://papers/app?papers-inline-device=1'}),true);
  assert.equal(isDeviceFilesPane({href:'https://papers/app?papers-inline-device=1&papers-phone=1'}),false);

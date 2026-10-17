@@ -3,6 +3,11 @@
  * vs. the whole Bin, and wires the cancel/delete/restore buttons. Committing
  * the destructive action goes through the injected commit() so the dialog
  * never mutates workspace state itself. */
+export function compactConfirmationPath(path) {
+  const parts = String(path ?? '').split(/[\\/]+/).filter(Boolean);
+  return parts.length > 3 ? '…/' + parts.slice(-3).join('/') : parts.join('/');
+}
+
 export function createConfirmationDialog({
   elements,
   getState,
@@ -37,12 +42,28 @@ export function createConfirmationDialog({
     if (resolve) resolve(answer);
   }
 
-  function askConfirm({ title, copy, confirmLabel = 'Continue' }) {
+  function askConfirm({ title, copy, confirmLabel = 'Continue', rows = null }) {
     settleConfirm(false);
     pendingPermanentIds = [];
     pendingRestoreIds = [];
     elements.confirmTitle.textContent = title;
     elements.confirmCopy.textContent = copy;
+    if (rows?.length) {
+      const d = elements.confirmCopy.ownerDocument;
+      const table = d.createElement('table'); table.className = 'confirm-paths';
+      const head = table.createTHead().insertRow();
+      for (const name of ['AYG', 'Native path']) { const cell=d.createElement('th'); cell.textContent=name; head.append(cell); }
+      const body = table.createTBody();
+      for (const row of rows) {
+        const tr = body.insertRow();
+        for (const value of [row.ayg || '—', row.native || '—']) {
+          const cell=tr.insertCell(), label=d.createElement('span');
+          const text=d.createElement('bdi'); text.dir='ltr'; text.textContent=compactConfirmationPath(value); label.append(text); label.title=value;
+          label.tabIndex=0; label.setAttribute('aria-label',value); cell.append(label);
+        }
+      }
+      elements.confirmCopy.prepend(table);
+    }
     confirmLabelBefore = elements.confirmDelete.textContent;
     elements.confirmDelete.textContent = confirmLabel;
     elements.confirmDelete.hidden = false;
