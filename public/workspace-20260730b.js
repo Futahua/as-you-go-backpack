@@ -546,7 +546,8 @@ function captureWorkspaceView() {
 }
 
 function restoreWorkspaceView() {
-  const requestedFromUrl = new URLSearchParams(window.location.search).get('as-you-go-folder');
+  // A blob pane asked to open another folder while this page was still starting opens that one first.
+  const requestedFromUrl = (BLOB_WORKSPACE && window.__papersBlobPendingFolder) || new URLSearchParams(window.location.search).get('as-you-go-folder');
   const requestedCurrent = requestedFromUrl && group(requestedFromUrl)
     ? requestedFromUrl
     : (surfaceLocationFor(state, PROJECT_SURFACE_KEY)?.currentGroupId ?? state.view.currentGroupId);
@@ -5981,12 +5982,12 @@ if (WIDGET_SURFACE) {
       // until this first themed render, so no unstyled page flashes.
       window.__papersBlobOpenFolder = (folderId) => {
         const go = (attempt = 0) => {
-          if (group(folderId)) { commands.goToWorkspaceFolder(folderId); render(); return; }
+          if (group(folderId)) { commands.goToWorkspaceFolder(folderId); render(); baseHost.notifyBlobFolder?.(folderId); return; }
           if (attempt < 20) setTimeout(() => go(attempt + 1), 250); // a just-created folder may still be syncing in
         };
         go();
       };
-      requestAnimationFrame(() => requestAnimationFrame(() => baseHost.notifyBlobReady?.()));
+      requestAnimationFrame(() => requestAnimationFrame(() => baseHost.notifyBlobReady?.(store.getSession().currentId)));
     }
     if (!windowLayoutDetachment.isStopped()) bootstrapWindowLayoutRecording();
     // The launcher overlay: the marker already put this page in command-surface mode, and now that the state
