@@ -348,7 +348,7 @@ export function createWorkspaceNavigator(o) {
     const savedView = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-view');
     if (savedView === 'nav' || savedView === 'tree') s.view = savedView;
     s.machineOrders = new Map(JSON.parse(d.defaultView?.localStorage?.getItem('papers:ayg:navigator-machine-orders') || '[]'));
-    s.collapsed = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-collapsed') === '1';
+    s.collapsed = !o.onClose && d.defaultView?.localStorage?.getItem('papers:ayg:navigator-collapsed') === '1';
     const savedMachineRoot = d.defaultView?.localStorage?.getItem('papers:ayg:navigator-machine-root');
     if (o.isAbsoluteWindowsPath(savedMachineRoot)) s.machineRoot = savedMachineRoot;
   } catch {
@@ -394,7 +394,8 @@ export function createWorkspaceNavigator(o) {
   const collapseAll = button(d,'Collapse all folders',['M5 9l5-4 5 4','M5 15l5-4 5 4']);
   collapseAll.classList.add('workspace-navigator-collapse-all');
   collapseAll.addEventListener('click',()=>{s.expanded.clear();s.machineExpanded.clear();render();});
-  head.append(provider, tools, collapseAll, collapse);
+  // A blob pane is the navigator itself: it closes with its × and has nothing to collapse into.
+  head.append(provider, tools, collapseAll, ...(o.onClose ? [] : [collapse]));
   if(o.onClose){
     // A Proxima blob pane has no header of its own: its close sits at the end of this strip.
     const close=button(d,'Close',['M5 5l10 10','M15 5L5 15']);close.classList.add('workspace-navigator-close');
