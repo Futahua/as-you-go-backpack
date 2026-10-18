@@ -27,7 +27,8 @@ export function paneRegions({left, right, top, bottom, preview, placement, windo
 
 /** Layout owns composition only; existing panels keep preview and native lifecycles. */
 export function installWorkspacePaneLayout({externalWindows=false,document,host,navigator,windows,getSettings,saveSettings,isReady,setStatus}) {
-  const win=document.defaultView,browser=Boolean(win.ProximaBrowserHost), left=document.querySelector('#workspace-navigator');
+  // The browser page and a Proxima blob pane show previews inside the pane, never in native windows.
+  const win=document.defaultView,browser=Boolean(win.ProximaBrowserHost)||new URLSearchParams(win.location.search).has('papers-blob-workspace'), left=document.querySelector('#workspace-navigator');
   const filesChannel=typeof win.BroadcastChannel==='function'?new win.BroadcastChannel('papers-device-files'):null;
   if(filesChannel)filesChannel.onmessage=async event=>{const value=event.data;if(!value?.pageKey||!slices?.hasPage(value.pageKey))return;
     if(value.openDevice&&value.requestId){try{await slices.openDevice(value.openDevice,value.pageKey);filesChannel.postMessage({requestId:value.requestId,ok:true});}catch(error){filesChannel.postMessage({requestId:value.requestId,ok:false,error:error.message});}return;}

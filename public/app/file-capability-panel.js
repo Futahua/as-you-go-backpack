@@ -1793,7 +1793,10 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     if (typeof data.resourceId === 'string') state.previewResourceId = data.resourceId;
-    if (data.kind === 'hosted-pdf') {
+    // Inside a Proxima blob pane a native PDF window cannot follow the pane (it would sit at the wrong
+    // place and outlive the pane), so the PDF shows in the pane's own viewer.
+    const inPane = new URLSearchParams(documentRef.defaultView?.location.search || '').has('papers-blob-workspace');
+    if (data.kind === 'hosted-pdf' && !inPane) {
       void startPdfPreview(data);
       return;
     }
@@ -1808,7 +1811,7 @@ export function createFileCapabilityPanel(options) {
         return;
       }
     }
-    if (data.kind === 'pdf') {
+    if (data.kind === 'pdf' || data.kind === 'hosted-pdf') {
       const source = previewSource(data);
       if (source) {
         const frame = documentRef.createElement('iframe');

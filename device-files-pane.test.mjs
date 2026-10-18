@@ -11,6 +11,9 @@ test('Android native folder paths resolve through their phone owner rather than 
 test('only desktop inline devices select Files-only composition',()=>{
  assert.equal(isDeviceFilesPane({href:'https://papers/app?papers-inline-device=1'}),true);
  assert.equal(isDeviceFilesPane({href:'https://papers/app?papers-inline-device=1&papers-phone=1'}),false);
+ // A Proxima blob pane keeps its preview inside the pane, on a computer and on the phone.
+ assert.equal(isDeviceFilesPane({href:'https://papers/app?papers-inline-device=1&papers-blob-workspace=ayg-root'}),false);
+ assert.equal(isDeviceFilesPane({href:'https://papers/app?papers-inline-device=1&papers-phone=1&papers-blob-workspace=ayg-root'}),false);
  assert.equal(isDeviceFilesPane({href:'https://papers/app?papers-device=owner'}),false);
 });
 test('a device Files tab opens siblings in the parent group and sends owner paths to shared Preview',async()=>{

@@ -5192,7 +5192,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     document.querySelector('.workspace-navigator-toolbar')?.append(button);
   }
   workspaceNavigator.render();
-  paneLayout = DEVICE_FILES ? installDeviceFilesPane({document,host}) : installWorkspacePaneLayout({externalWindows:EMBEDDED_SURFACE==='proxima'||Boolean(window.ProximaBrowserHost),document,host,navigator:workspaceNavigator,windows:fileCapabilityPanel,setStatus,
+  paneLayout = DEVICE_FILES ? installDeviceFilesPane({document,host}) : installWorkspacePaneLayout({externalWindows:EMBEDDED_SURFACE==='proxima'||Boolean(window.ProximaBrowserHost)||Boolean(BLOB_WORKSPACE),document,host,navigator:workspaceNavigator,windows:fileCapabilityPanel,setStatus,
     isReady:()=>workspaceLoad.ok,
     getSettings:()=>readPagePaneSettings(store.getSnapshot().view?.preferences?.paneLayouts||{},PROJECT_SURFACE_KEY,SCOPE_ROOT_ID||ROOT_ID,new URLSearchParams(window.location.search).get('papers-pane-legacy')==='1'),
     saveSettings:settings=>commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,paneLayouts:writePagePaneSettings(current.view.preferences.paneLayouts||{},PROJECT_SURFACE_KEY,SCOPE_ROOT_ID||ROOT_ID,settings,new URLSearchParams(window.location.search).get('papers-pane-legacy')==='1')}}};},{requireDurable:true,preserveSelection:true}),

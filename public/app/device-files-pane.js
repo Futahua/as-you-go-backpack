@@ -1,7 +1,8 @@
 /** Device tabs contain Files only. The containing page owns pane composition. */
 export function isDeviceFilesPane(location) {
   const query=new URL(location.href).searchParams;
-  return query.get('papers-inline-device')==='1' && (!query.has('papers-phone') || query.has('papers-blob-workspace'));
+  // A Proxima blob pane is not a device tab: it keeps its preview inside the pane (as on the web page).
+  return query.get('papers-inline-device')==='1' && !query.has('papers-phone') && !query.has('papers-blob-workspace');
 }
 export function deviceFilesUrl(location,deviceId) {
   const url=new URL(location.href);
