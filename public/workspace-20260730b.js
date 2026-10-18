@@ -5237,7 +5237,8 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
       clock.type = 'button'; clock.className = 'navigator-proxima-clock'; clock.title = 'Proxima'; clock.setAttribute('aria-label', 'Proxima');
       const tick = () => { const now = new Date(); clock.textContent = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'); };
       tick(); setInterval(tick, 1000);
-      clock.addEventListener('click', (event) => { event.stopPropagation(); window.parent.postMessage({ type: 'papers:phone:proxima' }, window.location.origin); });
+      // Inside a Proxima blob pane, Proxima is already behind the pane: the clock closes the pane.
+      clock.addEventListener('click', (event) => { event.stopPropagation(); if (BLOB_WORKSPACE) { baseHost.closeBlobPane?.(); return; } window.parent.postMessage({ type: 'papers:phone:proxima' }, window.location.origin); });
       toolbar.append(clock);
     }
     // The paperclip pill (phone's own As you Go only): a tap adds files chosen on the phone, a swipe up adds a link.
