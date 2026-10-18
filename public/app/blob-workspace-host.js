@@ -17,6 +17,7 @@ export function createBlobWorkspaceHost(base,workspaceId,win=window){
     if(value.type==='proxima:workspace:flush'){
       Promise.resolve(win.__papersFlushBeforeClose?.()).then(()=>win.parent.postMessage({type:'proxima:workspace:flushed',workspaceId,requestId:value.requestId,ok:true},origin()),error=>win.parent.postMessage({type:'proxima:workspace:flushed',workspaceId,requestId:value.requestId,ok:false,error:error.message},origin()));return;
     }
+    if(value.type==='proxima:workspace:open-folder'&&typeof value.folderId==='string'){win.__papersBlobOpenFolder?.(value.folderId);return;}
     if(value.type==='proxima:workspace:result'){
       const task=pending.get(value.requestId);if(!task)return;pending.delete(value.requestId);win.clearTimeout(task.timer);value.ok?task.resolve(value.result):task.reject(Error(value.error||'The workspace refused this action.'));
     }
@@ -41,5 +42,7 @@ export function createBlobWorkspaceHost(base,workspaceId,win=window){
     widgetOpen:async()=>({ok:false,code:'UNAVAILABLE',message:'Widgets are not available in a blob folder.'}),
     // The pane's close button (in the pill strip) closes the Proxima blob pane.
     closeBlobPane:()=>win.parent.postMessage({type:'proxima:workspace:close',workspaceId},origin()),
+    // Sent after the first themed render; the Proxima pane shows the frame only then.
+    notifyBlobReady:()=>win.parent.postMessage({type:'proxima:workspace:ready',workspaceId},origin()),
   };
 }

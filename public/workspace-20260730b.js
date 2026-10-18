@@ -5976,6 +5976,18 @@ if (WIDGET_SURFACE) {
     pointer,
     promptLibrary,
   }).then(() => {
+    if (BLOB_WORKSPACE) {
+      // The Proxima pane keeps this page alive and moves it between blob folders, and keeps it hidden
+      // until this first themed render, so no unstyled page flashes.
+      window.__papersBlobOpenFolder = (folderId) => {
+        const go = (attempt = 0) => {
+          if (group(folderId)) { commands.goToWorkspaceFolder(folderId); render(); return; }
+          if (attempt < 20) setTimeout(() => go(attempt + 1), 250); // a just-created folder may still be syncing in
+        };
+        go();
+      };
+      requestAnimationFrame(() => requestAnimationFrame(() => baseHost.notifyBlobReady?.()));
+    }
     if (!windowLayoutDetachment.isStopped()) bootstrapWindowLayoutRecording();
     // The launcher overlay: the marker already put this page in command-surface mode, and now that the state
     // is loaded and every collaborator exists, the surface opens itself - there is no canvas here to open it
