@@ -5000,6 +5000,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     permanentPane: true,
     killOnly: BLOB_TEMPLATE,
     treeFollowsFolder: BLOB_TEMPLATE,
+    linkLocalMachineDrops: BLOB_TEMPLATE,
     onClose: BLOB_TEMPLATE ? () => baseHost.closeBlobPane?.() : null,
     openPaneQuickRun:panel=>{
       const layer=elements.quickRunLayer;panel.append(layer);layer.classList.add('navigator-quick-run');const pills=panel.querySelector('.navigator-saved-pills');

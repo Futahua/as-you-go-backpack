@@ -562,7 +562,7 @@ export function createWorkspaceNavigator(o) {
   d.addEventListener('pointermove',event=>shiftExport(event.shiftKey),{capture:true,passive:true});
   d.defaultView.addEventListener('blur',()=>shiftExport(false));
   installThumbnailZoom({panel,surface:body,window:d.defaultView,isActive:()=>Boolean(s.thumbsActive)});
-  installNavigatorDropTarget(body,()=>s.mode==='machine'?{path:s.view==='tree'?s.machineRoot:s.path}:{item:{id:s.view==='tree'?o.rootId:currentAyG()}});
+  installNavigatorDropTarget(body,()=>s.mode==='machine'?{path:s.view==='tree'?s.machineRoot:s.path}:{item:{id:s.view==='tree'&&!o.treeFollowsFolder?o.rootId:currentAyG()}}); // a blob pane's tree shows the open folder, so blank space drops there
   const rowInteractions = bindNavigatorRowInteractions({document:d,body,
     dropEffect: allowed => navigatorDropEffect(allowed,'move'),
     canMove: (ids,parent) => s.mode==='ayg' ? o.canMoveAyGItems?.(ids,parent) !== false : navigatorFileMoveAllowed(ids,parent),
@@ -1030,6 +1030,14 @@ export function createWorkspaceNavigator(o) {
       s.internalDragSource=null;s.nativeDragSource=null;render();return;
     }
     if(segment.item && dragSources.machine.length && dragSources.machine.every(path=>/^\\\\papers~phone\\/i.test(path)) && o.importDevicePaths){await o.importDevicePaths(dragSources.machine,segment.item.id||o.rootId);render();return;}
+    // An embedded pane cannot turn dropped File objects into disk paths (they lose them crossing into
+    // the parent page), so files from this computer's own Files pane are linked by the paths they carry.
+    if(o.linkLocalMachineDrops&&!segment.path&&dragSources.machine.length&&!dragSources.ayg?.itemIds?.length&&dragSources.machine.every(path=>!/^\\papers~/i.test(path))){
+      s.internalDragSource=null;s.nativeDragSource=null;
+      const ok=await o.linkNavigatorPaths?.(dragSources.machine,segment.item?.id||o.rootId);
+      if(ok!==true)reportDropResult('These files could not be added here.');
+      render();return;
+    }
     const nativeSource=s.nativeDragSource;
     const resolvedPaths=await navigatorResolveDropPaths(nativeSource,files,droppedPaths);
     if(segment.path && !navigatorFileMoveAllowed(resolvedPaths.length?resolvedPaths:nativeSource?.paths||[],segment.path)){reportDropResult('A folder cannot be moved into itself or its contents.');return;}
