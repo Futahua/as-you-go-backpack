@@ -1250,6 +1250,7 @@ export function createWorkspaceNavigator(o) {
       });
       row.addEventListener('dragend',()=>{s.internalDragSource=null;});
       row.className = 'workspace-navigator-row'; row.dataset.id = id; row.dataset.reorderParent=parent;row.dataset.reorderFolder=String(x.kind==='group'); row.style.paddingLeft = `${4 + depth * 13}px`; row.classList.toggle('selected', o.getSession().selected.has(id));
+      if(x.workspaceAvailability==='evicted'){row.style.opacity='.45';row.title='Not available locally. Open to download from another device.';row.dataset.localAvailability='absent';}
       const ownNativePaths = o.nativeDragPaths?.([id]) || [];
       if (ownNativePaths.length > 0) {
         row.draggable = true;

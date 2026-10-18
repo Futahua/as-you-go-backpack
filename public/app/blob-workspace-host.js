@@ -8,6 +8,7 @@ export function createBlobWorkspaceHost(base,workspaceId,win=window){
   const pending=new Map();let sequence=0;
   const origin=()=>{try{const declared=new URL(win.location.href).searchParams.get('papers-blob-parent-origin'),url=new URL(declared||win.document.referrer);if(!['papers-backpack:','https:','http:'].includes(url.protocol))throw Error('Invalid parent origin');return url.origin==='null'?url.protocol+'//'+url.host:url.origin;}catch{return win.location.origin;}};
   function request(method,args=[]){return new Promise((resolve,reject)=>{
+    if(win.ProximaBrowserHost){Promise.resolve(win.ProximaBrowserHost.blobRequest(workspaceId,method,args)).then(resolve,reject);return;}
     const requestId='blob-'+(++sequence)+'-'+win.crypto.randomUUID(),timer=win.setTimeout(()=>{pending.delete(requestId);reject(Error('The workspace did not confirm this action; pending work is retained.'));},180000);
     pending.set(requestId,{resolve,reject,timer});win.parent.postMessage({type:'proxima:workspace:request',workspaceId,requestId,method,args},origin());
   });}

@@ -3395,6 +3395,8 @@ function createGraphController() {
     if (!candidate) return;
     const iconItem = node.shell.querySelector('.icon-item');
     if (!iconItem) return;
+    iconItem.style.opacity = candidate.workspaceAvailability === 'evicted' ? '.45' : '';
+    iconItem.title = candidate.workspaceAvailability === 'evicted' ? 'Not available locally. Open to download from another device.' : '';
     applyFolderColor(iconItem, candidate);
     const isGhost = candidate.kind === 'bin-origin';
     const canExpand = candidate.kind === 'group';
@@ -3472,6 +3474,7 @@ function createGraphController() {
     shell.style.transform = `translate3d(${node.x}px, ${node.y}px, 0) translate(-50%, -50%) scale(${node.visualScale ?? 1})`;
 
     const iconItem = document.createElement('div');
+    if (candidate.workspaceAvailability === 'evicted') { iconItem.style.opacity = '.45'; iconItem.title = 'Not available locally. Open to download from another device.'; }
     iconItem.className = `icon-item${isSelected ? ' selected' : ''}${isGhost ? ' bin-origin-ghost' : ''}${candidate.ancestor ? ' ancestor-item' : ''}${candidate.trail ? ' trail-item' : ''}${candidate.scopeRoot ? ' scope-root-item' : ''}`;
     applyFolderColor(iconItem, candidate);
     iconItem.dataset.id = candidate.id;
@@ -5189,7 +5192,7 @@ if (!WIDGET_SURFACE && commandSurfaceMode !== 'overlay') {
     document.querySelector('.workspace-navigator-toolbar')?.append(button);
   }
   workspaceNavigator.render();
-  paneLayout = DEVICE_FILES ? installDeviceFilesPane({document,host}) : installWorkspacePaneLayout({externalWindows:EMBEDDED_SURFACE==='proxima',document,host,navigator:workspaceNavigator,windows:fileCapabilityPanel,setStatus,
+  paneLayout = DEVICE_FILES ? installDeviceFilesPane({document,host}) : installWorkspacePaneLayout({externalWindows:EMBEDDED_SURFACE==='proxima'||Boolean(window.ProximaBrowserHost),document,host,navigator:workspaceNavigator,windows:fileCapabilityPanel,setStatus,
     isReady:()=>workspaceLoad.ok,
     getSettings:()=>readPagePaneSettings(store.getSnapshot().view?.preferences?.paneLayouts||{},PROJECT_SURFACE_KEY,SCOPE_ROOT_ID||ROOT_ID,new URLSearchParams(window.location.search).get('papers-pane-legacy')==='1'),
     saveSettings:settings=>commitWhenWorkspaceReady(()=>{const current=store.getSnapshot();return {...current,view:{...current.view,preferences:{...current.view.preferences,paneLayouts:writePagePaneSettings(current.view.preferences.paneLayouts||{},PROJECT_SURFACE_KEY,SCOPE_ROOT_ID||ROOT_ID,settings,new URLSearchParams(window.location.search).get('papers-pane-legacy')==='1')}}};},{requireDurable:true,preserveSelection:true}),

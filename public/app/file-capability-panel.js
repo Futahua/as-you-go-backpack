@@ -1121,6 +1121,7 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderBrowserWorkspace() {
+    if(windowRef.ProximaBrowserHost){renderWebLinkPreview();return;}
     if (previewOnly) { renderWebLinkPreview(); return; }
     const source = state.chromePaneSource;
     stopChromeLayout();
@@ -1400,6 +1401,7 @@ export function createFileCapabilityPanel(options) {
     inspector.classList.remove('browser-mode');
     const url = state.inspectedUrl;
     if (!safeBrowserUrl(url) || !state.expanded || state.previewSuspended || state.transientOverlay) return;
+    if(windowRef.ProximaBrowserHost){windowRef.ProximaBrowserHost.renderWebPreview(preview,url);return;}
     const generation = state.inspectGeneration;
     const surface = documentRef.createElement('div');
     surface.className = 'file-capability-native-preview file-capability-browser-preview';
@@ -1532,6 +1534,9 @@ export function createFileCapabilityPanel(options) {
       try {
         const parsed = new URL(data.url);
         if (parsed.protocol === 'papers-file-preview:') return parsed.toString();
+        // In the browser, BOP serves the file itself from this page's own address.
+        const win = documentRef.defaultView;
+        if (win?.ProximaBrowserHost && parsed.origin === win.location.origin) return parsed.toString();
       } catch {}
     }
     return previewBlobUrl(data);

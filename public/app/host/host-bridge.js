@@ -55,6 +55,7 @@ export function createHostBridge(window) {
   }
 
   function request(type, detail = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+    if(window.ProximaBrowserHost)return window.ProximaBrowserHost.request(type,detail);
     if (pending.size >= MAX_PENDING) {
       return Promise.reject(new Error('Host request capacity reached.'));
     }
