@@ -575,12 +575,29 @@ export function hostWriterLeaseAdapter(host) {
  * @param {(role: string, detail: object) => void} [options.onRoleChange]
  * @param {() => string} [options.newClientId]
  */
+export function mergeNewBrowserUploads(base,local,current){
+  if(!base||!local||!current)return null;
+  for(const key of ['groups','windowLayouts'])if(!sameJson(base[key],local[key]))return null;
+  const before=new Map((base.shortcuts||[]).map(item=>[item.id,item]));
+  const incoming=local.shortcuts||[];
+  if([...before].some(([id,item])=>!sameJson(item,incoming.find(entry=>entry.id===id))))return null;
+  const added=incoming.filter(item=>!before.has(item.id));
+  if(!added.length||added.some(item=>!/^P:\\Uploads\\/i.test(item.target||'')))return null;
+  const folders=new Map((current.groups||[]).map(item=>[item.id,item]));
+  const activeFolder=id=>{const seen=new Set();while(id&&id!=='root'){const folder=folders.get(id);if(!folder||folder.bin||seen.has(id))return false;seen.add(id);id=folder.parentId;}return true;};
+  if(added.some(item=>!item.placements?.length||item.placements.some(p=>p.bin||!activeFolder(p.parentId))))return null;
+  const existing=new Map((current.shortcuts||[]).map(item=>[item.id,item]));
+  if(added.some(item=>existing.has(item.id)&&!existing.get(item.id).workspaceFileId))return null;
+  return {...current,shortcuts:[...(current.shortcuts||[]),...added.filter(item=>!existing.has(item.id))]};
+}
+
 export function createSurfaceCoordinator({
   lock,
   lockName = SURFACE_DOCUMENT_LOCK,
   channel,
   host,
   ownerAuthoritative = false,
+  retainRejectedEdits = false,
   installDocument,
   installExternalDocument = installDocument,
   onHydrated = () => {},
@@ -1067,6 +1084,7 @@ export function createSurfaceCoordinator({
     get clientId() { return clientId; },
     get baselineReady() { return baselineReady; },
     get frozen() { return frozenSnapshot; },
+    get hasUnsavedConflict() { return typeof frozenSnapshot==='string'&&!sameJson(frozenSnapshot,lastSerialized); },
     get transferSuspended() { return transferSuspended; },
     /** Refresh a document changed outside this coordination channel, including
      * a hand-edit to state.json or a save from another scoped view. The host
@@ -1245,7 +1263,7 @@ export function createSurfaceCoordinator({
           }
           let parentRevision = revision;
           let result = await host.saveChecked(payload, parentRevision, { rebaseAutomaticSave: metadata.rebaseAutomaticSave === true });
-          if(ownerAuthoritative&&result?.code==='STALE_REVISION'){
+          if(ownerAuthoritative&&!retainRejectedEdits&&result?.code==='STALE_REVISION'){
             // A remote pane is a client of the physical owner, never an
             // alternative authority. Retire this rejected generation before
             // installing the owner's bytes, including any queued overlays.
@@ -1268,6 +1286,18 @@ export function createSurfaceCoordinator({
           // freezing the document on a write nobody intended: live rest-save
           // churn means one retry is not always enough.
           let lastObserved = null;
+          // A browser upload may take longer than a concurrent device edit.
+          // Replay only new file additions onto fresh owner bytes; never replay
+          // unrelated old fields or resurrect a folder removed by another device.
+          if(retainRejectedEdits&&result?.code==='STALE_REVISION'&&metadata.rebaseAutomaticSave!==true){
+            for(let attempt=0;result?.code==='STALE_REVISION'&&attempt<3;attempt++){
+              const loaded=await host.loadVersioned();
+              const merged=mergeNewBrowserUploads(JSON.parse(baseSerialized??lastSerialized),JSON.parse(serialized),loaded.state);
+              if(!merged)break;
+              payload=JSON.stringify(merged);parentRevision=loaded.revision;
+              result=await host.saveChecked(payload,parentRevision,{rebaseAutomaticSave:false});
+            }
+          }
           for (let attempt = 0;
             result?.code === 'STALE_REVISION' && metadata.rebaseAutomaticSave === true && attempt < 3;
             attempt += 1) {
@@ -1284,6 +1314,9 @@ export function createSurfaceCoordinator({
             } catch { break; /* preserve the original conflict outcome */ }
           }
           if (result && result.ok === true) {
+            // A file host may replace browser upload handles with durable managed identities.
+            // Install those acknowledged bytes so the next edit never resubmits a transient path.
+            if(typeof result.serialized==='string'){JSON.parse(result.serialized);payload=result.serialized;}
             revision = result.revision;
             lastSerialized = payload;
             authoritativeEpoch += 1;
@@ -1330,6 +1363,15 @@ export function createSurfaceCoordinator({
           } catch { /* freeze trail is diagnostic-only */ }
           setRole(SURFACE_ROLE.CONFLICT, { revision: result && result.revision });
           return { ok: false, code: result?.code ?? 'STALE_REVISION' };
+        })
+        .catch(error=>{
+          if(!retainRejectedEdits)throw error;
+          conflictGeneration=metadata.generation;conflictNeedsLock=false;
+          clearPendingGeneration(conflictGeneration);
+          const latestLocal=invalidatePendingSaves();
+          frozenSnapshot=typeof latestLocal==='string'?latestLocal:serialized;
+          setRole(SURFACE_ROLE.CONFLICT,{});
+          return {ok:false,code:'BROWSER_SAVE_FAILED',message:error?.message||'The upload was not saved. Your pending version is kept.'};
         })
         .finally(() => {
           const pendingIndex = pendingLocalSnapshots.indexOf(localPending);

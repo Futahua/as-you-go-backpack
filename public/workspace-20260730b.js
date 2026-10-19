@@ -250,7 +250,7 @@ My request:
 
 const elements = getWorkspaceElements(document);
 const windowLayoutPillTray = document.getElementById('window-layout-pills');
-const statusToast = createStatusToast({ element: elements.status, suppressWarnings: true });
+const statusToast = createStatusToast({ element: elements.status, suppressWarnings: !window.ProximaBrowserHost });
 
 // 019C: the compact-widget surface is the SAME project entry loaded by the
 // Papers compact-widget host with `papers-surface=compact-widget` plus the
@@ -364,7 +364,13 @@ const store = createWorkspaceStore({
     // 0B: the coordinator owns the revision and the compare-and-set, and
     // broadcasts the exact bytes that landed. The snapshot is already
     // serialized here, and is passed through untouched.
-    if (surfaceCoordinator) return surfaceCoordinator.saveSerialized(await iconAssets.encode(snapshot), await iconAssets.metadata(metadata));
+    if (surfaceCoordinator) {
+      // The web pane has no follower transport: BOP checks every save. Wait
+      // for its initial checked base instead of forwarding an early rest-save
+      // into an empty browser channel and later timing out its acknowledgement.
+      if(BLOB_WORKSPACE&&window.ProximaBrowserHost&&surfaceCoordinator.role===SURFACE_ROLE.VIEW)await surfaceCoordinator.start();
+      return surfaceCoordinator.saveSerialized(await iconAssets.encode(snapshot), await iconAssets.metadata(metadata));
+    }
     return Promise.reject(new Error('Shared document coordination is unavailable; durable editing is disabled.'));
   },
   setStatus: workspaceStoreStatus,
@@ -5785,11 +5791,15 @@ if (WIDGET_SURFACE) {
     // local CAS writer. The fixed host lease must not be bypassed: without it,
     // every lockless surface would become an unchecked writer. Persistence
     // stays on the versioned CAS path whenever a real lock arbitrates.
-    const lock = chooseWorkspaceWriterLock({ embedded: EMBEDDED_SURFACE === 'proxima',
+    // Every browser pane saves through BOP's serialized, revision-checked owner.
+    // A browser lock/channel cannot arbitrate other devices or public origins,
+    // and a suspended older tab must not strand a usable web pane as a follower.
+    const browserOwned=Boolean(BLOB_WORKSPACE&&window.ProximaBrowserHost);
+    const lock = browserOwned?localCasWriterLock:chooseWorkspaceWriterLock({ embedded: EMBEDDED_SURFACE === 'proxima',
       rendererLock, hostLock, fallback: localCasWriterLock });
     let channel;
     const coordinationNamespace = (BLOB_WORKSPACE ? `:blob:${BLOB_WORKSPACE}` : '') + (SCOPE_ROOT_ID ? `:scope:${SCOPE_ROOT_ID}` : '') + (REMOTE_DEVICE ? `:device:${REMOTE_DEVICE}` : '');
-    if (typeof BroadcastChannel === 'function') {
+    if (!browserOwned&&typeof BroadcastChannel === 'function') {
       try {
         channel = new BroadcastChannel(`${SURFACE_DOCUMENT_CHANNEL}${coordinationNamespace}`);
       } catch { /* use the CAS-protected single-surface channel below */ }
@@ -5833,6 +5843,7 @@ if (WIDGET_SURFACE) {
       // A device view follows its physical owner; a blob pane follows Proxima's synced root. Both rebase a
       // stale save onto the latest version instead of freezing in a conflict.
       ownerAuthoritative: Boolean(REMOTE_DEVICE || BLOB_WORKSPACE),
+      retainRejectedEdits: browserOwned,
       lockName: `${SURFACE_DOCUMENT_LOCK}${coordinationNamespace}`,
       channel,
       host: {
@@ -5878,7 +5889,8 @@ if (WIDGET_SURFACE) {
       onHydrationFailed: (stage, code, revision) => visualObservability.hydrationFailed(stage, code, revision),
       invalidatePendingSaves: () => store.invalidatePendingSaves(),
       onRoleChange: (role) => {
-        conflictPanel.syncToRole(role, elements.explorer);
+        if(BLOB_WORKSPACE)window.ProximaBrowserHost?.roleChanged?.({role,hasUnsavedConflict:surfaceCoordinator?.hasUnsavedConflict!==false});
+        conflictPanel.syncToRole(role, browserOwned?document.body:elements.explorer);
         // On takeover, hand every open widget an authoritative snapshot at once
         // instead of leaving it on the dead writer's last revision until it
         // happens to ask again.
@@ -5984,14 +5996,23 @@ if (WIDGET_SURFACE) {
     if (BLOB_WORKSPACE) {
       // The Proxima pane keeps this page alive and moves it between blob folders, and keeps it hidden
       // until this first themed render, so no unstyled page flashes.
-      window.__papersBlobOpenFolder = (folderId) => {
+      let folderRequest=0,openingFolder=false;
+      // Chromium may suspend animation frames in a preloaded, hidden iframe. The
+      // render above is synchronous; acknowledge it even while the parent hides us.
+      const afterBlobRender=callback=>{let done=false;const finish=()=>{if(done)return;done=true;clearTimeout(timer);callback();};const timer=setTimeout(finish,100);requestAnimationFrame(()=>requestAnimationFrame(finish));};
+      window.__papersBlobCurrentFolder=()=>openingFolder||store.getSession().binMode?null:store.getSession().currentId;
+      window.__papersBlobOpenFolder = (folderId,requestId) => {
+        const sequence=++folderRequest;openingFolder=true;
         const go = (attempt = 0) => {
-          if (group(folderId)) { commands.goToWorkspaceFolder(folderId); render(); baseHost.notifyBlobFolder?.(folderId); return; }
+          if(sequence!==folderRequest)return;
+          if (folderId===ROOT_ID||group(folderId)) { commands.goToWorkspaceFolder(folderId); render();afterBlobRender(()=>{if(sequence!==folderRequest)return;openingFolder=false;if(store.getSession().currentId!==folderId)return;const url=new URL(location.href);url.searchParams.set('as-you-go-folder',folderId);history.replaceState(null,'',url);baseHost.notifyBlobFolder?.(folderId,requestId);});return; }
           if (attempt < 20) setTimeout(() => go(attempt + 1), 250); // a just-created folder may still be syncing in
+          else openingFolder=false;
         };
         go();
       };
-      requestAnimationFrame(() => requestAnimationFrame(() => baseHost.notifyBlobReady?.(store.getSession().currentId)));
+      if(window.__papersBlobPendingFolder)window.__papersBlobOpenFolder(window.__papersBlobPendingFolder,window.__papersBlobPendingRequest);
+      afterBlobRender(() => baseHost.notifyBlobReady?.(store.getSession().currentId));
     }
     if (!windowLayoutDetachment.isStopped()) bootstrapWindowLayoutRecording();
     // The launcher overlay: the marker already put this page in command-surface mode, and now that the state

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {createWorkspaceStore} from './public/app/workspace-store.js';
 
 import {
   SURFACE_ROLE,
@@ -7,6 +8,7 @@ import {
   hostWriterLeaseAdapter,
   chooseWorkspaceWriterLock,
   mergeSurfaceSnapshots,
+  mergeNewBrowserUploads,
 } from './public/app/workspace-surface-coordinator.js';
 
 test('host writer lease adapter acquires and releases through Papers', async () => {
@@ -109,6 +111,69 @@ function surface(lock, disk, name, { latestQueued = null, ackTimeoutMs } = {}) {
 }
 
 const ser = (value) => JSON.stringify(value);
+
+test('a stale automatic browser save cannot retire a later queued file drop',async()=>{
+ const initial={groups:[],shortcuts:[],view:{}},disk=fakeDisk(initial),save=disk.saveChecked.bind(disk);let state=initial,coordinator,release;
+ const blocked=new Promise(resolve=>{release=resolve;});let first=true,entered;
+ const enteredSave=new Promise(resolve=>{entered=resolve;});
+ disk.saveChecked=async(...args)=>{if(first){first=false;entered();await blocked;disk.externalWrite({...initial,groups:[{id:'peer'}]});}return save(...args);};
+ const store=createWorkspaceStore({getState:()=>state,setState:next=>{state=next;},normalizeState:s=>s,persist:(s,m)=>coordinator.saveSerialized(s,m)});
+ coordinator=createSurfaceCoordinator({lock:fakeLock(),channel:fakeChannel(),host:disk,ownerAuthoritative:true,retainRejectedEdits:true,
+  installDocument:(next,s)=>store.install(next,{authoritativeSerialized:s}),invalidatePendingSaves:()=>store.invalidatePendingSaves()});
+ await coordinator.start();
+ const automatic=store.save({...initial,view:{cosmetic:1}},{rebaseAutomaticSave:true});await enteredSave;
+ const drop=store.commit({...initial,shortcuts:[{id:'file',target:'P:\\Uploads\\token\\f.txt',placements:[{parentId:'root'}]}]});release();
+ await automatic;assert.equal(await drop,true);assert.equal(disk.state.shortcuts[0].id,'file');assert.equal(disk.state.groups[0].id,'peer');
+ coordinator.release();
+});
+
+test('browser upload additions retry a stale revision without replacing concurrent owner edits',async()=>{
+ const initial={schemaVersion:1,groups:[{id:'folder',parentId:'root'}],shortcuts:[]};
+ const disk=fakeDisk(initial),original=disk.saveChecked.bind(disk);let calls=0;
+ disk.saveChecked=async(...args)=>{if(calls++===0)disk.externalWrite({...initial,shortcuts:[{id:'other',name:'owner file'}]});return original(...args);};
+ const installed=[];
+ const coordinator=createSurfaceCoordinator({lock:fakeLock(),channel:fakeChannel(),host:disk,ownerAuthoritative:true,retainRejectedEdits:true,installDocument:s=>installed.push(s)});
+ await coordinator.start();
+ const result=await coordinator.saveSerialized(ser({...initial,shortcuts:[{id:'new',target:'P:\\Uploads\\token\\new.txt',placements:[{id:'p',parentId:'folder'}]}]}),{baseSerialized:ser(initial)});
+ assert.equal(result.ok,true);assert.deepEqual(disk.state.shortcuts.map(s=>s.id),['other','new']);assert.equal(coordinator.role,SURFACE_ROLE.WRITER);
+ coordinator.release();
+});
+
+test('browser upload recovery refuses deleted destinations and unrelated changed fields',()=>{
+ const base={groups:[{id:'folder',parentId:'root'}],shortcuts:[{id:'old',name:'old'}]};
+ const local={...base,shortcuts:[...base.shortcuts,{id:'new',target:'P:\\Uploads\\token\\new.txt',placements:[{parentId:'folder'}]}]};
+ assert.equal(mergeNewBrowserUploads(base,local,{...base,groups:[]}),null);
+ assert.equal(mergeNewBrowserUploads(base,{...local,shortcuts:[{id:'old',name:'renamed'},local.shortcuts[1]]},base),null);
+});
+
+test('a failed browser upload retains its pending file through later refreshes',async()=>{
+ const disk=fakeDisk(),installed=[];disk.saveChecked=async()=>{throw Error('Upload interrupted');};
+ const coordinator=createSurfaceCoordinator({lock:fakeLock(),channel:fakeChannel(),host:disk,ownerAuthoritative:true,retainRejectedEdits:true,installDocument:s=>installed.push(s)});
+ await coordinator.start();const pending={schemaVersion:1,groups:[],shortcuts:[{id:'new',target:'P:\\Uploads\\token\\new.txt'}]};
+ const result=await coordinator.saveSerialized(ser(pending));assert.equal(result.ok,false);assert.equal(coordinator.role,SURFACE_ROLE.CONFLICT);assert.deepEqual(JSON.parse(coordinator.frozen),pending);
+ disk.externalWrite({groups:[],shortcuts:[]});await coordinator.refreshFromHost();assert.deepEqual(JSON.parse(coordinator.frozen),pending);coordinator.release();
+});
+
+test('a rejected browser change remains recoverable instead of clearing its queued generation',async()=>{
+ const initial={groups:[],shortcuts:[{id:'old',name:'old'}]},disk=fakeDisk(initial);let invalidations=0;
+ const coordinator=createSurfaceCoordinator({lock:fakeLock(),channel:fakeChannel(),host:disk,ownerAuthoritative:true,retainRejectedEdits:true,
+  installDocument(){},invalidatePendingSaves:()=>{invalidations++;return ser({...initial,shortcuts:[{id:'old',name:'mine'}]});}});
+ await coordinator.start();disk.externalWrite({...initial,shortcuts:[{id:'old',name:'theirs'}]});
+ const result=await coordinator.saveSerialized(ser({...initial,shortcuts:[{id:'old',name:'mine'}]}),{baseSerialized:ser(initial)});
+ assert.equal(result.ok,false);assert.equal(coordinator.role,SURFACE_ROLE.CONFLICT);assert.equal(coordinator.hasUnsavedConflict,true);assert.equal(invalidations,1);
+ coordinator.release();
+});
+
+test('a host acknowledgement installs durable file identities before the next save', async () => {
+  const disk=fakeDisk(),original=disk.saveChecked.bind(disk);
+  disk.saveChecked=async(serialized,revision)=>{const doc=JSON.parse(serialized);for(const entry of doc.shortcuts){if(entry.target==='P:\\Uploads\\pending\\test.txt'){entry.target='P:\\Proxima\\managed-1\\test.txt';entry.workspaceFileId='managed-1';}}const result=await original(ser(doc),revision);return result.ok?{...result,serialized:ser(doc)}:result;};
+  const writer=surface(fakeLock(),disk,'canonical-writer');await writer.coordinator.start();
+  const first=await writer.coordinator.saveSerialized(ser({schemaVersion:1,groups:[],shortcuts:[{id:'file-1',name:'test.txt',target:'P:\\Uploads\\pending\\test.txt'}]}));
+  assert.equal(first.ok,true);assert.equal(writer.installed.at(-1).shortcuts[0].workspaceFileId,'managed-1');
+  const next=structuredClone(writer.installed.at(-1));next.shortcuts[0].name='renamed.txt';await writer.coordinator.saveSerialized(ser(next));
+  assert.equal(disk.state.shortcuts[0].target,'P:\\Proxima\\managed-1\\test.txt');assert.equal(disk.state.shortcuts[0].name,'renamed.txt');
+  writer.coordinator.release();
+});
 
 test('a hand-edited document refreshes the writer and its same-scope peers', async () => {
   const disk = fakeDisk();
