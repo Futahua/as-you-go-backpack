@@ -1585,9 +1585,12 @@ export function createFileCapabilityPanel(options) {
 
   function nativePreviewRect(node) {
     const rect = node.getBoundingClientRect();
+    // Inside a Proxima blob pane this page is a frame: native windows are placed in the outer page's
+    // coordinates, so add where the pane's frame sits (and park them while the pane is closed).
+    const frame = documentRef.defaultView?.__papersBlobFrame, away = state.transientOverlay || frame?.hidden;
     return {
-      x: state.transientOverlay ? -10000 : Math.round(rect.x),
-      y: state.transientOverlay ? -10000 : Math.round(rect.y),
+      x: away ? -10000 : Math.round(rect.x + (frame?.x || 0)),
+      y: away ? -10000 : Math.round(rect.y + (frame?.y || 0)),
       width: Math.max(1, Math.round(rect.width)),
       height: Math.max(1, Math.round(rect.height)),
     };
@@ -2493,6 +2496,7 @@ export function createFileCapabilityPanel(options) {
     if (!same || state.inspectedPath !== next.path) void inspectPath(next.path, next);
   }
 
+  documentRef.defaultView?.addEventListener('papers-blob-frame', () => refreshPreviewGeometry());
   function refreshPreviewGeometry() {
     if (!nativeLayoutManaged) state.chromeLayout?.refresh();
     // Restored native tabs can already be visible before a selection creates

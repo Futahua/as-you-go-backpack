@@ -19,6 +19,8 @@ export function createBlobWorkspaceHost(base,workspaceId,win=window){
       Promise.resolve(win.__papersFlushBeforeClose?.()).then(()=>win.parent.postMessage({type:'proxima:workspace:flushed',workspaceId,requestId:value.requestId,ok:true},origin()),error=>win.parent.postMessage({type:'proxima:workspace:flushed',workspaceId,requestId:value.requestId,ok:false,error:error.message},origin()));return;
     }
     if(value.type==='proxima:workspace:open-folder'&&typeof value.folderId==='string'){win.__papersBlobPendingFolder=value.folderId;win.__papersBlobPendingRequest=value.requestId;if(win.__papersBlobOpenFolder)win.__papersBlobOpenFolder(value.folderId,value.requestId);return;}
+    // Where the Proxima pane's frame sits in its page: native preview windows are placed from it.
+    if(value.type==='proxima:workspace:frame-offset'){win.__papersBlobFrame={x:Number(value.x)||0,y:Number(value.y)||0,hidden:value.hidden===true};win.dispatchEvent(new win.Event('papers-blob-frame'));return;}
     if(value.type==='proxima:workspace:result'){
       const task=pending.get(value.requestId);if(!task)return;pending.delete(value.requestId);win.clearTimeout(task.timer);value.ok?task.resolve(value.result):task.reject(Error(value.error||'The workspace refused this action.'));
     }
