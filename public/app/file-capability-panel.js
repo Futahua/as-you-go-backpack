@@ -1800,6 +1800,19 @@ export function createFileCapabilityPanel(options) {
       void startPdfPreview(data);
       return;
     }
+    // A drawing viewer made by BOP (MLight CAD): its own scripts run, cut off from this page (no same origin).
+    if (data.kind === 'cad-html') {
+      const source = previewSource(data);
+      if (source) {
+        const open = documentRef.createElement('a');
+        open.href = source; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open full screen ↗'; open.className = 'file-capability-action';
+        const frame = documentRef.createElement('iframe');
+        frame.src = source; frame.title = itemTitle.textContent || 'Drawing'; frame.className = 'file-capability-preview-frame';
+        frame.setAttribute('sandbox', 'allow-scripts allow-downloads');
+        preview.append(open, frame);
+        return;
+      }
+    }
     if (data.kind === 'hosted-html') {
       void startHtmlPreview(data);
       return;
