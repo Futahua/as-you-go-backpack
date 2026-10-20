@@ -5385,9 +5385,11 @@ graph._setOnDragCancel(() => pointer.cancelDrag());
 // variable, so an update that only reached the store would be overwritten by
 // the next save before it ever hit disk.
 graph._setOnRestPositions((positions) => {
-  state = store.replace(
-    setGraphRestPositions(state, scopedGraphContextId(session.currentId, session.binMode), positions),
-  );
+  const next=setGraphRestPositions(state, scopedGraphContextId(session.currentId, session.binMode), positions);
+  // A peer install restarts graph settling. Re-publishing unchanged resting
+  // coordinates makes two blob panes continually acknowledge and redraw each other.
+  if(JSON.stringify(next.view?.graphRestPositions)===JSON.stringify(state.view?.graphRestPositions))return;
+  state = store.replace(next);
   saveWorkspaceView();
   // Resting coordinates are shared board geometry, not a surface-local view
   // preference. Persist them without adding an Undo history entry so reopening
