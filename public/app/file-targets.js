@@ -10,8 +10,11 @@ function retarget(value,oldPath,newPath){if(typeof value==='string'){const p=key
 export function applyFileTargetResult(state,entry,result,at=new Date().toISOString()){
  if(!result?.targetId||!result.status)return state;
  const matches=x=>(entry.kind==='shortcut'?x.id===entry.id:key(x.path||x.art?.target)===key(entry.path))&&(!refId(x)||refId(x)===result.targetId);
- const nextRef={id:result.targetId,status:result.status,revision:result.revision??0,...(result.path?{name:diskName(result.path)}:entry.ref?.name?{name:entry.ref.name}:{})};let changed=false;
- const update=(x,pill=false)=>{if(!matches(x))return x;const old=pill?(x.path||x.art?.target):x.target;if(key(old)!==key(entry.path))return x;
+ // The name comes from the owner's path when it reports one; otherwise keep the name this record has
+ // now. Falling back to the entry read before the owner answered let two panes of one workspace
+ // alternately add and drop it, re-saving each other's document without end.
+ const refFor=x=>{const name=result.path?diskName(result.path):(x.fileTarget?.name||entry.ref?.name);return{id:result.targetId,status:result.status,revision:result.revision??0,...(name?{name}:{})};};let changed=false;
+ const update=(x,pill=false)=>{if(!matches(x))return x;const nextRef=refFor(x);const old=pill?(x.path||x.art?.target):x.target;if(key(old)!==key(entry.path))return x;
  if(refId(x)===result.targetId&&(x.fileTarget.revision??0)>(result.revision??0))return x;
  if(JSON.stringify(x.fileTarget)!==JSON.stringify(nextRef))changed=true;
  let next={...x,fileTarget:nextRef};
