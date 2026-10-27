@@ -17,9 +17,10 @@ export function createSharedClipboard({ window: win, deviceId = null }) {
   return {
     page,
     scope,
-    write({ cut = false, paths = [], ayg = null }) {
+    write({ cut = false, paths = [], ayg = null, labels = {} }) {
       const record = { id: win.crypto.randomUUID(), page, scope, at: Date.now(), cut: Boolean(cut),
-        paths: [...new Set(paths.filter((path) => typeof path === 'string' && path).map(qualify))], ayg, fingerprint: null };
+        paths: [...new Set(paths.filter((path) => typeof path === 'string' && path).map(qualify))], ayg,
+        labels: Object.fromEntries(paths.filter(path => typeof labels[path] === 'string' && labels[path].trim()).map(path => [qualify(path), labels[path]])), fingerprint: null };
       save(record);
       return record.id;
     },

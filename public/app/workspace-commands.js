@@ -6,6 +6,19 @@ import {
   normalizeSetTitle,
 } from '../sets-model.js';
 
+/** Expand virtual AYG folders through their placements; bytes stay with checked file owners. */
+export function selectedDiskFiles(state,ids,isDiskPath=target=>/^(?:[a-z]:[\\/]|\\\\|content:\/\/)/i.test(target||'')){
+  const chosen=new Set(ids),folders=new Set((state.groups||[]).filter(g=>chosen.has(g.id)&&!g.bin).map(g=>g.id));
+  let changed=true;while(changed){changed=false;for(const folder of state.groups||[])if(!folder.bin&&folders.has(folder.parentId)&&!folders.has(folder.id)){folders.add(folder.id);changed=true;}}
+  const files=[];
+  for(const file of state.shortcuts||[]){
+    if(!isDiskPath(file.target))continue;
+    const placement=(file.placements||[]).find(p=>!p.bin&&(chosen.has(p.id)||folders.has(p.parentId)));
+    if(chosen.has(file.id)||placement)files.push({...file,...(placement?{parentId:placement.parentId}:{})});
+  }
+  return [...new Map(files.map(file=>[file.target,file])).values()];
+}
+
 /** Application command layer. Commands are the named user-intent operations
  * that coordinate session mutation, persistence, and narrow rendering/host
  * effects. They depend only on the store, model/host operations, and the
@@ -480,7 +493,11 @@ export function createWorkspaceCommands({
     const sharedId = sharedClipboard?.write({
       cut: mode === 'cut',
       paths: copiedPaths,
-      ayg: { ids: [...session.selected], collapseWhole: [...collapseWhole], placementIds: [...placementIds] },
+      labels: Object.fromEntries(copiedPaths.map(path => [path,
+        [...session.selected].map(shortcut).find(item => item?.target === path)?.name
+        ?? store.getSnapshot().shortcuts.find(item => item.target === path)?.name,
+      ])),
+      ayg: { documentId: host.blobWorkspaceId || 'local', ids: [...session.selected], collapseWhole: [...collapseWhole], placementIds: [...placementIds] },
     }) ?? null;
     // As you Go links point at files; cutting a link does not move its file, so Windows gets a copy.
     rememberClipboardAtInternalCopy(sharedId, copiedPaths, false);
@@ -643,31 +660,42 @@ export function createWorkspaceCommands({
       // Bound project roots anchor scoped views (and the Bin pill counts as a
       // move out of the top level for them): neither binning path may take one.
       .filter((id) => id !== scopeRootId)
-      .filter(id=>!deleteDisk||fileForSelection(id));
+      .filter(id=>!deleteDisk||fileForSelection(id)||group(id));
     if (selected.length === 0) {
       setStatus(deleteDisk?'Select an entry linked to a real file or folder.':'The project folder cannot be moved to the Bin.');
       return;
     }
     if (!scopeAllowsSelection(selected)) return;
-    if(deleteDisk&&!await confirmDiskDeletion([...new Map(selected.map(fileForSelection).filter(Boolean).map(file=>[file.target,file])).values()]))return;
+    if(deleteDisk&&!await confirmDiskDeletion(selectedDiskFiles(store.getSnapshot(),selected,isDiskPath),{folders:selected.map(group).filter(Boolean)}))return;
     const historyBefore=store.getSnapshot();
     const deletion=await prepareFileDeletion(selected,deleteDisk);if(!deletion)return;
     let snapshot=store.getSnapshot();if(deleteDisk&&deletion.receipts?.length){snapshot={...snapshot,shortcuts:snapshot.shortcuts.map(file=>{const receipt=deletion.receipts.find(r=>r.recordId===file.id&&r.path===file.target);if(!receipt?.target?.targetId||file.fileTarget?.id&&file.fileTarget.id!==receipt.target.targetId)return file;return {...file,fileTarget:{id:receipt.target.targetId,status:'deleted',revision:receipt.target.revision,name:file.fileTarget?.name||file.name}};})};}
-    await store.commit(binSelection(snapshot,resolveBinTargets(selected)),{historyBefore});
+    await store.commit(binSelection(snapshot,resolveBinTargets(deletion.ids||selected)),{historyBefore});
   }
 
+  const isDiskPath=target=>/^(?:[a-z]:[\\/]|\\\\|content:\/\/)/i.test(target||'')||Boolean(host.deviceFilePath?.(target));
   function fileForSelection(id){
     const file=shortcut(id)||store.getSnapshot().shortcuts?.find(x=>x.placements?.some(p=>p.id===id));
-    return file&&!isWebLink(file)&&/^(?:[a-z]:[\\/]|\\\\|content:\/\/)/i.test(file.target||'')?file:null;
+    return file&&!isWebLink(file)&&isDiskPath(file.target)?file:null;
   }
   async function prepareFileDeletion(ids,deleteDisk=false){
     if(!deleteDisk)return true;
-    const files=[...new Map(ids.map(fileForSelection).filter(Boolean).map(x=>[x.target,x])).values()];
-    if(!files.length)return true;
-    try{
-      const receipts=[];for(const file of files){const result=await host.fileCapability('delete',{paths:[file.target]});if(result?.ok!==true)throw Error(result?.message||'The device did not confirm recycling this file.');receipts.push(...(result.targets||[]));}
-      return {receipts};
-    }catch(error){setStatus(error instanceof Error?error.message:String(error));return false;}
+    const files=selectedDiskFiles(store.getSnapshot(),ids,isDiskPath);
+    if(!files.length)return {receipts:[]};
+    // Every file is attempted, like Explorer. An entry is binned only when its own files left, so a
+    // file still open elsewhere keeps its entry here and the toast names what holds it.
+    const receipts=[],failures=[];let recycled=0;
+    for(const file of files){
+      let result;try{result=await host.fileCapability('delete',{paths:[file.target]});}catch(error){result={ok:false,message:error instanceof Error?error.message:String(error)};}
+      if(result?.ok===true){recycled++;receipts.push(...(result.targets||[]));continue;}
+      failures.push({target:file.target,message:result?.message||'The device did not confirm recycling this file.'});
+    }
+    if(!failures.length)return {receipts,ids};
+    const failed=new Set(failures.map(item=>item.target)),snapshot=store.getSnapshot();
+    const kept=ids.filter(id=>!selectedDiskFiles(snapshot,[id],isDiskPath).some(file=>failed.has(file.target)));
+    // Warnings are muted in As you Go, so this uses the visible info level and stays until replaced.
+    setStatus((recycled?`Recycled ${recycled} of ${files.length}; the rest stay here. `:'')+failures.slice(0,3).map(item=>item.message).join(' ')+(failures.length>3?` ${failures.length-3} more were not recycled.`:''),{level:'info',persistent:true});
+    return kept.length?{receipts,ids:kept}:false;
   }
 
   function resetGraphPositions() {

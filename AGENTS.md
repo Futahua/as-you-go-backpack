@@ -72,9 +72,10 @@ in the actual Source checkout; do not depend on an obsolete hard-coded checkout 
 ## Current interaction and data contracts
 
 - AYG links reference real targets. Importing a link does not itself move the target.
-  Explicit real-file moves/copies are supported. AYG link-to-real-folder movement updates
-  the link only after successful movement; Opus real-file movement does not run AYG link
-  retargeting. Prevent moving a folder into itself or its descendants.
+  Explicit real-file moves/copies are supported. Every real move or rename made through AYG
+  (link drags, Files-pane drags/cut-paste/tree moves, Preview move/rename) rewrites every stored
+  reference at or beneath the moved path in one checked save, only after the owner verifies it.
+  Prevent moving a folder into itself or its descendants.
 - Navigator selections support batches, pills, breadcrumbs and folder drops. Accepted
   destination drops take priority over reorder. Live reorder previews follow the cursor
   without expanding a collapsed destination folder.
@@ -180,3 +181,13 @@ Creator-directed settings entry, 2026-10-11: the existing copy-prompt toolbar pl
 Icon assets, 2026-10-11: AYG stores authored image payloads under public/icons/<SHA-256>.<extension> and persists ./icons/ references. Its save adapter externalizes snapshots and their coordination bases before the existing elected writer/CAS owner, using Papers verified immutable image writes. Failed writes retain the original JSON. Files snapshots include and verify icons; restore restores missing immutable assets. Keep assets when removing links: snapshots and undo may still reference them. Moving or exporting AYG must carry state.json and public/icons together. Never move only state.json or garbage-collect assets solely from the current state.
 
 Creator-directed dead-window replacement, 2026-10-12: Shift-drag a live window onto a dormant native tab, or onto its selected pane, to replace that slot. External windows bind through the existing pane-window-replace/reconnect owner; retained transfers move successfully before removing only the dormant placeholder. Keep pane topology, independent page/document tabs and ordinary unmodified drag behavior. The drop cue names the replacement. Save before refreshing a live AYG renderer; a failed coordination flush leaves it open.
+
+Save-refusal recovery, 2026-10-24: owner-authoritative stale mutations still reject, but successful fresh owner reload explicitly marks authoritativeReloaded. The store does not attach that retired generation's error to the new generation and block later close/reload. Failed owner refresh and unresolved edits remain save barriers. The creator authorized loading the latest saved embedded Go pane for this incident; it then confirmed its normal flush successfully.
+
+Creator-requested extension-safe file rename, 2026-10-24: real-file rename controls preserve the original extension when the supplied new name has none. Explicit new extensions remain supported; folders and AYG authored labels are unchanged. Preview retargeting verifies the resolved filename through the existing file owner.
+
+Links survive moves, 2026-10-25 (creator bug: moving files from D:\sort into `Oct 24 2026` broke links): Files-pane moves had skipped link retargeting, and links with non-ASCII names never received a host file identity, so they could not follow moves made elsewhere. `public/app/file-link-rewrite.js` owns the rewrite (targets, descendants, pills, pinned previews; authored names kept) and the repair of already-broken identity-less links: an ENOENT link is re-found by exact name beneath its nearest surviving folder, accepted only when unique, never touching disk. The file-target reconciler runs that repair every five minutes and on access.
+
+Creator-requested Explorer-like recycling, 2026-10-25: Opus (machine) view hides the kill skull; its Delete already recycles the real file, and the skull would only repeat it under "Kill" wording. As you Go and blob kill-only panes keep the skull. Recycle results are per item: what could go goes, what stays remains selected, and a "File in use" dialog names the holding process (Papers Restart Manager lookup) with Try again. Kill bins only entries whose files actually left. Nothing is ever force-closed.
+
+Embedded Go pane Tab, 2026-10-25: non-editing Tab/Shift+Tab forward a workspace-scoped pane-key message through the existing verified parent bridge; Proxima owns close/fullscreen and restores timeline focus. Inputs, editable fields, dialogs and standalone AYG retain their own keyboard behavior. No document/filesystem state is changed by this key route.

@@ -18,7 +18,37 @@ import {
   navigatorSavedStateForItem,
   activateNavigatorFilePill,
   deleteNavigatorSelection,
+  navigatorRecycleOutcome,
+  navigatorShowsKill,
 } from './public/app/workspace-navigator.js';
+
+test('Opus view hides the kill skull; As you Go and blob kill-only panes keep it', () => {
+  assert.equal(navigatorShowsKill({ mode:'machine', killOnly:false }), false);
+  assert.equal(navigatorShowsKill({ mode:'ayg', killOnly:false }), true);
+  assert.equal(navigatorShowsKill({ mode:'machine', killOnly:true }), true);
+});
+
+test('recycle outcome keeps per-item results and maps an old all-or-nothing reply onto every path', () => {
+  const held = { path:'D:\\sort\\held.docx', name:'held.docx', ok:false, code:'FILE_LOCKED', reason:'Open in Microsoft Word (WINWORD.EXE, pid 4312)', lockers:[{ pid:4312 }] };
+  assert.deepEqual(navigatorRecycleOutcome({ ok:false, message:'Recycled 1 of 2.', results:[{ path:'D:\\sort\\a.txt', ok:true }, held] }, []), {
+    recycled:['D:\\sort\\a.txt'],
+    failed:[{ path:held.path, name:'held.docx', reason:held.reason, lockers:held.lockers }],
+    message:'Recycled 1 of 2.',
+  });
+  assert.deepEqual(navigatorRecycleOutcome({ ok:true }, ['D:\\x']), { recycled:['D:\\x'], failed:[], message:'' });
+  assert.deepEqual(navigatorRecycleOutcome({ ok:false, message:'busy' }, ['D:\\sort\\x.txt']).failed, [{ path:'D:\\sort\\x.txt', name:'x.txt', reason:'busy', lockers:[] }]);
+});
+
+test('Opus Delete reports what stayed through a visible dialog with Try again, not a muted warning', async () => {
+  const source = await readFile(new URL('./public/app/workspace-navigator.js', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf("del.addEventListener('click'"), source.indexOf('let recycleSelection=null'));
+  assert.match(handler, /navigatorRecycleOutcome\(r,pending\)/);
+  assert.match(handler, /o\.reportFileFailures/);
+  assert.match(handler, /fileCapability\('delete',\{paths:pending\}\)/);
+  assert.doesNotMatch(handler, /o\.setStatus\(r\.message\|\|'Delete failed\.'\)/);
+  const workspace = await readFile(new URL('./public/workspace-20260730b.js', import.meta.url), 'utf8');
+  assert.match(workspace, /reportFileFailures:.*confirmLabel:'Try again'/s);
+});
 
 test('new folder follows selected AYG placement and real folders across providers',async()=>{
  const base={currentId:'current',rootId:'root',path:'D:\\current',isAbsoluteWindowsPath:()=>true,stat:async()=>({ok:true,entry:{kind:'folder'}})};
@@ -358,13 +388,15 @@ test('Electron copyLink native drag negotiates an allowed drop while retaining t
 });
 
 
-test('closed folders use the existing drop handler without hover expansion and Opus omits link retargeting',async()=>{
+test('closed folders use the existing drop handler without hover expansion and every verified move follows links',async()=>{
   const source=await readFile(new URL('./public/app/workspace-navigator.js',import.meta.url),'utf8');
   const resolve=source.slice(source.indexOf('    resolveDestination:'),source.indexOf('    isNativeDrag:'));
   assert.match(resolve,/if\(!container\)return null/);
   assert.doesNotMatch(resolve,/expanded\.add|machineExpanded\.add|createElement/);
-  assert.match(source,/destination:plan\.parent\}/);
-  assert.match(source,/retarget:updatesLinks\?retargetMovedFiles:undefined/);
+  assert.doesNotMatch(source,/retarget:(?:updatesLinks|machineClipboard)\?/);
+  assert.match(source,/paths:plan\.paths,destination:plan\.destination,retarget:retargetMovedFiles\}/);
+  assert.match(source,/destination:plan\.parent,retarget:retargetMovedFiles\}/);
+  assert.match(source,/followRenamedFileLinks\(selected\.path,newName\)/);
 });
 
 

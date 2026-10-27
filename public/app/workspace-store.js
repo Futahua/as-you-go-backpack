@@ -56,6 +56,7 @@ export function createWorkspaceStore({
   canMutateDocument = () => true,
   onMutationBlocked = () => {},
   onSaveGenerationInvalidated = () => {},
+  historyEnabled = true,
 }) {
   let undoStack = [];
   let redoStack = [];
@@ -162,7 +163,7 @@ export function createWorkspaceStore({
             if (result?.forwarded && generation === saveGeneration) {
               invalidateGeneration(generation);
             }
-            throw new Error(humanSaveRefusal(acknowledgement));
+            throw Object.assign(new Error(humanSaveRefusal(acknowledgement)), { authoritativeReloaded: acknowledgement?.authoritativeReloaded === true });
           }
           result = { ...result, ...acknowledgement };
           forwardedAcknowledged = true;
@@ -171,7 +172,7 @@ export function createWorkspaceStore({
           if (result?.forwarded && generation === saveGeneration) {
             invalidateGeneration(generation);
           }
-          throw new Error(humanSaveRefusal(result));
+          throw Object.assign(new Error(humanSaveRefusal(result)), { authoritativeReloaded: result?.authoritativeReloaded === true });
         }
         // Forwarded view saves are only optimistic; their committed broadcast
         // (installExternal) is the durable acknowledgement. A writer save is
@@ -203,6 +204,12 @@ export function createWorkspaceStore({
       cleanup();
       return result;
     }, (error) => {
+      // The rejected edit still fails to its caller. A proven owner refresh has
+      // retired its generation, so it cannot poison the new generation's flush.
+      if (error?.authoritativeReloaded === true && generation !== saveGeneration) {
+        cleanup();
+        return undefined;
+      }
       lastSaveError = error;
       lastSaveWasAutomatic = metadata?.rebaseAutomaticSave === true;
       if (!lastSaveWasAutomatic) pendingEditError = error;
@@ -227,7 +234,10 @@ export function createWorkspaceStore({
       return Promise.resolve(false);
     }
     const previous = historyBefore ?? getState();
-    if (isUndo) {
+    if (!historyEnabled) {
+      undoStack.length = 0;
+      redoStack.length = 0;
+    } else if (isUndo) {
       redoStack.push(previous);
     } else if (isRedo) {
       undoStack.push(previous);
@@ -265,11 +275,13 @@ export function createWorkspaceStore({
 
   let historyBusy = false;
   async function undo() {
+    if (!historyEnabled) return false;
     if (!canMutateDocument()) { onMutationBlocked('undo'); return; }
     return replayHistory(undoStack, true);
   }
 
   async function redo() {
+    if (!historyEnabled) return false;
     if (!canMutateDocument()) { onMutationBlocked('redo'); return; }
     return replayHistory(redoStack, false);
   }
@@ -300,6 +312,7 @@ export function createWorkspaceStore({
 
   return {
     recordExternalEffect(effect) {
+      if (!historyEnabled) return;
       undoStack.push({externalEffect:true,effect});
       redoStack.length=0;
     },

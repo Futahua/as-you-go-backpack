@@ -843,3 +843,35 @@ test('dragDropToFolder with mixed ids moves only the non-ancestor ids', async ()
   await h.commands.dragDropToFolder({ itemIds: ['anc-f1', 'g2'], placementIds: new Map(), folderId: 'dest' });
   assert.deepEqual(h.store.getSnapshot().moved, ['p-g2', 'dest']);
 });
+
+test('kill recycles every linked file, bins only entries whose files left, and names the holder visibly', async () => {
+  const shortcuts = [
+    { id: 'free', name: 'Free', target: 'D:/sort/free.txt' },
+    { id: 'held', name: 'Held', target: 'D:/sort/held.docx' },
+  ];
+  const calls = [];
+  const h = createHarness({
+    shortcuts,
+    model: {
+      confirmDiskDeletion: async () => true,
+      host: { fileCapability: async (operation, params) => {
+        calls.push(params.paths[0]);
+        return params.paths[0].endsWith('held.docx')
+          ? { ok: false, code: 'FILE_LOCKED', message: 'held.docx is open in Microsoft Word (WINWORD.EXE, pid 4312).' }
+          : { ok: true, recycle: true };
+      } },
+    },
+  });
+  h.store.setSelection(['free', 'held']);
+  await h.commands.moveSelectionToBin({ deleteDisk: true });
+  assert.deepEqual(calls, ['D:/sort/free.txt', 'D:/sort/held.docx']);
+  assert.deepEqual(h.store.getSnapshot().binned, ['free']);
+  assert.match(h.effects.status.at(-1), /^Recycled 1 of 2; the rest stay here\. held\.docx is open in Microsoft Word \(WINWORD\.EXE, pid 4312\)\.$/);
+
+  calls.length = 0;
+  const all = createHarness({ shortcuts: [shortcuts[1]], model: { confirmDiskDeletion: async () => true,
+    host: { fileCapability: async () => ({ ok: false, message: 'held.docx is open in Microsoft Word (WINWORD.EXE, pid 4312).' }) } } });
+  all.store.setSelection(['held']);
+  await all.commands.moveSelectionToBin({ deleteDisk: true });
+  assert.equal(all.store.getSnapshot().binned, undefined, 'a file that stayed keeps its entry out of the Bin');
+});

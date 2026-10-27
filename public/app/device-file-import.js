@@ -85,7 +85,9 @@ export function createDeviceFileImport({ document: d, host, link: saveLink, scop
   async function finish(job, entry) {
     if (job.phase !== 'completed') return;
     if (entry.linkFailed) { Object.assign(job, { linked: false, error: entry.linkError }); return; }
-    try { await link(job.results.map(item => ({ target: ownPath(item.target), name: item.name, kind: item.kind })), entry.destination); job.linked = true;feedback.complete(job.id,{items:job.results.map(item=>({name:item.name,target:ownPath(item.target)}))});pending.delete(job.id); save(); }
+    // A copied entry keeps the label it had where it was copied from.
+    const labelled = (item, index) => (job.results.length === entry.labels?.length && entry.labels[index]) || item.name;
+    try { await link(job.results.map((item, index) => ({ target: ownPath(item.target), name: labelled(item, index), kind: item.kind })), entry.destination); job.linked = true;feedback.complete(job.id,{items:job.results.map(item=>({name:item.name,target:ownPath(item.target)}))});pending.delete(job.id); save(); }
     catch (error) { job.linked = false; job.error = 'Saved in the inbox, but the link failed: ' + (error?.message || error); entry.linkFailed = true; entry.linkError = job.error;feedback.fail(job.id,error);save(); }
     linkResults.set(job.id, { linked: job.linked, error: job.error });
   }
@@ -120,33 +122,34 @@ export function createDeviceFileImport({ document: d, host, link: saveLink, scop
   close.addEventListener('click', () => { panel.hidden = true; });
 
   // This computer's files dropped into another device's As you Go: copied into that device's inbox, then linked there.
-  async function sendLocal(local, destinationId) {
+  async function sendLocal(local, destinationId, labels = {}) {
     const feedbackId=feedback.begin({destinationId,items:local.map(source=>({source,name:source.split(/[\\/]/).pop()}))});
     const name = local.length === 1 ? local[0].split('\\').pop() : local.length + ' items';
-    if (!host.deviceId) { await link(local.map(path => ({ target: path, name: path.split('\\').pop() })), destinationId); return; }
+    if (!host.deviceId) { await link(local.map(path => ({ target: path, name: labels[path] || path.split('\\').pop() })), destinationId); return; }
     shown = null;  heading.textContent = 'Sending…'; file.textContent = name; file.title = name; progress.hidden = false; progress.removeAttribute('value'); detail.textContent = ''; destination.textContent = ''; actions.hidden = true;
     try {
       const sent = await call({ operation: 'send-to-inbox', ownerId: host.deviceId, paths: local });
       if (!Array.isArray(sent) || sent.length !== local.length) throw Error('The device did not confirm the copy.');
-      await link(sent.map((target, index) => ({ target: ownPath(target), name: String(target).split('\\').pop() || local[index].split('\\').pop() })), destinationId);
+      await link(sent.map((target, index) => ({ target: ownPath(target), name: labels[local[index]] || String(target).split('\\').pop() || local[index].split('\\').pop() })), destinationId);
       feedback.complete(feedbackId,{items:sent.map(target=>({name:String(target).split(/[\\/]/).pop(),target:ownPath(target)}))});heading.textContent = 'Completed';progress.hidden=true; file.textContent = sent.map(target => String(target).split('\\').pop()).join(', '); progress.max = 1; progress.value = 1;
       destination.textContent = 'To ' + String(sent[0]).replace(/^\\\\papers~[^\\]+\\/i, '').replace(/\\[^\\]*$/, '');
     } catch (error) { feedback.fail(feedbackId,error);showError('Not sent', error); }
   }
 
-  async function importPaths(paths, destinationId, local = []) {
-    if (local.length) await sendLocal([...new Set(local)], destinationId);
+  /** [labels]: path -> the entry's label where it was copied, kept for the new entry. */
+  async function importPaths(paths, destinationId, local = [], labels = {}) {
+    if (local.length) await sendLocal([...new Set(local)], destinationId, labels);
     const devicePaths = [...new Set(paths.filter(isDevicePath))];
     if (!devicePaths.length) return local.length > 0;
     // Files already on the device this As you Go belongs to need no download.
     const here = host.deviceId ? devicePaths.filter(path => ownPath(path) !== path) : [];
-    if (here.length) await link(here.map(path => ({ target: ownPath(path), name: path.split('\\').pop() })), destinationId);
+    if (here.length) await link(here.map(path => ({ target: ownPath(path), name: labels[path] || path.split('\\').pop() })), destinationId);
     const fetch = devicePaths.filter(path => !here.includes(path));
     if (!fetch.length) return true;
      heading.textContent = 'Finding files…'; file.textContent = fetch.length === 1 ? fetch[0].split('\\').pop() : fetch.length + ' items'; progress.hidden = false; progress.removeAttribute('value'); detail.textContent = ''; destination.textContent = ''; actions.hidden = true;
     const commandId = crypto.randomUUID();
     feedback.begin({id:commandId,destinationId,items:fetch.map(source=>({source,name:source.split(/[\\/]/).pop()}))});
-    pending.set(commandId, { jobId: commandId, destination: destinationId,items:fetch.map(source=>({source,name:source.split(/[\\/]/).pop()})) }); save();
+    pending.set(commandId, { jobId: commandId, destination: destinationId,items:fetch.map(source=>({source,name:source.split(/[\\/]/).pop()})), labels: fetch.map(path => labels[path] || null) }); save();
     try {
       const job = await call({ operation: 'inbox-import', commandId, paths: fetch, ...(host.deviceId ? { destinationOwnerId: host.deviceId } : {}) });
       shown = commandId; previous = null; speed = 0; if (job) draw(job); watch();

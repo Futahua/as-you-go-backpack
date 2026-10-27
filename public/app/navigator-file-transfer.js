@@ -29,6 +29,22 @@ export async function moveNavigatorFiles({host,paths,destination,retarget,onProg
  return pending.size?{ok:false,pending:true,message:'Move is still pending in Directory Opus. Check its progress or confirmation dialog.'}:{ok:true};
 }
 
+/** A real rename is a move in place; links follow it only after the owner verifies the new path. */
+export async function followNavigatorRename({host,path,newName,retarget,sleep=ms=>new Promise(r=>setTimeout(r,ms)),attempts=120}) {
+ const parent=String(path||'').replace(/[\\/]+$/,'').replace(/[\\/][^\\/]*$/,'');
+ const newPath=parent+'\\'+newName;
+ if(!parent||!newName||newPath.toLowerCase()===String(path).toLowerCase()||typeof retarget!=='function')return {ok:true};
+ for(let attempt=0;attempt<attempts;attempt++){
+  const [oldStat,newStat]=await Promise.all([host.fileCapability('stat',{path}),host.fileCapability('stat',{path:newPath})]);
+  if(oldStat?.ok===false&&oldStat.code==='ENOENT'&&newStat?.ok===true){
+   let saved=false;try{saved=await retarget([{oldPath:path,newPath}])===true;}catch{}
+   return saved?{ok:true}:{ok:false,unlinkedMoves:[{oldPath:path,newPath}],message:'Renamed, but AYG links could not be saved. Refresh to retry the links without renaming again.'};
+  }
+  await sleep(500);
+ }
+ return {ok:false,pending:true,message:'Rename is still pending in Directory Opus; AYG links were left unchanged.'};
+}
+
 /** Retry only a verified link update, never the completed filesystem move. */
 export async function retryNavigatorFileLinks({host,moves,retarget}) {
  const verified=[];

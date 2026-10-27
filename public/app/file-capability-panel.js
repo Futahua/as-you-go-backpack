@@ -1,3 +1,4 @@
+import { preserveRenameExtension } from './file-rename-name.js';
 import { createPaneSelectionPolicy } from './pane-selection-policy.js';
 import { createWebLinkPreview } from './web-link-preview.js';
 import { browserTabClosePlan } from './browser-pane-actions.js';
@@ -127,6 +128,8 @@ export function createFileCapabilityPanel(options) {
   const host = options.host;
   const setStatus = options.setStatus || (() => {});
   const retargetShortcut = options.retargetShortcut || (async () => false);
+  // When supplied, every stored reference at or beneath a moved/renamed path follows it in one change.
+  const retargetMovedFiles = typeof options.retargetMovedFiles === 'function' ? options.retargetMovedFiles : null;
   const windowRef = documentRef?.defaultView ?? null;
   let launchedPreview = null;
   let nativeLayoutManaged=false;
@@ -1121,6 +1124,7 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderBrowserWorkspace() {
+    if(windowRef.ProximaBrowserHost){renderWebLinkPreview();return;}
     if (previewOnly) { renderWebLinkPreview(); return; }
     const source = state.chromePaneSource;
     stopChromeLayout();
@@ -1400,6 +1404,7 @@ export function createFileCapabilityPanel(options) {
     inspector.classList.remove('browser-mode');
     const url = state.inspectedUrl;
     if (!safeBrowserUrl(url) || !state.expanded || state.previewSuspended || state.transientOverlay) return;
+    if(windowRef.ProximaBrowserHost){windowRef.ProximaBrowserHost.renderWebPreview(preview,url);return;}
     const generation = state.inspectGeneration;
     const surface = documentRef.createElement('div');
     surface.className = 'file-capability-native-preview file-capability-browser-preview';
@@ -1532,6 +1537,9 @@ export function createFileCapabilityPanel(options) {
       try {
         const parsed = new URL(data.url);
         if (parsed.protocol === 'papers-file-preview:') return parsed.toString();
+        // In the browser, BOP serves the file itself from this page's own address.
+        const win = documentRef.defaultView;
+        if (win?.ProximaBrowserHost && parsed.origin === win.location.origin) return parsed.toString();
       } catch {}
     }
     return previewBlobUrl(data);
@@ -1580,9 +1588,12 @@ export function createFileCapabilityPanel(options) {
 
   function nativePreviewRect(node) {
     const rect = node.getBoundingClientRect();
+    // Inside a Proxima blob pane this page is a frame: native windows are placed in the outer page's
+    // coordinates, so add where the pane's frame sits (and park them while the pane is closed).
+    const frame = documentRef.defaultView?.__papersBlobFrame, away = state.transientOverlay || frame?.hidden;
     return {
-      x: state.transientOverlay ? -10000 : Math.round(rect.x),
-      y: state.transientOverlay ? -10000 : Math.round(rect.y),
+      x: away ? -10000 : Math.round(rect.x + (frame?.x || 0)),
+      y: away ? -10000 : Math.round(rect.y + (frame?.y || 0)),
       width: Math.max(1, Math.round(rect.width)),
       height: Math.max(1, Math.round(rect.height)),
     };
@@ -1788,9 +1799,25 @@ export function createFileCapabilityPanel(options) {
       return;
     }
     if (typeof data.resourceId === 'string') state.previewResourceId = data.resourceId;
-    if (data.kind === 'hosted-pdf') {
+    // Inside a Proxima blob pane a native PDF window cannot follow the pane (it would sit at the wrong
+    // place and outlive the pane), so the PDF shows in the pane's own viewer.
+    const inPane = new URLSearchParams(documentRef.defaultView?.location.search || '').has('papers-blob-workspace');
+    if (data.kind === 'hosted-pdf' && !inPane) {
       void startPdfPreview(data);
       return;
+    }
+    // A drawing viewer made by BOP (MLight CAD): its own scripts run, cut off from this page (no same origin).
+    if (data.kind === 'cad-html') {
+      const source = previewSource(data);
+      if (source) {
+        const open = documentRef.createElement('a');
+        open.href = source; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'Open full screen ↗'; open.className = 'file-capability-action';
+        const frame = documentRef.createElement('iframe');
+        frame.src = source; frame.title = itemTitle.textContent || 'Drawing'; frame.className = 'file-capability-preview-frame';
+        frame.setAttribute('sandbox', 'allow-scripts allow-downloads');
+        preview.append(open, frame);
+        return;
+      }
     }
     if (data.kind === 'hosted-html') {
       void startHtmlPreview(data);
@@ -1803,7 +1830,7 @@ export function createFileCapabilityPanel(options) {
         return;
       }
     }
-    if (data.kind === 'pdf') {
+    if (data.kind === 'pdf' || data.kind === 'hosted-pdf') {
       const source = previewSource(data);
       if (source) {
         const frame = documentRef.createElement('iframe');
@@ -2203,9 +2230,17 @@ export function createFileCapabilityPanel(options) {
   }
 
   async function verifyAndRetarget(oldPath, expectedPath) {
-    if (!state.context || !state.context.shortcutId) return false;
+    if ((!state.context || !state.context.shortcutId) && !retargetMovedFiles) return false;
     const verified = await waitForPathState(host, { present: expectedPath, absent: oldPath });
     if (!verified) return false;
+    if (retargetMovedFiles) {
+      const saved = await retargetMovedFiles([{ oldPath, newPath: expectedPath }]) === true;
+      if (saved && state.context && state.context.shortcutId) {
+        const name = state.context.name === basename(oldPath) ? basename(expectedPath) : state.context.name;
+        state.context = { shortcutId: state.context.shortcutId, path: expectedPath, name };
+      }
+      return saved;
+    }
     const nextName = state.context.name === basename(oldPath) ? basename(expectedPath) : state.context.name;
     const changed = await retargetShortcut({
       shortcutId: state.context.shortcutId,
@@ -2306,7 +2341,7 @@ export function createFileCapabilityPanel(options) {
   copyPathButton.addEventListener('click', () => {
     const value = state.inspectedPath || state.inspectedUrl;
     if (!value) return;
-    void host.copyText(value)
+    void Promise.resolve().then(() => host.copyText(value))
       .then(() => setStatus('Path copied.', { level: 'success' }))
       .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
   });
@@ -2370,14 +2405,17 @@ export function createFileCapabilityPanel(options) {
   renameRow.addEventListener('submit', async (event) => {
     event.preventDefault();
     const source = state.inspectedPath;
-    const newName = renameInput.value.trim();
+    let newName = renameInput.value.trim();
     if (!source || !newName || newName === basename(source)) {
       renameRow.hidden = true;
       return;
     }
-    const expected = joinPath(dirname(source), newName);
     setBusy(renameSave, true, 'Renaming…');
     try {
+      const stat = await host.fileCapability('stat', { path: source });
+      if (!stat?.ok || !stat.entry?.kind) throw new Error(stat?.message || 'Could not check the file before renaming.');
+      newName = preserveRenameExtension(source, newName, stat.entry.kind);
+      const expected = joinPath(dirname(source), newName);
       const result = await host.fileCapability('rename', { path: source, newName });
       if (!result || !result.ok) throw new Error(result && result.message ? result.message : 'Rename failed.');
       const retargeted = await verifyAndRetarget(source, expected);
@@ -2422,7 +2460,8 @@ export function createFileCapabilityPanel(options) {
       message.textContent = 'The file is now in Recycle Bin. This As you Go reference is still here.';
       preview.append(message);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      // The host names the process holding a locked file; show it at a level As you Go does not mute.
+      setStatus(error instanceof Error ? error.message : String(error), { level: 'info', persistent: true });
     } finally {
       setBusy(deleteButton, false);
     }
@@ -2472,6 +2511,7 @@ export function createFileCapabilityPanel(options) {
     if (!same || state.inspectedPath !== next.path) void inspectPath(next.path, next);
   }
 
+  documentRef.defaultView?.addEventListener('papers-blob-frame', () => refreshPreviewGeometry());
   function refreshPreviewGeometry() {
     if (!nativeLayoutManaged) state.chromeLayout?.refresh();
     // Restored native tabs can already be visible before a selection creates

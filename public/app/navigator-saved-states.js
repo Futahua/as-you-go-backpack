@@ -1,4 +1,5 @@
 import {isPhoneResizeLocked} from './phone-control-scale.js';
+import {movedPath} from './file-link-rewrite.js';
 /** Saved pills belong to document preferences; browser storage is a legacy fallback. */
 const MODES = new Set(['ayg', 'machine', 'action']);
 
@@ -283,8 +284,9 @@ export function createNavigatorSavedStates({ document, container, snapshot, rest
       if(Array.isArray(next)&&signature!==durableSignature){durableSignature=signature;installRemoteStates(next);}
     },
     retargetPaths(moves){
-      const replace=path=>moves.find(move=>typeof path==='string'&&move.oldPath.toLowerCase()===path.toLowerCase())?.newPath||path;
-      states=states.map(state=>({...state,path:replace(state.path),art:state.art?{...state.art,target:replace(state.art.target)}:state.art}));
+      // Pills inside a moved folder follow it too, as the document's own rewrite does.
+      const replace=path=>movedPath(path,moves)??path;
+      states=states.map(state=>({...state,path:replace(state.path),...(state.machineRoot?{machineRoot:replace(state.machineRoot)}:{}),art:state.art?{...state.art,target:replace(state.art.target)}:state.art}));
       states=uniqueNavigatorSavedStates(states,resolveTarget);
       persistStates();render();
     },
