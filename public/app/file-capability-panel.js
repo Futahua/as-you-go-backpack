@@ -2050,10 +2050,20 @@ export function createFileCapabilityPanel(options) {
   }
 
   function renderEmptySelection() {
-      if (previewOnly) { clearPreview(); itemTitle.textContent = ''; itemMeta.textContent = ''; pathText.textContent = 'Select an item to preview.'; return; }
+      // Invalidate a preview still opening too, or a hosted HTML/PDF view lands after the clear and stays.
+      if (previewOnly) { clearPreview(); ++state.inspectGeneration; state.inspectedPath = null; itemTitle.textContent = ''; itemMeta.textContent = ''; pathText.textContent = 'Select an item to preview.'; return; }
       // The native host retains the active peer across previews and restart.
       // Resume that peer without opening or selecting a Chrome tab.
       if (nativeWindowTabs.hasWindows()) {
+        // The file preview that was showing still ends here: a hosted DWG/HTML or PDF view would
+        // otherwise stay on screen over the next folder (for example after a blob switch).
+        ++state.inspectGeneration;
+        state.inspectedPath = null;
+        state.lastPreviewResult = null;
+        void closeOfficeEditor();
+        closeNativePreview();
+        closePdfPreview();
+        closeHtmlPreview();
         void nativeWindowTabs.showCurrent().catch(error => console.warn('Native pane:', error));
         return;
       }
