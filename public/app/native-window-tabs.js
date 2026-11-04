@@ -16,7 +16,7 @@ export function createLensButton(document,lens,status=()=>{}) {
 }
 
 /** Retained window membership belongs to the native host, including restart recovery. */
-export function installNativeWindowTabs({ document, header, host, bounds, prepare, overlay, status, lens, sliceId='main', sliceDocking=false, groupHandle=null, layoutBinding=()=>null }) {
+export function installNativeWindowTabs({ document, header, host, bounds, prepare, overlay, status, lens, sliceId='main', sliceDocking=false, groupHandle=null, layoutBinding=()=>null, pickTemplate=null }) {
   const strip = document.createElement('div');
   strip.className = 'pane-window-tabs file-capability-browser-tabs';
   strip.addEventListener('wheel', event => { if (strip.scrollWidth > strip.clientWidth) { event.preventDefault(); strip.scrollLeft += event.deltaY || event.deltaX; } }, { passive: false });
@@ -73,6 +73,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
   };
   async function add() {
     if (busy || disposed) return;
+    if(pickTemplate){await pickTemplate();return;}
     stopHover();
     busy = true; render();
     try {
@@ -194,8 +195,8 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
     }
     const addButton = document.createElement('button'); addButton.type = 'button';
     addButton.innerHTML = windowLayoutControlGlyphMarkup('pick');
-    addButton.title = 'Existing windows — hover for the list'; addButton.setAttribute('aria-label', 'Existing windows');
-    addButton.addEventListener('mouseenter', () => { if (!busy && !disposed) dwell = setTimeout(() => { dwell = null; void add(); }, 200); });
+    addButton.title = pickTemplate?'Blob templates':'Existing windows — hover for the list'; addButton.setAttribute('aria-label',pickTemplate?'Blob templates':'Existing windows');
+    addButton.addEventListener('mouseenter', () => { if (!pickTemplate && !busy && !disposed) dwell = setTimeout(() => { dwell = null; void add(); }, 200); });
     addButton.addEventListener('mouseleave', () => { clearTimeout(dwell); dwell = null; });
     addButton.disabled = busy; addButton.addEventListener('click', add);
     if (lensButton) strip.prepend(lensButton);
