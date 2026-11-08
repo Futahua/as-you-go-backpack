@@ -5424,7 +5424,9 @@ window.__papersFlushBeforeClose = async () => {
   }
   await pendingRestSave;
   await pendingSurfaceLocationSave;
-  await store.flush();
+  // Only view-position saves are made here; if the writer refused one, the creator's edits are not at
+  // risk, so it must not keep Papers from reloading ("The document was not committed").
+  await store.flush({ ignoreAutomaticFailures: true });
   return { ok: true };
 };
 

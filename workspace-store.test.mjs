@@ -643,3 +643,19 @@ test('pane preference commits preserve live selection while ordinary document ed
  assert.deepEqual([...h.store.getSession().selected],['root']);assert.equal(h.store.getSession().selectionAnchor,'root');
  await h.store.commit({...h.getState(),items:['changed']});assert.equal(h.store.getSession().selected.size,0);
 });
+test('a refused automatic save does not block the close/reload barrier; a refused edit still does', async () => {
+  let state = { items: ['root'] };
+  const make = () => createWorkspaceStore({
+    getState: () => state,
+    setState: (next) => { state = next; },
+    persist: async () => ({ ok: false, code: 'REMOTE_SAVE_FAILED' }),
+    normalizeState: (s) => s,
+  });
+  const automatic = make();
+  await automatic.save({ items: ['view'] }, { rebaseAutomaticSave: true }).catch(() => {});
+  await assert.rejects(automatic.flush(), 'a plain flush still reports the refusal');
+  await automatic.flush({ ignoreAutomaticFailures: true });
+  const edit = make();
+  await edit.save({ items: ['edit'] }).catch(() => {});
+  await assert.rejects(edit.flush({ ignoreAutomaticFailures: true }), "a refused edit of the creator's blocks reload");
+});

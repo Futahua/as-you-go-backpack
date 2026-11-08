@@ -320,11 +320,14 @@ export function createWorkspaceStore({
     // Resolve only after every save queued before the call is terminal. The
     // queue deliberately remains usable after a rejection, while this
     // barrier still reports that rejection to a close-time caller.
-    flush: ({ ignoreAutomaticWriterRefusal = false } = {}) => saveQueue.then(() => {
-      if (ignoreAutomaticWriterRefusal && pendingEditError) throw pendingEditError;
+    // ignoreAutomaticFailures: a close/reload barrier must not be blocked by a refused automatic
+    // save (view position, rest coordinates); a failed edit of the creator's still blocks it.
+    flush: ({ ignoreAutomaticWriterRefusal = false, ignoreAutomaticFailures = false } = {}) => saveQueue.then(() => {
+      if ((ignoreAutomaticWriterRefusal || ignoreAutomaticFailures) && pendingEditError) throw pendingEditError;
       const viewRefusal = ignoreAutomaticWriterRefusal && lastSaveWasAutomatic
         && lastSaveError?.message === 'This surface is not the writer and may not save the board.';
-      if (lastSaveError && !viewRefusal) throw lastSaveError;
+      const automaticOnly = ignoreAutomaticFailures && lastSaveWasAutomatic;
+      if (lastSaveError && !viewRefusal && !automaticOnly) throw lastSaveError;
       return undefined;
     }),
     getSession: () => session,

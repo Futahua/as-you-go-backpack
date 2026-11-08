@@ -5,7 +5,7 @@ import vm from 'node:vm';
 const source=readFileSync(new URL('./public/workspace-20260730b.js',import.meta.url),'utf8');
 const hook=source.slice(source.indexOf('window.__papersFlushBeforeClose = async () => {'),source.indexOf('\n};',source.indexOf('window.__papersFlushBeforeClose = async () => {'))+3);
 function fixture(mode,failure){
- const calls=[];const context={window:{},commandSurfaceMode:mode,graph:{_saveRestPositionsNow(){calls.push('graph');}},PROJECT_SURFACE_KEY:'page',detachSaveGate:{isReadOnly:()=>false},state:{},pendingRestSave:Promise.resolve(),pendingSurfaceLocationSave:Promise.resolve(),captureWorkspaceView:()=>({}),setStatus:()=>{},store:{replace:s=>s,save:async()=>{calls.push('save');},flush:async()=>{calls.push('flush');if(failure)throw failure;}}};
+ const calls=[];const context={window:{},commandSurfaceMode:mode,WIDGET_SURFACE:false,REMOTE_DEVICE:false,hasDocumentWriteAuthority:()=>true,graph:{_saveRestPositionsNow(){calls.push('graph');}},PROJECT_SURFACE_KEY:'page',detachSaveGate:{isReadOnly:()=>false},state:{},pendingRestSave:Promise.resolve(),pendingSurfaceLocationSave:Promise.resolve(),captureWorkspaceView:()=>({}),setStatus:()=>{},store:{replace:s=>s,save:async()=>{calls.push('save');},flush:async()=>{calls.push('flush');if(failure)throw failure;}}};
  vm.runInNewContext(hook,context);return {calls,flush:context.window.__papersFlushBeforeClose};
 }
 test('reload does not ask the read-only launcher to write or flush its document queue',async()=>{const f=fixture('overlay',Error('not the writer'));const result=await f.flush();assert.equal(result.ok,true);assert.equal(result.skipped,'command-surface');assert.deepEqual(f.calls,[]);});
