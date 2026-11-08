@@ -50,10 +50,10 @@ test("maximizing a link gives its members the page in that window; restoring put
   const links = view(memory(), 'w1');
   links.click('a'); links.click('b'); links.cancel();
   const max = links.request('a', 'maximized', groups(['a'], ['b', 'minimized'], ['c'], ['d', 'minimized']));
-  assert.deepEqual(max.steps, [{ groupId: 'a', mode: 'normal' }, { groupId: 'b', mode: 'normal' }, { groupId: 'c', mode: 'minimized' }]);
+  assert.deepEqual(max.steps, [{ groupId: 'a', mode: 'maximized', side: 'link:a,b' }], 'one coordinator command keeps their relative sizes');
   assert.equal(links.linkMaximized('b'), true);
   const back = links.request('b', 'normal', groups(['a'], ['b'], ['c', 'minimized'], ['d', 'minimized']));
-  assert.deepEqual(back.steps, [{ groupId: 'c', mode: 'normal' }]);
+  assert.deepEqual(back.steps, [{ groupId: 'a', mode: 'normal', side: 'link:a,b' }, { groupId: 'c', mode: 'normal' }]);
   assert.equal(links.linkMaximized('a'), false);
 });
 

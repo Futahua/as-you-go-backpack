@@ -104,12 +104,16 @@ export function createPaneGroupLinks({ storage = globalThis.localStorage, now = 
     if (mode === 'maximized') {
       // A host-maximized group outside the link is restored first, or it would keep the page.
       writeLocalMax({ link, others: Object.fromEntries(others.map(g => [g.id, g.presentation === 'maximized' ? 'normal' : g.presentation])) });
-      return [...mine.map(g => ({ groupId: g.id, mode: 'normal' })), ...others.filter(g => g.presentation !== 'minimized').map(g => ({ groupId: g.id, mode: 'minimized' }))];
+      // One coordinator command: it minimizes the other groups and keeps the linked groups' sizes relative to each other.
+      return [{ groupId: mine[0].id, mode: 'maximized', side: 'link:' + mine.map(g => g.id).join(',') }];
     }
     if (mode === 'normal' && local?.link === link) {
       writeLocalMax(null);
       const current = new Map(groups.map(g => [g.id, g.presentation]));
-      return [...mine.filter(g => g.presentation !== 'normal').map(g => ({ groupId: g.id, mode: 'normal' })),
+      // The coordinator puts back the saved split ratios and presentations; the explicit steps after it only matter
+      // if Papers restarted since the maximize (they find every group already as it was otherwise).
+      return [{ groupId: mine[0].id, mode: 'normal', side: 'link:' + mine.map(g => g.id).join(',') },
+        ...mine.filter(g => g.presentation !== 'normal').map(g => ({ groupId: g.id, mode: 'normal' })),
         ...Object.entries(local.others).filter(([groupId, was]) => current.has(groupId) && current.get(groupId) !== was).map(([groupId, was]) => ({ groupId, mode: was }))];
     }
     if (local?.link === link) writeLocalMax(null);
