@@ -2,77 +2,80 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPaneGroupLinks } from './public/app/pane-group-links.js';
 
-function memory() { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) }; }
+function memory() { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: k => m.delete(k) }; }
 const groups = (...entries) => entries.map(([id, presentation = 'normal']) => ({ id, presentation }));
+function view(storage, binding) { const links = createPaneGroupLinks({ storage }); links.load(binding); return links; }
 
-test('two consecutive handle clicks link two groups with one colour; clicking a linked one removes just it', () => {
-  const links = createPaneGroupLinks({ storage: memory() }); links.load('b');
-  links.click('a'); assert.equal(links.look('a').pending, true);
-  links.click('b'); assert.ok(links.look('a').color); assert.equal(links.look('a').color, links.look('b').color);
+test('two handle clicks link two groups; picking stays on until Esc; a click while picking toggles membership', () => {
+  const links = view(memory(), 'w1');
+  links.click('a'); assert.equal(links.look('a').pending, true); assert.equal(links.look('a').acting, true);
+  links.click('b');
+  assert.ok(links.linkOf('a')); assert.equal(links.linkOf('a'), links.linkOf('b'));
   assert.equal(links.snapshot().picking, true, 'picking stays on after the second click');
-  links.click('e'); assert.equal(links.linkOf('e'), links.linkOf('a'), 'a third click joins the same link');
+  assert.equal(links.look('b').acting, true, 'the strips of the link being built are rainbow');
+  assert.equal(links.look('z').acting, false, 'other strips are not');
+  links.click('e'); assert.equal(links.linkOf('e'), links.linkOf('a'));
   links.click('e'); assert.equal(links.linkOf('e'), null, 'clicking a member while picking takes it back out');
   links.cancel(); assert.equal(links.snapshot().picking, false);
-  links.click('c'); links.click('d'); links.cancel();
-  assert.notEqual(links.look('c').color, links.look('a').color, 'a second link gets its own colour');
-  links.click('a'); assert.equal(links.linkOf('a'), null);
+  links.click('a'); assert.equal(links.linkOf('a'), null, 'outside picking a click unlinks');
   assert.equal(links.linkOf('b'), null, 'a link left with one group ends');
-  assert.ok(links.linkOf('c'));
 });
 
-test('Ctrl-click starts adding to that link; later clicks join it; Ctrl-click again stops', () => {
-  const links = createPaneGroupLinks({ storage: memory() }); links.load('b');
-  links.click('a', { ctrl: true }); links.click('b'); links.click('c');
-  const link = links.linkOf('a');
-  assert.equal(links.linkOf('b'), link); assert.equal(links.linkOf('c'), link);
+test('Ctrl-click picks for an existing link; Ctrl-click again stops', () => {
+  const links = view(memory(), 'w1');
+  links.click('a'); links.click('b'); links.cancel();
+  links.click('a', { ctrl: true }); links.click('c');
+  assert.equal(links.linkOf('c'), links.linkOf('a'));
   links.click('a', { ctrl: true }); assert.equal(links.adding, null);
-  links.click('b'); assert.equal(links.linkOf('b'), null, 'out of adding mode a click unlinks again');
-  assert.equal(links.linkOf('c'), link);
 });
 
-test('Esc cancels a half-made link and an adding mode that added nobody', () => {
-  const links = createPaneGroupLinks({ storage: memory() }); links.load('b');
-  links.click('a'); assert.equal(links.cancel(), true); assert.equal(links.look('a').pending, false);
-  links.click('x', { ctrl: true }); links.cancel(); assert.equal(links.linkOf('x'), null);
+test("links work across Papers windows and a linked action reaches each window's own members", () => {
+  const storage = memory(), w1 = view(storage, 'window-1'), w2 = view(storage, 'window-2');
+  w1.click('g1'); w2.click('g1');
+  assert.equal(w1.linkOf('g1'), w2.linkOf('g1'), 'the same group id in two windows is two groups, linked together');
+  w1.cancel();
+  const { steps, announce } = w1.request('g1', 'minimized', groups(['g1'], ['g2']));
+  assert.deepEqual(steps, [{ groupId: 'g1', mode: 'minimized' }]);
+  assert.ok(announce);
+  assert.deepEqual(w2.applyLink(announce.link, announce.mode, groups(['g1'], ['g3'])), [{ groupId: 'g1', mode: 'minimized' }]);
+  assert.deepEqual(view(storage, 'window-3').applyLink(announce.link, announce.mode, groups(['g1'])), [], 'a window without members does nothing');
 });
 
-test('linked groups minimize and restore together; unlinked ones act alone', () => {
-  const links = createPaneGroupLinks({ storage: memory() }); links.load('b');
+test('an unlinked group acts alone', () => {
+  const links = view(memory(), 'w1');
+  assert.deepEqual(links.request('c', 'minimized', groups(['c'])), { steps: [{ groupId: 'c', mode: 'minimized' }], announce: null });
+});
+
+test("maximizing a link gives its members the page in that window; restoring puts the others back", () => {
+  const links = view(memory(), 'w1');
   links.click('a'); links.click('b'); links.cancel();
-  assert.deepEqual(links.present('a', 'minimized', groups(['a'], ['b'], ['c'])), [{ groupId: 'a', mode: 'minimized' }, { groupId: 'b', mode: 'minimized' }]);
-  assert.deepEqual(links.present('c', 'minimized', groups(['a'], ['b'], ['c'])), [{ groupId: 'c', mode: 'minimized' }]);
-});
-
-test('maximizing a link gives it the page and restoring puts the others back as they were', () => {
-  const links = createPaneGroupLinks({ storage: memory() }); links.load('b');
-  links.click('a'); links.click('b'); links.cancel();
-  const max = links.present('a', 'maximized', groups(['a'], ['b', 'minimized'], ['c'], ['d', 'minimized']));
-  assert.deepEqual(max, [{ groupId: 'a', mode: 'normal' }, { groupId: 'b', mode: 'normal' }, { groupId: 'c', mode: 'minimized' }]);
+  const max = links.request('a', 'maximized', groups(['a'], ['b', 'minimized'], ['c'], ['d', 'minimized']));
+  assert.deepEqual(max.steps, [{ groupId: 'a', mode: 'normal' }, { groupId: 'b', mode: 'normal' }, { groupId: 'c', mode: 'minimized' }]);
   assert.equal(links.linkMaximized('b'), true);
-  const back = links.present('b', 'normal', groups(['a'], ['b'], ['c', 'minimized'], ['d', 'minimized']));
-  assert.deepEqual(back, [{ groupId: 'c', mode: 'normal' }]);
+  const back = links.request('b', 'normal', groups(['a'], ['b'], ['c', 'minimized'], ['d', 'minimized']));
+  assert.deepEqual(back.steps, [{ groupId: 'c', mode: 'normal' }]);
   assert.equal(links.linkMaximized('a'), false);
 });
 
-test('links are remembered per layout', () => {
-  const storage = memory();
-  const one = createPaneGroupLinks({ storage }); one.load('layout-1'); one.click('a'); one.click('b'); one.cancel();
-  const two = createPaneGroupLinks({ storage }); two.load('layout-1');
-  assert.ok(two.linkOf('a')); assert.equal(two.linkOf('a'), two.linkOf('b'));
-  two.load('layout-2'); assert.equal(two.linkOf('a'), null);
+test('a link keeps one colour for every window, kept 45° from colours in use', () => {
+  const storage = memory(), w1 = view(storage, 'w1'), w2 = view(storage, 'w2');
+  w1.click('a'); w1.click('b'); w1.cancel(); w1.click('c'); w1.click('d'); w1.cancel();
+  const first = w1.linkOf('a'), second = w1.linkOf('c');
+  assert.equal(w1.snapshot().needsHue(first), true);
+  w1.assignHues([[first, 100], [second, 110]]);
+  assert.equal(w1.look('a').color, 'oklch(68% 0.18 100deg)');
+  assert.equal(w1.look('c').color, 'oklch(68% 0.18 155deg)', 'a proposed hue too close to one in use moves 45° on');
+  w2.assignHues([[first, 300]]);
+  assert.equal(w1.look('a').color, 'oklch(68% 0.18 100deg)', 'a chosen colour never changes, whichever window proposes one');
 });
 
-test('two views of the same layout share links and the picking mode instead of overwriting each other', () => {
-  const storage = memory();
-  const left = createPaneGroupLinks({ storage }), right = createPaneGroupLinks({ storage });
-  left.load('layout'); right.load('layout');
+test("picking started in one view shows in the other; neither overwrites the other's links", () => {
+  const storage = memory(), left = view(storage, 'layout'), right = view(storage, 'layout');
   left.click('a'); left.click('b'); left.cancel();
   right.click('c', { ctrl: true });
-  assert.equal(left.snapshot().picking, true, 'picking started in one view shows in the other');
-  left.click('d');
-  right.cancel();
-  assert.ok(left.linkOf('a')); assert.equal(left.linkOf('a'), right.linkOf('b'));
+  assert.equal(left.snapshot().picking, true);
+  left.click('d'); right.cancel();
+  assert.equal(left.linkOf('a'), right.linkOf('b'));
   assert.equal(right.linkOf('d'), right.linkOf('c'));
-  assert.notEqual(right.look('c').color, right.look('a').color);
-  assert.equal(left.snapshot().picking, false);
+  assert.notEqual(right.linkOf('c'), right.linkOf('a'));
 });
