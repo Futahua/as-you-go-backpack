@@ -1,5 +1,6 @@
 /* Linked window groups (creator, 2026-11-08). A group's grab handle (⠿) links it with others:
- * - click one handle, then another: the two become a link group, and their handles share a colour;
+ * - click one handle, then another: the two become a link group, and their handles share a colour; picking
+ *   stays on (rainbow strips) so every further click adds to that link (or takes a member out) until Esc;
  * - click a handle that is already linked: that group leaves its link (a link left with one group ends);
  * - Ctrl-click a handle: every following click adds to that handle's link; Ctrl-click it again or Esc to stop;
  * - Esc cancels a half-made link or the adding mode. While picking, every group strip turns rainbow.
@@ -68,12 +69,15 @@ export function createPaneGroupLinks({ storage = globalThis.localStorage, now = 
           state.adding = { link, anchor: groupId }; state.pending = null; state.pickAt = now();
         }
       } else if (state.adding) {
+        // While picking, a click adds a group to the link being built, or takes one of its members back out.
         if (linkOf(groupId) !== state.adding.link) { leave(state, groupId); state.members[groupId] = state.adding.link; }
+        else if (state.adding.anchor !== groupId) delete state.members[groupId];
         state.pickAt = now();
       } else if (linkOf(groupId)) {
         leave(state, groupId); state.pending = null;
       } else if (state.pending && state.pending !== groupId) {
-        const link = newLink(state); state.members[state.pending] = link; state.members[groupId] = link; state.pending = null;
+        const link = newLink(state); state.members[state.pending] = link; state.members[groupId] = link;
+        state.adding = { link, anchor: state.pending }; state.pending = null; state.pickAt = now();
       } else {
         state.pending = state.pending === groupId ? null : groupId; state.pickAt = now();
       }

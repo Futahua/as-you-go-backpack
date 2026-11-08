@@ -9,7 +9,11 @@ test('two consecutive handle clicks link two groups with one colour; clicking a 
   const links = createPaneGroupLinks({ storage: memory() }); links.load('b');
   links.click('a'); assert.equal(links.look('a').pending, true);
   links.click('b'); assert.ok(links.look('a').color); assert.equal(links.look('a').color, links.look('b').color);
-  links.click('c'); links.click('d');
+  assert.equal(links.snapshot().picking, true, 'picking stays on after the second click');
+  links.click('e'); assert.equal(links.linkOf('e'), links.linkOf('a'), 'a third click joins the same link');
+  links.click('e'); assert.equal(links.linkOf('e'), null, 'clicking a member while picking takes it back out');
+  links.cancel(); assert.equal(links.snapshot().picking, false);
+  links.click('c'); links.click('d'); links.cancel();
   assert.notEqual(links.look('c').color, links.look('a').color, 'a second link gets its own colour');
   links.click('a'); assert.equal(links.linkOf('a'), null);
   assert.equal(links.linkOf('b'), null, 'a link left with one group ends');
@@ -34,14 +38,14 @@ test('Esc cancels a half-made link and an adding mode that added nobody', () => 
 
 test('linked groups minimize and restore together; unlinked ones act alone', () => {
   const links = createPaneGroupLinks({ storage: memory() }); links.load('b');
-  links.click('a'); links.click('b');
+  links.click('a'); links.click('b'); links.cancel();
   assert.deepEqual(links.present('a', 'minimized', groups(['a'], ['b'], ['c'])), [{ groupId: 'a', mode: 'minimized' }, { groupId: 'b', mode: 'minimized' }]);
   assert.deepEqual(links.present('c', 'minimized', groups(['a'], ['b'], ['c'])), [{ groupId: 'c', mode: 'minimized' }]);
 });
 
 test('maximizing a link gives it the page and restoring puts the others back as they were', () => {
   const links = createPaneGroupLinks({ storage: memory() }); links.load('b');
-  links.click('a'); links.click('b');
+  links.click('a'); links.click('b'); links.cancel();
   const max = links.present('a', 'maximized', groups(['a'], ['b', 'minimized'], ['c'], ['d', 'minimized']));
   assert.deepEqual(max, [{ groupId: 'a', mode: 'normal' }, { groupId: 'b', mode: 'normal' }, { groupId: 'c', mode: 'minimized' }]);
   assert.equal(links.linkMaximized('b'), true);
@@ -52,7 +56,7 @@ test('maximizing a link gives it the page and restoring puts the others back as 
 
 test('links are remembered per layout', () => {
   const storage = memory();
-  const one = createPaneGroupLinks({ storage }); one.load('layout-1'); one.click('a'); one.click('b');
+  const one = createPaneGroupLinks({ storage }); one.load('layout-1'); one.click('a'); one.click('b'); one.cancel();
   const two = createPaneGroupLinks({ storage }); two.load('layout-1');
   assert.ok(two.linkOf('a')); assert.equal(two.linkOf('a'), two.linkOf('b'));
   two.load('layout-2'); assert.equal(two.linkOf('a'), null);
@@ -62,7 +66,7 @@ test('two views of the same layout share links and the picking mode instead of o
   const storage = memory();
   const left = createPaneGroupLinks({ storage }), right = createPaneGroupLinks({ storage });
   left.load('layout'); right.load('layout');
-  left.click('a'); left.click('b');
+  left.click('a'); left.click('b'); left.cancel();
   right.click('c', { ctrl: true });
   assert.equal(left.snapshot().picking, true, 'picking started in one view shows in the other');
   left.click('d');
