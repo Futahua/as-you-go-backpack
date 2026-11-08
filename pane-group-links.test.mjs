@@ -79,3 +79,31 @@ test("picking started in one view shows in the other; neither overwrites the oth
   assert.equal(right.linkOf('d'), right.linkOf('c'));
   assert.notEqual(right.linkOf('c'), right.linkOf('a'));
 });
+
+test('Ctrl acts on one group, which then keeps its state while its link moves; a plain click on it rejoins the link', () => {
+  const links = view(memory(), 'page');
+  links.click('a'); links.click('b'); links.cancel();
+  const max = links.request('a', 'maximized', groups(['a'], ['b'], ['c']));
+  assert.deepEqual(max.steps, [{ groupId: 'a', mode: 'maximized', side: 'link:a,b' }]);
+  const alone = links.request('b', 'minimized', groups(['a'], ['b'], ['c', 'minimized']), { ctrl: true });
+  assert.deepEqual(alone, { steps: [{ groupId: 'b', mode: 'minimized' }], announce: null });
+  const back = links.request('a', 'normal', groups(['a'], ['b', 'minimized'], ['c', 'minimized']));
+  assert.deepEqual(back.steps[0], { groupId: 'a', mode: 'normal', side: 'link:a|keep:b' }, 'the restore leaves B as you set it');
+  assert.ok(!back.steps.some(step => step.groupId === 'b'));
+  const rejoin = links.request('b', 'normal', groups(['a'], ['b', 'minimized'], ['c']));
+  assert.deepEqual(rejoin.steps, [{ groupId: 'b', mode: 'normal' }], 'a plain click on B acts on the link again, B included');
+});
+
+test('links survive a reload: they are keyed by the page, not by the per-load layout binding', () => {
+  const storage = memory();
+  const before = view(storage, 'page-key'); before.click('a'); before.click('b'); before.cancel();
+  const after = view(storage, 'page-key');
+  assert.ok(after.linkOf('a')); assert.equal(after.linkOf('a'), after.linkOf('b'));
+});
+
+test('a removed group drops out of its link', () => {
+  const links = view(memory(), 'page');
+  links.click('a'); links.click('b'); links.click('c'); links.cancel();
+  links.drop('a'); assert.equal(links.linkOf('a'), null); assert.equal(links.linkOf('b'), links.linkOf('c'));
+  links.drop('b'); assert.equal(links.linkOf('c'), null, 'a link left with one group ends');
+});

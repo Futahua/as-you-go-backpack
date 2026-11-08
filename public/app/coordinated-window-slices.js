@@ -33,16 +33,18 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
   const links=createPaneGroupLinks();
   if(!document.getElementById('pane-group-link-style')){const style=document.createElement('style');style.id='pane-group-link-style';style.textContent='.window-slice.is-linked .slice-group-handle,.window-slice.is-linked button:has(+ .slice-group-handle){background:var(--link-color);color:#15181c;border-radius:6px}.window-slice.is-linked .slice-group-handle svg,.window-slice.is-linked button:has(+ .slice-group-handle) svg{color:#15181c;stroke:currentColor}.slice-group-handle.is-link-pending{outline:2px dashed #e6e9ef;outline-offset:1px}.slice-group-handle.is-link-anchor{outline:2px solid #e6e9ef;outline-offset:1px}@keyframes pane-link-rainbow{to{background-position:200% 0}}.window-slice.link-acting .window-slice-header{position:relative}.window-slice.link-acting .window-slice-header::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.42;background:linear-gradient(90deg,#ff4d4d,#ffa64d,#ffe14d,#5dde6b,#4dd2ff,#6b6bff,#d16bff,#ff4d4d);background-size:200% 100%;animation:pane-link-rainbow 2.4s linear infinite}';document.head.append(style);}
   // Every window-group view on the page (and other windows, through storage) redraws when links change.
+  const linkPage=(()=>{try{const url=new URL(document.defaultView.location.href);return url.searchParams.get('papers-surface-key')||url.pathname;}catch{return 'page';}})();
+  let linkCtrl=false; // Ctrl held on the last press: min/max/restore then act on that group alone
   const linksChanged=()=>{document.defaultView.dispatchEvent(new CustomEvent('papers:pane-group-links-changed'));};
   const runSteps=steps=>steps.reduce((done,step)=>done.then(()=>command('presentation',step)),Promise.resolve());
   const linkChannel=typeof BroadcastChannel==='function'?new BroadcastChannel('papers-pane-group-links'):null;
-  linkChannel?.addEventListener('message',event=>{const action=event.data;if(disposed||!snapshot||typeof action?.link!=='string'||!['normal','minimized','maximized'].includes(action.mode))return;links.load(snapshot.binding);void runSteps(links.applyLink(action.link,action.mode,snapshot.groups)).finally(schedule);});
-  const presentLinked=(groupId,mode)=>{const {steps,announce}=links.request(groupId,mode,snapshot?.groups||[]);if(announce)linkChannel?.postMessage(announce);linksChanged();return runSteps(steps);};
+  linkChannel?.addEventListener('message',event=>{const action=event.data;if(disposed||!snapshot||typeof action?.link!=='string'||!['normal','minimized','maximized'].includes(action.mode))return;links.load(linkPage);void runSteps(links.applyLink(action.link,action.mode,snapshot.groups)).finally(schedule);});
+  const presentLinked=(groupId,mode)=>{const {steps,announce}=links.request(groupId,mode,snapshot?.groups||[],{ctrl:linkCtrl});if(announce)linkChannel?.postMessage(announce);linksChanged();return runSteps(steps);};
   const linkRedraw=()=>schedule();const linkStorage=event=>{if(event.key===links.key)schedule();};
   document.defaultView.addEventListener('papers:pane-group-links-changed',linkRedraw);document.defaultView.addEventListener('storage',linkStorage);
   // Esc cancels a half-made link or the Ctrl adding mode; clicking elsewhere cancels a half-made link.
   const linkKey=event=>{if(event.key==='Escape'&&links.cancel()){event.stopPropagation();linksChanged();}};
-  const linkOutside=event=>{if(links.pending&&!links.adding&&!event.target?.closest?.('.slice-group-handle')){links.cancel();linksChanged();}};
+  const linkOutside=event=>{linkCtrl=Boolean(event.ctrlKey||event.metaKey);if(links.pending&&!links.adding&&!event.target?.closest?.('.slice-group-handle')){links.cancel();linksChanged();}};
   document.addEventListener('keydown',linkKey,true);document.addEventListener('pointerdown',linkOutside,true);
   const icons=new Map();
   function previewIcon(tab){if(!tab)return null;if(!icons.has(tab.path)){icons.set(tab.path,null);void host.fileCapability("icon",{path:tab.path}).then(reply=>{if(disposed)return;if(reply?.ok&&reply.icon){icons.set(tab.path,reply.icon);schedule();}}).catch(()=>{});}return icons.get(tab.path)||tab.previewIcon||tab.icon||null;}
@@ -169,12 +171,12 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
     });
     view.min=toolsButton(tools,'Minimize group','−',()=>presentLinked(group.id,snapshot.groups.find(g=>g.id===group.id)?.presentation==='minimized'?'normal':'minimized'));
     view.max=toolsButton(tools,'Maximize group','□',()=>presentLinked(group.id,links.linkMaximized(group.id)||snapshot.groups.find(g=>g.id===group.id)?.presentation==='maximized'?'normal':'maximized'));
-    view.close=toolsButton(tools,'Remove window group','×',()=>command('close-group',{groupId:group.id,destination:snapshot.groups.find(g=>g.id!==group.id).id}));
+    view.close=toolsButton(tools,'Remove window group','×',()=>command('close-group',{groupId:group.id,destination:snapshot.groups.find(g=>g.id!==group.id).id}).then(reply=>{links.drop(group.id);linksChanged();return reply;}));
     // A vertical minimized group can be empty. Its header is hidden, and a
     // tab-icon-only restore rail would otherwise leave it impossible to reopen.
     view.railRestore=toolsButton(railControls,'Restore group','↗',()=>presentLinked(group.id,'normal'));
     view.railMax=toolsButton(railControls,'Maximize group','□',()=>presentLinked(group.id,'maximized'));
-    view.railClose=toolsButton(railControls,'Remove window group','×',()=>command('close-group',{groupId:group.id,destination:snapshot.groups.find(g=>g.id!==group.id).id}));
+    view.railClose=toolsButton(railControls,'Remove window group','×',()=>command('close-group',{groupId:group.id,destination:snapshot.groups.find(g=>g.id!==group.id).id}).then(reply=>{links.drop(group.id);linksChanged();return reply;}));
     header.append(tools);views.set(group.id,view);return view;
   }
   // Link colours follow As you Go's folder colouring: a hue from where the link's groups sit around the
@@ -183,7 +185,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
    const view=snapshot.viewport||{x:0,y:0,width:win.innerWidth,height:win.innerHeight},list=[...centres].map(([id,c])=>({id,x:c.x/c.n,y:c.y/c.n}));
    const missing=list.filter(item=>linkView.needsHue(item.id));if(!missing.length)return false;
    const hues=assignSpatialFolderHues(list,new Map(),{cx:(view.x||0)+(view.width||0)/2,cy:(view.y||0)+(view.height||0)/2});links.assignHues(missing.map(item=>[item.id,hues.get(item.id)]));return true;}
-  function render(){frame=0;if(disposed||!mounted||!snapshot)return;links.load(snapshot.binding);let linkView=links.snapshot();if(linkColours(linkView))linkView=links.snapshot();
+  function render(){frame=0;if(disposed||!mounted||!snapshot)return;links.load(linkPage);let linkView=links.snapshot();if(linkColours(linkView))linkView=links.snapshot();
     const hidden=root.element.hidden,maximum=snapshot.groups.find(g=>g.presentation==='maximized')?.id;
     region.hidden=hidden;region.classList.toggle('slice-page-maximized',Boolean(maximum));
     for(const [id,view] of views)if(!snapshot.groups.some(g=>g.id===id)){view.native.destroy();view.element.remove();views.delete(id);}

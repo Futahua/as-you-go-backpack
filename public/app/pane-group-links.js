@@ -12,7 +12,7 @@
  *
  * Every window and every window-group view keeps its own copy of this module, so the links, their colours
  * and the picking mode live only in storage (one key for all windows), read fresh on every use. A group is
- * known as "<layout binding>|<group id>". Each window remembers what it minimized for a maximize under its
+ * known as "<page key>|<group id>" (the page key survives reloads and reboots). Each window remembers what it minimized for a maximize under its
  * own key, so windows never overwrite each other's restore state. A link's colour is chosen once, the way
  * As you Go colours a folder, so it is the same in every window. */
 
@@ -24,7 +24,9 @@ export function createPaneGroupLinks({ storage = globalThis.localStorage, now = 
   let binding = 'default';
   const id = groupId => binding + '|' + groupId;
 
-  function empty() { return { members: {}, hues: {}, maxedLinks: {}, pending: null, adding: null, pickAt: 0 }; }
+  // own: linked groups the creator set on their own with Ctrl-click; linked actions skip them until a plain click on
+  // one of that group's own buttons makes it follow its link again.
+  function empty() { return { members: {}, own: {}, hues: {}, maxedLinks: {}, pending: null, adding: null, pickAt: 0 }; }
   function read() {
     let state;
     try {
@@ -47,13 +49,13 @@ export function createPaneGroupLinks({ storage = globalThis.localStorage, now = 
     if (state.adding?.link === link) return;
     const members = membersOf(state, link);
     if (members.length > 1) return;
-    for (const member of members) delete state.members[member];
+    for (const member of members) { delete state.members[member]; delete state.own[member]; }
     delete state.hues[link]; delete state.maxedLinks[link];
   }
   function leave(state, member) {
     const link = state.members[member];
     if (!link) return;
-    delete state.members[member];
+    delete state.members[member]; delete state.own[member];
     dissolveIfSingle(state, link);
   }
 
@@ -97,22 +99,25 @@ export function createPaneGroupLinks({ storage = globalThis.localStorage, now = 
 
   /** This window's presentation steps for a linked action (also run when another window announces one). */
   function applyLink(link, mode, groups) {
-    const state = read(), set = new Set(membersOf(state, link));
-    const mine = groups.filter(g => set.has(id(g.id))), others = groups.filter(g => !set.has(id(g.id)));
+    const state = read(), set = new Set(membersOf(state, link)), own = state.own || {};
+    const linked = groups.filter(g => set.has(id(g.id))), others = groups.filter(g => !set.has(id(g.id)));
+    const mine = linked.filter(g => !own[id(g.id)]), kept = linked.filter(g => own[id(g.id)]);
     if (!mine.length) return [];
+    const spec = 'link:' + mine.map(g => g.id).join(',') + (kept.length ? '|keep:' + kept.map(g => g.id).join(',') : '');
     const local = readLocalMax();
     if (mode === 'maximized') {
       // A host-maximized group outside the link is restored first, or it would keep the page.
       writeLocalMax({ link, others: Object.fromEntries(others.map(g => [g.id, g.presentation === 'maximized' ? 'normal' : g.presentation])) });
+      // Groups set on their own keep their state; only the rest of the link and the unlinked groups move.
       // One coordinator command: it minimizes the other groups and keeps the linked groups' sizes relative to each other.
-      return [{ groupId: mine[0].id, mode: 'maximized', side: 'link:' + mine.map(g => g.id).join(',') }];
+      return [{ groupId: mine[0].id, mode: 'maximized', side: spec }];
     }
     if (mode === 'normal' && local?.link === link) {
       writeLocalMax(null);
       const current = new Map(groups.map(g => [g.id, g.presentation]));
       // The coordinator puts back the saved split ratios and presentations; the explicit steps after it only matter
       // if Papers restarted since the maximize (they find every group already as it was otherwise).
-      return [{ groupId: mine[0].id, mode: 'normal', side: 'link:' + mine.map(g => g.id).join(',') },
+      return [{ groupId: mine[0].id, mode: 'normal', side: spec },
         ...mine.filter(g => g.presentation !== 'normal').map(g => ({ groupId: g.id, mode: 'normal' })),
         ...Object.entries(local.others).filter(([groupId, was]) => current.has(groupId) && current.get(groupId) !== was).map(([groupId, was]) => ({ groupId, mode: was }))];
     }
@@ -120,9 +125,12 @@ export function createPaneGroupLinks({ storage = globalThis.localStorage, now = 
     return mine.filter(g => g.presentation !== mode).map(g => ({ groupId: g.id, mode }));
   }
   /** A min/max/restore on one group: this window's steps, and the action to announce to other windows. */
-  function request(groupId, mode, groups) {
+  function request(groupId, mode, groups, { ctrl = false } = {}) {
     const me = id(groupId);
+    // Ctrl: this group alone, and it keeps that state while its link moves around it.
+    if (ctrl) { change(state => { if (state.members[me]) state.own[me] = mode; }); return { steps: [{ groupId, mode }], announce: null }; }
     const link = change(state => {
+      delete state.own[me]; // a plain click on its own buttons makes it follow its link again
       const link = state.members[me] || null;
       if (!link || membersOf(state, link).length < 2) return null;
       if (mode === 'maximized') state.maxedLinks[link] = true; else delete state.maxedLinks[link];
@@ -131,6 +139,8 @@ export function createPaneGroupLinks({ storage = globalThis.localStorage, now = 
     if (!link) return { steps: [{ groupId, mode }], announce: null };
     return { steps: applyLink(link, mode, groups), announce: { link, mode } };
   }
+  /** A group removed with its × drops out of its link (a link left with one group ends). */
+  function drop(groupId) { change(state => leave(state, id(groupId))); }
   /** Whether this group's link currently holds the page (shows the maximize button as restore). */
   function linkMaximized(groupId) { const state = read(); const link = state.members[id(groupId)]; return Boolean(link && state.maxedLinks[link]); }
 
@@ -172,7 +182,7 @@ export function createPaneGroupLinks({ storage = globalThis.localStorage, now = 
   }
   const look = groupId => snapshot().look(groupId);
   const linkOf = groupId => read().members[id(groupId)] || null;
-  return { load, click, cancel, request, applyLink, linkMaximized, assignHues, snapshot, look, linkOf, key: KEY,
+  return { load, click, cancel, request, applyLink, drop, linkMaximized, assignHues, snapshot, look, linkOf, key: KEY,
     get pending() { return read().pending; }, get adding() { return read().adding; } };
 }
 
