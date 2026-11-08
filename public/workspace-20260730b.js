@@ -5413,8 +5413,8 @@ window.__papersFlushBeforeClose = async () => {
   if (WIDGET_SURFACE) return { ok: true, skipped: 'compact-widget' };
   // A device's Files tab saves its edits to that device as they happen; it is not that document's
   // writer, so saving its view position is refused, which also blocked the window from closing.
-  if (REMOTE_DEVICE) { await store.flush({ ignoreAutomaticWriterRefusal: true }); return { ok: true, skipped: 'device-view' }; }
-  if(!hasDocumentWriteAuthority()){await store.flush({ignoreAutomaticWriterRefusal:true});return {ok:true,skipped:'follower-view'};}
+  if (REMOTE_DEVICE) { await store.flush({ ignoreAutomaticWriterRefusal: true, ignoreAutomaticFailures: true }); return { ok: true, skipped: 'device-view' }; }
+  if(!hasDocumentWriteAuthority()){await store.flush({ignoreAutomaticWriterRefusal:true,ignoreAutomaticFailures:true});return {ok:true,skipped:'follower-view'};}
   graph._saveRestPositionsNow();
   if (PROJECT_SURFACE_KEY && !detachSaveGate.isReadOnly()) {
     state = store.replace(captureWorkspaceView());
