@@ -5413,7 +5413,9 @@ window.__papersFlushBeforeClose = async () => {
   if (WIDGET_SURFACE) return { ok: true, skipped: 'compact-widget' };
   // A device's Files tab saves its edits to that device as they happen; it is not that document's
   // writer, so saving its view position is refused, which also blocked the window from closing.
-  if (REMOTE_DEVICE) { await store.flush({ ignoreAutomaticWriterRefusal: true, ignoreAutomaticFailures: true }); return { ok: true, skipped: 'device-view' }; }
+  // A device's Files tab is a view of another device's workspace; reloading fetches it again from that device. A save
+  // that device keeps refusing must not keep Papers from reloading: report it on the tab and let the reload go ahead.
+  if (REMOTE_DEVICE) { try { await store.flush({ ignoreAutomaticWriterRefusal: true, ignoreAutomaticFailures: true }); } catch (error) { setStatus('Not saved on that device: ' + (error instanceof Error ? error.message : String(error))); return { ok: true, skipped: 'device-view', unsaved: true }; } return { ok: true, skipped: 'device-view' }; }
   if(!hasDocumentWriteAuthority()){await store.flush({ignoreAutomaticWriterRefusal:true,ignoreAutomaticFailures:true});return {ok:true,skipped:'follower-view'};}
   graph._saveRestPositionsNow();
   if (PROJECT_SURFACE_KEY && !detachSaveGate.isReadOnly()) {
