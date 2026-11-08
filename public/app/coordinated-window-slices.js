@@ -33,10 +33,10 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
   const links=createPaneGroupLinks();
   if(!document.getElementById('pane-group-link-style')){const style=document.createElement('style');style.id='pane-group-link-style';style.textContent='.slice-group-handle.is-link-pending{outline:1.5px dashed #e6e9ef;outline-offset:1px}.slice-group-handle.is-link-adding{outline:1.5px dashed currentColor;outline-offset:1px}.slice-group-handle.is-link-anchor{outline-style:solid}@keyframes pane-link-rainbow{to{background-position:200% 0}}.window-slices-region.link-picking .window-slice-header{position:relative}.window-slices-region.link-picking .window-slice-header::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.42;background:linear-gradient(90deg,#ff4d4d,#ffa64d,#ffe14d,#5dde6b,#4dd2ff,#6b6bff,#d16bff,#ff4d4d);background-size:200% 100%;animation:pane-link-rainbow 2.4s linear infinite}';document.head.append(style);}
   // Every window-group view on the page (and other windows, through storage) redraws when links change.
-  const linksChanged=()=>{win.dispatchEvent(new CustomEvent('papers:pane-group-links-changed'));};
+  const linksChanged=()=>{document.defaultView.dispatchEvent(new CustomEvent('papers:pane-group-links-changed'));};
   const presentLinked=(groupId,mode)=>{const steps=links.present(groupId,mode,snapshot?.groups||[]);linksChanged();return steps.reduce((done,step)=>done.then(()=>command('presentation',step)),Promise.resolve());};
   const linkRedraw=()=>schedule();const linkStorage=event=>{if(event.key===links.key)schedule();};
-  win.addEventListener('papers:pane-group-links-changed',linkRedraw);win.addEventListener('storage',linkStorage);
+  document.defaultView.addEventListener('papers:pane-group-links-changed',linkRedraw);document.defaultView.addEventListener('storage',linkStorage);
   // Esc cancels a half-made link or the Ctrl adding mode; clicking elsewhere cancels a half-made link.
   const linkKey=event=>{if(event.key==='Escape'&&links.cancel()){event.stopPropagation();linksChanged();}};
   const linkOutside=event=>{if(links.pending&&!links.adding&&!event.target?.closest?.('.slice-group-handle')){links.cancel();linksChanged();}};
