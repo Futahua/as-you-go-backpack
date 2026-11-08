@@ -6,6 +6,7 @@ import {paneSpanTargets,paneSpanDrop} from './pane-span-drop.js';
 import {showMoveRefusal} from './move-feedback.js';
 import {WINDOW_TAB_MIME,windowTabTransfer} from './window-tab-transfer.js';
 import {createPaneGroupLinks} from './pane-group-links.js';
+import {assignSpatialFolderHues} from '../graph-model-20260730b.js';
 
 export const GROUP_DRAG_MIME='application/x-papers-pane-group';
 const PAGE_TAB_MIME='application/x-papers-page';
@@ -30,11 +31,15 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
   root.element.style.transition='none';
   // Grab-handle links: linked groups minimize, maximize and restore together (pane-group-links.js).
   const links=createPaneGroupLinks();
-  if(!document.getElementById('pane-group-link-style')){const style=document.createElement('style');style.id='pane-group-link-style';style.textContent='.slice-group-handle.is-link-pending{outline:1.5px dashed #e6e9ef;outline-offset:1px}.slice-group-handle.is-link-adding{outline:1.5px dashed currentColor;outline-offset:1px}.slice-group-handle.is-link-anchor{outline-style:solid}';document.head.append(style);}
-  const presentLinked=(groupId,mode)=>links.present(groupId,mode,snapshot?.groups||[]).reduce((done,step)=>done.then(()=>command('presentation',step)),Promise.resolve());
+  if(!document.getElementById('pane-group-link-style')){const style=document.createElement('style');style.id='pane-group-link-style';style.textContent='.slice-group-handle.is-link-pending{outline:1.5px dashed #e6e9ef;outline-offset:1px}.slice-group-handle.is-link-adding{outline:1.5px dashed currentColor;outline-offset:1px}.slice-group-handle.is-link-anchor{outline-style:solid}@keyframes pane-link-rainbow{to{background-position:200% 0}}.window-slices-region.link-picking .window-slice-header{position:relative}.window-slices-region.link-picking .window-slice-header::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:.42;background:linear-gradient(90deg,#ff4d4d,#ffa64d,#ffe14d,#5dde6b,#4dd2ff,#6b6bff,#d16bff,#ff4d4d);background-size:200% 100%;animation:pane-link-rainbow 2.4s linear infinite}';document.head.append(style);}
+  // Every window-group view on the page (and other windows, through storage) redraws when links change.
+  const linksChanged=()=>{win.dispatchEvent(new CustomEvent('papers:pane-group-links-changed'));};
+  const presentLinked=(groupId,mode)=>{const steps=links.present(groupId,mode,snapshot?.groups||[]);linksChanged();return steps.reduce((done,step)=>done.then(()=>command('presentation',step)),Promise.resolve());};
+  const linkRedraw=()=>schedule();const linkStorage=event=>{if(event.key===links.key)schedule();};
+  win.addEventListener('papers:pane-group-links-changed',linkRedraw);win.addEventListener('storage',linkStorage);
   // Esc cancels a half-made link or the Ctrl adding mode; clicking elsewhere cancels a half-made link.
-  const linkKey=event=>{if(event.key==='Escape'&&links.cancel()){event.stopPropagation();schedule();}};
-  const linkOutside=event=>{if(links.pending&&!links.adding&&!event.target?.closest?.('.slice-group-handle')){links.cancel();schedule();}};
+  const linkKey=event=>{if(event.key==='Escape'&&links.cancel()){event.stopPropagation();linksChanged();}};
+  const linkOutside=event=>{if(links.pending&&!links.adding&&!event.target?.closest?.('.slice-group-handle')){links.cancel();linksChanged();}};
   document.addEventListener('keydown',linkKey,true);document.addEventListener('pointerdown',linkOutside,true);
   const icons=new Map();
   function previewIcon(tab){if(!tab)return null;if(!icons.has(tab.path)){icons.set(tab.path,null);void host.fileCapability("icon",{path:tab.path}).then(reply=>{if(disposed)return;if(reply?.ok&&reply.icon){icons.set(tab.path,reply.icon);schedule();}}).catch(()=>{});}return icons.get(tab.path)||tab.previewIcon||tab.icon||null;}
@@ -122,7 +127,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
     header.addEventListener('scroll',paintContour,true);
     const handle=document.createElement('button');handle.type='button';handle.className='slice-group-handle';handle.draggable=true;handle.textContent='⠿';handle.title='Move group — center swaps; edge resplits';handle.setAttribute('aria-label','Move entire group');handle.dataset.groupId=group.id;
     handle.addEventListener('dragstart',event=>{groupDragId=group.id;event.dataTransfer.setData(GROUP_DRAG_MIME,group.id);const current=snapshot.groups.find(g=>g.id===group.id);if(current?.transferId)event.dataTransfer.setData(PANE_TRANSFER_MIME,JSON.stringify({transferId:current.transferId,binding:snapshot.binding,kind:'group'}));event.dataTransfer.effectAllowed='move';});
-    handle.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();links.click(group.id,{ctrl:event.ctrlKey||event.metaKey});schedule();});
+    handle.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();links.click(group.id,{ctrl:event.ctrlKey||event.metaKey});linksChanged();});
     element.addEventListener('pointerdown',()=>{lensGroup=group.id;},true);
     const listeners=new Set(),tools=document.createElement('span');tools.className='window-slice-controls';
     const rail=document.createElement("div");rail.className="slice-vertical-restore";element.append(rail);
@@ -169,7 +174,12 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
     view.railClose=toolsButton(railControls,'Remove window group','×',()=>command('close-group',{groupId:group.id,destination:snapshot.groups.find(g=>g.id!==group.id).id}));
     header.append(tools);views.set(group.id,view);return view;
   }
-  function render(){frame=0;if(disposed||!mounted||!snapshot)return;links.load(snapshot.binding);
+  // Link colours follow As you Go's folder colouring: a hue from where the link's groups sit around the
+  // page centre, nearby links kept apart (assignSpatialFolderHues), painted as oklch(68% 0.18 hue).
+  function linkColours(linkView){const centres=new Map();for(const group of snapshot.groups){const link=linkView.linkOf(group.id);if(!link||!group.slot)continue;const c=centres.get(link)||{x:0,y:0,n:0};c.x+=group.slot.x+group.slot.width/2;c.y+=group.slot.y+group.slot.height/2;c.n++;centres.set(link,c);}
+   const view=snapshot.viewport||{x:0,y:0,width:win.innerWidth,height:win.innerHeight},list=[...centres].map(([id,c])=>({id,x:c.x/c.n,y:c.y/c.n}));
+   const hues=list.length?assignSpatialFolderHues(list,new Map(),{cx:(view.x||0)+(view.width||0)/2,cy:(view.y||0)+(view.height||0)/2}):new Map();return id=>hues.has(id)?'oklch(68% 0.18 '+hues.get(id)+'deg)':null;}
+  function render(){frame=0;if(disposed||!mounted||!snapshot)return;links.load(snapshot.binding);const linkView=links.snapshot(),linkColour=linkColours(linkView);region.classList.toggle('link-picking',linkView.picking);
     const hidden=root.element.hidden,maximum=snapshot.groups.find(g=>g.presentation==='maximized')?.id;
     region.hidden=hidden;region.classList.toggle('slice-page-maximized',Boolean(maximum));
     for(const [id,view] of views)if(!snapshot.groups.some(g=>g.id===id)){view.native.destroy();view.element.remove();views.delete(id);}
@@ -189,7 +199,7 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
       view.close.hidden=snapshot.groups.length<2||group.tabs.some(t=>protectedTabs.some(p=>ref(p.id)===t.id));view.handle.disabled=false;
       view.railClose.hidden=view.close.hidden;
       view.min.textContent=group.presentation==='minimized'?'↗':'−';view.max.textContent=group.presentation==='maximized'||links.linkMaximized(group.id)?'❐':'□';
-      {const look=links.look(group.id);view.handle.style.color=look.color||'';view.handle.style.boxShadow=look.color?'inset 0 0 0 1.5px '+look.color:'';view.handle.classList.toggle('is-link-pending',look.pending);view.handle.classList.toggle('is-link-adding',look.adding);view.handle.classList.toggle('is-link-anchor',look.anchor);}
+      {const look=linkView.look(group.id),color=look.link?linkColour(look.link)||look.color:null;view.handle.style.color=color||'';view.handle.style.boxShadow=color?'inset 0 0 0 1.5px '+color:'';view.handle.classList.toggle('is-link-pending',look.pending);view.handle.classList.toggle('is-link-adding',look.adding);view.handle.classList.toggle('is-link-anchor',look.anchor);}
       const docs=group.tabs.filter(t=>t.kind==='document').map(t=>{const tab=protectedTabs.find(p=>ref(p.id)===t.id)||previews.find(p=>ref(p.id)===t.id)||(t.preview?.PageKey?{id:docId(t.id),name:t.preview.Name,pageKey:t.preview.PageKey,tabStyle:t.preview.TabStyle}:null);if(!tab)return null;
         return {id:tab.id,transferId:t.transferId,title:tab.name,icon:previewIcon(tab),active:t.active,nativeIndex:group.tabs.slice(0,group.tabs.indexOf(t)).filter(p=>p.kind==='native').length,
           protected:Boolean(tab.panel),tabStyle:tab.tabStyle,onSelect:()=>{void (tab.panel||tab.pageKey?command('select',{groupId:group.id,tabId:t.id}):selectPreview(tab)).catch(()=>{});},onClose:()=>{void command('document-remove',{tabId:t.id}).then(()=>{previews=previews.filter(p=>p.id!==tab.id);onPreviews(previews);schedule();}).catch(()=>{});},
@@ -315,6 +325,6 @@ export function installCoordinatedWindowSlices({document,host,root,pagePanels=nu
       mounted=true;root.replaceNativeTabs();root.element.classList.add('window-slices-root');accept(ready.snapshot);
       onOuterEdge(snapshot.viewport);onActive();schedule();})();
       try{await mounting;}finally{mounting=null;}},
-    destroy(){document.removeEventListener('keydown',linkKey,true);document.removeEventListener('pointerdown',linkOutside,true);clear(true);disposed=true;release?.();observer.disconnect();if(frame)win.cancelAnimationFrame(frame);win.removeEventListener('resize',schedule);document.removeEventListener('dragstart',startDrag);document.removeEventListener('dragover',dragOver,true);document.removeEventListener('drop',drop,true);document.removeEventListener('dragend',clear,true);document.removeEventListener('dragleave',leave,true);document.removeEventListener('keydown',cancel,true);win.removeEventListener('blur',blur);for(const view of views.values())view.native.destroy();for(const panel of retainedPreviews.values())panel.destroy();region.remove();cue.remove();spanHandles.remove();}
+    destroy(){win.removeEventListener('papers:pane-group-links-changed',linkRedraw);win.removeEventListener('storage',linkStorage);document.removeEventListener('keydown',linkKey,true);document.removeEventListener('pointerdown',linkOutside,true);clear(true);disposed=true;release?.();observer.disconnect();if(frame)win.cancelAnimationFrame(frame);win.removeEventListener('resize',schedule);document.removeEventListener('dragstart',startDrag);document.removeEventListener('dragover',dragOver,true);document.removeEventListener('drop',drop,true);document.removeEventListener('dragend',clear,true);document.removeEventListener('dragleave',leave,true);document.removeEventListener('keydown',cancel,true);win.removeEventListener('blur',blur);for(const view of views.values())view.native.destroy();for(const panel of retainedPreviews.values())panel.destroy();region.remove();cue.remove();spanHandles.remove();}
   };
 }

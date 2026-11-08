@@ -57,3 +57,18 @@ test('links are remembered per layout', () => {
   assert.ok(two.linkOf('a')); assert.equal(two.linkOf('a'), two.linkOf('b'));
   two.load('layout-2'); assert.equal(two.linkOf('a'), null);
 });
+
+test('two views of the same layout share links and the picking mode instead of overwriting each other', () => {
+  const storage = memory();
+  const left = createPaneGroupLinks({ storage }), right = createPaneGroupLinks({ storage });
+  left.load('layout'); right.load('layout');
+  left.click('a'); left.click('b');
+  right.click('c', { ctrl: true });
+  assert.equal(left.snapshot().picking, true, 'picking started in one view shows in the other');
+  left.click('d');
+  right.cancel();
+  assert.ok(left.linkOf('a')); assert.equal(left.linkOf('a'), right.linkOf('b'));
+  assert.equal(right.linkOf('d'), right.linkOf('c'));
+  assert.notEqual(right.look('c').color, right.look('a').color);
+  assert.equal(left.snapshot().picking, false);
+});
