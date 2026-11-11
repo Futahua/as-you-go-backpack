@@ -36,7 +36,7 @@ test('application tabs select and release exact native peers without closing app
   f.push([{ id: 'writer', title: 'Writer', active: true }, { id: 'cad', title: 'AutoCAD', active: false }]);
   f.strip.children[2].children[0].listeners.click(); await settle();
   assert.deepEqual(f.calls.at(-1), { operation: 'pane-window-select', data: { tabId: 'cad' } });
-  f.strip.children[1].children[1].listeners.click(); await settle();
+  assert.equal(f.strip.children[1].children.length, 1); f.strip.children[1].listeners.contextmenu({preventDefault(){},stopPropagation(){}}); await settle();
   assert.deepEqual(f.calls.at(-1), { operation: 'pane-window-detach', data: { tabId: 'writer' } });
   f.api.destroy(); assert.equal(f.strip.removed, true);
 });
@@ -157,7 +157,7 @@ test('pinned preview tabs use local preview callbacks and never detach or select
  const f=fixture();let selected=0,closed=0;
  f.push([{id:'native',title:'Chrome',active:true}]);
  f.api.setDocumentTabs([{id:'preview',title:'Drawing.png',active:true,onSelect:()=>selected++,onClose:()=>closed++}]);
- const tab=f.strip.children.at(-1);tab.children[0].listeners.click({stopPropagation(){}});tab.children[1].listeners.click({stopPropagation(){}});
+ const tab=f.strip.children.at(-1);tab.children[0].listeners.click({stopPropagation(){}});assert.equal(tab.children.length,1);tab.listeners.contextmenu({preventDefault(){},stopPropagation(){}});
  assert.equal(selected,1);assert.equal(closed,1);assert.equal(f.calls.some(c=>['pane-window-select','pane-window-detach'].includes(c.operation)),false);assert.equal(tab.children[0].getAttribute('aria-selected'),'true');assert.equal(f.strip.children[1].children[0].getAttribute('aria-selected'),'false');f.api.destroy();
 });
 

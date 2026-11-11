@@ -1654,10 +1654,13 @@ export function createFileCapabilityPanel(options) {
       state.nativeGeometry?.update({rect,visible:!state.previewSuspended});
     };
     refreshPreviewGeometry();
-    if (typeof ResizeObserver === 'function') {
-      state.nativePreviewObserver = new ResizeObserver(move);
-      state.nativePreviewObserver.observe(surface);
-    }
+    // The Windows viewer is a separate native window: a surface that moves without
+    // resizing (neighbouring panes shifting) fires no ResizeObserver, so also re-check
+    // its position. The scheduler drops unchanged rectangles.
+    const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(move) : null;
+    resize?.observe(surface);
+    const follow = setInterval(() => { if (surface.isConnected) move(); }, 250);
+    state.nativePreviewObserver = { disconnect() { resize?.disconnect(); clearInterval(follow); } };
     documentRef.defaultView?.addEventListener('resize', move, { passive: true, once: true });
   }
 

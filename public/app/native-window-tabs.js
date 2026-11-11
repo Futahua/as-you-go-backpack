@@ -151,6 +151,8 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       release.type = 'button'; release.className = 'pane-window-release file-capability-browser-tab-close'; release.textContent = '×';
       release.title = 'Release window'; release.setAttribute('aria-label', `Release ${tab.title}`);
       release.addEventListener('click', () => { if (!disposed) void request('pane-window-detach', { tabId: tab.id }).catch(report); });
+      // Creator request 2026-11-06: no X on tabs; right-click releases the window instead.
+      group.addEventListener('contextmenu', event => { event.preventDefault(); event.stopPropagation(); release.click(); });
       group.addEventListener('click', event => { if (event.target === group) button.click?.(); });
       group.setAttribute('data-pane-tab-id', tab.id);
       if(sliceDocking){group.draggable=true;group.addEventListener('dragstart',event=>{stopHover();event.dataTransfer.setData(NATIVE_TAB_MIME,JSON.stringify({id:tab.id,sliceId}));if(tab.transferId)event.dataTransfer.setData(PANE_TRANSFER_MIME,JSON.stringify({transferId:tab.transferId,binding:layoutBinding(),kind:'tab'}));event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});group.addEventListener('dragend',()=>{void overlay(documentTabs.some(t=>t.active)).catch(report);});}
@@ -190,7 +192,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
         else void request('pane-window-drop',{tabId:drag.id,beforeId,shiftHeld:Boolean(event.shiftKey)}).catch(report);
       });
       group.addEventListener('pointercancel', () => { pointerDrag=null; strip.classList?.remove('detach-ready'); strip.setAttribute('data-drag-hint',''); render(); });
-      group.append(button, release); strip.append(group);
+      group.append(button); strip.append(group);
     }
     const addButton = document.createElement('button'); addButton.type = 'button';
     addButton.innerHTML = windowLayoutControlGlyphMarkup('pick');
@@ -210,7 +212,7 @@ export function installNativeWindowTabs({ document, header, host, bounds, prepar
       group.draggable=true;group.setAttribute('data-preview-tab-id',tab.id);
       group.addEventListener('dragstart',event=>{documentDragId=tab.id;stopHover();event.dataTransfer.setData(PREVIEW_TAB_MIME,tab.id);if(tab.transferId)event.dataTransfer.setData(PANE_TRANSFER_MIME,JSON.stringify({transferId:tab.transferId,binding:layoutBinding(),kind:'tab'}));event.dataTransfer.effectAllowed='move';void overlay(true).catch(report);});
       group.addEventListener('dragend',()=>{documentDragId=null;for(const child of strip.children)child.classList?.remove('reorder-before','reorder-after');void overlay(documentTabs.some(t=>t.active)).catch(report);});
-      group.append(button);if(!tab.protected)group.append(close);
+      group.append(button);if(!tab.protected)group.addEventListener('contextmenu',event=>{event.preventDefault();event.stopPropagation();close.click();});
       const nativeGroups=Array.from(strip.children).filter(node=>node.getAttribute?.('data-pane-tab-id'));
       const anchor=Number.isInteger(tab.nativeIndex)?nativeGroups[Math.max(0,tab.nativeIndex)]:null;
       if(anchor&&strip.insertBefore)strip.insertBefore(group,anchor);else strip.append(group);
